@@ -42,11 +42,11 @@ export const apiKeys = pgTable(
     /** When the key was revoked (soft delete) */
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     /**
-     * Optional JSON-encoded array of capability scopes.
-     * Used by the internal control-plane endpoints — e.g.
-     * `["internal:tier-limits"]`. Null/empty means a normal API key
-     * with no special capabilities (subject to the principal's role
-     * for authorization). Never serialized to the public API.
+     * Optional JSON-encoded array of capability scopes. Used by
+     * trusted internal endpoints — e.g. `["internal:tier-limits"]`.
+     * Null/empty means a normal API key with no special capabilities
+     * (subject to the principal's role for authorization). Never
+     * serialized to the public API.
      */
     scopes: text('scopes'),
   },

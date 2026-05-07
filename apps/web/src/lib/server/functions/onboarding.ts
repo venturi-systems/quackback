@@ -218,7 +218,8 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
           throw new Error('Invalid workspace name - cannot generate valid slug')
         }
 
-        // Initial setupState for self-hosted (workspace step done after this fn completes)
+        // Workspace step is done by the time this fn returns; boards
+        // step still pending until the user creates / skips one.
         setupState = {
           version: 1,
           steps: {
@@ -226,7 +227,6 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
             workspace: true,
             boards: false,
           },
-          source: 'self-hosted',
           useCase,
         }
 
@@ -341,7 +341,7 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
         // Update existing settings with useCase
         const setupState: SetupState = existingSettings.setupState
           ? JSON.parse(existingSettings.setupState)
-          : { version: 1, steps: { core: true, workspace: false, boards: false }, source: 'cloud' }
+          : { version: 1, steps: { core: true, workspace: false, boards: false } }
 
         const updatedState: SetupState = {
           ...setupState,
@@ -373,8 +373,8 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
         await invalidateSettingsCache()
         console.log(`[fn:onboarding] saveUseCaseFn: saved useCase=${data.useCase}`)
       } else {
-        // Fresh self-hosted install: create minimal settings to store useCase
-        // The workspace step will update name/slug later
+        // Fresh install: create minimal settings to store useCase. The
+        // workspace step will update name/slug later.
         const setupState: SetupState = {
           version: 1,
           steps: {
@@ -382,7 +382,6 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
             workspace: false,
             boards: false,
           },
-          source: 'self-hosted',
           useCase: data.useCase,
         }
 

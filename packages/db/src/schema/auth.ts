@@ -186,7 +186,6 @@ export const settings = pgTable('settings', {
    *     boards: boolean,         // At least one board created or skipped
    *   },
    *   completedAt?: string,      // ISO timestamp when onboarding was fully completed
-   *   source: 'cloud' | 'self-hosted'  // How this instance was provisioned
    * }
    */
   setupState: text('setup_state'),
@@ -209,9 +208,10 @@ export const settings = pgTable('settings', {
   helpCenterConfig: text('help_center_config'),
   /**
    * Optional per-workspace tier limits (JSON-encoded TierLimits).
-   * Written by the cloud control plane via /api/v1/internal/tier-limits,
-   * or by self-hosters who want to impose their own caps. Null/absent
-   * means OSS defaults (everything unlimited, all features on).
+   * Written by an external orchestrator via /api/v1/admin/tier-limits
+   * (capability scope `internal:tier-limits`), or by operators who
+   * want to impose their own caps. Null/absent means defaults
+   * (everything unlimited, all features on).
    */
   tierLimits: text('tier_limits'),
 })

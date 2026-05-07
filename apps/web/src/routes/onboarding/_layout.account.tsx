@@ -29,45 +29,44 @@ export const Route = createFileRoute('/onboarding/_layout/account')({
       throw redirect({ to: '/onboarding/usecase' })
     }
 
-    // Cloud-mode tenants must sign in via the control-plane OIDC provider
-    // — the manual signup form is intentionally hidden so a non-admin
-    // self-serve account can't shadow the cloud admin. Self-hosted
-    // instances (no CP_OAUTH_* env) keep the original Jane-Doe form.
-    const { cloudAuthEnabled } = await getPublicAuthConfig()
-    return { cloudAuthEnabled }
+    // When an env-baked SSO provider is configured, hide the manual
+    // signup form so the first user lands as admin via SSO instead of
+    // creating a self-serve account that would shadow the intended
+    // workspace owner. Operators who don't set SSO_OIDC_* keep the
+    // standard Jane-Doe form.
+    const { ssoEnabled } = await getPublicAuthConfig()
+    return { ssoEnabled }
   },
   component: AccountStep,
 })
 
 function AccountStep() {
-  const { cloudAuthEnabled } = Route.useLoaderData()
+  const { ssoEnabled } = Route.useLoaderData()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Auto-trigger the OIDC redirect on mount in cloud mode. The control
-  // plane is the only legitimate path to admin on a managed tenant, so
-  // skipping the click avoids a useless intermediate page. If the kick-
-  // off fails (network, CP down) the button below stays interactable as
-  // a manual retry.
+  // Auto-trigger the SSO redirect on mount when the operator has
+  // configured a single sign-on provider. SSO is the only legitimate
+  // path to admin in that mode, so skipping the click avoids a useless
+  // intermediate page. If the kick-off fails the button below stays
+  // interactable as a manual retry.
   useEffect(() => {
-    if (!cloudAuthEnabled) return
+    if (!ssoEnabled) return
     void authClient.signIn
-      .oauth2({ providerId: 'cp', callbackURL: '/' })
+      .oauth2({ providerId: 'sso', callbackURL: '/' })
       .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'))
-  }, [cloudAuthEnabled])
+  }, [ssoEnabled])
 
-  if (cloudAuthEnabled) {
+  if (ssoEnabled) {
     return (
       <div className="w-full max-w-md mx-auto">
         <div className="overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-sm">
           <div className="p-8 text-center">
             <h1 className="text-2xl font-bold">Welcome to Quackback</h1>
-            <p className="mt-2 text-muted-foreground">
-              Sign in with your Quackback Cloud account to continue
-            </p>
+            <p className="mt-2 text-muted-foreground">Sign in with single sign-on to continue</p>
             {error && (
               <div className="mt-4 rounded-lg bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">
                 {error}
@@ -76,12 +75,12 @@ function AccountStep() {
             <Button
               onClick={() =>
                 void authClient.signIn
-                  .oauth2({ providerId: 'cp', callbackURL: '/' })
+                  .oauth2({ providerId: 'sso', callbackURL: '/' })
                   .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'))
               }
               className="mt-6 w-full h-11"
             >
-              Continue with Quackback Cloud
+              Continue with single sign-on
             </Button>
           </div>
         </div>

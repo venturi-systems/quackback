@@ -490,23 +490,22 @@ export const fetchIntegrationByType = createServerFn({ method: 'GET' })
 
 /**
  * Public auth configuration surface for the unauthenticated onboarding
- * shell. Tells the client whether the Quackback Cloud (control-plane)
- * OIDC provider is wired up so the account-creation step can offer the
- * managed sign-in path instead of the manual Jane-Doe form. Only
- * non-secret signals are returned; the client never sees the OAuth
- * client secret.
+ * shell. Tells the client whether an env-baked SSO provider is wired
+ * up so the account-creation step can offer the one-click button
+ * instead of the manual Jane-Doe form. Only non-secret signals are
+ * returned; the client never sees the OAuth client secret.
  *
- * `cloudAuthEnabled` is true iff all three CP_OAUTH_* env vars are
- * populated — the same gate the `auth/index.ts` server uses to register
- * the genericOAuth provider, so the two stay in lockstep.
+ * `ssoEnabled` is true iff all three SSO_OIDC_* env vars are
+ * populated — the same gate the `auth/index.ts` server uses to
+ * register the genericOAuth provider, so the two stay in lockstep.
  */
 export const getPublicAuthConfig = createServerFn({ method: 'GET' }).handler(async () => {
-  const cloudAuthEnabled = Boolean(
-    process.env.CP_OAUTH_DISCOVERY_URL &&
-    process.env.CP_OAUTH_CLIENT_ID &&
-    process.env.CP_OAUTH_CLIENT_SECRET
+  const ssoEnabled = Boolean(
+    process.env.SSO_OIDC_DISCOVERY_URL &&
+    process.env.SSO_OIDC_CLIENT_ID &&
+    process.env.SSO_OIDC_CLIENT_SECRET
   )
-  return { cloudAuthEnabled }
+  return { ssoEnabled }
 })
 
 /**

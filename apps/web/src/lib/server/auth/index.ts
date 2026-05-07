@@ -98,25 +98,26 @@ async function createAuth() {
   // /sign-in/oauth2 callback path 404s on that providerId.
   const tierLimits = await getTierLimits()
 
-  // Cloud Quackback adds CP as a pre-baked OAuth provider so the
-  // dashboard's "Open workspace" click can SSO straight in. CP-OIDC
-  // env vars are projected by the chart for cloud tenants only —
-  // self-hosters never have these set, so the `cp` providerId stays
-  // unregistered and the OAuth callback path 404s. Bypasses the
-  // platform-credentials table because it's pure runtime config.
+  // Optional environment-baked SSO provider. When the operator (a
+  // self-hoster pointing at their company IdP, or any other deploy
+  // automation) sets the SSO_OIDC_* env trio, register it as a
+  // genericOAuth provider with id `sso` so the sign-in route can
+  // surface a one-click button. Bypasses the platform-credentials
+  // table because it's pure runtime config — there's no admin UI
+  // for it on purpose, the operator owns the env.
   if (
-    process.env.CP_OAUTH_DISCOVERY_URL &&
-    process.env.CP_OAUTH_CLIENT_ID &&
-    process.env.CP_OAUTH_CLIENT_SECRET
+    process.env.SSO_OIDC_DISCOVERY_URL &&
+    process.env.SSO_OIDC_CLIENT_ID &&
+    process.env.SSO_OIDC_CLIENT_SECRET
   ) {
     genericOAuthConfigs.push({
-      providerId: 'cp',
-      clientId: process.env.CP_OAUTH_CLIENT_ID,
-      clientSecret: process.env.CP_OAUTH_CLIENT_SECRET,
-      discoveryUrl: process.env.CP_OAUTH_DISCOVERY_URL,
+      providerId: 'sso',
+      clientId: process.env.SSO_OIDC_CLIENT_ID,
+      clientSecret: process.env.SSO_OIDC_CLIENT_SECRET,
+      discoveryUrl: process.env.SSO_OIDC_DISCOVERY_URL,
       scopes: ['openid', 'email', 'profile'],
     })
-    trustedProviders.push('cp')
+    trustedProviders.push('sso')
   }
 
   for (const provider of getAllAuthProviders()) {
@@ -300,14 +301,14 @@ async function createAuth() {
       account: {
         create: {
           after: async (account) => {
-            // Cloud SSO: any user signing in via the `cp` OAuth provider
-            // is a verified CP-org member, so they implicitly land as
-            // admin in this workspace. The user.create.after hook above
-            // ran first (writing role=user); upgrading here means a
-            // first-time CP sign-in skips the OSS onboarding wizard's
-            // workspace step entirely. Self-hosters never have a `cp`
-            // provider registered, so this branch is dead code for them.
-            if (account.providerId === 'cp') {
+            // First user signing in via the env-baked SSO provider
+            // owns the workspace as admin. The user.create.after hook
+            // above already wrote role=user; upgrade to admin here so
+            // the very first SSO sign-in lands on the dashboard with
+            // full permissions instead of a member view. Subsequent
+            // SSO sign-ins keep role=admin (no-op update). Operators
+            // who don't set SSO_OIDC_* never see this branch fire.
+            if (account.providerId === 'sso') {
               await db
                 .update(principalTable)
                 .set({ role: 'admin' })
@@ -315,7 +316,7 @@ async function createAuth() {
                   eq(principalTable.userId, account.userId as ReturnType<typeof generateId<'user'>>)
                 )
               console.log(
-                `[auth] Upgraded principal to admin via cp OAuth: userId=${account.userId}`
+                `[auth] Upgraded principal to admin via SSO OAuth: userId=${account.userId}`
               )
             }
           },

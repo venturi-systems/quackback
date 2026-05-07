@@ -22,7 +22,6 @@ describe('pickOnboardingStep', () => {
         state: {
           setupState: {
             version: 1,
-            source: 'self-hosted',
             useCase: 'saas',
             steps: { core: false, workspace: true, boards: false },
           },
@@ -39,7 +38,6 @@ describe('pickOnboardingStep', () => {
         state: {
           setupState: {
             version: 1,
-            source: 'self-hosted',
             useCase: 'saas',
             steps: { core: false, workspace: false, boards: false },
           },
@@ -49,60 +47,25 @@ describe('pickOnboardingStep', () => {
     ).toBe('/onboarding/workspace')
   })
 
-  it('routes cloud-seeded workspace WITHOUT useCase back to /onboarding/usecase', () => {
-    // Regression: when CP pre-seeds setupState.steps.workspace via
-    // /api/v1/admin/setup but the cloud signup form didn't capture a
-    // useCase, the wizard's dynamic stepper showed Use case as a
-    // remaining step but pickOnboardingStep used to drop the user
-    // straight on /onboarding/boards — silently checking off Use case.
-    // First-incomplete ordering keeps stepper + router agreed.
+  it('routes pre-seeded workspace WITHOUT useCase back to /onboarding/usecase', () => {
+    // Regression: when an external orchestrator pre-seeds
+    // setupState.steps.workspace via /api/v1/admin/setup without a
+    // useCase, the wizard's dynamic stepper still shows Use case as
+    // a remaining step. pickOnboardingStep used to drop the user
+    // straight on /onboarding/boards — silently checking off Use
+    // case. First-incomplete ordering keeps stepper + router agreed.
     expect(
       pickOnboardingStep({
         session: { userId: 'u1' },
         state: {
           setupState: {
             version: 1,
-            source: 'cloud',
             steps: { core: true, workspace: true, boards: false },
           },
           principalRecord: { id: 'p1', role: 'admin' },
         },
       })
     ).toBe('/onboarding/usecase')
-  })
-
-  it('routes cloud-source admin with workspace + useCase complete to /admin', () => {
-    expect(
-      pickOnboardingStep({
-        session: { userId: 'u1' },
-        state: {
-          setupState: {
-            version: 1,
-            source: 'cloud',
-            useCase: 'saas',
-            steps: { core: true, workspace: true, boards: false },
-          },
-          principalRecord: { id: 'p1', role: 'admin' },
-        },
-      })
-    ).toBe('/admin')
-  })
-
-  it('keeps cloud-source MEMBER on /onboarding/boards (admin gate)', () => {
-    expect(
-      pickOnboardingStep({
-        session: { userId: 'u1' },
-        state: {
-          setupState: {
-            version: 1,
-            source: 'cloud',
-            useCase: 'saas',
-            steps: { core: true, workspace: true, boards: false },
-          },
-          principalRecord: { id: 'p1', role: 'member' },
-        },
-      })
-    ).toBe('/onboarding/boards')
   })
 
   it('falls back to /onboarding/usecase when nothing has been chosen', () => {

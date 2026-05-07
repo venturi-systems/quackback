@@ -10,10 +10,11 @@ interface MintOptions {
   errorCallbackPath?: string
   /** Workspace's public origin, e.g. `https://acme.quackback.io`. */
   portalUrl: string
-  /** Override the default 10-minute expiry on the underlying verification
-   *  row. Used by the cloud-bootstrap "claim this workspace" URL which
-   *  needs a multi-day window. Sign-in callers (portal/admin) must NOT
-   *  set this — the global plugin expiry is intentionally short. */
+  /** Override the default 10-minute expiry on the underlying
+   *  verification row. Used by long-lived "claim this workspace"
+   *  invitations that need a multi-day window. Sign-in callers
+   *  (portal/admin) must NOT set this — the global plugin expiry is
+   *  intentionally short. */
   expiresInSeconds?: number
 }
 

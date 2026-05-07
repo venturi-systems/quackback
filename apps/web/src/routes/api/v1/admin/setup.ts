@@ -9,11 +9,12 @@ import { authenticateAdminToken } from '@/lib/server/domains/api-keys/admin-toke
 /**
  * POST /api/v1/admin/setup
  *
- * One-shot provisioning seed. The cloud control plane calls this right
- * after a tenant pod becomes healthy to populate the workspace name +
- * use case + tier limits in a single hit, so the user lands in the
- * onboarding wizard past the steps they already answered on the cloud
- * signup form.
+ * One-shot provisioning seed. An external orchestrator calls this
+ * right after the pod becomes healthy to populate the workspace name
+ * + use case + tier limits in a single hit, so the user lands in the
+ * onboarding wizard past whatever steps the orchestrator already
+ * answered on its own signup form. Whatever isn't pre-stamped here
+ * still has to be filled in via the wizard.
  *
  * Body:
  *   {
@@ -23,12 +24,9 @@ import { authenticateAdminToken } from '@/lib/server/domains/api-keys/admin-toke
  *     tierLimits?: TierLimits       // optional; same shape as /admin/tier-limits POST
  *   }
  *
- * Phase B (this commit) dropped the `admin: {email, name}` payload —
- * user provisioning happens via OIDC now (CP is the IdP via Better-
- * Auth's `oidcProvider` plugin; the OSS pod uses `genericOAuth` to
- * consume CP-issued JWTs). Phase C will retire this endpoint
- * entirely and move workspace + tier values into the rendered
- * Deployment manifests.
+ * The `admin: {email, name}` payload is intentionally absent — user
+ * provisioning is the responsibility of whatever sign-in path the
+ * operator wires up (e.g. an env-baked SSO_OIDC_* OAuth provider).
  *
  * Idempotent: re-running with the same payload is a no-op-ish
  * overwrite. Workspace name/slug + useCase only seed on the first
@@ -169,7 +167,6 @@ function mergeSetupState(
       boards: existing?.steps?.boards ?? false,
     },
     completedAt: existing?.completedAt,
-    source: 'cloud',
     useCase: useCase ?? existing?.useCase,
   }
 }

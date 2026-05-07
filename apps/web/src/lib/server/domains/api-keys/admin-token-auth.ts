@@ -1,18 +1,18 @@
 /**
  * Authenticate a request to a /api/v1/admin/* endpoint.
  *
- * Auth is the simplest thing that works: a per-tenant `ADMIN_API_TOKEN`
- * env var, projected into the pod by the cloud control plane via
- * OpenBao + ESO. The request bearer must match.
+ * Auth is the simplest thing that works: a per-tenant
+ * `ADMIN_API_TOKEN` env var, projected into the pod by whatever
+ * deploy automation owns secret distribution. The request bearer
+ * must match.
  *
- *   - env var unset (self-host)             → 404, endpoint "doesn't exist"
+ *   - env var unset                         → 404, endpoint "doesn't exist"
  *   - env var set + bearer matches          → null (caller proceeds)
  *   - env var set + bearer missing/wrong    → 401
  *
- * Self-hosters never set the env var, so admin endpoints look gone to
- * any external caller. The OSS-unaware contract holds — the env var
- * is opaque, the orchestrator (CP today, anything else tomorrow) is
- * the only writer.
+ * Operators that don't set the env var see admin endpoints as gone
+ * to any external caller. The env var is opaque to the app — whoever
+ * sets it is the implicit orchestrator.
  *
  * On success: returns null. On failure: returns a Response — the
  * handler should return it directly.

@@ -7,10 +7,10 @@ import { authenticateAdminToken } from '@/lib/server/domains/api-keys/admin-toke
 /**
  * GET /api/v1/admin/usage
  *
- * Reports current usage counters (AI tokens, posts, boards, team seats).
- * Trusted endpoint authenticated by ADMIN_API_TOKEN — used by the cloud
- * control plane for billing meters and any external tool tracking
- * workspace activity. Env-var-unset = 404 (self-host parity).
+ * Reports current usage counters (AI tokens, posts, boards, team
+ * seats). Trusted endpoint authenticated by ADMIN_API_TOKEN — used
+ * by external billing meters or any tool tracking workspace activity.
+ * Env-var-unset = 404.
  */
 export const Route = createFileRoute('/api/v1/admin/usage')({
   server: {
