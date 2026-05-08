@@ -16,6 +16,7 @@ import type { TenantSettings } from '@/lib/shared/types/settings'
 import { ThemeProvider } from '@/components/theme-provider'
 import { DefaultErrorPage } from '@/components/shared/error-page'
 import { OttHandler } from '@/components/shared/ott-handler'
+import { isSuspensionExempt } from '@/lib/server/middleware/suspension-guard'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -55,6 +56,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       if (!isOnboardingComplete(setupState)) {
         throw redirect({ to: '/onboarding' })
       }
+    }
+
+    if (settings && state !== 'active' && !isSuspensionExempt(location.pathname)) {
+      throw redirect({ to: '/suspended' })
     }
 
     return {
