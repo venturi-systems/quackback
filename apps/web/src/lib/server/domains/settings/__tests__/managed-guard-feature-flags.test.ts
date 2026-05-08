@@ -3,9 +3,9 @@
  *
  * updateFeatureFlags() lives in settings.service alongside the
  * getTenantSettings() helper that assertNotManaged() reads. The gate
- * imports getTenantSettings() dynamically, so when we test from inside
- * settings.service we stub `assertNotManaged` directly rather than
- * trying to mock the dynamic import-out-of-self.
+ * imports getTenantSettings() dynamically, so this test stubs
+ * `assertNotManaged` directly rather than trying to mock a dynamic
+ * import-out-of-self.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ForbiddenError } from '@/lib/shared/errors'

@@ -10,7 +10,7 @@ import { z } from 'zod'
  * Only fields with a legitimate platform-control story are in scope.
  * Workflow data (boards, posts, integrations, API keys, sessions) is
  * intentionally NOT representable here — keeps the lock surface small
- * and prevents the file from drifting into a kitchen-sink schema.
+ * and prevents the file from growing into a kitchen-sink schema.
  */
 
 const useCaseSchema = z.enum(['saas', 'consumer', 'marketplace', 'internal'])
@@ -28,8 +28,8 @@ const workspaceSchema = z
   })
   .strict()
 
-// Mirrors the real OSS TierLimits shape from
-// apps/web/src/lib/server/domains/settings/tier-limits.types.ts:28.
+// Mirrors the TierLimits shape from
+// apps/web/src/lib/server/domains/settings/tier-limits.types.ts.
 // `null` in any numeric field = unlimited; partial objects allowed
 // (the reconciler merges into the existing tierLimits row, so the
 // file only needs to declare the fields it wants to lock).
@@ -61,24 +61,19 @@ const tierLimitsSchema = z
   .strict()
 
 // `features` is per-key managed: each entry locks one feature flag
-// while leaving others UI-toggleable. Allow any boolean key — the OSS
+// while leaving others UI-toggleable. Accepts any boolean key — the
 // FeatureFlags shape has its own zod schema that the reconciler
-// validates against; here we just need the shape to be string→boolean.
+// validates against; here the shape just needs to be string→boolean.
 const featuresSchema = z.record(z.string(), z.boolean())
 
-// Suspension state. Cloud-only knob: CP flips this when a subscription
-// goes past-due ('suspended') or the Quackback is scheduled for delete
-// ('deleting'). Self-hosters never set it — without a config file the
-// reconciler doesn't run and `settings.state` stays at its DB default
-// of 'active'.
+// Workspace runtime state. The reconciler writes whatever the file
+// declares; absent → `settings.state` keeps its DB default of 'active'.
 const stateSchema = z.enum(['active', 'suspended', 'deleting'])
 
-// v1 auth surface: OAuth provider toggles + openSignup. Mirrors the OSS
-// `AuthConfig` shape (settings.types.ts). Provider secrets stay in their
-// existing channels (env + platform_credentials); the file only declares
-// which providers are toggled on and whether signup is open. Custom OIDC
-// (SSO_OIDC_*) is intentionally NOT declarative in v1 — that requires a
-// Secret-reference resolver, which is a separate moving part.
+// Auth surface: OAuth provider toggles + openSignup + optional OIDC SSO.
+// Provider secrets are never declared here — OAuth credentials live in
+// the platform_credentials table, and the SSO client secret rides on
+// the SSO_OIDC_CLIENT_SECRET env var.
 const oauthProvidersSchema = z
   .object({
     google: z.boolean().optional(),
@@ -86,13 +81,12 @@ const oauthProvidersSchema = z
   })
   .strict()
 
-// Cloud-OIDC default admin auth (Phase P). The file declares the
-// non-secret config — discoveryUrl + clientId + UX flags — while the
-// client *secret* keeps riding on SSO_OIDC_CLIENT_SECRET (mounted from
-// the per-tenant K8s Secret rendered by the controller). When enabled
-// + isDefault, the admin login UI promotes "Sign in with {providerName}"
-// as the prominent CTA and demotes password / magic-link / other-OAuth
-// to a "More sign-in options" disclosure.
+// OIDC SSO provider config. The file declares the non-secret config —
+// discoveryUrl + clientId + UX flags — while the client *secret* keeps
+// riding on SSO_OIDC_CLIENT_SECRET. When enabled + isDefault, the admin
+// login UI promotes "Sign in with {providerName}" as the prominent CTA
+// and demotes password / magic-link / other-OAuth to a "More sign-in
+// options" disclosure.
 const ssoOidcSchema = z
   .object({
     enabled: z.boolean(),
@@ -103,8 +97,7 @@ const ssoOidcSchema = z
      *  When true + enabled, password sign-in is hidden behind a
      *  "more options" disclosure (still available; just demoted). */
     isDefault: z.boolean().default(true),
-    /** Auto-create OSS user records on first SSO sign-in. CP is the
-     *  identity source of truth for cloud, so this is true by default. */
+    /** Auto-create user records on first SSO sign-in. */
     autoCreateUsers: z.boolean().default(true),
   })
   .strict()

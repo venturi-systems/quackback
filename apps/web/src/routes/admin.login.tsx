@@ -28,14 +28,13 @@ const searchSchema = z.object({
  * For team members (admin, member) to sign in to the admin dashboard.
  * Supports email OTP and any configured OAuth providers.
  *
- * Phase P: when cloud-OIDC SSO is enabled (settings.authConfig.ssoOidc)
- * AND the `sso` provider is actually registered by Better-Auth (per
+ * When OIDC SSO is enabled (settings.authConfig.ssoOidc) AND the `sso`
+ * provider is actually registered by Better-Auth (per
  * BootstrapData.registeredAuthProviders — covers the case where the
- * client secret hasn't materialized in env yet, e.g. ESO sync gap),
- * "Sign in with {providerName}" becomes the prominent CTA. Password /
- * magic-link / other-OAuth options stay rendered behind a "More
- * sign-in options" disclosure so admins keep a working fallback during
- * a CP outage or mid-rotation Secret gap.
+ * client secret hasn't materialized in env yet), "Sign in with
+ * {providerName}" becomes the prominent CTA. Password / magic-link /
+ * other-OAuth options stay rendered behind a "More sign-in options"
+ * disclosure so admins keep a working fallback.
  */
 export const Route = createFileRoute('/admin/login')({
   validateSearch: searchSchema,
@@ -64,10 +63,9 @@ export const Route = createFileRoute('/admin/login')({
 
     const ssoOidc = settings.authConfig?.ssoOidc
     const ssoIsRegistered = registeredAuthProviders?.includes('sso') ?? false
-    // Critical: BOTH the DB intent AND actual registration need to be
-    // true. A stale `ssoOidc.enabled=true` whose K8s Secret hasn't
-    // arrived yet (rotation gap, ESO lag) would otherwise produce a
-    // CTA that 404s on click.
+    // Both the DB intent AND actual registration must be true. A stale
+    // `ssoOidc.enabled=true` whose client secret hasn't arrived in env
+    // would otherwise produce a CTA that 404s on click.
     const ssoIsDefault = Boolean(ssoOidc?.enabled) && Boolean(ssoOidc?.isDefault) && ssoIsRegistered
     const ssoProviderName = ssoOidc?.providerName ?? 'Quackback Cloud'
 

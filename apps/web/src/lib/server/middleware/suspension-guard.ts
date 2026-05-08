@@ -1,17 +1,15 @@
 /**
- * Suspension guard — chokepoint helper for declarative tenant
+ * Suspension guard — chokepoint helper for declarative workspace
  * suspension.
  *
  * `settings.state` carries the trinary 'active' | 'suspended' |
- * 'deleting'. Cloud's control-plane flips it via the file reconciler
- * when a subscription goes past-due ('suspended') or the Quackback is
- * scheduled for deletion ('deleting'). Self-hosters never set this:
- * with no config file there's nothing to reconcile, so the column
- * keeps its 'active' DB default.
+ * 'deleting' and is written by the config-file reconciler. With no
+ * config file present, the column stays at its 'active' DB default and
+ * this guard is a no-op for every request.
  *
  * This module exposes:
  * - `ensureNotSuspended()` — call from a request chokepoint to throw
- *   402 / 410 for non-active tenants.
+ *   402 / 410 for non-active workspaces.
  * - `isSuspensionExempt(path)` — for HTML page-load guards (used by
  *   `__root.tsx`'s `beforeLoad`) so login/auth/health endpoints stay
  *   reachable on a suspended workspace.
@@ -21,8 +19,8 @@
  */
 import { DomainException } from '@/lib/shared/errors'
 
-/** HTTP 402 — Payment Required. Subscription is past-due; the
- *  workspace stays read-blocked until CP clears `suspendedAt`. */
+/** HTTP 402 — Payment Required. The workspace stays read-blocked
+ *  until something clears the suspended state. */
 export class SuspendedError extends DomainException {
   readonly statusCode = 402
   constructor() {
@@ -42,11 +40,11 @@ export class DeletingError extends DomainException {
 /**
  * Path prefixes that stay reachable while the workspace is suspended
  * or deleting. The list is intentionally small: only what users need
- * to get back in (login, OAuth completion) and what platform health
- * checks need (health, .well-known).
+ * to get back in (login, OAuth completion) and what health checks need
+ * (`/api/health`, `/.well-known/`).
  *
- * Whole-path equality OR prefix-match. `/api/auth/` blocks itself but
- * also lets `/api/auth/sign-in/email` through.
+ * Whole-path equality OR prefix-match. `/api/auth/` matches itself
+ * and any descendant such as `/api/auth/sign-in/email`.
  */
 export const SUSPENSION_EXEMPT_PATHS = [
   '/suspended',
@@ -59,8 +57,7 @@ export const SUSPENSION_EXEMPT_PATHS = [
   '/.well-known/',
   '/complete-signup/',
   // Magic-link landing — without this, a suspended workspace's owner
-  // can't click their billing email back into the portal to clear the
-  // overdue invoice.
+  // can't click an email link back into the portal.
   '/verify-magic-link',
 ] as const
 

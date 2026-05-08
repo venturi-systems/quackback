@@ -1,11 +1,11 @@
 /**
  * Late-arriving SSO_OIDC_CLIENT_SECRET retry.
  *
- * On managed deployments the env var is projected from a K8s Secret
- * that ESO populates from OpenBao. If the OSS pod boots before ESO
- * catches up, the very first `createAuth()` call captures a missing
- * secret and the SSO provider is permanently absent until restart —
- * a hard outage for tenants whose admins only have OIDC login.
+ * Some deployments project the SSO client secret into env from a
+ * Secret-store sidecar that may populate after the pod has booted. If
+ * the first `createAuth()` call captures a missing secret, the SSO
+ * provider would be permanently absent until restart — a hard outage
+ * for workspaces whose admins only have OIDC login.
  *
  * Re-checking env after a short delay and clearing the cached auth
  * instance on success lets the next request rebuild the auth instance
@@ -39,10 +39,10 @@ export function scheduleSsoSecretRetry(deps: SsoRetryDeps): void {
       deps.log?.('[auth] SSO_OIDC_CLIENT_SECRET materialized; re-initializing auth')
       deps.resetAuth()
     }
-    // If the secret still isn't there we silently let it be — another
+    // If the secret still isn't there, silently let it be — another
     // request will hit createAuth(), see the missing secret, and queue
     // another retry. Avoids hammering env reads on a permanently
-    // misconfigured tenant.
+    // misconfigured workspace.
   }, SSO_SECRET_RETRY_MS)
   _activeHandle = handle
   // Don't keep the Node event loop alive just for this retry — important

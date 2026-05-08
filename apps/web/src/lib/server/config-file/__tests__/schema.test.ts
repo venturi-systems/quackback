@@ -98,9 +98,9 @@ describe('parseQuackbackConfig', () => {
         auth: {
           ssoOidc: {
             enabled: true,
-            providerName: 'Quackback Cloud',
-            discoveryUrl: 'https://cp.quackback.io/api/auth/.well-known/openid-configuration',
-            clientId: 'tenant-phasetest',
+            providerName: 'Acme SSO',
+            discoveryUrl: 'https://idp.example.com/.well-known/openid-configuration',
+            clientId: 'workspace-x',
             isDefault: true,
             autoCreateUsers: true,
           },
@@ -110,7 +110,7 @@ describe('parseQuackbackConfig', () => {
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data.spec.auth?.ssoOidc?.enabled).toBe(true)
-      expect(result.data.spec.auth?.ssoOidc?.clientId).toBe('tenant-phasetest')
+      expect(result.data.spec.auth?.ssoOidc?.clientId).toBe('workspace-x')
       expect(result.data.spec.auth?.ssoOidc?.isDefault).toBe(true)
     }
   })

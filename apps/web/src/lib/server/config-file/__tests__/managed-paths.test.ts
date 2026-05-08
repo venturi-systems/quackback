@@ -58,9 +58,9 @@ describe('computeManagedPaths', () => {
         auth: {
           ssoOidc: {
             enabled: true,
-            providerName: 'Quackback Cloud',
-            discoveryUrl: 'https://cp.quackback.io/api/auth/.well-known/openid-configuration',
-            clientId: 'tenant-x',
+            providerName: 'Acme SSO',
+            discoveryUrl: 'https://idp.example.com/.well-known/openid-configuration',
+            clientId: 'workspace-x',
             isDefault: true,
             autoCreateUsers: true,
           },

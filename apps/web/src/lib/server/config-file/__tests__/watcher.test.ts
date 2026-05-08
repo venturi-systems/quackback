@@ -113,8 +113,8 @@ describe('watchConfigFile', () => {
     )
     await wait(200)
     stop()
-    // Even with multiple change triggers, onChange must never be
-    // running in parallel — the in-flight gate guarantees serial calls.
+    // Even with multiple change triggers, onChange must never run in
+    // parallel — the in-flight gate guarantees serial calls.
     expect(maxActive).toBe(1)
   })
 })

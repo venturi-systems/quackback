@@ -10,18 +10,18 @@ export interface BootstrapData {
   settings: TenantSettings | null
   userRole: 'admin' | 'member' | 'user' | null
   themeCookie: Theme
-  /** Dot-paths managed by /etc/quackback/config.yaml. The matching
+  /** Dot-paths managed by `/etc/quackback/config.yaml`. The matching
    *  in-app form controls render disabled when the path appears here.
-   *  Empty list = nothing locked (self-host default). */
+   *  Empty list = nothing locked. */
   managedFieldPaths: string[]
-  /** Suspension state. 'active' for self-hosters; cloud may flip to
-   *  'suspended' (past-due) or 'deleting' via spec.config.state. */
+  /** Workspace state, written by the config-file reconciler. Defaults
+   *  to 'active' when no config file is present. */
   state: 'active' | 'suspended' | 'deleting'
   /** Provider IDs that Better-Auth would register at boot — used by
-   *  the admin login UI (Phase P) to gate CTAs on actually-usable
-   *  providers, not just DB intent. A stale `ssoOidc.enabled=true`
-   *  with no SSO_OIDC_CLIENT_SECRET will NOT include 'sso' here, so
-   *  the UI never renders an SSO button that would 404 on click. */
+   *  the admin login UI to gate CTAs on actually-usable providers, not
+   *  just DB intent. A stale `ssoOidc.enabled=true` with no
+   *  SSO_OIDC_CLIENT_SECRET will NOT include 'sso' here, so the UI
+   *  never renders an SSO button that would 404 on click. */
   registeredAuthProviders: string[]
 }
 

@@ -13,10 +13,10 @@ interface SsoSignInButtonProps {
 }
 
 /**
- * Phase P primary CTA on the admin login page when cloud-OIDC SSO is the
- * default sign-in path. The `sso` provider id is registered by Better-
- * Auth's genericOAuth plugin (see `lib/server/auth/index.ts`); we mirror
- * the popup flow that `OAuthButtons` uses for built-in social providers.
+ * Primary CTA on the admin login page when OIDC SSO is the default
+ * sign-in path. The `sso` provider id is registered by Better-Auth's
+ * genericOAuth plugin (see `lib/server/auth/index.ts`); this mirrors
+ * the popup flow `OAuthButtons` uses for built-in social providers.
  */
 export function SsoSignInButton({ providerName, callbackUrl }: SsoSignInButtonProps) {
   const [loading, setLoading] = useState(false)

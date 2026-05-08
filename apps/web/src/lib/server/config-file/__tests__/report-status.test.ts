@@ -15,14 +15,14 @@ afterEach(() => {
 })
 
 describe('makeReportStatus', () => {
-  it('is a no-op when CP env vars are absent (self-host path)', async () => {
+  it('is a no-op when status-reporter env vars are absent', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const report = makeReportStatus()
     await report({ kind: 'ok' })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('is a no-op when only some CP env vars are present', async () => {
+  it('is a no-op when only some status-reporter env vars are present', async () => {
     process.env.QUACKBACK_CP_STATUS_URL = 'http://cp/api/v1/internal/config-status'
     process.env.QUACKBACK_CP_INTERNAL_TOKEN = 'tok'
     // QUACKBACK_INSTANCE_ID intentionally unset

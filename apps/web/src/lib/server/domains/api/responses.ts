@@ -221,8 +221,8 @@ export function handleDomainError(error: unknown): Response {
           if (s === 400) return validationErrorResponse(domainError.message)
           // 402 (SuspendedError) + 410 (DeletingError) — the suspension
           // guard throws these from chokepoints (API auth, server-fn
-          // requireAuth, widget writes). Forwarding the code/message
-          // payload lets clients render a billing-state UI.
+          // requireAuth, widget writes). Forward the code/message
+          // payload so clients can render a state-aware UI.
           if (s === 402 || s === 410) {
             return jsonResponse(
               { code: domainError.code, message: domainError.message },

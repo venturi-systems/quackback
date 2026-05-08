@@ -6,8 +6,8 @@ import type { ReconcileDeps, SettingsRow, SettingsUpdate } from './reconciler'
 import { makeReportStatus } from './report-status'
 
 /** Production wiring of `ReconcileDeps`. The reconciler is db-agnostic
- *  to keep its tests fast; this module is the only place that touches
- *  Drizzle + Redis. */
+ *  to keep its tests fast; this is the only place that touches Drizzle
+ *  + Redis. */
 export function makeReconcileDeps(): ReconcileDeps {
   return {
     readSettings: async () => {

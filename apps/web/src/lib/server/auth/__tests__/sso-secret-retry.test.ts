@@ -74,7 +74,7 @@ describe('scheduleSsoSecretRetry', () => {
     const h = makeDeps({ secret: undefined })
     scheduleSsoSecretRetry(h.deps)
     expect(h.resetAuth).not.toHaveBeenCalled()
-    h.setSecret('s3cret-from-eso')
+    h.setSecret('late-arriving-secret')
     h.fireAllPending()
     expect(h.resetAuth).toHaveBeenCalledTimes(1)
     expect(h.log).toHaveBeenCalledWith(

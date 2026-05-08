@@ -118,7 +118,7 @@ export async function updateAuthConfig(input: UpdateAuthConfigInput): Promise<Au
   console.log(`[domain:settings] updateAuthConfig`)
   try {
     // Managed-fields gate: refuse touching OAuth providers / openSignup
-    // that the cluster operator has declared in /etc/quackback/config.yaml.
+    // that the config file at `/etc/quackback/config.yaml` has declared.
     // Per-key so the file can lock one provider while leaving others
     // UI-editable. Runs BEFORE the tier gate so a 403 FIELD_MANAGED
     // error shows up cleanly even when the user is on a tier that
@@ -132,8 +132,8 @@ export async function updateAuthConfig(input: UpdateAuthConfigInput): Promise<Au
       await assertNotManaged('auth.openSignup')
     }
 
-    // Tier gate: refuse non-standard OAuth providers when customOidcProvider is off.
-    // No-op in OSS (feature is true).
+    // Tier gate: refuse non-standard OAuth providers when
+    // customOidcProvider is off. No-op when the feature is unlimited.
     if (input.oauth) {
       const { getTierLimits } = await import('@/lib/server/domains/settings/tier-limits.service')
       const { enforceFeatureGate } = await import('@/lib/server/domains/settings/tier-enforce')
@@ -436,10 +436,9 @@ export async function isFeatureEnabled(flag: keyof FeatureFlags): Promise<boolea
  * Update feature flags (partial update, merges with existing)
  */
 export async function updateFeatureFlags(input: Partial<FeatureFlags>): Promise<FeatureFlags> {
-  // Per-key gate: only the keys explicitly in the operator's
-  // config-file are locked, every other flag stays UI-editable. We
-  // assert before any DB write so a partial update with one locked
-  // key fails atomically.
+  // Per-key managed gate: only the keys declared in the config file
+  // are locked; every other flag stays UI-editable. Assert before any
+  // DB write so a partial update with one locked key fails atomically.
   for (const key of Object.keys(input)) {
     await assertNotManaged(`features.${key}`)
   }

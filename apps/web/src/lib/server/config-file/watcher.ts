@@ -3,9 +3,9 @@ import { createHash } from 'node:crypto'
 import { loadConfigFile, type LoadResult } from './loader'
 
 export interface WatchOptions {
-  /** Polling fallback interval. Defaults to 30s — kubelet auto-syncs
-   *  ConfigMap mounts on a similar cadence, and `fs.watch` on
-   *  symlink-swap mounts (Kubernetes projected volumes) is unreliable. */
+  /** Polling fallback interval. Defaults to 30s — `fs.watch` on
+   *  symlink-swap mounts (e.g. Kubernetes projected volumes) is
+   *  unreliable, so polling backs it up. */
   pollIntervalMs?: number
 }
 
@@ -60,7 +60,7 @@ export function watchConfigFile(
   void tick()
 
   // Polling fallback — guaranteed to fire even if fs.watch missed a
-  // ConfigMap symlink swap.
+  // symlink swap on the mount point.
   const pollHandle = setInterval(() => void tick(), interval)
 
   // Best-effort native watch. May fire false positives on the

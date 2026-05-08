@@ -32,8 +32,8 @@ export interface ReconcileDeps {
   resetAuth: () => Promise<void>
   /** Post-reconcile status reporter. Optional so unit tests don't have
    *  to stub it; production wiring (`makeReconcileDeps`) populates it
-   *  with a fetch to the cloud control plane. Self-hosters with no CP
-   *  configured (no env vars) are a silent no-op. */
+   *  with a fetch to the operator's status endpoint. A silent no-op
+   *  when its env vars aren't configured. */
   reportStatus?: (status: {
     kind: 'ok' | 'absent' | 'error'
     message?: string
@@ -57,9 +57,9 @@ export async function reconcileFileIntoDb(
 ): Promise<void> {
   const current = await deps.readSettings()
   if (!current) {
-    // Nothing to reconcile against — settings row hasn't been created
-    // yet (fresh-install pre-onboarding). The wizard will INSERT later;
-    // the file's state lands on the next reconcile after that.
+    // Settings row doesn't exist yet (fresh-install pre-onboarding).
+    // The wizard will INSERT later; the file's state lands on the next
+    // reconcile tick after that.
     return
   }
 
@@ -160,9 +160,8 @@ function mergeSetupState(
   const parsed = existing ? (safeJsonParse(existing) as Partial<SetupStateShape> | null) : null
   const parsedSteps = parsed?.steps
   // Workspace step is "done" when either name or slug ships in the
-  // file. Slug-only-managed Quackbacks (e.g. CP forces slug to match
-  // tenant ID) need this so the wizard advances when the operator
-  // declares only the slug.
+  // file. Slug-only declarations need this so the wizard advances when
+  // only the slug is managed.
   const fileSetsWorkspace = workspace.name !== undefined || workspace.slug !== undefined
   return {
     version: 1,

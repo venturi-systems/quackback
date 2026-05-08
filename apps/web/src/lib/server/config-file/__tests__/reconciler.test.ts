@@ -204,9 +204,9 @@ describe('reconcileFileIntoDb', () => {
         auth: {
           ssoOidc: {
             enabled: true,
-            providerName: 'Quackback Cloud',
-            discoveryUrl: 'https://cp.quackback.io/api/auth/.well-known/openid-configuration',
-            clientId: 'tenant-x',
+            providerName: 'Acme SSO',
+            discoveryUrl: 'https://idp.example.com/.well-known/openid-configuration',
+            clientId: 'workspace-x',
             isDefault: true,
             autoCreateUsers: true,
           },
@@ -216,7 +216,7 @@ describe('reconcileFileIntoDb', () => {
     )
     const arg = (deps.updateSettings as ReturnType<typeof vi.fn>).mock.calls[0]![0]
     const merged = JSON.parse(arg.authConfig as string)
-    expect(merged.ssoOidc.clientId).toBe('tenant-x')
+    expect(merged.ssoOidc.clientId).toBe('workspace-x')
     expect(merged.ssoOidc.enabled).toBe(true)
     expect(merged.ssoOidc.isDefault).toBe(true)
     expect(arg.managedFieldPaths).toEqual([
@@ -254,9 +254,9 @@ describe('reconcileFileIntoDb', () => {
       managedFieldPaths: [],
       state: 'active' as const,
     }))
-    // File only flips enabled=true and bumps the clientId; the rest of
-    // the existing block (providerName, discoveryUrl, isDefault, ...)
-    // stays put — partial merges let the file lock individual fields
+    // File flips enabled=true and bumps the clientId; everything else
+    // in the existing block (providerName, discoveryUrl, isDefault, ...)
+    // is unchanged — per-key merges let the file lock individual fields
     // without nuking siblings.
     await reconcileFileIntoDb(
       {

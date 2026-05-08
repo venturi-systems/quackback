@@ -1,12 +1,12 @@
 /**
- * Registered-providers introspection — used by BootstrapData (Phase P)
- * to drive admin login UI decisions (e.g. "show SSO as default CTA only
- * if it's actually wired up at the auth layer").
+ * Registered-providers introspection — used by BootstrapData to drive
+ * admin login UI decisions (e.g. "show SSO as the default CTA only if
+ * it's actually wired up at the auth layer").
  *
  * The registration-truth source is `createAuth()` in `index.ts`. Two
  * places decide whether a provider can sign anyone in:
  * 1. The env-baked / DB-baked SSO_OIDC trio (provider id `sso`)
- * 2. The platform_credentials table for the 10 known providers in
+ * 2. The platform_credentials table for the providers in
  *    AUTH_PROVIDERS — gated by tier-limits.features.customOidcProvider
  *    for the generic-oauth ones.
  *
@@ -14,8 +14,8 @@
  * providers would Better-Auth register if it booted right now?"
  * Critically, it returns the actually-usable set rather than the DB
  * intent: a stale `settings.authConfig.ssoOidc.enabled=true` with no
- * SSO_OIDC_CLIENT_SECRET in env (rotation gap, ESO sync lag) is NOT
- * reported as registered, because Better-Auth would reject it at boot.
+ * SSO_OIDC_CLIENT_SECRET in env is NOT reported as registered, because
+ * Better-Auth would reject it at boot.
  */
 
 import { getTenantSettings } from '@/lib/server/domains/settings/settings.service'
@@ -25,8 +25,8 @@ import { getAllAuthProviders } from './auth-providers'
 export async function getRegisteredAuthProviders(): Promise<string[]> {
   const ids: string[] = []
 
-  // Phase P: SSO is registered when EITHER (a) DB says enabled AND env
-  // has the client secret, or (b) the legacy env trio is fully set.
+  // SSO is registered when EITHER (a) DB says enabled AND env has the
+  // client secret, or (b) the env trio is fully set on its own.
   const tenantSettings = await getTenantSettings()
   const ssoFromDb = tenantSettings?.authConfig?.ssoOidc
   const hasClientSecret = Boolean(process.env.SSO_OIDC_CLIENT_SECRET)

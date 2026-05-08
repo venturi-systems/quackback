@@ -1,15 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { hashSpec } from '../index'
 
-// Coverage for the watcher entry point lives in two places:
-//   - hashSpec (the helper this file exports) — pure, tested here.
-//   - reportStatus wiring on the production deps — tested in deps.test.ts
-//     since it runs against `makeReconcileDeps` directly with env-var
-//     overrides.
-// `startQuackbackConfigWatcher` itself glues those together with
-// fs.watch + the reconciler; integration coverage is handled by the
-// existing `watcher.test.ts` (file-level changes) and `reconciler.test.ts`
-// (db-side effects).
+// `startQuackbackConfigWatcher` glues hashSpec, fs.watch, and the
+// reconciler together; integration coverage is split across
+// `watcher.test.ts` (file-level changes), `reconciler.test.ts`
+// (db-side effects), and `report-status.test.ts` (status reporter).
+// This file just covers the pure `hashSpec` helper.
 
 describe('hashSpec', () => {
   it('returns a deterministic SHA256 hex digest of JSON.stringify(spec)', () => {

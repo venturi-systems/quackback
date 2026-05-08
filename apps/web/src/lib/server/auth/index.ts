@@ -121,10 +121,10 @@ async function createAuth() {
   const tierLimits = await getTierLimits()
 
   // Optional SSO provider. DB-first (settings.authConfig.ssoOidc, set
-  // by the declarative config-file reconciler — Phase P) with env-var
-  // fallback (SSO_OIDC_* trio) for self-hosters and pre-Phase-P bootstrap.
-  // The client *secret* always comes from env; the file/DB never holds
-  // secrets, so a config-map dump or DB read can't leak it.
+  // by the declarative config-file reconciler) with env-var fallback
+  // (SSO_OIDC_* trio). The client *secret* always comes from env; the
+  // file and DB never hold secrets, so a config-file dump or DB read
+  // can't leak it.
   const tenantSettings = await getTenantSettings()
   const ssoFromDb = tenantSettings?.authConfig?.ssoOidc
   const ssoEnabled =
@@ -145,18 +145,18 @@ async function createAuth() {
     }
     const clientSecret = process.env.SSO_OIDC_CLIENT_SECRET
     if (!clientSecret) {
-      // DB says "enabled" but the K8s Secret hasn't materialized yet
-      // (rotation gap, ESO sync lag). Logging without registering keeps
-      // the rest of Better-Auth functional and lets the password /
-      // magic-link / other-OAuth fallbacks carry the sign-in load.
+      // DB says "enabled" but SSO_OIDC_CLIENT_SECRET hasn't been
+      // populated yet. Logging without registering keeps the rest of
+      // Better-Auth functional and lets the password / magic-link /
+      // other-OAuth fallbacks carry the sign-in load.
       console.error('[auth] ssoOidc enabled but SSO_OIDC_CLIENT_SECRET not set')
-      // Schedule a one-shot re-init in 60s. Without this, the cached
-      // _auth instance is missing the SSO provider until pod restart —
-      // a hard outage for tenants whose admins only have OIDC login.
+      // Schedule a one-shot re-init. Without this, the cached _auth
+      // instance is missing the SSO provider until pod restart — a
+      // hard outage for workspaces whose admins only have OIDC login.
       // Idempotent under multiple ticks: any later createAuth() call
       // re-reads env, so resetAuth() is the only side effect needed
       // here. If the secret never arrives, the timer fires once, sees
-      // the env still empty, and quietly no-ops.
+      // env still empty, and quietly no-ops.
       scheduleSsoSecretRetry()
     } else {
       genericOAuthConfigs.push({

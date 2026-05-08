@@ -4,7 +4,7 @@
  * Mirrors `lib/server/config-file/managed-paths.isPathManaged` so
  * client form components don't import server-only modules. Pulled into
  * its own file rather than re-exporting because TanStack Start trips
- * on cross-boundary imports of any file that touches the server tree.
+ * on cross-boundary imports of any module that touches the server tree.
  */
 
 export const MANAGED_PATHS = {

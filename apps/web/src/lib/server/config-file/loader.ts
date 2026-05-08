@@ -12,11 +12,11 @@ export type LoadResult =
  *
  * Three outcomes:
  * - `absent`: the file doesn't exist (ENOENT). Caller treats this as
- *   "no managed paths"; behavior identical to today's no-file path.
+ *   "no managed paths".
  * - `error`: the file exists but parsing or schema validation failed.
  *   Caller logs loudly + keeps the previously-loaded valid config (or
- *   the default empty managed list on first boot). An incorrect file
- *   should never silently unlock fields.
+ *   the default empty managed list on first boot). An invalid file must
+ *   never silently unlock fields.
  * - `ok`: the file parsed and validated.
  */
 export async function loadConfigFile(path: string): Promise<LoadResult> {

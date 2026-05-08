@@ -70,18 +70,18 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
         throw new Error('Authentication required')
       }
 
-      // Block in-app writes when the operator's config-file owns these
-      // fields. The reconciler still applies the file's value separately;
-      // we just refuse to let the UI clobber it. Pre-onboarding the gate
-      // is a no-op because settings (and managedFieldPaths) don't exist
-      // yet — by the time managedFieldPaths is populated the reconciler
+      // Block in-app writes when the config-file owns these fields.
+      // The reconciler applies the file's value separately; this gate
+      // refuses to let the UI clobber it. Pre-onboarding the gate is a
+      // no-op because settings (and managedFieldPaths) don't exist yet
+      // — by the time managedFieldPaths is populated the reconciler
       // has already written the file's name/slug.
       //
-      // Slug-only-managed: when the file owns slug but not name, we let
-      // the user submit the name input (the wizard auto-derives slug
-      // client-side, but the server skips the slug column write below).
-      // This avoids locking the user out of onboarding when only one of
-      // the two fields is managed.
+      // Slug-only lock: when the file owns slug but not name, the name
+      // input still accepts user submission (the wizard auto-derives
+      // slug client-side, but the server skips the slug column write
+      // below). This avoids locking the user out of onboarding when
+      // only one of the two fields is managed.
       await assertNotManaged('workspace.name')
       if (data.useCase !== undefined) {
         await assertNotManaged('workspace.useCase')
@@ -185,9 +185,9 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
         console.log(`[fn:onboarding] setupWorkspaceFn: updating existing settings`)
 
         // Slug is auto-derived from name client-side, but if the
-        // operator's file owns workspace.slug we skip the column write
-        // and let the file's slug stand. The reconciler will overwrite
-        // it on its next tick anyway.
+        // config file owns workspace.slug we skip the column write and
+        // let the file's slug stand. The reconciler will overwrite it
+        // on its next tick anyway.
         const slugManaged = isPathManaged('workspace.slug', existingSettings.managedFieldPaths)
         const slug = slugify(workspaceName)
 
@@ -259,9 +259,9 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
         // Fresh-insert intentionally bypasses the managed-paths gate:
         // there's no settings row yet to read managedFieldPaths from,
         // so assertNotManaged would have nothing to assert against. If
-        // the workspace is cloud-managed, the file reconciler will
-        // overwrite name/slug/etc on its next tick and populate
-        // managedFieldPaths — subsequent UI mutators are gated normally.
+        // a config file is present, the reconciler will overwrite
+        // name/slug/etc on its next tick and populate managedFieldPaths
+        // — subsequent UI mutators are gated normally.
         const [createdSettings] = await db
           .insert(settings)
           .values({
@@ -365,8 +365,8 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
         throw new Error('Authentication required')
       }
 
-      // Same rationale as setupWorkspaceFn: don't let the UI overwrite a
-      // file-managed useCase. Pre-onboarding the gate is a no-op.
+      // Same rationale as setupWorkspaceFn: don't let the UI overwrite
+      // a file-managed useCase. Pre-onboarding the gate is a no-op.
       await assertNotManaged('workspace.useCase')
 
       const existingSettings = await getSettings()
