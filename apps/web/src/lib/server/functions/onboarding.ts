@@ -10,6 +10,7 @@ import { syncPrincipalProfile } from '@/lib/server/domains/principals/principal.
 import { listBoards } from '@/lib/server/domains/boards/board.service'
 import { db, settings, principal, user, postStatuses, eq, DEFAULT_STATUSES } from '@/lib/server/db'
 import { invalidateSettingsCache } from '@/lib/server/domains/settings/settings.helpers'
+import { assertNotManaged } from '@/lib/server/config-file/managed-guard'
 import { slugify } from '@/lib/shared/utils'
 
 /**
@@ -66,6 +67,18 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
       const session = await getSession()
       if (!session?.user) {
         throw new Error('Authentication required')
+      }
+
+      // Block in-app writes when the operator's config-file owns these
+      // fields. The reconciler still applies the file's value separately;
+      // we just refuse to let the UI clobber it. Pre-onboarding the gate
+      // is a no-op because settings (and managedFieldPaths) don't exist
+      // yet — by the time managedFieldPaths is populated the reconciler
+      // has already written the file's name/slug.
+      await assertNotManaged('workspace.name')
+      await assertNotManaged('workspace.slug')
+      if (data.useCase !== undefined) {
+        await assertNotManaged('workspace.useCase')
       }
 
       const { workspaceName, userName, useCase } = data
@@ -334,6 +347,10 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
       if (!session?.user) {
         throw new Error('Authentication required')
       }
+
+      // Same rationale as setupWorkspaceFn: don't let the UI overwrite a
+      // file-managed useCase. Pre-onboarding the gate is a no-op.
+      await assertNotManaged('workspace.useCase')
 
       const existingSettings = await getSettings()
 
