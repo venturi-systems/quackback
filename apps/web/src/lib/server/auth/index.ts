@@ -114,10 +114,11 @@ async function createAuth() {
     scopes?: string[]
   }> = []
 
-  // Defense-in-depth: a Pro tenant who configured SSO before downgrading
-  // would still have OIDC creds in the DB. Skip generic-oauth providers
-  // when the tier flag is off so the login button never renders and the
-  // /sign-in/oauth2 callback path 404s on that providerId.
+  // Defense-in-depth: a workspace that configured SSO on a higher tier
+  // would still have OIDC creds in the DB after a downgrade. Skip
+  // generic-oauth providers when the tier flag is off so the login
+  // button never renders and the /sign-in/oauth2 callback path 404s
+  // on that providerId.
   const tierLimits = await getTierLimits()
 
   // Optional SSO provider. DB-first (settings.authConfig.ssoOidc, set

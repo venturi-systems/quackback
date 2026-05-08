@@ -20,6 +20,7 @@
 
 import { getTenantSettings } from '@/lib/server/domains/settings/settings.service'
 import { getTierLimits } from '@/lib/server/domains/settings/tier-limits.service'
+import { getConfiguredIntegrationTypes } from '@/lib/server/domains/platform-credentials/platform-credential.service'
 import { getAllAuthProviders } from './auth-providers'
 
 export async function getRegisteredAuthProviders(): Promise<string[]> {
@@ -27,7 +28,11 @@ export async function getRegisteredAuthProviders(): Promise<string[]> {
 
   // SSO is registered when EITHER (a) DB says enabled AND env has the
   // client secret, or (b) the env trio is fully set on its own.
-  const tenantSettings = await getTenantSettings()
+  const [tenantSettings, tierLimits, configuredTypes] = await Promise.all([
+    getTenantSettings(),
+    getTierLimits(),
+    getConfiguredIntegrationTypes(),
+  ])
   const ssoFromDb = tenantSettings?.authConfig?.ssoOidc
   const hasClientSecret = Boolean(process.env.SSO_OIDC_CLIENT_SECRET)
   const dbWantsSso = Boolean(ssoFromDb?.enabled)
@@ -40,16 +45,14 @@ export async function getRegisteredAuthProviders(): Promise<string[]> {
     ids.push('sso')
   }
 
-  // Built-in social + custom generic-oauth providers gated by
-  // platform_credentials having both clientId + clientSecret. The auth
-  // layer also gates generic-oauth on the customOidcProvider tier flag,
-  // so mirror that here.
-  const { getPlatformCredentials } =
-    await import('@/lib/server/domains/platform-credentials/platform-credential.service')
-  const tierLimits = await getTierLimits()
+  // Built-in social + custom generic-oauth providers gated by having
+  // platform credentials configured. The auth layer also gates
+  // generic-oauth on the customOidcProvider tier flag, so mirror that
+  // here. `configuredTypes` is the cached Set returned by
+  // getConfiguredIntegrationTypes — a single Redis read replaces
+  // per-provider DB lookups.
   for (const provider of getAllAuthProviders()) {
-    const creds = await getPlatformCredentials(provider.credentialType)
-    if (!creds?.clientId || !creds?.clientSecret) continue
+    if (!configuredTypes.has(provider.credentialType)) continue
     if (provider.type === 'generic-oauth' && !tierLimits.features.customOidcProvider) continue
     ids.push(provider.id)
   }
