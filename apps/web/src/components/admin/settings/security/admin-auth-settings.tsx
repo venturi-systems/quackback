@@ -15,6 +15,13 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { MethodRow } from '@/components/admin/settings/auth-shared/method-row'
 import { CopyButton } from '@/components/shared/copy-button'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
@@ -426,6 +433,10 @@ function SsoConfiguredForm({
   // existing one (handleSave skips the call when secretDraft is empty).
   const [secretTouched, setSecretTouched] = useState(false)
   const [secretError, setSecretError] = useState<string | null>(null)
+  const [confirmAdminRoleOpen, setConfirmAdminRoleOpen] = useState(false)
+  const [pendingRoleChange, setPendingRoleChange] = useState<'admin' | 'member' | 'user' | null>(
+    null
+  )
 
   const fieldManaged = (key: keyof NonNullable<AuthConfig['ssoOidc']>) =>
     isManaged(`auth.ssoOidc.${String(key)}`)
@@ -469,6 +480,7 @@ function SsoConfiguredForm({
       'discoveryUrl',
       'clientId',
       'autoCreateUsers',
+      'autoProvisionRole',
     ]
     for (const key of all) {
       if (fieldManaged(key)) continue
@@ -537,12 +549,59 @@ function SsoConfiguredForm({
           </Alert>
         )}
 
-        <RowSwitch
-          label="Just-in-time provisioning"
-          description="Auto-create user records on first SSO sign-in."
-          checked={draft.autoCreateUsers}
-          onCheckedChange={(v) => setDraft({ ...draft, autoCreateUsers: v })}
-          managed={fieldManaged('autoCreateUsers')}
+        <div className="flex items-start justify-between gap-4 py-2">
+          <div className="flex-1 min-w-0">
+            <Label className="font-medium">Auto-create accounts on first sign-in</Label>
+            <p className="mt-1 text-sm text-muted-foreground">
+              New users from your IdP land in Quackback with the role you pick.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            {draft.autoCreateUsers && (
+              <Select
+                value={draft.autoProvisionRole ?? 'member'}
+                onValueChange={(role) => {
+                  const next = role as 'admin' | 'member' | 'user'
+                  if (next === 'admin' && draft.autoProvisionRole !== 'admin') {
+                    setPendingRoleChange(next)
+                    setConfirmAdminRoleOpen(true)
+                    return
+                  }
+                  setDraft({ ...draft, autoProvisionRole: next })
+                }}
+                disabled={fieldManaged('autoProvisionRole') || saving}
+              >
+                <SelectTrigger className="h-8 w-[140px] text-xs" aria-label="Default role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="member">Member</SelectItem>
+                  <SelectItem value="user">Portal user</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            <Switch
+              checked={draft.autoCreateUsers}
+              onCheckedChange={(v) => setDraft({ ...draft, autoCreateUsers: v })}
+              disabled={fieldManaged('autoCreateUsers') || saving}
+              aria-label="Auto-create accounts on first sign-in"
+            />
+          </div>
+        </div>
+
+        <ConfirmDialog
+          open={confirmAdminRoleOpen}
+          onOpenChange={setConfirmAdminRoleOpen}
+          title="Auto-create new users as admin?"
+          description="Anyone who signs in via SSO at a verified domain will land with full admin access. Make sure your IdP's user directory is curated."
+          warning={{ title: 'High-blast-radius default.' }}
+          confirmLabel="Use admin as default"
+          onConfirm={() => {
+            if (pendingRoleChange) setDraft({ ...draft, autoProvisionRole: pendingRoleChange })
+            setPendingRoleChange(null)
+            setConfirmAdminRoleOpen(false)
+          }}
         />
 
         <div className="flex items-center gap-3">
@@ -867,30 +926,6 @@ function Field({
         placeholder={placeholder}
       />
       {help && <p className="mt-1 text-xs text-muted-foreground">{help}</p>}
-    </div>
-  )
-}
-
-function RowSwitch({
-  label,
-  description,
-  checked,
-  onCheckedChange,
-  managed,
-}: {
-  label: string
-  description: string
-  checked: boolean
-  onCheckedChange: (v: boolean) => void
-  managed?: boolean
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div>
-        <Label>{label}</Label>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={managed} />
     </div>
   )
 }
