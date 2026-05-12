@@ -41,16 +41,6 @@ export const Route = createFileRoute('/admin/settings/api')({
   component: ApiPage,
 })
 
-function useApiBaseUrl() {
-  const { baseUrl } = useRouteContext({ from: '__root__' })
-  return baseUrl ? `${baseUrl}/api/v1` : '/api/v1'
-}
-
-function useMcpEndpointUrl() {
-  const { baseUrl } = useRouteContext({ from: '__root__' })
-  return baseUrl ? `${baseUrl}/api/mcp` : '/api/mcp'
-}
-
 function ApiPage() {
   const search = Route.useSearch()
   const tab: ApiTab = search.tab ?? 'keys'
@@ -60,8 +50,9 @@ function ApiPage() {
   const webhooksQuery = useSuspenseQuery(adminQueries.webhooks())
   const developerConfigQuery = useSuspenseQuery(settingsQueries.developerConfig())
 
-  const apiBaseUrl = useApiBaseUrl()
-  const mcpEndpointUrl = useMcpEndpointUrl()
+  const { baseUrl } = useRouteContext({ from: '__root__' })
+  const apiBaseUrl = baseUrl ? `${baseUrl}/api/v1` : '/api/v1'
+  const mcpEndpointUrl = baseUrl ? `${baseUrl}/api/mcp` : '/api/mcp'
 
   return (
     <div className="space-y-6 max-w-5xl">
