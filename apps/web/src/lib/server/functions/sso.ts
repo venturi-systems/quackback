@@ -28,6 +28,7 @@ import { z } from 'zod'
 import { ConflictError, ForbiddenError } from '@/lib/shared/errors'
 import { httpsUrl } from '@/lib/shared/schemas/auth'
 import { SSO_OAUTH_CALLBACK_PATH } from '@/lib/shared/sso-test-keys'
+import { recordAuditEvent } from '@/lib/server/audit/log'
 import { requireAuth } from './auth-helpers'
 
 const testSsoConnectionInput = z.object({
@@ -210,34 +211,72 @@ const setVerifiedDomainEnforcedInput = z.object({
 export const setVerifiedDomainEnforcedFn = createServerFn({ method: 'POST' })
   .inputValidator(setVerifiedDomainEnforcedInput)
   .handler(async ({ data }) => {
-    const { user } = await requireAuth({ roles: ['admin'] })
+    const { user, principal } = await requireAuth({ roles: ['admin'] })
 
-    if (data.enforced) {
-      const { db, principal: principalTable, eq } = await import('@/lib/server/db')
-      const principalRow = await db.query.principal.findFirst({
-        where: eq(principalTable.userId, user.id),
-        columns: { lastSsoSignInAt: true },
-      })
-      const last = principalRow?.lastSsoSignInAt
-      if (!last || last.getTime() < Date.now() - SSO_BOOTSTRAP_WINDOW_MS) {
-        throw new ForbiddenError(
-          'SSO_BOOTSTRAP_GUARD',
-          'Sign in via SSO first to enable enforcement.'
-        )
-      }
+    const event = data.enforced
+      ? 'sso.enforcement.domain.enabled'
+      : 'sso.enforcement.domain.disabled'
+    const actor = { userId: user.id, email: user.email, role: principal.role }
+    const target = { type: 'sso_verified_domain', id: data.id }
 
-      const { isEmailConfigured } = await import('@quackback/email')
-      if (!isEmailConfigured()) {
-        throw new ConflictError(
-          'SSO_NO_BREAKGLASS',
-          'Configure email delivery (SMTP/Resend) before requiring SSO. Magic-link is the only fallback when SSO breaks.'
-        )
-      }
-    }
-
-    const { setVerifiedDomainEnforced } =
+    const { setVerifiedDomainEnforced, listVerifiedDomains } =
       await import('@/lib/server/domains/settings/settings.service')
-    return setVerifiedDomainEnforced(data.id, data.enforced)
+
+    // Snapshot the prior `enforced` value for the audit row.
+    const priorRows = await listVerifiedDomains()
+    const prior = priorRows.find((row) => row.id === data.id)
+    const before = prior ? { enforced: prior.enforced } : null
+
+    try {
+      if (data.enforced) {
+        const { db, principal: principalTable, eq } = await import('@/lib/server/db')
+        const principalRow = await db.query.principal.findFirst({
+          where: eq(principalTable.userId, user.id),
+          columns: { lastSsoSignInAt: true },
+        })
+        const last = principalRow?.lastSsoSignInAt
+        if (!last || last.getTime() < Date.now() - SSO_BOOTSTRAP_WINDOW_MS) {
+          throw new ForbiddenError(
+            'SSO_BOOTSTRAP_GUARD',
+            'Sign in via SSO first to enable enforcement.'
+          )
+        }
+
+        const { isEmailConfigured } = await import('@quackback/email')
+        if (!isEmailConfigured()) {
+          throw new ConflictError(
+            'SSO_NO_BREAKGLASS',
+            'Configure email delivery (SMTP/Resend) before requiring SSO. Magic-link is the only fallback when SSO breaks.'
+          )
+        }
+      }
+
+      const updated = await setVerifiedDomainEnforced(data.id, data.enforced)
+      await recordAuditEvent({
+        event,
+        outcome: 'success',
+        actor,
+        target,
+        before,
+        after: { enforced: data.enforced },
+      })
+      return updated
+    } catch (error) {
+      const reason =
+        error instanceof ForbiddenError || error instanceof ConflictError
+          ? error.code
+          : 'UNEXPECTED'
+      await recordAuditEvent({
+        event,
+        outcome: 'failure',
+        actor,
+        target,
+        before,
+        after: { enforced: data.enforced },
+        metadata: { reason },
+      })
+      throw error
+    }
   })
 
 /** Cache of the last discovery probe per URL. 60s TTL is enough to
