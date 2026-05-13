@@ -635,13 +635,13 @@ function SsoProviderHeader({
   })()
 
   return (
-    <div className="flex items-center justify-between gap-4">
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted shrink-0">
           <BrandIcon className="h-5 w-5" />
         </div>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold truncate">{headerLabel}</p>
             {isLive && (
               <Badge
@@ -663,7 +663,7 @@ function SsoProviderHeader({
           <p className={`text-xs mt-0.5 ${statusLabel.color}`}>{statusLabel.node}</p>
         </div>
       </div>
-      <div className="flex items-center gap-4 shrink-0">
+      <div className="flex items-center justify-between gap-3 sm:justify-end sm:gap-4 sm:shrink-0">
         <div className="flex items-center gap-2">
           <Label htmlFor="sso-enabled-toggle" className="text-xs text-muted-foreground">
             Enabled
@@ -675,7 +675,7 @@ function SsoProviderHeader({
             disabled={enabledManaged || saving}
           />
         </div>
-        <Button variant="ghost" size="sm" onClick={onSwitchProvider}>
+        <Button variant="ghost" size="sm" onClick={onSwitchProvider} className="h-9 sm:h-8">
           Change provider
         </Button>
       </div>
