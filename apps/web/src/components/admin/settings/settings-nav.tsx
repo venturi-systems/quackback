@@ -19,6 +19,7 @@ import {
 } from '@heroicons/react/24/solid'
 import { cn } from '@/lib/shared/utils'
 import type { FeatureFlags } from '@/lib/shared/types'
+import { useSsoSidebarStatus, type SsoSidebarTone } from './use-sso-sidebar-status'
 
 interface NavItem {
   label: string
@@ -122,6 +123,27 @@ function NavSection({
   )
 }
 
+const TONE_CLASS: Record<SsoSidebarTone, string> = {
+  muted: 'bg-muted text-muted-foreground',
+  warn: 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200',
+  ok: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200',
+}
+
+function SsoChip() {
+  const status = useSsoSidebarStatus()
+  if (!status) return null
+  return (
+    <span
+      className={cn(
+        'ml-auto inline-flex items-center rounded-sm px-1.5 py-0.5 text-[10px] font-medium',
+        TONE_CLASS[status.tone]
+      )}
+    >
+      {status.text}
+    </span>
+  )
+}
+
 export function SettingsNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const { settings } = useRouteContext({ from: '__root__' })
@@ -150,6 +172,7 @@ export function SettingsNav() {
               >
                 <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive && 'text-primary')} />
                 <span className="truncate flex-1">{item.label}</span>
+                {item.to === '/admin/settings/security/sso' ? <SsoChip /> : null}
               </Link>
             )
           })}
