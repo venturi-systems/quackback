@@ -116,6 +116,7 @@ export const Route = createFileRoute('/api/widget/identify')({
 
         // Determine identity source: verified JWT or unverified body fields
         let claims: Record<string, unknown>
+        let claimsAreVerified = false
 
         if (body.ssoToken) {
           const secret = await getWidgetSecret()
@@ -127,6 +128,7 @@ export const Route = createFileRoute('/api/widget/identify')({
             return jsonError('TOKEN_INVALID', 'Invalid or expired ssoToken', 403)
           }
           claims = payload
+          claimsAreVerified = true
         } else {
           // Unverified identify — only allowed when verified-identity-only is off
           if (widgetConfig.identifyVerification) {
@@ -136,10 +138,14 @@ export const Route = createFileRoute('/api/widget/identify')({
               403
             )
           }
-          // Strip session-management fields so they're not treated as attributes
+          // Strip session-management fields so they're not treated as attributes.
+          // Also strip `segments` — an unverified body must NOT grant segment
+          // membership, which is an access-control surface (anyone could self-
+          // assign to 'enterprise' otherwise).
           claims = { ...body } as Record<string, unknown>
           delete claims.ssoToken
           delete claims.previousToken
+          delete claims.segments
         }
 
         // Extract identity fields, supporting both JWT and unverified body shapes
@@ -240,10 +246,11 @@ export const Route = createFileRoute('/api/widget/identify')({
         const principalId = principalRecord.id as PrincipalId
 
         // Segments claim — the customer can tag the identified user with one
-        // or more segment slugs in the signed JWT. Unknown slugs are silently
-        // skipped (admin must pre-create the segment). Lookup by slug, not
-        // name — slug is unique, name is not.
-        const rawSegments = claims.segments
+        // or more segment slugs in the signed JWT. ONLY honored on the
+        // verified-token path; the unverified body's `segments` was stripped
+        // above (else any visitor could self-assign to 'enterprise'). Unknown
+        // slugs are silently skipped. Lookup by slug (unique), not name.
+        const rawSegments = claimsAreVerified ? claims.segments : undefined
         if (Array.isArray(rawSegments)) {
           for (const slug of rawSegments) {
             if (typeof slug !== 'string') continue

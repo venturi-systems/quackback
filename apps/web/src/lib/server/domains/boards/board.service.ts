@@ -26,6 +26,7 @@ import type { BoardId, PostId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ConflictError } from '@/lib/shared/errors'
 import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './board.types'
 import { slugify } from '@/lib/shared/utils'
+import type { BoardAudience } from '@/lib/server/db'
 import { getTierLimits } from '@/lib/server/domains/settings/tier-limits.service'
 import { enforceCountLimit } from '@/lib/server/domains/settings/tier-enforce'
 
@@ -83,6 +84,13 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
     slug = `${baseSlug}-${counter}`
   }
 
+  // Phase-2 deploy invariant: dual-write isPublic + audience so a new
+  // board created on this code path lands with a consistent visibility
+  // record across both columns. Until isPublic is fully retired (Task 21
+  // follow-up), readers may consult either; they must not disagree.
+  const isPublic = input.isPublic ?? true
+  const audience: BoardAudience = isPublic ? { kind: 'public' } : { kind: 'team' }
+
   // Create the board
   const [board] = await db
     .insert(boards)
@@ -90,7 +98,8 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
       name: input.name.trim(),
       slug,
       description: input.description?.trim() || null,
-      isPublic: input.isPublic ?? true, // default to public
+      isPublic,
+      audience,
       settings: input.settings || {},
     })
     .returning()
@@ -161,7 +170,14 @@ export async function updateBoard(id: BoardId, input: UpdateBoardInput): Promise
   if (input.name !== undefined) updateData.name = input.name.trim()
   if (input.description !== undefined) updateData.description = input.description?.trim() || null
   if (slug !== existingBoard.slug) updateData.slug = slug
-  if (input.isPublic !== undefined) updateData.isPublic = input.isPublic
+  if (input.isPublic !== undefined) {
+    updateData.isPublic = input.isPublic
+    // Dual-write: when the legacy isPublic toggle changes via the old
+    // admin UI, mirror it onto audience so portal queries (which now
+    // read audience) stay consistent. Granular audience changes go
+    // through updateBoardAccessFn (admin-only, audited) instead.
+    updateData.audience = input.isPublic ? { kind: 'public' } : { kind: 'team' }
+  }
   if (input.settings !== undefined) updateData.settings = input.settings
 
   // Update the board
