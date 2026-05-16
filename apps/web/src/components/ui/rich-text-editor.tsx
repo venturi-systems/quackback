@@ -21,6 +21,7 @@ import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
 import Youtube from '@tiptap/extension-youtube'
 import { Emoji, emojis as defaultEmojis, type EmojiItem } from '@tiptap/extension-emoji'
+import { MentionExtension } from './mention-extension'
 import { Markdown } from '@tiptap/markdown'
 import { Extension } from '@tiptap/core'
 import type { Range } from '@tiptap/core'
@@ -204,6 +205,7 @@ export function buildExtensions(
     ...(features.slashMenu !== false ? [createSlashCommands(features, onImageUpload)] : []),
     ...(features.emojiPicker !== false ? [createEmojiExtension()] : []),
     ...(features.enterAsHardBreak ? [createEnterAsHardBreak()] : []),
+    MentionExtension,
     Markdown,
   ]
 }
@@ -2128,7 +2130,7 @@ interface RichTextContentProps {
 // safePositiveInt, extractYoutubeId) are imported from @/lib/shared/utils/sanitize
 
 // Generate HTML from TipTap JSON content for SSR
-function generateContentHTML(content: JSONContent): string {
+export function generateContentHTML(content: JSONContent): string {
   function extractPlainText(node: JSONContent): string {
     if (!node) return ''
     if (node.type === 'text') return node.text ?? ''
@@ -2283,6 +2285,17 @@ function generateContentHTML(content: JSONContent): string {
       case 'hardBreak':
         return '<br>'
 
+      case 'mention': {
+        // Inline leaf node. The picker stores {id: principalId, label: displayName}.
+        // We emit a chip span with both attrs so the client overlay can resolve a
+        // hover card by principalId; label is also rendered as the visible "@name".
+        // escapeHtmlAttr escapes &<>"' so it's safe for both attribute and text use.
+        const id = escapeHtmlAttr(String(node.attrs?.id ?? ''))
+        const label = escapeHtmlAttr(String(node.attrs?.label ?? ''))
+        if (!id) return ''
+        return `<span class="mention" data-principal-id="${id}" data-display-name="${label}">@${label}</span>`
+      }
+
       case 'emoji': {
         // Emoji is a leaf node — the Unicode char lives on attrs.emoji.
         // Sanitize-tiptap caps the field at 16 chars and the picker only
@@ -2356,6 +2369,8 @@ const DOMPURIFY_CONFIG = {
     'disabled',
     'data-type',
     'data-name',
+    'data-principal-id',
+    'data-display-name',
   ],
   ALLOW_DATA_ATTR: false,
   ADD_TAGS: ['iframe'],
