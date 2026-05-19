@@ -11,13 +11,30 @@
  * silently closes with no session and no message.
  *
  * `detectAuthBlockRedirect` lets the client's `onResponse` hook turn
- * those redirects into a thrown error so the form's existing
- * try/catch surfaces a friendly message.
+ * those redirects into a thrown `AuthBlockedError` so the form's
+ * existing try/catch surfaces a friendly message.
+ *
+ * The exported `AUTH_BLOCK_MESSAGES` map is also imported by
+ * `/admin/login` (and any future surface that consumes a pre-check
+ * error code) so the wording stays in one place.
  */
+import { ForbiddenError } from '@/lib/shared/errors'
 
-/** Map known pre-check error codes to user-facing copy. Unknown
- *  codes fall back to a generic message. */
-const FRIENDLY_MESSAGES: Record<string, string> = {
+/** Closed set of codes `handleSignInPreCheck` and `auth-restrictions`
+ *  emit. Adding a producer-side code without listing it here makes
+ *  the auth client fall back to the generic message — TypeScript
+ *  won't catch that for you because the producer side types these as
+ *  `error?: string`. Keep both sides in sync. */
+export type AuthBlockCode =
+  | 'password_method_not_allowed'
+  | 'magic_link_method_not_allowed'
+  | 'oauth_method_not_allowed'
+  | 'auth_method_blocked'
+  | 'rate_limited'
+  | 'verified_domain_requires_sso'
+  | 'require_two_factor'
+
+export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
   password_method_not_allowed:
     "Password sign-in isn't enabled for this workspace. Try magic-link or SSO instead.",
   magic_link_method_not_allowed: "Magic-link sign-in isn't enabled for this workspace.",
@@ -31,22 +48,26 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
 
 const LOGIN_PATHS = new Set(['/admin/login', '/auth/login'])
 
-export class AuthBlockedError extends Error {
-  readonly code: string
+const GENERIC_BLOCK_MESSAGE = "Sign-in isn't allowed right now. Please try again."
+
+/**
+ * 403 domain error for pre-check denials. Extending `ForbiddenError`
+ * keeps the auth-client throw path on the same hierarchy the rest of
+ * the codebase catches via `DomainException` / `instanceof`.
+ */
+export class AuthBlockedError extends ForbiddenError {
   constructor(code: string, message: string) {
-    super(message)
+    super(code, message)
     this.name = 'AuthBlockedError'
-    this.code = code
   }
 }
 
 /**
  * Inspect a Response to see if it was redirected to a login error
  * page. Returns the corresponding error to throw, or null if this
- * was a normal response.
- *
- * Exported so the onResponse hook stays a one-liner and the
- * detection logic is unit-testable without a real Response.
+ * was a normal response. Exported so the onResponse hook stays a
+ * one-liner and the detection logic is unit-testable without a real
+ * Response.
  */
 export function detectAuthBlockRedirect(response: {
   redirected: boolean
@@ -62,6 +83,6 @@ export function detectAuthBlockRedirect(response: {
   if (!LOGIN_PATHS.has(parsed.pathname)) return null
   const code = parsed.searchParams.get('error')
   if (!code) return null
-  const message = FRIENDLY_MESSAGES[code] ?? "Sign-in isn't allowed right now. Please try again."
+  const message = AUTH_BLOCK_MESSAGES[code as AuthBlockCode] ?? GENERIC_BLOCK_MESSAGE
   return new AuthBlockedError(code, message)
 }

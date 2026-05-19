@@ -97,14 +97,9 @@ export function resolveTwoFactorDest(
  */
 export const authClient = createAuthClient({
   fetchOptions: {
-    // `handleSignInPreCheck` blocks denied methods with a 302 to
-    // /admin/login or /auth/login carrying `?error=<code>`. fetch
-    // follows the redirect and the HTML body parses as null JSON,
-    // so without this hook the awaiting form sees no error and
-    // closes its popover silently. Surfacing the redirect as a
-    // thrown error lets the form's existing try/catch show the
-    // pre-check's reason to the user.
     onResponse: async (ctx) => {
+      // See redirect-errors.ts for the why — surfaces pre-check 302s
+      // as throwable errors instead of letting them resolve as null.
       const blocked = detectAuthBlockRedirect(ctx.response)
       if (blocked) throw blocked
     },

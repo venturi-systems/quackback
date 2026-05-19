@@ -5,28 +5,24 @@ import { AdminAuthShell } from '@/components/auth/admin-auth-shell'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
+import { AUTH_BLOCK_MESSAGES } from '@/lib/server/auth/redirect-errors'
 
-// Error messages for login failures
+// Pre-check codes (password_method_not_allowed, rate_limited, etc.)
+// share copy with the portal-side auth-client hook via
+// AUTH_BLOCK_MESSAGES. Codes below are admin-only paths the portal
+// modal can't reach: token expiry, OAuth-callback failures, the
+// SSO-signup-disabled branch.
 const errorMessages: Record<string, string> = {
+  ...AUTH_BLOCK_MESSAGES,
   invalid_token: 'Your login link is invalid or has been tampered with. Please try again.',
   token_expired: 'Your login link has expired. Please request a new one.',
   not_team_member:
     "This account doesn't have team access. Team membership is by invitation only. Please contact your administrator.",
-  oauth_method_not_allowed: 'This sign-in method is not enabled for team members.',
-  password_method_not_allowed: 'Password sign-in is not enabled. Please use another method.',
   // Better-Auth genericOAuth surfaces this when disableSignUp blocks a
   // brand-new SSO user (`autoCreateUsers === false` on the SSO config).
   // Existing users still link via accountLinking and don't see this.
   signup_disabled:
     "Your account isn't pre-provisioned for SSO. Ask an administrator to invite you first.",
-  auth_method_blocked:
-    "This sign-in method isn't allowed for your account right now. Try another option or contact your administrator.",
-  // Verified-domain hard-binding (Section 3 of design): emails at the
-  // tenant's verified SSO domain must use SSO — password / sign-up /
-  // social / generic-OAuth callbacks are rejected. Magic-link / OTP
-  // remain available as documented break-glass.
-  verified_domain_requires_sso:
-    'Your email domain is configured for SSO. Sign in with your single sign-on provider.',
   // Better-Auth's genericOAuth plugin surfaces these when the upstream
   // OIDC callback fails — IdP returned an error, token exchange
   // rejected, scope mismatch, etc.
@@ -34,7 +30,6 @@ const errorMessages: Record<string, string> = {
     'Sign-in failed. Your identity provider rejected the request — check the app configuration in your IdP and try again.',
   oauth_signin_error:
     'Sign-in failed. Your identity provider rejected the request — check the app configuration in your IdP and try again.',
-  rate_limited: 'Too many sign-in attempts. Please wait a few minutes and try again.',
 }
 
 const GENERIC_ERROR_MESSAGE =
