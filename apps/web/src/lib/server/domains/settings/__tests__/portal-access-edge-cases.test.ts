@@ -4,11 +4,12 @@
  * Covers:
  *  - evaluatePortalAccess: all remaining decision-table branches and edge cases.
  *  - emailDomain helper: edge cases exercised through evaluatePortalAccess.
- *  - parseGateError (from _portal.tsx): valid gate error, malformed JSON,
- *    partial gate-shaped object, non-Error inputs.
+ *  - parseGateError: valid gate error, malformed JSON, partial gate-shaped
+ *    object, non-Error inputs.
  */
 import { describe, it, expect } from 'vitest'
 import { evaluatePortalAccess } from '../portal-access'
+import { parseGateError, type PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
 // ============================================================================
 // evaluatePortalAccess — complete decision truth table
@@ -252,59 +253,10 @@ describe('evaluatePortalAccess — domain matching edge cases', () => {
 })
 
 // ============================================================================
-// parseGateError — inline re-implementation for testing
-// (The real function lives in _portal.tsx; we extract its logic to test it
-//  without importing the React module.)
+// parseGateError — tests against the real implementation
 // ============================================================================
 
-// Copy of isValidGateError and parseGateError from _portal.tsx so we can
-// test them in a unit context without the React+router env.
-
-interface PortalAccessGateErrorShape {
-  type: 'portal-access-gate'
-  reason: 'unauthenticated' | 'unauthorized'
-  workspaceName: string
-  logoUrl: string | null
-  themeStyles: string
-  customCss: string
-  authConfig: {
-    found: boolean
-    oauth: Record<string, boolean | undefined>
-    customProviderNames?: Record<string, string>
-  }
-}
-
-function isValidGateError(obj: unknown): obj is PortalAccessGateErrorShape {
-  if (!obj || typeof obj !== 'object') return false
-  const o = obj as Record<string, unknown>
-  return (
-    o['type'] === 'portal-access-gate' &&
-    (o['reason'] === 'unauthenticated' || o['reason'] === 'unauthorized') &&
-    typeof o['workspaceName'] === 'string' &&
-    (o['logoUrl'] === null || typeof o['logoUrl'] === 'string') &&
-    typeof o['themeStyles'] === 'string' &&
-    typeof o['customCss'] === 'string' &&
-    o['authConfig'] !== null &&
-    typeof o['authConfig'] === 'object' &&
-    typeof (o['authConfig'] as Record<string, unknown>)['found'] === 'boolean' &&
-    typeof (o['authConfig'] as Record<string, unknown>)['oauth'] === 'object'
-  )
-}
-
-function parseGateError(error: unknown): PortalAccessGateErrorShape | null {
-  if (!(error instanceof Error)) return null
-  const ext = error as unknown as Record<string, unknown>
-  if (isValidGateError(ext)) return ext as unknown as PortalAccessGateErrorShape
-  try {
-    const parsed: unknown = JSON.parse(error.message)
-    if (isValidGateError(parsed)) return parsed as PortalAccessGateErrorShape
-  } catch {
-    // not a gate error
-  }
-  return null
-}
-
-const VALID_GATE_PAYLOAD: PortalAccessGateErrorShape = {
+const VALID_GATE_PAYLOAD: PortalAccessGateError = {
   type: 'portal-access-gate',
   reason: 'unauthenticated',
   workspaceName: 'Acme',
@@ -386,7 +338,7 @@ describe('parseGateError', () => {
   })
 
   it('parses a valid unauthorized gate error', () => {
-    const payload: PortalAccessGateErrorShape = {
+    const payload: PortalAccessGateError = {
       ...VALID_GATE_PAYLOAD,
       reason: 'unauthorized',
     }
@@ -396,7 +348,7 @@ describe('parseGateError', () => {
   })
 
   it('parses when logoUrl is a non-null string', () => {
-    const payload: PortalAccessGateErrorShape = {
+    const payload: PortalAccessGateError = {
       ...VALID_GATE_PAYLOAD,
       logoUrl: 'https://cdn.example.com/logo.png',
     }

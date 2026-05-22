@@ -53,10 +53,15 @@ export type PortalAccessDecision =
  * The caller's identity is read only from the request headers (cookie session
  * or widget Bearer token) — a caller cannot supply their own identity.
  *
- * No-settings-safe: if the portal config cannot be read (no settings row, DB
- * error, etc.) this treats the portal as `public` and returns
- * `{ granted: true }`. It never throws for a missing/unreadable config — a
- * fresh, un-onboarded install must not have its public surfaces broken.
+ * Never-throw contract: this function never throws. Two distinct failure modes:
+ *
+ *   - Portal config unreadable (no settings row, DB error): fail OPEN → treats
+ *     the portal as `public`. A fresh un-onboarded install must not have its
+ *     public surfaces broken.
+ *
+ *   - Principal lookup fails (DB error): fail CLOSED → treats the session as
+ *     anonymous (isAnonymousPrincipal = true, role = null). A DB error during
+ *     principal resolution must never grant access to a private portal.
  */
 export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecision> {
   const { auth } = await import('@/lib/server/auth/index')
@@ -82,14 +87,24 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
 
     // Resolve principalType so anonymous Better Auth sessions are not
     // counted as authenticated portal sessions.
-    const principalRecord = await db.query.principal.findFirst({
-      where: eq(principal.userId, session.user.id as UserId),
-      columns: { type: true, role: true },
-    })
-    if (principalRecord?.type === 'anonymous') {
+    // Fail CLOSED on DB error: treat the session as anonymous so a lookup
+    // failure never grants access to a private portal.
+    let principalRecord: { type: string; role: string | null } | undefined
+    try {
+      principalRecord = await db.query.principal.findFirst({
+        where: eq(principal.userId, session.user.id as UserId),
+        columns: { type: true, role: true },
+      })
+    } catch {
+      // Principal lookup failed — treat caller as anonymous (fail closed).
       isAnonymousPrincipal = true
     }
-    role = (principalRecord?.role as 'admin' | 'member' | 'user' | null) ?? null
+    if (!isAnonymousPrincipal) {
+      if (principalRecord?.type === 'anonymous') {
+        isAnonymousPrincipal = true
+      }
+      role = (principalRecord?.role as 'admin' | 'member' | 'user' | null) ?? null
+    }
   }
 
   const isAuthenticated = !!session?.user && !isAnonymousPrincipal

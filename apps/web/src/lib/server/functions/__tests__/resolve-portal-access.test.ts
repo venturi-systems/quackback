@@ -190,4 +190,39 @@ describe('resolvePortalAccessForRequest — private portal', () => {
       expect(result.reason).toBe('unauthenticated')
     }
   })
+
+  it('fails CLOSED when the principal DB lookup throws (deny, not throw)', async () => {
+    // A DB error during principal resolution must never grant access and must
+    // not throw out of the function — the never-throw contract must hold.
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_1', email: 'user@acme.com', emailVerified: true },
+    })
+    mockPrincipalFindFirst.mockRejectedValue(new Error('DB_CONN_TIMEOUT'))
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    const result = await resolvePortalAccessForRequest()
+
+    // Must not throw, and must deny — fail CLOSED.
+    expect(result.granted).toBe(false)
+    if (!result.granted) {
+      expect(result.reason).toBe('unauthenticated')
+    }
+  })
+
+  it('fails CLOSED on a public portal when the principal lookup throws (treats session as anonymous)', async () => {
+    // Even on a public portal, a DB error during principal lookup should fail
+    // closed for team-member detection — but a public portal still grants.
+    // The function must not throw.
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_1', email: 'user@acme.com', emailVerified: true },
+    })
+    mockPrincipalFindFirst.mockRejectedValue(new Error('DB_CONN_TIMEOUT'))
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'public', allowedDomains: [] },
+    })
+
+    await expect(resolvePortalAccessForRequest()).resolves.toMatchObject({ granted: true })
+  })
 })

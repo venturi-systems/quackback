@@ -18,23 +18,13 @@ import { AuthPopoverProvider } from '@/components/auth/auth-popover-context'
 import { AuthDialog } from '@/components/auth/auth-dialog'
 import { useAuthPopover } from '@/components/auth/auth-popover-context'
 import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
+import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface PortalAccessGateError {
-  /** Discriminant — used to identify this error in the route's errorComponent. */
-  type: 'portal-access-gate'
-  reason: 'unauthenticated' | 'unauthorized'
-  workspaceName: string
-  logoUrl: string | null
-  themeStyles: string
-  customCss: string
-  authConfig: {
-    found: boolean
-    oauth: Record<string, boolean | undefined>
-    customProviderNames?: Record<string, string>
-  }
-}
+// Re-exported so existing `import type { PortalAccessGateError } from
+// '@/components/portal/portal-access-gate'` imports keep working.
+export type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
 // ── Decorative backdrop ───────────────────────────────────────────────────────
 

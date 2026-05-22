@@ -5,7 +5,7 @@ import { PortalHeader } from '@/components/public/portal-header'
 import { AuthPopoverProvider } from '@/components/auth/auth-popover-context'
 import { AuthDialog } from '@/components/auth/auth-dialog'
 import { PortalAccessGate } from '@/components/portal/portal-access-gate'
-import type { PortalAccessGateError } from '@/components/portal/portal-access-gate'
+import { type PortalAccessGateError, parseGateError } from '@/lib/shared/types/portal-gate-error'
 import { DEFAULT_PORTAL_CONFIG } from '@/lib/shared/types/settings'
 import { generateThemeCSS, getGoogleFontsUrl } from '@/lib/shared/theme'
 import { resolveLocale } from '@/lib/shared/i18n'
@@ -180,39 +180,6 @@ function PortalErrorBoundary({ error }: { error: unknown; reset?: () => void }) 
       <p className="text-muted-foreground">Something went wrong. Please try again.</p>
     </div>
   )
-}
-
-/** Validates all required fields of PortalAccessGateError are present and correct. */
-function isValidGateError(obj: unknown): obj is PortalAccessGateError {
-  if (!obj || typeof obj !== 'object') return false
-  const o = obj as Record<string, unknown>
-  return (
-    o['type'] === 'portal-access-gate' &&
-    (o['reason'] === 'unauthenticated' || o['reason'] === 'unauthorized') &&
-    typeof o['workspaceName'] === 'string' &&
-    (o['logoUrl'] === null || typeof o['logoUrl'] === 'string') &&
-    typeof o['themeStyles'] === 'string' &&
-    typeof o['customCss'] === 'string' &&
-    o['authConfig'] !== null &&
-    typeof o['authConfig'] === 'object' &&
-    typeof (o['authConfig'] as Record<string, unknown>)['found'] === 'boolean' &&
-    typeof (o['authConfig'] as Record<string, unknown>)['oauth'] === 'object'
-  )
-}
-
-function parseGateError(error: unknown): PortalAccessGateError | null {
-  if (!(error instanceof Error)) return null
-  // Fast path: extra properties survive (dev / client-only execution).
-  const ext = error as unknown as Record<string, unknown>
-  if (isValidGateError(ext)) return ext as unknown as PortalAccessGateError
-  // Fallback: parse from JSON message (SSR serialization strips extra props).
-  try {
-    const parsed: unknown = JSON.parse(error.message)
-    if (isValidGateError(parsed)) return parsed as PortalAccessGateError
-  } catch {
-    // not a gate error
-  }
-  return null
 }
 
 function PortalLayout() {
