@@ -10,7 +10,10 @@ import { isAdmin } from '@/lib/shared/roles'
 import { requireAuth } from './auth-helpers'
 import { getPortalConfig, updatePortalConfig } from '@/lib/server/domains/settings/settings.service'
 import { actorFromAuth, recordAuditEvent } from '@/lib/server/audit/log'
-import { evaluatePortalAccess } from '@/lib/server/domains/settings/portal-access'
+import {
+  evaluatePortalAccess,
+  type PortalAccessResult,
+} from '@/lib/server/domains/settings/portal-access'
 import type { UserId } from '@quackback/ids'
 
 // ---------------------------------------------------------------------------
@@ -40,7 +43,24 @@ export type PortalAccessDecision =
       reason: 'unauthenticated' | 'unauthorized'
     }
 
-export const evaluateMyPortalAccessFn = createServerFn({ method: 'GET' }).handler(async () => {
+/**
+ * Resolve the portal-access decision for the CURRENT request.
+ *
+ * This is the shared, reusable core: it reads the caller's session and the
+ * portal config entirely server-side, then runs the pure `evaluatePortalAccess`
+ * decision function. It is NOT a `createServerFn` — call it directly from any
+ * server function or route handler that serves portal content, so the
+ * "private portal" gate is enforced at the data layer, not just on the page.
+ *
+ * The caller's identity is read only from the request headers (cookie session
+ * or widget Bearer token) — a caller cannot supply their own identity.
+ *
+ * No-settings-safe: if the portal config cannot be read (no settings row, DB
+ * error, etc.) this treats the portal as `public` and returns
+ * `{ granted: true }`. It never throws for a missing/unreadable config — a
+ * fresh, un-onboarded install must not have its public surfaces broken.
+ */
+export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecision> {
   const { auth } = await import('@/lib/server/auth/index')
   const { db, principal, eq } = await import('@/lib/server/db')
   const headers = getRequestHeaders()
@@ -77,22 +97,40 @@ export const evaluateMyPortalAccessFn = createServerFn({ method: 'GET' }).handle
   const isAuthenticated = !!session?.user && !isAnonymousPrincipal
 
   // Read the full portal config server-side — never leaves this function.
-  const portalConfig = await getPortalConfig()
-  const visibility = portalConfig.access?.visibility ?? 'public'
-  const allowedDomains = portalConfig.access?.allowedDomains ?? []
-
-  const result = evaluatePortalAccess({
-    visibility,
-    role,
-    isAuthenticated,
-    userEmail,
-    emailVerified,
-    allowedDomains,
-  })
+  // A missing/unreadable config must NOT throw: fail open to a public portal
+  // so an un-onboarded install keeps working. `getPortalConfig` throws
+  // (NotFoundError) when there is no settings row.
+  let result: PortalAccessResult
+  try {
+    const portalConfig = await getPortalConfig()
+    result = evaluatePortalAccess({
+      visibility: portalConfig.access?.visibility ?? 'public',
+      role,
+      isAuthenticated,
+      userEmail,
+      emailVerified,
+      allowedDomains: portalConfig.access?.allowedDomains ?? [],
+    })
+  } catch {
+    // No settings row / config unreadable — treat the portal as public.
+    return { granted: true, reason: 'public' }
+  }
 
   // Return only the decision. Never include allowedDomains, widgetSignIn,
   // or any other policy input — those must stay server-side.
   return { granted: result.granted, reason: result.reason } as PortalAccessDecision
+}
+
+/**
+ * Evaluate the portal access of the current request's caller.
+ *
+ * Thin `createServerFn` wrapper over `resolvePortalAccessForRequest` so the
+ * portal page (`_portal.tsx`) can call it as an RPC. The response carries
+ * ONLY the access decision: { granted, reason }. The full portal access
+ * policy (allowedDomains, widgetSignIn) is never included in the response.
+ */
+export const evaluateMyPortalAccessFn = createServerFn({ method: 'GET' }).handler(async () => {
+  return resolvePortalAccessForRequest()
 })
 
 // ---------------------------------------------------------------------------

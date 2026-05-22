@@ -51,6 +51,17 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   getPortalConfig: () => mockGetPortalConfig(),
 }))
 
+// --- Mock: portal-access resolver ---
+// public-posts.ts imports `./portal-access`, which itself registers
+// `createServerFn` handlers. Without this mock those registrations would land
+// in the shared handler array and shift the hard-coded indices below. The
+// resolver defaults to `granted: true` so the guarded functions behave as on
+// a public portal.
+
+vi.mock('@/lib/server/functions/portal-access', () => ({
+  resolvePortalAccessForRequest: vi.fn(async () => ({ granted: true, reason: 'public' })),
+}))
+
 // --- Mock: dependencies for toggleVoteFn ---
 
 const mockVoteOnPost = vi.fn()

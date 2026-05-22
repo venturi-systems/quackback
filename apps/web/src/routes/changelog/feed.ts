@@ -14,11 +14,13 @@ export const Route = createFileRoute('/changelog/feed')({
           { db, changelogEntries, and, desc },
           { publicChangelogConditions },
           { getSettingsBrandingData },
+          { resolvePortalAccessForRequest },
         ] = await Promise.all([
           import('@/lib/server/config'),
           import('@/lib/server/db'),
           import('@/lib/server/domains/changelog/changelog.public'),
           import('@/lib/server/settings-utils'),
+          import('@/lib/server/functions/portal-access'),
         ])
 
         const baseUrl = config.baseUrl
@@ -27,11 +29,17 @@ export const Route = createFileRoute('/changelog/feed')({
         const branding = await getSettingsBrandingData()
         const siteName = branding?.name || 'Changelog'
 
-        const entries = await db.query.changelogEntries.findMany({
-          where: and(...publicChangelogConditions(new Date())),
-          orderBy: [desc(changelogEntries.publishedAt)],
-          limit: 50,
-        })
+        // Private portals must not expose changelog content via the RSS feed.
+        // Mirror sitemap.xml: a denied caller gets a valid but empty feed.
+        const access = await resolvePortalAccessForRequest()
+
+        const entries = access.granted
+          ? await db.query.changelogEntries.findMany({
+              where: and(...publicChangelogConditions(new Date())),
+              orderBy: [desc(changelogEntries.publishedAt)],
+              limit: 50,
+            })
+          : []
 
         // Build RSS XML
         const rssXml = buildRssFeed({

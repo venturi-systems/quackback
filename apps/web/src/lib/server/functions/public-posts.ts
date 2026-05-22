@@ -39,6 +39,7 @@ import { getDefaultStatus } from '@/lib/server/domains/statuses/status.service'
 import { getMemberByUser } from '@/lib/server/domains/principals/principal.service'
 import { listPublicRoadmaps } from '@/lib/server/domains/roadmaps/roadmap.service'
 import { getPublicRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
+import { resolvePortalAccessForRequest } from './portal-access'
 
 // ============================================
 // Schemas
@@ -128,6 +129,10 @@ export type GetVoteSidebarDataInput = z.infer<typeof getVoteSidebarDataSchema>
 
 /**
  * List public posts with filtering (no auth required).
+ *
+ * Portal-visibility gate: a private portal serves no posts to a caller the
+ * portal-access resolver denies. The per-board audience filter inside
+ * `listPublicPosts` still runs as the inner layer for granted callers.
  */
 export const listPublicPostsFn = createServerFn({ method: 'GET' })
   .inputValidator(listPublicPostsSchema)
@@ -136,6 +141,13 @@ export const listPublicPostsFn = createServerFn({ method: 'GET' })
       `[fn:public-posts] listPublicPostsFn: sort=${data.sort}, board=${data.boardSlug || 'all'}`
     )
     try {
+      // Outer gate: private portal + unauthorized caller → no portal data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:public-posts] listPublicPostsFn: portal access denied, returning empty`)
+        return { items: [], hasMore: false, total: 0 }
+      }
+
       // No auth needed - this is public data
       const result = await listPublicPosts({
         boardSlug: data.boardSlug,
@@ -459,10 +471,20 @@ export const getVotedPostsFn = createServerFn({ method: 'GET' }).handler(
 
 /**
  * List public roadmaps for a workspace (no auth required).
+ *
+ * Portal-visibility gate: a private portal serves no roadmaps to a denied
+ * caller.
  */
 export const listPublicRoadmapsFn = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:public-posts] listPublicRoadmapsFn`)
   try {
+    // Outer gate: private portal + unauthorized caller → no portal data.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:public-posts] listPublicRoadmapsFn: portal access denied, returning empty`)
+      return []
+    }
+
     // No auth needed - this is public data
     const result = await listPublicRoadmaps()
 
@@ -486,12 +508,24 @@ export const listPublicRoadmapsFn = createServerFn({ method: 'GET' }).handler(as
 
 /**
  * Get posts for a public roadmap (no auth required).
+ *
+ * Portal-visibility gate: a private portal serves no roadmap posts to a
+ * denied caller.
  */
 export const getPublicRoadmapPostsFn = createServerFn({ method: 'GET' })
   .inputValidator(getPublicRoadmapPostsSchema)
   .handler(async ({ data }: { data: GetPublicRoadmapPostsInput }) => {
     console.log(`[fn:public-posts] getPublicRoadmapPostsFn: roadmapId=${data.roadmapId}`)
     try {
+      // Outer gate: private portal + unauthorized caller → no portal data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(
+          `[fn:public-posts] getPublicRoadmapPostsFn: portal access denied, returning empty`
+        )
+        return { items: [], hasMore: false, total: 0 }
+      }
+
       // No auth needed - this is public data
       const { roadmapId, statusId, limit, offset } = data
 
@@ -530,12 +564,24 @@ export const getPublicRoadmapPostsFn = createServerFn({ method: 'GET' })
 
 /**
  * Get paginated posts for roadmap view filtered by status (legacy).
+ *
+ * Portal-visibility gate: a private portal serves no roadmap posts to a
+ * denied caller.
  */
 export const getRoadmapPostsByStatusFn = createServerFn({ method: 'GET' })
   .inputValidator(getRoadmapPostsByStatusSchema)
   .handler(async ({ data }: { data: GetRoadmapPostsByStatusInput }) => {
     console.log(`[fn:public-posts] getRoadmapPostsByStatusFn: statusId=${data.statusId}`)
     try {
+      // Outer gate: private portal + unauthorized caller → no portal data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(
+          `[fn:public-posts] getRoadmapPostsByStatusFn: portal access denied, returning empty`
+        )
+        return { items: [], hasMore: false, total: 0 }
+      }
+
       // No auth needed - this is public data
       const { statusId, page, limit } = data
 
@@ -707,12 +753,23 @@ function toRawResult(row: {
  * FTS provides a boost for exact keyword matches.
  *
  * No auth required - this is a read-only helper for the post creation form.
+ *
+ * Portal-visibility gate: a private portal must not let a denied caller
+ * enumerate post titles via this search. Team members (admin/member) using
+ * the admin merge UI are granted by the resolver, so their use is unaffected.
  */
 export const findSimilarPostsFn = createServerFn({ method: 'GET' })
   .inputValidator(findSimilarPostsSchema)
   .handler(async ({ data }): Promise<SimilarPost[]> => {
     console.log(`[fn:public-posts] findSimilarPostsFn: title="${data.title.slice(0, 30)}..."`)
     try {
+      // Outer gate: private portal + unauthorized caller → no post data.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:public-posts] findSimilarPostsFn: portal access denied, returning empty`)
+        return []
+      }
+
       const { db, posts, boards, postStatuses, and, isNull, desc, sql, inArray } =
         await import('@/lib/server/db')
       const { generateEmbedding } =

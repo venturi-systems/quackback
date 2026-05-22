@@ -31,6 +31,7 @@ import { listPublicTags } from '@/lib/server/domains/tags/tag.service'
 import { getSubscriptionStatus } from '@/lib/server/domains/subscriptions/subscription.service'
 import { listPublicRoadmaps } from '@/lib/server/domains/roadmaps/roadmap.service'
 import { getPublicRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
+import { resolvePortalAccessForRequest } from './portal-access'
 
 // Schemas
 const sortSchema = z.enum(['top', 'new', 'trending'])
@@ -76,6 +77,23 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
   .inputValidator(fetchPortalDataSchema)
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPortalData: boardSlug=${data.boardSlug}, sort=${data.sort}`)
+
+    // Outer gate: a private portal serves no boards/posts/statuses/tags to a
+    // caller the portal-access resolver denies. The per-board audience filter
+    // below stays as the inner layer for granted callers.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:portal] fetchPortalData: portal access denied, returning empty`)
+      return {
+        boards: [],
+        posts: { items: [], hasMore: false, total: 0 },
+        statuses: [],
+        tags: [],
+        votedPostIds: [],
+        principalId: null,
+      }
+    }
+
     // Resolve the policy actor from the current session before fanning out the
     // parallel queries. List helpers default to ANONYMOUS_ACTOR; we pass the
     // real one so signed-in users and segment members see audience-restricted
@@ -153,6 +171,13 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
 export const fetchPublicBoards = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:portal] fetchPublicBoards`)
   try {
+    // Outer gate: private portal + unauthorized caller → no boards.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:portal] fetchPublicBoards: portal access denied, returning empty`)
+      return []
+    }
+
     const auth = await getOptionalAuth()
     const actor = await policyActorFromAuth(auth)
     const boards = await listPublicBoardsWithStats(actor)
@@ -168,6 +193,13 @@ export const fetchPublicBoardBySlug = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPublicBoardBySlug: slug=${data.slug}`)
     try {
+      // Outer gate: private portal + unauthorized caller → no board.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:portal] fetchPublicBoardBySlug: portal access denied, returning null`)
+        return null
+      }
+
       // Direct-load lookup must honour the request actor — otherwise an
       // authenticated/segment-member user navigating directly to the slug
       // is denied a board they can see in the portal list. Without the
@@ -188,6 +220,16 @@ export const fetchPublicPostDetail = createServerFn({ method: 'GET' })
   .inputValidator(z.object({ postId: z.string() }))
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPublicPostDetail: postId=${data.postId}`)
+
+    // Outer gate: a private portal serves no post detail to a caller the
+    // portal-access resolver denies. The per-board audience check inside
+    // getPublicPostDetail stays as the inner layer for granted callers.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:portal] fetchPublicPostDetail: portal access denied, returning null`)
+      return null
+    }
+
     // The policy actor is the sole input getPublicPostDetail needs:
     // it drives the visibility check, the principalId-for-own-comments
     // lookup, and the include-private-comments flag (derived from
@@ -240,6 +282,13 @@ export const fetchPublicPosts = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     console.log(`[fn:portal] fetchPublicPosts: boardSlug=${data.boardSlug}, sort=${data.sort}`)
     try {
+      // Outer gate: private portal + unauthorized caller → no posts.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:portal] fetchPublicPosts: portal access denied, returning empty`)
+        return { items: [], hasMore: false, total: 0 }
+      }
+
       const auth = await getOptionalAuth()
       const actor = await policyActorFromAuth(auth)
       const result = await listPublicPosts({ ...data, page: 1, limit: 20, actor })
@@ -256,6 +305,13 @@ export const fetchPublicPosts = createServerFn({ method: 'GET' })
 export const fetchPublicStatuses = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:portal] fetchPublicStatuses`)
   try {
+    // Outer gate: a private portal must not expose its status taxonomy to a
+    // denied caller.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:portal] fetchPublicStatuses: portal access denied, returning empty`)
+      return []
+    }
     return await listPublicStatuses()
   } catch (error) {
     console.error(`[fn:portal] fetchPublicStatuses failed:`, error)
@@ -266,6 +322,13 @@ export const fetchPublicStatuses = createServerFn({ method: 'GET' }).handler(asy
 export const fetchPublicTags = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:portal] fetchPublicTags`)
   try {
+    // Outer gate: a private portal must not expose its tag taxonomy to a
+    // denied caller.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:portal] fetchPublicTags: portal access denied, returning empty`)
+      return []
+    }
     return await listPublicTags()
   } catch (error) {
     console.error(`[fn:portal] fetchPublicTags failed:`, error)
@@ -351,6 +414,13 @@ export const fetchSubscriptionStatus = createServerFn({ method: 'GET' })
 export const fetchPublicRoadmaps = createServerFn({ method: 'GET' }).handler(async () => {
   console.log(`[fn:portal] fetchPublicRoadmaps`)
   try {
+    // Outer gate: private portal + unauthorized caller → no roadmaps.
+    const access = await resolvePortalAccessForRequest()
+    if (!access.granted) {
+      console.log(`[fn:portal] fetchPublicRoadmaps: portal access denied, returning empty`)
+      return []
+    }
+
     const roadmaps = await listPublicRoadmaps()
     return roadmaps.map((r) => ({
       id: r.id,
@@ -387,6 +457,13 @@ export const fetchPublicRoadmapPosts = createServerFn({ method: 'GET' })
       `[fn:portal] fetchPublicRoadmapPosts: roadmapId=${data.roadmapId}, limit=${data.limit}, offset=${data.offset}`
     )
     try {
+      // Outer gate: private portal + unauthorized caller → no roadmap posts.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:portal] fetchPublicRoadmapPosts: portal access denied, returning empty`)
+        return { items: [], hasMore: false, total: 0 }
+      }
+
       // Segment filtering requires admin/member role
       let segmentIds: SegmentId[] | undefined
       if (data.segmentIds?.length && hasAuthCredentials()) {

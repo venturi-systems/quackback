@@ -8,7 +8,9 @@ import { createServerFn } from '@tanstack/react-start'
 import type { BoardId, ChangelogId, PostId } from '@quackback/ids'
 // Note: BoardId is only used for searchShippedPosts filtering
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
+import { NotFoundError } from '@/lib/shared/errors'
 import { requireAuth } from './auth-helpers'
+import { resolvePortalAccessForRequest } from './portal-access'
 import {
   createChangelog,
   updateChangelog,
@@ -193,6 +195,19 @@ export const getPublicChangelogFn = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     console.log(`[fn:changelog] getPublicChangelogFn: id=${data.id}`)
     try {
+      // Outer gate: a private portal must not serve changelog content to a
+      // caller the portal-access resolver denies. Throw the same not-found
+      // error as a genuinely missing entry — a blocked visitor sees no data
+      // and cannot distinguish a private entry from a non-existent one.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:changelog] getPublicChangelogFn: portal access denied`)
+        throw new NotFoundError(
+          'CHANGELOG_NOT_FOUND',
+          `Published changelog entry with ID ${data.id} not found`
+        )
+      }
+
       const entry = await getPublicChangelogById(data.id as ChangelogId)
 
       return {
@@ -213,6 +228,13 @@ export const listPublicChangelogsFn = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     console.log(`[fn:changelog] listPublicChangelogsFn: limit=${data.limit}`)
     try {
+      // Outer gate: private portal + unauthorized caller → no changelog entries.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        console.log(`[fn:changelog] listPublicChangelogsFn: portal access denied, returning empty`)
+        return { items: [], nextCursor: null, hasMore: false }
+      }
+
       const result = await listPublicChangelogs({
         cursor: data.cursor,
         limit: data.limit,
