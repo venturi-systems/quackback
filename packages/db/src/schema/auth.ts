@@ -188,7 +188,7 @@ export const settings = pgTable('settings', {
   authConfig: text('auth_config'),
   /**
    * Portal configuration (JSON)
-   * Structure: { oauth: { google, github }, features: { publicView, submissions, comments, voting } }
+   * Structure: { oauth: { google, github }, features: { submissions, comments, voting } }
    */
   portalConfig: text('portal_config'),
   /**
@@ -350,7 +350,7 @@ export const principal = pgTable(
     // Unified roles: 'admin' | 'member' | 'user'
     // 'user' role = portal users (public portal access only, no admin dashboard)
     role: text('role').default('member').notNull(),
-    // Principal type: 'user' (human) or 'service' (integration/API key)
+    // Principal type: 'user' (human), 'anonymous' (unidentified visitor), or 'service' (integration/API key)
     type: text('type').default('user').notNull(),
     // Display name — always populated (humans synced from user.name, service principals set on creation)
     displayName: text('display_name'),

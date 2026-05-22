@@ -1099,7 +1099,7 @@ const segmentByIdSchema = z.object({
 })
 
 // Shared condition schema used by both create and update
-const segmentConditionSchema = z.object({
+export const segmentConditionSchema = z.object({
   attribute: z.enum([
     'email_domain',
     'email_verified',
@@ -1108,6 +1108,9 @@ const segmentConditionSchema = z.object({
     'vote_count',
     'comment_count',
     'metadata_key',
+    'name',
+    'display_name',
+    'principal_type',
   ]),
   operator: z.enum([
     'eq',
@@ -1157,7 +1160,7 @@ const weightConfigSchema = z.object({
   aggregation: z.enum(['sum', 'average', 'count', 'median']),
 })
 
-const createSegmentSchema = z.object({
+export const createSegmentSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   type: z.enum(['manual', 'dynamic']),
