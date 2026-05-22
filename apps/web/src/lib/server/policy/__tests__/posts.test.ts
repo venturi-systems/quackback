@@ -267,10 +267,14 @@ describe('canCreatePost — happy-path moderation matrix', () => {
   ])(
     'requireApproval=$ra + actor.principalType=$actor.principalType → requiresApproval=$want',
     ({ ra, actor, want }) => {
-      const decision = canCreatePost(actor, {
-        audience: { kind: 'public' },
-        moderation: moderation(ra),
-      })
+      const decision = canCreatePost(
+        actor,
+        {
+          audience: { kind: 'public' },
+          moderation: moderation(ra),
+        },
+        undefined
+      )
       expect(decision.allowed).toBe(true)
       if (decision.allowed) expect(decision.requiresApproval).toBe(want)
     }
@@ -306,10 +310,14 @@ describe('canCreatePost — happy-path moderation matrix', () => {
   // `boards.moderation.gateService: boolean` knob.
   // ────────────────────────────────────────────────────────────────────
   it('DESIGN PIN: service principalType is gated by requireApproval=anonymous (over-moderates)', () => {
-    const decision = canCreatePost(service, {
-      audience: { kind: 'public' },
-      moderation: moderation('anonymous'),
-    })
+    const decision = canCreatePost(
+      service,
+      {
+        audience: { kind: 'public' },
+        moderation: moderation('anonymous'),
+      },
+      undefined
+    )
     expect(decision).toEqual({ allowed: true, requiresApproval: true })
   })
 })
@@ -317,13 +325,13 @@ describe('canCreatePost — happy-path moderation matrix', () => {
 describe('canCreatePost — team always bypasses approval', () => {
   it.each(requireApprovalValues)('admin + requireApproval=%s', (ra) => {
     expect(
-      canCreatePost(admin, { audience: { kind: 'public' }, moderation: moderation(ra) })
+      canCreatePost(admin, { audience: { kind: 'public' }, moderation: moderation(ra) }, undefined)
     ).toEqual({ allowed: true, requiresApproval: false })
   })
 
   it.each(requireApprovalValues)('member + requireApproval=%s', (ra) => {
     expect(
-      canCreatePost(member, { audience: { kind: 'public' }, moderation: moderation(ra) })
+      canCreatePost(member, { audience: { kind: 'public' }, moderation: moderation(ra) }, undefined)
     ).toEqual({ allowed: true, requiresApproval: false })
   })
 })
@@ -332,19 +340,27 @@ describe('canCreatePost — trusted-segment bypass', () => {
   it('trusted-segment member bypasses every requireApproval level', () => {
     for (const ra of requireApprovalValues) {
       expect(
-        canCreatePost(trustedPortal, {
-          audience: { kind: 'public' },
-          moderation: moderation(ra, ['segment_trusted']),
-        })
+        canCreatePost(
+          trustedPortal,
+          {
+            audience: { kind: 'public' },
+            moderation: moderation(ra, ['segment_trusted']),
+          },
+          undefined
+        )
       ).toEqual({ allowed: true, requiresApproval: false })
     }
   })
 
   it('non-trusted-segment user is NOT bypassed by an unrelated trusted segment', () => {
-    const decision = canCreatePost(portal, {
-      audience: { kind: 'public' },
-      moderation: moderation('all', ['segment_other']),
-    })
+    const decision = canCreatePost(
+      portal,
+      {
+        audience: { kind: 'public' },
+        moderation: moderation('all', ['segment_other']),
+      },
+      undefined
+    )
     expect(decision).toEqual({ allowed: true, requiresApproval: true })
   })
 
@@ -354,58 +370,105 @@ describe('canCreatePost — trusted-segment bypass', () => {
       segmentIds: new Set(['segment_a', 'segment_trusted'] as SegmentId[]),
     }
     expect(
-      canCreatePost(actor, {
-        audience: { kind: 'public' },
-        moderation: moderation('all', ['segment_unrelated', 'segment_trusted']),
-      })
+      canCreatePost(
+        actor,
+        {
+          audience: { kind: 'public' },
+          moderation: moderation('all', ['segment_unrelated', 'segment_trusted']),
+        },
+        undefined
+      )
     ).toEqual({ allowed: true, requiresApproval: false })
   })
 
   it('trusted-segment bypass works even when actor cannot otherwise view the board', () => {
     // segments-audience board: actor is in 'segment_trusted' so they CAN view AND bypass.
     expect(
-      canCreatePost(trustedPortal, {
-        audience: { kind: 'segments', segmentIds: ['segment_trusted'] },
-        moderation: moderation('all', ['segment_trusted']),
-      })
+      canCreatePost(
+        trustedPortal,
+        {
+          audience: { kind: 'segments', segmentIds: ['segment_trusted'] },
+          moderation: moderation('all', ['segment_trusted']),
+        },
+        undefined
+      )
     ).toEqual({ allowed: true, requiresApproval: false })
   })
 })
 
 describe('canCreatePost — board view denied → create denied', () => {
   it('anonymous cannot post on authenticated-only board', () => {
-    const decision = canCreatePost(anon, {
-      audience: { kind: 'authenticated' },
-      moderation: moderation('none'),
-    })
+    const decision = canCreatePost(
+      anon,
+      {
+        audience: { kind: 'authenticated' },
+        moderation: moderation('none'),
+      },
+      undefined
+    )
     expect(decision.allowed).toBe(false)
   })
 
   it('portal user cannot post on team-only board', () => {
-    const decision = canCreatePost(portal, {
-      audience: { kind: 'team' },
-      moderation: moderation('none'),
-    })
+    const decision = canCreatePost(
+      portal,
+      {
+        audience: { kind: 'team' },
+        moderation: moderation('none'),
+      },
+      undefined
+    )
     expect(decision.allowed).toBe(false)
   })
 
   it('portal user cannot post on segments-only board if they are not a member', () => {
-    const decision = canCreatePost(portal, {
-      audience: { kind: 'segments', segmentIds: ['segment_other'] },
-      moderation: moderation('none'),
-    })
+    const decision = canCreatePost(
+      portal,
+      {
+        audience: { kind: 'segments', segmentIds: ['segment_other'] },
+        moderation: moderation('none'),
+      },
+      undefined
+    )
     expect(decision.allowed).toBe(false)
   })
 })
 
 describe('canCreatePost — moderation defaults safely when undefined', () => {
-  it('treats absent moderation as { requireApproval: none, trusted: [] }', () => {
-    const decision = canCreatePost(portal, { audience: { kind: 'public' } })
+  it('treats absent moderation as { requireApproval: inherit, trusted: [] } resolved to none', () => {
+    const decision = canCreatePost(portal, { audience: { kind: 'public' } }, undefined)
     expect(decision).toEqual({ allowed: true, requiresApproval: false })
   })
 
   it('absent moderation does not crash on missing trustedSegmentIds', () => {
-    expect(() => canCreatePost(trustedPortal, { audience: { kind: 'public' } })).not.toThrow()
+    expect(() =>
+      canCreatePost(trustedPortal, { audience: { kind: 'public' } }, undefined)
+    ).not.toThrow()
+  })
+})
+
+describe('canCreatePost — inherit resolution via global default', () => {
+  it('a board on inherit follows the global default (all → requires approval)', () => {
+    const decision = canCreatePost(
+      anon,
+      {
+        audience: { kind: 'public' },
+        moderation: { requireApproval: 'inherit', trustedSegmentIds: [] },
+      },
+      'all'
+    )
+    expect(decision).toEqual({ allowed: true, requiresApproval: true })
+  })
+  it('an explicit board override beats the global default', () => {
+    const decision = canCreatePost(
+      anon,
+      {
+        audience: { kind: 'public' },
+        moderation: { requireApproval: 'none', trustedSegmentIds: [] },
+      },
+      'all'
+    )
+    expect(decision).toEqual({ allowed: true, requiresApproval: false })
   })
 })
 

@@ -43,6 +43,7 @@ import { subscribeToPost } from '@/lib/server/domains/subscriptions/subscription
 import type { CreatePostInput, UpdatePostInput, CreatePostResult } from './post.types'
 import { createActivity } from '@/lib/server/domains/activity/activity.service'
 import { canCreatePost, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
+import { getPortalConfig } from '@/lib/server/domains/settings/settings.service'
 import { extractMentions, extractMentionExcerpts } from './extract-mentions'
 import { syncPostMentions } from './sync-post-mentions'
 import { buildPostUrl } from '@/lib/server/integrations/message-utils'
@@ -128,10 +129,12 @@ export async function createPost(
   // Per-board moderation gate. Submissions on boards with requireApproval
   // matching the submitter category land in 'pending' instead of 'published'.
   // Trusted-segment members + team always bypass.
-  const createDecision = canCreatePost(author.actor ?? ANONYMOUS_ACTOR, {
-    audience: board.audience,
-    moderation: board.moderation,
-  })
+  const portalConfig = await getPortalConfig()
+  const createDecision = canCreatePost(
+    author.actor ?? ANONYMOUS_ACTOR,
+    { audience: board.audience, moderation: board.moderation },
+    portalConfig.moderationDefault.requireApproval
+  )
   if (!createDecision.allowed) {
     throw new ValidationError('POST_CREATE_DENIED', createDecision.reason)
   }

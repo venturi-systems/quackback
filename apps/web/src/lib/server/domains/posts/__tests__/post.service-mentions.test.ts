@@ -70,9 +70,13 @@ vi.mock('@/lib/server/db', async () => {
     db: {
       query: {
         boards: {
-          findFirst: vi
-            .fn()
-            .mockResolvedValue({ id: 'board_b', slug: 'feedback', name: 'Feedback' }),
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'board_b',
+            slug: 'feedback',
+            name: 'Feedback',
+            audience: { kind: 'public' },
+            moderation: { requireApproval: 'none', trustedSegmentIds: [] },
+          }),
         },
         postStatuses: {
           findFirst: vi.fn().mockResolvedValue({ id: 'status_open', name: 'Open' }),
@@ -167,6 +171,10 @@ vi.mock('@/lib/server/content/rehost-images', () => ({
 
 vi.mock('@/lib/server/domains/settings/tier-limits.service', () => ({
   getTierLimits: vi.fn(async () => ({ maxPosts: null, features: {} })),
+}))
+
+vi.mock('@/lib/server/domains/settings/settings.service', () => ({
+  getPortalConfig: vi.fn(async () => ({ moderationDefault: { requireApproval: 'none' } })),
 }))
 
 vi.mock('../sync-post-mentions', () => ({

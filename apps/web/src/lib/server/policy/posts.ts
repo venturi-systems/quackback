@@ -84,11 +84,16 @@ export type CreateDecision =
   | { allowed: true; requiresApproval: boolean }
   | { allowed: false; reason: string }
 
-export function canCreatePost(actor: Actor, board: BoardShape): CreateDecision {
+export function canCreatePost(
+  actor: Actor,
+  board: BoardShape,
+  globalDefault: ResolvedRequireApproval | undefined
+): CreateDecision {
   const view = canViewBoard(actor, board)
   if (!view.allowed) return { allowed: false, reason: view.reason }
 
-  const moderation = board.moderation ?? { requireApproval: 'none', trustedSegmentIds: [] }
+  const moderation = board.moderation ?? { requireApproval: 'inherit', trustedSegmentIds: [] }
+  const requireApproval = resolveRequireApproval(moderation, globalDefault)
 
   if (moderation.trustedSegmentIds.some((id) => actor.segmentIds.has(id as never))) {
     return { allowed: true, requiresApproval: false }
@@ -98,9 +103,9 @@ export function canCreatePost(actor: Actor, board: BoardShape): CreateDecision {
   }
 
   const requires =
-    moderation.requireApproval === 'all' ||
-    (moderation.requireApproval === 'anonymous' && actor.principalType !== 'user') ||
-    (moderation.requireApproval === 'authenticated' && actor.principalType === 'user')
+    requireApproval === 'all' ||
+    (requireApproval === 'anonymous' && actor.principalType !== 'user') ||
+    (requireApproval === 'authenticated' && actor.principalType === 'user')
 
   return { allowed: true, requiresApproval: requires }
 }

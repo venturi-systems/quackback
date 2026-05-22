@@ -107,6 +107,10 @@ vi.mock('@/lib/server/domains/settings/tier-limits.service', () => ({
   getTierLimits: vi.fn(async () => ({ maxPosts: null, features: {} })),
 }))
 
+vi.mock('@/lib/server/domains/settings/settings.service', () => ({
+  getPortalConfig: vi.fn(async () => ({ moderationDefault: { requireApproval: 'none' } })),
+}))
+
 describe('createPost author attribution', () => {
   beforeEach(() => {
     insertedRows.posts.length = 0
