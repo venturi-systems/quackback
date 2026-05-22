@@ -204,6 +204,14 @@ export interface PortalFeatures {
 }
 
 /**
+ * Workspace-wide default post-approval policy. A board with
+ * `moderation.requireApproval === 'inherit'` follows this value.
+ */
+export interface ModerationDefault {
+  requireApproval: 'none' | 'anonymous' | 'authenticated' | 'all'
+}
+
+/**
  * Welcome card shown above the post list on the portal index.
  * Title is plain text (server trims + caps at 120 chars). Body is
  * sanitized TipTap JSON — same shape as post / help-center content,
@@ -234,6 +242,8 @@ export interface PortalConfig {
   features: PortalFeatures
   /** Welcome card on the portal index. Optional — absent = disabled. */
   welcomeCard?: PortalWelcomeCard
+  /** Workspace default approval policy; boards on 'inherit' follow it. */
+  moderationDefault: ModerationDefault
 }
 
 /**
@@ -263,6 +273,7 @@ export const DEFAULT_PORTAL_CONFIG: PortalConfig = {
     title: '',
     body: { type: 'doc', content: [{ type: 'paragraph' }] },
   },
+  moderationDefault: { requireApproval: 'none' },
 }
 
 // =============================================================================

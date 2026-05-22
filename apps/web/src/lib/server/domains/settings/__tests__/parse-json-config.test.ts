@@ -2,6 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { parseJsonConfig } from '../settings.helpers'
 import { DEFAULT_PORTAL_CONFIG, DEFAULT_WIDGET_CONFIG } from '../settings.types'
 
+describe('DEFAULT_PORTAL_CONFIG', () => {
+  it('DEFAULT_PORTAL_CONFIG carries a moderationDefault of none', () => {
+    expect(DEFAULT_PORTAL_CONFIG.moderationDefault).toEqual({ requireApproval: 'none' })
+  })
+})
+
 describe('parseJsonConfig', () => {
   it('returns default when json is null', () => {
     const result = parseJsonConfig(null, DEFAULT_PORTAL_CONFIG)

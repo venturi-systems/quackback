@@ -77,7 +77,11 @@ export function makeTenant(overrides: Partial<TenantSettings> = {}): TenantSetti
     name: 'test',
     slug: 'test',
     authConfig: makeAuthConfig(),
-    portalConfig: { oauth: {}, features: PORTAL_FEATURES_DEFAULTS },
+    portalConfig: {
+      oauth: {},
+      features: PORTAL_FEATURES_DEFAULTS,
+      moderationDefault: { requireApproval: 'none' },
+    },
     brandingConfig: {} as TenantSettings['brandingConfig'],
     developerConfig: {} as TenantSettings['developerConfig'],
     helpCenterConfig: {} as TenantSettings['helpCenterConfig'],
