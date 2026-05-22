@@ -406,29 +406,19 @@ export function UserAttributesList({ initialAttributes }: UserAttributesListProp
         </div>
       </div>
 
-      {/* Custom attributes sub-section */}
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-medium text-foreground">Custom attributes</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Attributes you define to extend the built-in fields with app-specific data.
-            </p>
-          </div>
+      {/* Custom attributes */}
+      {attributes.length > 0 && (
+        <div>
+          {attributes.map((attr) => (
+            <AttributeRow
+              key={attr.id}
+              attribute={attr}
+              onEdit={() => setEditTarget(attr)}
+              onDelete={() => setDeleteTarget(attr)}
+            />
+          ))}
         </div>
-        {attributes.length > 0 && (
-          <div>
-            {attributes.map((attr) => (
-              <AttributeRow
-                key={attr.id}
-                attribute={attr}
-                onEdit={() => setEditTarget(attr)}
-                onDelete={() => setDeleteTarget(attr)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Create dialog */}
       <AttributeFormDialog
