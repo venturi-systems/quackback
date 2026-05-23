@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { MethodRow } from '@/components/admin/settings/auth-shared/method-row'
 import { OAuthProviderGrid } from '@/components/admin/settings/auth-shared/oauth-provider-grid'
 import { AuthProviderCredentialsDialog } from '@/components/admin/settings/portal-auth/auth-provider-credentials-dialog'
@@ -599,10 +600,6 @@ function formatInviteDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
-}
-
 const PORTAL_INVITES_QUERY_KEY = ['portal', 'invites'] as const
 
 function InviteStatusBadge({ status }: { status: string | null }) {
@@ -710,6 +707,29 @@ function InviteRow({ invite, onRevoke, onResend, revoking, resending }: InviteRo
   )
 }
 
+// ---------------------------------------------------------------------------
+// Email-list parsing helpers for the multi-email textarea
+// ---------------------------------------------------------------------------
+
+function parseEmailList(raw: string): string[] {
+  return raw
+    .split(/[\s,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function partitionValidEmails(list: string[]): { valid: string[]; invalid: string[] } {
+  const valid: string[] = []
+  const invalid: string[] = []
+  for (const e of list) {
+    if (EMAIL_RE.test(e)) valid.push(e.toLowerCase())
+    else invalid.push(e)
+  }
+  return { valid, invalid }
+}
+
 /**
  * Email-invite sub-section rendered inside the Portal Visibility card.
  *
@@ -727,8 +747,13 @@ function PortalInvitesSection() {
     staleTime: 30 * 1000,
   })
 
-  const [emailInput, setEmailInput] = useState('')
+  const [emailsInput, setEmailsInput] = useState('')
+  const [messageInput, setMessageInput] = useState('')
   const [emailError, setEmailError] = useState<string | null>(null)
+  const [batchResults, setBatchResults] = useState<null | {
+    sent: number
+    failed: Array<{ email: string; error: string }>
+  }>(null)
   const [sendBusy, setSendBusy] = useState(false)
   const [resendingId, setResendingId] = useState<string | null>(null)
   const [revokingId, setRevokingId] = useState<string | null>(null)
@@ -738,22 +763,41 @@ function PortalInvitesSection() {
   const refetch = () => queryClient.invalidateQueries({ queryKey: PORTAL_INVITES_QUERY_KEY })
 
   const handleSend = async () => {
-    const email = emailInput.trim()
-    if (!email) return
+    if (sendBusy) return
+    setEmailError(null)
+    setBatchResults(null)
 
-    if (!isValidEmail(email)) {
-      setEmailError('Enter a valid email address.')
+    const raw = parseEmailList(emailsInput)
+    if (raw.length === 0) {
+      setEmailError('Enter at least one email address.')
       return
     }
-    setEmailError(null)
-    setActionError(null)
+    if (raw.length > 50) {
+      setEmailError('You can send at most 50 invites at a time. Trim the list and try again.')
+      return
+    }
+    const { valid, invalid } = partitionValidEmails(raw)
+    if (invalid.length > 0) {
+      setEmailError(`Invalid email${invalid.length > 1 ? 's' : ''}: ${invalid.join(', ')}`)
+      return
+    }
+
     setSendBusy(true)
     try {
-      await sendPortalInviteFn({ data: { email } })
-      setEmailInput('')
-      void refetch()
+      const message = messageInput.trim() || undefined
+      const result = await sendPortalInviteFn({ data: { emails: valid, message } })
+      const sent = result.results.filter((r) => r.ok).length
+      const failed = result.results.filter(
+        (r): r is { email: string; ok: false; error: string } => !r.ok
+      )
+      setBatchResults({ sent, failed })
+      if (sent > 0) {
+        setEmailsInput('')
+        setMessageInput('')
+        void refetch()
+      }
     } catch (err) {
-      setEmailError(err instanceof Error ? err.message : 'Failed to send invite.')
+      setEmailError(err instanceof Error ? err.message : 'Failed to send invites.')
     } finally {
       setSendBusy(false)
     }
@@ -789,13 +833,6 @@ function PortalInvitesSection() {
     }
   }
 
-  const handleEmailKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      void handleSend()
-    }
-  }
-
   const anyBusy = sendBusy || resendingId !== null || revokingId !== null
 
   return (
@@ -809,39 +846,83 @@ function PortalInvitesSection() {
       </div>
 
       {/* Send form */}
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <Input
-            type="email"
-            value={emailInput}
+      <div className="space-y-3">
+        <label className="block">
+          <span className="text-sm font-medium">Email addresses</span>
+          <Textarea
+            value={emailsInput}
             onChange={(e) => {
-              setEmailInput(e.target.value)
+              setEmailsInput(e.target.value)
               if (emailError) setEmailError(null)
             }}
-            onKeyDown={handleEmailKeyDown}
-            placeholder="user@example.com"
+            placeholder={'alice@acme.com, bob@acme.com\ncarol@acme.com'}
+            rows={3}
+            className="mt-1.5 font-mono text-sm"
             disabled={anyBusy}
-            aria-label="Email address to invite"
+            aria-label="Email addresses to invite"
             aria-invalid={!!emailError}
-            className={cn(emailError && 'border-destructive')}
           />
-          {emailError && <p className="mt-1 text-xs text-destructive">{emailError}</p>}
+          <span className="text-xs text-muted-foreground mt-1 block">
+            Separate addresses with commas, spaces, or newlines. Up to 50 at a time.
+          </span>
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium">Personal message (optional)</span>
+          <Textarea
+            value={messageInput}
+            onChange={(e) => setMessageInput(e.target.value)}
+            placeholder="Hi! We'd love your feedback on the new beta."
+            rows={2}
+            className="mt-1.5 text-sm"
+            maxLength={500}
+            disabled={anyBusy}
+            aria-label="Optional personal message"
+          />
+        </label>
+
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            onClick={() => void handleSend()}
+            disabled={sendBusy || !emailsInput.trim()}
+          >
+            {sendBusy ? <ArrowPathIcon className="mr-2 h-3 w-3 animate-spin" /> : null}
+            Send invites
+          </Button>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => void handleSend()}
-          disabled={!emailInput.trim() || anyBusy}
-          className="h-9 shrink-0"
-        >
-          {sendBusy ? (
-            <ArrowPathIcon className="mr-1 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <PlusIcon className="mr-1 h-3.5 w-3.5" />
-          )}
-          Send invite
-        </Button>
+
+        {emailError && (
+          <p className="text-xs text-destructive" role="alert">
+            {emailError}
+          </p>
+        )}
+
+        {batchResults && (
+          <div
+            className={cn(
+              'rounded-md border p-2 text-xs',
+              batchResults.failed.length === 0
+                ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400'
+                : 'border-amber-500/30 bg-amber-500/5 text-amber-800 dark:text-amber-400'
+            )}
+            role="status"
+          >
+            <p className="font-medium">
+              {batchResults.sent} sent
+              {batchResults.failed.length > 0 ? `, ${batchResults.failed.length} failed` : ''}.
+            </p>
+            {batchResults.failed.length > 0 && (
+              <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                {batchResults.failed.map((f) => (
+                  <li key={f.email}>
+                    <span className="font-mono">{f.email}</span> — {f.error}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Action-level error (resend/revoke) */}

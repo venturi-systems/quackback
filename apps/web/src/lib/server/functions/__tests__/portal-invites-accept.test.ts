@@ -129,10 +129,11 @@ vi.mock('@/lib/server/storage/s3', () => ({
 }))
 
 // ---------------------------------------------------------------------------
-// Handler index — accept is the 5th handler (index 4)
+// Handler index — accept is the 6th handler (index 5)
+// send=0, cancel=1, resend=2, fetch=3, getLink=4, accept=5
 // ---------------------------------------------------------------------------
 
-const ACCEPT_IDX = 4
+const ACCEPT_IDX = 5
 
 const FUTURE = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
 const PAST = new Date(Date.now() - 1000)
