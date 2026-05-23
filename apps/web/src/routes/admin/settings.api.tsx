@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, useRouteContext } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { z } from 'zod'
-import { KeyIcon } from '@heroicons/react/24/solid'
+import { KeyIcon, BoltIcon, CommandLineIcon } from '@heroicons/react/24/solid'
 import { BackLink } from '@/components/ui/back-link'
 import { PageHeader } from '@/components/shared/page-header'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -76,10 +76,19 @@ function ApiPage() {
         }}
         className="space-y-6"
       >
-        <TabsList className="border-b border-border/50">
-          <TabsTrigger value="keys">Keys</TabsTrigger>
-          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
-          <TabsTrigger value="mcp">MCP</TabsTrigger>
+        <TabsList>
+          <TabsTrigger value="keys">
+            <KeyIcon />
+            Keys
+          </TabsTrigger>
+          <TabsTrigger value="webhooks">
+            <BoltIcon />
+            Webhooks
+          </TabsTrigger>
+          <TabsTrigger value="mcp">
+            <CommandLineIcon />
+            MCP
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="keys" className="space-y-6">
