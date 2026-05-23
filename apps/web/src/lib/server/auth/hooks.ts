@@ -853,6 +853,72 @@ export async function handleTwoFactorLifecycleAudit(ctx: {
 }
 
 /**
+ * Sign-in failure audit emitter.
+ *
+ * Fires in the after-hook chain when a sign-in path was hit but no
+ * session was created — the canonical signal of a failed credential
+ * or magic-link attempt. Emits `auth.signin.failed` with a stable
+ * reason code derived from the response status / body when available.
+ *
+ * OWASP PII guard: only the attempted email and a stable reason code
+ * are logged. Passwords, tokens, and credential material are never
+ * recorded.
+ *
+ * Covers two paths:
+ *  - `/sign-in/email` (password) — newSession absent on wrong password.
+ *  - `/magic-link/verify` / `/sign-in/email-otp` — newSession absent
+ *    on invalid or expired token.
+ */
+const CREDENTIAL_FAILURE_PATHS = new Set<string>(['/sign-in/email'])
+const MAGIC_LINK_FAILURE_PATHS = new Set<string>(['/magic-link/verify', '/sign-in/email-otp'])
+
+export async function handleSignInFailureAudit(ctx: {
+  path?: string
+  params?: Record<string, unknown>
+  body?: Record<string, unknown>
+  context?: {
+    newSession?: {
+      user?: { id?: string; email?: string }
+      session?: { token?: string }
+    } | null
+  }
+}): Promise<void> {
+  // Only fire on sign-in paths where a failure produces no newSession.
+  const path = ctx.path ?? ''
+  const isCredentialPath = CREDENTIAL_FAILURE_PATHS.has(path)
+  const isMagicLinkPath = MAGIC_LINK_FAILURE_PATHS.has(path)
+  if (!isCredentialPath && !isMagicLinkPath) return
+
+  // If a session was actually created, the success audit handles it.
+  const sessionCreated =
+    !!ctx.context?.newSession?.user?.id && !!ctx.context?.newSession?.session?.token
+  if (sessionCreated) return
+
+  // Extract the attempted email. Never log passwords, tokens, or other
+  // credential material — only the email address + stable reason code.
+  const body = ctx.body as { email?: unknown; token?: unknown } | undefined
+  const attemptedEmail = typeof body?.email === 'string' ? body.email : null
+
+  const reason = isMagicLinkPath ? 'INVALID_MAGIC_LINK' : 'INVALID_CREDENTIALS'
+  const authMethod = isMagicLinkPath ? 'magic_link' : ('password' as const)
+
+  const { recordAuditEvent } = await import('@/lib/server/audit/log')
+  const { getRequestHeaders } = await import('@tanstack/react-start/server')
+  try {
+    await recordAuditEvent({
+      event: 'auth.signin.failed',
+      outcome: 'failure',
+      actor: { email: attemptedEmail, type: 'user', authMethod },
+      headers: getRequestHeaders(),
+      metadata: { reason },
+    })
+  } catch (err) {
+    // Best-effort — never let an audit failure surface to the user.
+    console.error('[auth-hooks.after] handleSignInFailureAudit: audit emit failed:', err)
+  }
+}
+
+/**
  * Successful sign-in audit log emitter. Fires whenever Better-Auth
  * creates a `newSession` — covers password, magic-link, OTP, OAuth
  * callbacks, and SSO. The provider is inferred from `ctx.path` /
@@ -1055,6 +1121,7 @@ export const hooksAfter = createAuthMiddleware(async (ctx) => {
   // both can fire on the same request only for the verify-totp
   // enrollment path (which itself does not constitute a sign-in).
   await handleTwoFactorLifecycleAudit(ctx as Parameters<typeof handleTwoFactorLifecycleAudit>[0])
+  await handleSignInFailureAudit(ctx as Parameters<typeof handleSignInFailureAudit>[0])
   await handleSignInSuccessAudit(ctx as Parameters<typeof handleSignInSuccessAudit>[0])
   // Fires only when a new device fingerprint (UA + /24) for this user
   // is observed; default-on but workspace can opt out.
