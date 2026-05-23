@@ -356,8 +356,9 @@ export function PortalAuthTab({
             <div>
               <p className="text-sm font-medium">Allowed email domains</p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Signed-in users with a verified email on these domains can access the private
-                portal.
+                Users with a verified email on these domains can access the private portal. Users
+                verify their address by clicking the link in the verification email we send on
+                sign-up.
               </p>
             </div>
             <div className="flex gap-2">
