@@ -54,11 +54,12 @@ vi.mock('@/lib/server/db', () => ({
       },
     },
   },
-  principal: { userId: 'userId' },
+  principal: { userId: 'userId', id: 'id' },
   invitation: { email: 'email', kind: 'kind', status: 'status' },
   widgetOriginSession: { sessionId: 'sessionId' },
   eq: vi.fn(),
   and: vi.fn((...args: unknown[]) => args),
+  inArray: vi.fn(),
   sql: vi.fn((parts: TemplateStringsArray) => parts.raw[0]),
 }))
 
@@ -86,6 +87,14 @@ vi.mock('@/lib/server/audit/log', () => ({
   recordAuditEvent: vi.fn(),
 }))
 
+// --- Mock: segment membership service ---
+
+const mockSegmentIdsForPrincipal = vi.fn()
+
+vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
+  segmentIdsForPrincipal: (...args: unknown[]) => mockSegmentIdsForPrincipal(...args),
+}))
+
 import { resolvePortalAccessForRequest } from '../portal-access'
 
 beforeEach(() => {
@@ -96,6 +105,8 @@ beforeEach(() => {
   mockWidgetOriginSessionFindFirst.mockResolvedValue(null)
   // Default: identifyVerification off (email-capture mode).
   mockGetWidgetConfig.mockResolvedValue({ identifyVerification: false })
+  // Default: no segment memberships.
+  mockSegmentIdsForPrincipal.mockResolvedValue(new Set())
 })
 
 describe('resolvePortalAccessForRequest — no-settings-safe', () => {
@@ -533,5 +544,65 @@ describe('resolvePortalAccessForRequest — widget origin marker', () => {
     await resolvePortalAccessForRequest()
 
     expect(mockWidgetOriginSessionFindFirst).not.toHaveBeenCalled()
+  })
+})
+
+describe('resolvePortalAccessForRequest — segment lookup', () => {
+  const SESSION = {
+    user: { id: 'user_seg', email: 'seg@example.com', emailVerified: true },
+    session: { id: 'sess_seg' },
+  }
+  const PRINCIPAL_RECORD = { type: 'user', role: 'user', id: 'principal_seg' }
+
+  it('grants via segment when the user is in an allowed segment', async () => {
+    mockGetSession.mockResolvedValue(SESSION)
+    mockPrincipalFindFirst.mockResolvedValue(PRINCIPAL_RECORD)
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+    mockSegmentIdsForPrincipal.mockResolvedValue(new Set(['seg_1', 'seg_2']))
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result).toEqual({ granted: true, reason: 'segment' })
+  })
+
+  it('denies when the user is in NO allowed segment', async () => {
+    mockGetSession.mockResolvedValue(SESSION)
+    mockPrincipalFindFirst.mockResolvedValue(PRINCIPAL_RECORD)
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+    mockSegmentIdsForPrincipal.mockResolvedValue(new Set(['seg_other']))
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result.granted).toBe(false)
+    expect(result.reason).toBe('unauthorized')
+  })
+
+  it('fails CLOSED on segment-lookup error (does not grant)', async () => {
+    mockGetSession.mockResolvedValue(SESSION)
+    mockPrincipalFindFirst.mockResolvedValue(PRINCIPAL_RECORD)
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+    mockSegmentIdsForPrincipal.mockRejectedValue(new Error('DB_ERROR'))
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result.granted).toBe(false)
+  })
+
+  it('skips the segment lookup when allowedSegmentIds is empty', async () => {
+    mockGetSession.mockResolvedValue(SESSION)
+    mockPrincipalFindFirst.mockResolvedValue(PRINCIPAL_RECORD)
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: [] },
+    })
+
+    await resolvePortalAccessForRequest()
+
+    expect(mockSegmentIdsForPrincipal).not.toHaveBeenCalled()
   })
 })

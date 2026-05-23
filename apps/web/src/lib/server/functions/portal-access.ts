@@ -35,7 +35,7 @@ import type { UserId } from '@quackback/ids'
 export type PortalAccessDecision =
   | {
       granted: true
-      reason: 'public' | 'team' | 'domain' | 'invite' | 'widget'
+      reason: 'public' | 'team' | 'domain' | 'invite' | 'widget' | 'segment'
     }
   | {
       granted: false
@@ -81,6 +81,7 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
   let userEmail: string | null = null
   let emailVerified = false
   let isAnonymousPrincipal = false
+  let resolvedPrincipalId: string | null = null
 
   if (session?.user) {
     userEmail = session.user.email
@@ -90,11 +91,11 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
     // counted as authenticated portal sessions.
     // Fail CLOSED on DB error: treat the session as anonymous so a lookup
     // failure never grants access to a private portal.
-    let principalRecord: { type: string; role: string | null } | undefined
+    let principalRecord: { type: string; role: string | null; id: string } | undefined
     try {
       principalRecord = await db.query.principal.findFirst({
         where: eq(principal.userId, session.user.id as UserId),
-        columns: { type: true, role: true },
+        columns: { type: true, role: true, id: true },
       })
     } catch {
       // Principal lookup failed — treat caller as anonymous (fail closed).
@@ -105,6 +106,7 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
         isAnonymousPrincipal = true
       }
       role = (principalRecord?.role as 'admin' | 'member' | 'user' | null) ?? null
+      resolvedPrincipalId = principalRecord?.id ?? null
     }
   }
 
@@ -168,6 +170,23 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
       getWidgetConfig().catch(() => null),
     ])
     const identifyVerificationEnabled = widgetConfig?.identifyVerification ?? false
+
+    // Check segment membership — only when authenticated and the config lists allowed segments.
+    // Fail CLOSED on DB error: a lookup failure never grants access.
+    const allowedSegmentIds = portalConfig.access?.allowedSegmentIds ?? []
+    let isInAllowedSegment = false
+    if (isAuthenticated && resolvedPrincipalId && allowedSegmentIds.length > 0) {
+      try {
+        const { segmentIdsForPrincipal } =
+          await import('@/lib/server/domains/segments/segment-membership.service')
+        const memberSet = await segmentIdsForPrincipal(resolvedPrincipalId as never)
+        isInAllowedSegment = allowedSegmentIds.some((id) => memberSet.has(id as never))
+      } catch (err) {
+        console.warn('[fn:portal-access] segment lookup failed, failing closed:', err)
+        isInAllowedSegment = false
+      }
+    }
+
     result = evaluatePortalAccess({
       visibility: portalConfig.access?.visibility ?? 'public',
       role,
@@ -179,6 +198,7 @@ export async function resolvePortalAccessForRequest(): Promise<PortalAccessDecis
       widgetSignInEnabled: portalConfig.access?.widgetSignIn ?? false,
       hasViaWidgetMarker,
       identifyVerificationEnabled,
+      isInAllowedSegment,
     })
   } catch {
     // No settings row / config unreadable — treat the portal as public.
