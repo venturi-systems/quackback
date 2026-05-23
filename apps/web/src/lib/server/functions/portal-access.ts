@@ -272,6 +272,7 @@ export const updatePortalVisibilitySchema = z.object({
   visibility: z.enum(['public', 'private']),
   allowedDomains: z.array(z.string()).optional(),
   widgetSignIn: z.boolean().optional(),
+  allowedSegmentIds: z.array(z.string()).optional(),
 })
 
 export type UpdatePortalVisibilityInput = z.infer<typeof updatePortalVisibilitySchema>
@@ -301,11 +302,14 @@ export const updatePortalAccessFn = createServerFn({ method: 'POST' })
     const nextWidgetSignIn =
       data.widgetSignIn !== undefined ? data.widgetSignIn : (before.access?.widgetSignIn ?? false)
 
+    const nextSegmentIds = data.allowedSegmentIds ?? before.access?.allowedSegmentIds ?? []
+
     const updated = await updatePortalConfig({
       access: {
         visibility: data.visibility,
         allowedDomains: normalizedDomains,
         widgetSignIn: nextWidgetSignIn,
+        allowedSegmentIds: nextSegmentIds,
       },
     })
 
@@ -346,6 +350,19 @@ export const updatePortalAccessFn = createServerFn({ method: 'POST' })
         target: { type: 'settings', id: 'portal-config' },
         before: { widgetSignIn: prevWidgetSignIn },
         after: { widgetSignIn: data.widgetSignIn },
+      })
+    }
+
+    const prevSegmentIds = before.access?.allowedSegmentIds ?? []
+    const segmentsChanged =
+      JSON.stringify([...prevSegmentIds].sort()) !== JSON.stringify([...nextSegmentIds].sort())
+    if (segmentsChanged) {
+      await recordAuditEvent({
+        event: 'portal.allowed_segments.changed',
+        actor,
+        headers,
+        target: { type: 'settings', id: 'portal-config' },
+        metadata: { previous: prevSegmentIds, next: nextSegmentIds },
       })
     }
 

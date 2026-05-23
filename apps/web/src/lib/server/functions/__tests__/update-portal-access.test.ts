@@ -317,6 +317,73 @@ describe('updatePortalAccessFn — audit events', () => {
 })
 
 // ---------------------------------------------------------------------------
+// allowedSegmentIds
+// ---------------------------------------------------------------------------
+
+describe('updatePortalAccessFn allowedSegmentIds', () => {
+  it('saves a non-empty allowedSegmentIds and emits the audit event', async () => {
+    hoisted.mockRequireAuth.mockResolvedValue(ADMIN_AUTH)
+    hoisted.mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: [] },
+    })
+    hoisted.mockUpdatePortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1', 'seg_2'] },
+    })
+
+    await updatePortalAccessHandler({
+      data: { visibility: 'private', allowedSegmentIds: ['seg_1', 'seg_2'] },
+    })
+
+    expect(hoisted.mockUpdatePortalConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({ allowedSegmentIds: ['seg_1', 'seg_2'] }),
+      })
+    )
+    const auditCall = hoisted.mockRecordAuditEvent.mock.calls.find(
+      (c) => (c[0] as { event: string }).event === 'portal.allowed_segments.changed'
+    )
+    expect(auditCall).toBeDefined()
+  })
+
+  it('does NOT emit the audit event when allowedSegmentIds is unchanged', async () => {
+    hoisted.mockRequireAuth.mockResolvedValue(ADMIN_AUTH)
+    hoisted.mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+    hoisted.mockUpdatePortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+
+    await updatePortalAccessHandler({
+      data: { visibility: 'private', allowedSegmentIds: ['seg_1'] },
+    })
+
+    const auditCall = hoisted.mockRecordAuditEvent.mock.calls.find(
+      (c) => (c[0] as { event: string }).event === 'portal.allowed_segments.changed'
+    )
+    expect(auditCall).toBeUndefined()
+  })
+
+  it('preserves allowedSegmentIds when the input omits the field', async () => {
+    hoisted.mockRequireAuth.mockResolvedValue(ADMIN_AUTH)
+    hoisted.mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+    hoisted.mockUpdatePortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [], allowedSegmentIds: ['seg_1'] },
+    })
+
+    await updatePortalAccessHandler({ data: { visibility: 'private' } })
+
+    expect(hoisted.mockUpdatePortalConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: expect.objectContaining({ allowedSegmentIds: ['seg_1'] }),
+      })
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Domain normalization (exercised through the fn's input pipeline)
 // ---------------------------------------------------------------------------
 
