@@ -529,7 +529,7 @@ describe('resendPortalInviteFn — success', () => {
     expect((result as { inviteId: string }).inviteId).toBe('invite_1')
   })
 
-  it('records portal.invite.sent on resend', async () => {
+  it('emits portal.invite.resent (not portal.invite.sent) on resend', async () => {
     const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
     hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue({
       id: 'invite_1',
@@ -541,13 +541,50 @@ describe('resendPortalInviteFn — success', () => {
 
     await resendHandler({ data: { inviteId: 'invite_1' } })
 
+    expect(hoisted.mockRecordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'portal.invite.resent' })
+    )
+    // The old portal.invite.sent event must NOT be emitted during a resend
     const sentEvent = hoisted.mockRecordAuditEvent.mock.calls.find(
       (c) => (c[0] as { event: string }).event === 'portal.invite.sent'
     )
-    expect(sentEvent).toBeDefined()
-    // resend flag in metadata
-    const meta = (sentEvent![0] as { metadata?: { resend?: boolean } }).metadata
-    expect(meta?.resend).toBe(true)
+    expect(sentEvent).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 1F — batchId correlation + hasMessage PII guard
+// ---------------------------------------------------------------------------
+
+describe('sendPortalInviteFn — batchId and hasMessage (1F)', () => {
+  it('emits N portal.invite.sent rows with the same batchId for a bulk call', async () => {
+    await sendHandler({ data: { emails: ['a@x.com', 'b@x.com', 'c@x.com'] } })
+    const calls = hoisted.mockRecordAuditEvent.mock.calls.filter(
+      (c) => (c[0] as { event: string }).event === 'portal.invite.sent'
+    )
+    expect(calls).toHaveLength(3)
+    const batchIds = calls.map(
+      (c) => (c[0] as { metadata?: { batchId?: string } }).metadata?.batchId
+    )
+    expect(new Set(batchIds).size).toBe(1)
+    expect(batchIds[0]).toMatch(/^batch_/)
+  })
+
+  it('omits batchId for a single-email send', async () => {
+    await sendHandler({ data: { emails: ['solo@x.com'] } })
+    const call = hoisted.mockRecordAuditEvent.mock.calls.find(
+      (c) => (c[0] as { event: string }).event === 'portal.invite.sent'
+    )
+    expect((call?.[0] as { metadata?: { batchId?: string } }).metadata?.batchId).toBeUndefined()
+  })
+
+  it('records hasMessage:true without leaking the message body', async () => {
+    await sendHandler({ data: { emails: ['m@x.com'], message: 'Hi there!' } })
+    const call = hoisted.mockRecordAuditEvent.mock.calls.find(
+      (c) => (c[0] as { event: string }).event === 'portal.invite.sent'
+    )
+    expect((call?.[0] as { metadata?: { hasMessage?: boolean } }).metadata?.hasMessage).toBe(true)
+    expect(JSON.stringify((call?.[0] as { metadata?: unknown }).metadata)).not.toContain('Hi there')
   })
 })
 

@@ -64,6 +64,7 @@ export type AuditEventType =
   | 'segment.sso_mapping.changed'
   // v1 portal invites
   | 'portal.invite.sent'
+  | 'portal.invite.resent'
   | 'portal.invite.accepted'
   | 'portal.invite.revoked'
   | 'portal.invite.link_minted'

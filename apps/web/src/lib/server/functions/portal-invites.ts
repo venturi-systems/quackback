@@ -344,11 +344,12 @@ export const resendPortalInviteFn = createServerFn({ method: 'POST' })
       .where(and(eq(invitation.id, inviteId), eq(invitation.kind, 'portal')))
 
     await recordAuditEvent({
-      event: 'portal.invite.sent',
+      event: 'portal.invite.resent',
+      outcome: 'success',
       actor,
       headers,
       target: { type: 'invitation', id: inviteId },
-      metadata: { resend: true, email: inv.email },
+      metadata: { email: inv.email },
     })
 
     console.log(
