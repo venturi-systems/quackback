@@ -47,7 +47,6 @@ describe('segmentConditionSchema — attribute allowlist', () => {
     'comment_count',
     'metadata_key',
     'name',
-    'display_name',
     'principal_type',
   ])('accepts attribute "%s"', (attribute) => {
     const result = segmentConditionSchema.safeParse({ attribute, ...baseCondition })
@@ -84,9 +83,9 @@ describe('createSegmentSchema — new built-in field conditions', () => {
     expect(result.success).toBe(true)
   })
 
-  it('accepts a segment with a "display_name" condition', () => {
+  it('rejects a segment with a "display_name" condition (dropped attribute)', () => {
     const result = createSegmentSchema.safeParse(makePayload('display_name'))
-    expect(result.success).toBe(true)
+    expect(result.success).toBe(false)
   })
 
   it('accepts a segment with a "principal_type" condition', () => {

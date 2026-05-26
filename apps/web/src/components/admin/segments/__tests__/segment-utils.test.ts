@@ -300,14 +300,6 @@ describe('serializeCondition — new built-in fields round-trip', () => {
     expect(s.metadataKey).toBeUndefined()
   })
 
-  it('serializes display_name as a plain string (un-prefixed)', () => {
-    const c: RuleCondition = { attribute: 'display_name', operator: 'contains', value: 'Corp' }
-    const s = serializeCondition(c)
-    expect(s.attribute).toBe('display_name')
-    expect(s.operator).toBe('contains')
-    expect(s.value).toBe('Corp')
-  })
-
   it('serializes principal_type as a plain string (un-prefixed)', () => {
     const c: RuleCondition = { attribute: 'principal_type', operator: 'eq', value: 'anonymous' }
     const s = serializeCondition(c)
@@ -328,13 +320,6 @@ describe('deserializeCondition — new built-in fields round-trip', () => {
     expect(d.attribute).toBe('name')
     expect(d.value).toBe('Alice')
     expect(d.metadataKey).toBeUndefined()
-  })
-
-  it('deserializes display_name without prefixing', () => {
-    const c: SegmentCondition = { attribute: 'display_name', operator: 'starts_with', value: 'Ac' }
-    const d = deserializeCondition(c)
-    expect(d.attribute).toBe('display_name')
-    expect(d.value).toBe('Ac')
   })
 
   it('deserializes principal_type without prefixing', () => {

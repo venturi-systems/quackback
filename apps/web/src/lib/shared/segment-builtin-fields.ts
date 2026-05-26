@@ -111,15 +111,6 @@ export const BUILTIN_FIELDS = [
     // evaluator: eq/neq/contains/starts_with/ends_with/is_set/is_not_set — matches string default
   },
   {
-    key: 'display_name',
-    label: 'Display Name',
-    type: 'string',
-    group: 'attribute',
-    description:
-      "The principal's display name. May differ from the user name for service principals.",
-    // evaluator: eq/neq/contains/starts_with/ends_with/is_set/is_not_set — matches string default
-  },
-  {
     key: 'email',
     label: 'Email',
     type: 'string',

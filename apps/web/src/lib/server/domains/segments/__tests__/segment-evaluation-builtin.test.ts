@@ -1,6 +1,6 @@
 /**
  * Tests for the new built-in field evaluator cases:
- * name, display_name, principal_type.
+ * name, principal_type.
  *
  * Uses the same SQL-capture approach as the existing evaluator tests:
  * mock @/lib/server/db so that db.execute captures the generated SQL
@@ -190,38 +190,6 @@ describe('evaluator — name attribute', () => {
     await evaluateDynamicSegment('segment_test' as never)
     // name is a NOT NULL column — is_not_set is never true; evaluator emits FALSE
     expect(capturedSql).toContain('FALSE')
-  })
-})
-
-describe('evaluator — display_name attribute', () => {
-  it('eq operator produces p.display_name = value', async () => {
-    mockSegment = makeSegment([{ attribute: 'display_name', operator: 'eq', value: 'Bob' }])
-    await evaluateDynamicSegment('segment_test' as never)
-    expect(capturedSql).toContain('p.display_name')
-    expect(capturedSql).toContain('=')
-    expect(capturedSql).toContain('Bob')
-  })
-
-  it('starts_with operator produces p.display_name ILIKE value%', async () => {
-    mockSegment = makeSegment([{ attribute: 'display_name', operator: 'starts_with', value: 'Bo' }])
-    await evaluateDynamicSegment('segment_test' as never)
-    expect(capturedSql).toContain('p.display_name')
-    expect(capturedSql).toContain('ILIKE')
-    expect(capturedSql).toContain('Bo%')
-  })
-
-  it('is_set produces p.display_name IS NOT NULL (nullable column)', async () => {
-    mockSegment = makeSegment([{ attribute: 'display_name', operator: 'is_set' }])
-    await evaluateDynamicSegment('segment_test' as never)
-    expect(capturedSql).toContain('p.display_name')
-    expect(capturedSql).toContain('IS NOT NULL')
-  })
-
-  it('is_not_set produces p.display_name IS NULL (nullable column)', async () => {
-    mockSegment = makeSegment([{ attribute: 'display_name', operator: 'is_not_set' }])
-    await evaluateDynamicSegment('segment_test' as never)
-    expect(capturedSql).toContain('p.display_name')
-    expect(capturedSql).toContain('IS NULL')
   })
 })
 

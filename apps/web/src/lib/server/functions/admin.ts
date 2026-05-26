@@ -1124,7 +1124,6 @@ export const segmentConditionSchema = z.object({
     'comment_count',
     'metadata_key',
     'name',
-    'display_name',
     'principal_type',
   ]),
   operator: z.enum([

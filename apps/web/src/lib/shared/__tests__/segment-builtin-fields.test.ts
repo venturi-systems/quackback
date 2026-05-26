@@ -61,12 +61,16 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
       'vote_count',
       'comment_count',
       'name',
-      'display_name',
       'principal_type',
     ]
     for (const key of expected) {
       expect(keys.has(key), `expected key "${key}" to be in BUILTIN_FIELDS`).toBe(true)
     }
+  })
+
+  it('does NOT include display_name (dropped — redundant with name for portal users)', () => {
+    const keys: Set<string> = new Set(BUILTIN_FIELDS.map((f) => f.key))
+    expect(keys.has('display_name')).toBe(false)
   })
 
   it('does NOT include email_domain (replaced by email)', () => {
@@ -99,17 +103,15 @@ describe('BUILTIN_FIELDS registry well-formedness', () => {
   })
 
   it('string fields have type string', () => {
-    for (const key of ['email', 'name', 'display_name', 'principal_type']) {
+    for (const key of ['email', 'name', 'principal_type']) {
       const field = BUILTIN_FIELDS.find((f) => f.key === key)
       expect(field?.type, `"${key}" should be string`).toBe('string')
     }
   })
 
-  it('attribute-group fields are name, display_name, email, email_verified (genuine user attributes)', () => {
+  it('attribute-group fields are name, email, email_verified (genuine user attributes)', () => {
     const attributeKeys = BUILTIN_FIELDS.filter((f) => f.group === 'attribute').map((f) => f.key)
-    expect(attributeKeys).toEqual(
-      expect.arrayContaining(['name', 'display_name', 'email', 'email_verified'])
-    )
+    expect(attributeKeys).toEqual(expect.arrayContaining(['name', 'email', 'email_verified']))
     expect(attributeKeys).not.toContain('principal_type')
     expect(attributeKeys).not.toContain('post_count')
     expect(attributeKeys).not.toContain('vote_count')
