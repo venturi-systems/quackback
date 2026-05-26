@@ -42,6 +42,40 @@ import { z } from 'zod'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import type { UserId } from '@quackback/ids'
 
+/**
+ * Look up the widget identification provenance for a session.
+ *
+ * Returns true only when the session has a `widget_identified_session`
+ * row with `hmac_verified=true` — i.e. the session was created by
+ * `/api/widget/identify` on the HMAC-verified path. Returns false when
+ * the row is missing (session minted elsewhere — e.g. a portal email
+ * signup that produced a generic BA OTT) OR when the row says the
+ * identify happened on the email-capture path.
+ *
+ * The handoff route uses this to gate insertion of the
+ * `widget_origin_session` marker — without it, any BA OTT could earn
+ * the marker, breaking the chain of trust the portal-access widget
+ * branch depends on.
+ *
+ * Exported for unit-test reach. Fails closed on DB errors — a query
+ * hiccup must never be interpreted as "verified". Imports db lazily
+ * so this file stays client-bundle-safe (the route file ends up in
+ * the client bundle via routeTree.gen.ts).
+ */
+export async function isWidgetSessionHmacVerified(sessionId: string): Promise<boolean> {
+  try {
+    const { db, widgetIdentifiedSession, eq } = await import('@/lib/server/db')
+    const row = await db.query.widgetIdentifiedSession.findFirst({
+      where: eq(widgetIdentifiedSession.sessionId, sessionId),
+      columns: { hmacVerified: true },
+    })
+    return row?.hmacVerified === true
+  } catch (err) {
+    console.error('[route:widget-handoff] provenance lookup failed:', err)
+    return false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Search schema
 // ---------------------------------------------------------------------------
@@ -79,7 +113,6 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
   .inputValidator(searchSchema)
   .handler(async ({ data }): Promise<HandoffResult> => {
     const { config } = await import('@/lib/server/config')
-    const { db, widgetOriginSession } = await import('@/lib/server/db')
     const { recordAuditEvent } = await import('@/lib/server/audit/log')
 
     const returnTo = isSafeCallbackUrl(data.returnTo) ? (data.returnTo as string) : '/'
@@ -171,25 +204,52 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
       console.warn('[route:widget-handoff] could not parse verify response body')
     }
 
-    // Insert the widget origin marker — best-effort (non-fatal on failure).
-    if (sessionId && userId) {
-      try {
-        await db.insert(widgetOriginSession).values({ sessionId, userId }).onConflictDoNothing()
-      } catch (err) {
-        console.error('[route:widget-handoff] failed to insert widget_origin_session marker:', err)
-      }
-    } else {
+    // Provenance gate: only sessions whose identity claim was
+    // HMAC-verified at identify time can earn the marker. Without
+    // this, any BA one-time-token from any session source (portal
+    // email signup, email-capture widget identify, etc.) would
+    // unlock the portal widget grant. See widget_identified_session.
+    if (!sessionId || !userId) {
       console.warn(
-        '[route:widget-handoff] session/user id missing from verify response — marker not inserted'
+        '[route:widget-handoff] session/user id missing from verify response — handoff rejected'
       )
+      await recordAuditEvent({
+        event: 'portal.widget_handshake.invalid',
+        outcome: 'failure',
+        actor: {},
+        metadata: { reason: 'missing_session_info' },
+      })
+      return { kind: 'error', status: 'invalid' }
+    }
+
+    const provenanceOk = await isWidgetSessionHmacVerified(sessionId)
+    if (!provenanceOk) {
+      // The OTT was valid, but the session was not produced by an
+      // HMAC-verified widget identify. Refuse the upgrade and audit.
+      await recordAuditEvent({
+        event: 'portal.widget_handshake.invalid',
+        outcome: 'failure',
+        actor: { userId: userId as UserId },
+        target: { type: 'session', id: sessionId },
+        metadata: { reason: 'unverified_provenance' },
+      })
+      return { kind: 'error', status: 'invalid' }
+    }
+
+    // Insert the widget origin marker — best-effort (non-fatal on failure).
+    try {
+      const { db, widgetOriginSession } = await import('@/lib/server/db')
+      await db.insert(widgetOriginSession).values({ sessionId, userId }).onConflictDoNothing()
+    } catch (err) {
+      console.error('[route:widget-handoff] failed to insert widget_origin_session marker:', err)
     }
 
     // Record the success audit event — best-effort.
     await recordAuditEvent({
       event: 'portal.widget_handshake.consumed',
       outcome: 'success',
-      actor: { userId: userId ? (userId as UserId) : undefined },
-      target: sessionId ? { type: 'session', id: sessionId } : undefined,
+      actor: { userId: userId as UserId },
+      target: { type: 'session', id: sessionId },
     })
 
     return { kind: 'redirect', to: returnTo }

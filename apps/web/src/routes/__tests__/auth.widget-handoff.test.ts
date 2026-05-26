@@ -37,10 +37,24 @@ const mockOnConflictDoNothing: any = vi.fn()
 const mockInsertValues: any = vi.fn(() => ({ onConflictDoNothing: mockOnConflictDoNothing }))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockDbInsert: any = vi.fn(() => ({ values: mockInsertValues }))
+// Provenance lookup: tests default to hmacVerified=true so the
+// existing redirect/audit assertions still exercise the success
+// path. The provenance gate itself is covered in detail by
+// auth.widget-handoff-provenance.test.ts.
+const mockWidgetIdentifiedFindFirst = vi.fn(async () => ({ hmacVerified: true }))
 vi.mock('@/lib/server/db', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: { insert: (arg: any) => mockDbInsert(arg) },
+  db: {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    insert: (arg: any) => mockDbInsert(arg),
+    query: {
+      widgetIdentifiedSession: {
+        findFirst: (...args: unknown[]) => mockWidgetIdentifiedFindFirst(...(args as [])),
+      },
+    },
+  },
   widgetOriginSession: {},
+  widgetIdentifiedSession: { sessionId: 'widget_identified_session.session_id' },
+  eq: vi.fn((col, val) => ({ kind: 'eq', col, val })),
 }))
 
 // Fetch mock
@@ -131,23 +145,47 @@ async function runHandoffLoader(search: string) {
     /* ignore */
   }
 
-  if (sessionId && userId) {
-    try {
+  if (!sessionId || !userId) {
+    await recordAuditEvent({
+      event: 'portal.widget_handshake.invalid',
+      outcome: 'failure',
+      actor: {},
+      metadata: { reason: 'missing_session_info' },
+    })
+    return { status: 'invalid' as const }
+  }
+
+  // Provenance gate — only HMAC-verified widget sessions earn the marker.
+  // Mirrors isWidgetSessionHmacVerified in the production route.
+  const { isWidgetSessionHmacVerified } = await import('../auth.widget-handoff')
+  const provenanceOk = await isWidgetSessionHmacVerified(sessionId)
+  if (!provenanceOk) {
+    await recordAuditEvent({
+      event: 'portal.widget_handshake.invalid',
+      outcome: 'failure',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (db.insert(widgetOriginSession) as any)
-        .values({ sessionId, userId })
-        .onConflictDoNothing()
-    } catch {
-      /* non-fatal */
-    }
+      actor: { userId: userId as any },
+      target: { type: 'session', id: sessionId },
+      metadata: { reason: 'unverified_provenance' },
+    })
+    return { status: 'invalid' as const }
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (db.insert(widgetOriginSession) as any)
+      .values({ sessionId, userId })
+      .onConflictDoNothing()
+  } catch {
+    /* non-fatal */
   }
 
   await recordAuditEvent({
     event: 'portal.widget_handshake.consumed',
     outcome: 'success',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    actor: { userId: userId ? (userId as any) : undefined },
-    target: sessionId ? { type: 'session', id: sessionId } : undefined,
+    actor: { userId: userId as any },
+    target: { type: 'session', id: sessionId },
   })
 
   // In the real route, this throws redirect(). Return a sentinel for testing.
@@ -247,6 +285,45 @@ describe('widget handoff loader — valid OTT', () => {
       `?ott=valid-token&returnTo=${encodeURIComponent('https://evil.com')}`
     )
     if (result.status === 'redirect') expect(result.to).toBe('/')
+  })
+
+  describe('provenance gate', () => {
+    it('rejects when the session has no widget_identified_session row', async () => {
+      // No row → undefined → isWidgetSessionHmacVerified returns false →
+      // handoff refuses to insert the marker and returns invalid.
+      mockFetch.mockResolvedValue(makeOkResponse({ id: 'sess_no_row', userId: 'user_xyz' }))
+      mockWidgetIdentifiedFindFirst.mockResolvedValueOnce(
+        undefined as unknown as { hmacVerified: boolean }
+      )
+
+      const result = await runHandoffLoader('?ott=valid-token')
+      expect(result.status).toBe('invalid')
+      expect(mockDbInsert).not.toHaveBeenCalled()
+    })
+
+    it('rejects when hmac_verified is false (email-capture identify)', async () => {
+      mockFetch.mockResolvedValue(makeOkResponse({ id: 'sess_capture', userId: 'user_xyz' }))
+      mockWidgetIdentifiedFindFirst.mockResolvedValueOnce({ hmacVerified: false })
+
+      const result = await runHandoffLoader('?ott=valid-token')
+      expect(result.status).toBe('invalid')
+      expect(mockDbInsert).not.toHaveBeenCalled()
+    })
+
+    it('records an audit failure with unverified_provenance reason on reject', async () => {
+      mockFetch.mockResolvedValue(makeOkResponse({ id: 'sess_capture', userId: 'user_xyz' }))
+      mockWidgetIdentifiedFindFirst.mockResolvedValueOnce({ hmacVerified: false })
+
+      await runHandoffLoader('?ott=valid-token')
+
+      expect(mockRecordAuditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: 'portal.widget_handshake.invalid',
+          outcome: 'failure',
+          metadata: expect.objectContaining({ reason: 'unverified_provenance' }),
+        })
+      )
+    })
   })
 })
 

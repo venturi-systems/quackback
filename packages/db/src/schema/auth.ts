@@ -650,3 +650,31 @@ export const widgetOriginSession = pgTable(
   },
   (table) => [index('widget_origin_session_user_id_idx').on(table.userId)]
 )
+
+/**
+ * Widget identification provenance table.
+ *
+ * Records, for each session minted by `/api/widget/identify`, whether
+ * the identity claim was HMAC-verified (verified-token path) or
+ * unverified (email-capture path). The handoff route reads this to
+ * decide whether to insert a `widget_origin_session` marker — only
+ * HMAC-verified sessions are allowed to upgrade into the widget
+ * portal-access grant.
+ *
+ * Without this row, the portal gate would only know the workspace's
+ * *current* `identifyVerificationEnabled` setting, not whether the
+ * specific session was ever HMAC-verified — letting a session created
+ * during an unverified window keep portal access after the admin turns
+ * verification on, and letting any BA session that minted a generic
+ * OTT walk through the handoff.
+ *
+ * Upsert semantics: re-identifying the same session demotes (or
+ * promotes) hmac_verified to reflect the latest identify path. A
+ * session that loses HMAC verification on re-identify must lose the
+ * trust it carries.
+ */
+export const widgetIdentifiedSession = pgTable('widget_identified_session', {
+  sessionId: text('session_id').primaryKey(),
+  hmacVerified: boolean('hmac_verified').notNull(),
+  identifiedAt: timestamp('identified_at', { withTimezone: true }).defaultNow().notNull(),
+})

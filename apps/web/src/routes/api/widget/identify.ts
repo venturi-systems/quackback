@@ -2,7 +2,19 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { generateId } from '@quackback/ids'
 import type { UserId, PrincipalId } from '@quackback/ids'
-import { db, user, session, principal, segments, eq, and, gt, isNull } from '@/lib/server/db'
+import {
+  db,
+  user,
+  session,
+  principal,
+  segments,
+  widgetIdentifiedSession,
+  eq,
+  and,
+  gt,
+  isNull,
+  sql,
+} from '@/lib/server/db'
 import { getWidgetConfig, getWidgetSecret } from '@/lib/server/domains/settings/settings.widget'
 import { getAllUserVotedPostIds } from '@/lib/server/domains/posts/post.public'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
@@ -64,7 +76,36 @@ function jsonError(code: string, message: string, status: number): Response {
   return Response.json({ error: { code, message } }, { status })
 }
 
-async function findOrCreateSession(userId: UserId, request: Request): Promise<string> {
+/**
+ * Record the HMAC-verification provenance of a widget-identified
+ * session. Upsert semantics — re-identifying the same session flips
+ * `hmacVerified` to the latest value, so a session that loses HMAC
+ * verification on a re-identify must lose the trust it carries.
+ *
+ * The widget handoff route reads this row before inserting a
+ * `widget_origin_session` marker; without an `hmacVerified=true`
+ * row, the handoff refuses to grant the portal widget branch.
+ *
+ * Exported for unit-test reach. Called once per identify, after
+ * `findOrCreateSession` returns the session token.
+ */
+export async function recordWidgetSessionProvenance(
+  sessionId: string,
+  hmacVerified: boolean
+): Promise<void> {
+  await db
+    .insert(widgetIdentifiedSession)
+    .values({ sessionId, hmacVerified })
+    .onConflictDoUpdate({
+      target: widgetIdentifiedSession.sessionId,
+      set: { hmacVerified, identifiedAt: sql`now()` },
+    })
+}
+
+async function findOrCreateSession(
+  userId: UserId,
+  request: Request
+): Promise<{ id: string; token: string }> {
   const existingSession = await db.query.session.findFirst({
     where: and(eq(session.userId, userId), gt(session.expiresAt, new Date())),
   })
@@ -73,12 +114,13 @@ async function findOrCreateSession(userId: UserId, request: Request): Promise<st
       .update(session)
       .set({ updatedAt: new Date() })
       .where(eq(session.id, existingSession.id))
-    return existingSession.token
+    return { id: existingSession.id, token: existingSession.token }
   }
   const token = crypto.randomUUID()
+  const id = crypto.randomUUID()
   const now = new Date()
   await db.insert(session).values({
-    id: crypto.randomUUID(),
+    id,
     token,
     userId,
     expiresAt: new Date(now.getTime() + SESSION_TTL_MS),
@@ -87,7 +129,7 @@ async function findOrCreateSession(userId: UserId, request: Request): Promise<st
     ipAddress: request.headers.get('x-forwarded-for') ?? null,
     userAgent: request.headers.get('user-agent') ?? null,
   })
-  return token
+  return { id, token }
 }
 
 interface IdentifiedUser {
@@ -285,11 +327,20 @@ export const Route = createFileRoute('/api/widget/identify')({
 
         // Find/create session and fetch voted posts in parallel
         // (voted posts include any merged anonymous votes)
-        const [sessionToken, votedPostIdSet] = await Promise.all([
+        const [sessionInfo, votedPostIdSet] = await Promise.all([
           findOrCreateSession(userId, request),
           getAllUserVotedPostIds(principalId),
         ])
         const votedPostIds = Array.from(votedPostIdSet)
+
+        // Record HMAC-verification provenance for this session. The
+        // widget-handoff route reads this to decide whether to grant
+        // the portal widget branch — without an hmacVerified=true row,
+        // the handoff refuses to insert the widget_origin_session
+        // marker. Upsert by sessionId; re-identifying via the
+        // unverified path demotes a previously-verified row, so a
+        // session that loses HMAC verification loses its trust.
+        await recordWidgetSessionProvenance(sessionInfo.id, claimsAreVerified)
 
         // No Set-Cookie — the widget sends the token as Bearer header.
         // An unsigned cookie here would poison Better Auth's signed-cookie
@@ -301,7 +352,7 @@ export const Route = createFileRoute('/api/widget/identify')({
           null
 
         return Response.json({
-          sessionToken,
+          sessionToken: sessionInfo.token,
           user: {
             id: userRecord.id,
             name: userRecord.name,

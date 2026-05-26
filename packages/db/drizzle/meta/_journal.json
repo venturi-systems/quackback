@@ -498,6 +498,13 @@
       "when": 1778457600017,
       "tag": "0070_audit_log_observability",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1778457600018,
+      "tag": "0071_widget_identified_session",
+      "breakpoints": true
     }
   ]
 }
