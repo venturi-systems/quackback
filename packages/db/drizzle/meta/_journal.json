@@ -554,6 +554,13 @@
       "when": 1779408000000,
       "tag": "0078_comment_moderation_state",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1779494400000,
+      "tag": "0079_board_access",
+      "breakpoints": true
     }
   ]
 }
