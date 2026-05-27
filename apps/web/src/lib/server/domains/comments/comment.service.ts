@@ -189,8 +189,15 @@ export async function createComment(
         .update(posts)
         .set({
           statusId: input.statusId as StatusId,
-          // Private comments don't count toward the public comment count
-          ...(isPrivate ? {} : { commentCount: sql`${posts.commentCount} + 1` }),
+          // Private and pending comments don't count toward the public
+          // commentCount. Pending comments are held back from public reads
+          // (see post.public.detail.ts) — `approveCommentFn` re-increments
+          // the count when the comment becomes visible. Rejected (soft-
+          // deleted) pending comments stay uncounted since they never
+          // incremented in the first place.
+          ...(isPrivate || initialModerationState === 'pending'
+            ? {}
+            : { commentCount: sql`${posts.commentCount} + 1` }),
         })
         .where(eq(posts.id, input.postId))
 
@@ -216,8 +223,11 @@ export async function createComment(
         })
         .returning()
 
-      // Private comments don't count toward the public comment count
-      if (!isPrivate) {
+      // Private and pending comments don't count toward the public
+      // commentCount. Pending comments are held back from public reads
+      // (see post.public.detail.ts) — `approveCommentFn` re-increments
+      // the count when the comment becomes visible.
+      if (!isPrivate && initialModerationState !== 'pending') {
         await tx
           .update(posts)
           .set({ commentCount: sql`${posts.commentCount} + 1` })

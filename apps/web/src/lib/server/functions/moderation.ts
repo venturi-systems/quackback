@@ -201,6 +201,16 @@ export const approveCommentFn = createServerFn({ method: 'POST' })
     if (updated.length === 0) {
       throw new ConflictError('COMMENT_NOT_PENDING', 'Comment is not awaiting review')
     }
+    // Reconcile the public commentCount now that the comment is visible.
+    // The insert path skipped the increment for pending comments
+    // (see comment.service.ts), so approval is what flips it on. Rejected
+    // comments stay uncounted — rejectCommentFn doesn't need a counterpart.
+    if (!before.isPrivate) {
+      await db
+        .update(posts)
+        .set({ commentCount: sql`${posts.commentCount} + 1` })
+        .where(eq(posts.id, before.postId))
+    }
     await recordAuditEvent({
       event: 'comment.moderation.approved',
       actor: actorFromAuth(auth),

@@ -242,6 +242,53 @@ describe('Comment count maintenance', () => {
       })
       expect(hasCommentCountUpdate).toBe(true)
     })
+
+    it('does NOT increment commentCount when holding a pending comment', async () => {
+      // Switch the board fixture to approval.comments=true so a portal
+      // commenter lands as moderationState='pending'. The insert path
+      // must skip the commentCount bump — approveCommentFn re-increments
+      // when the comment becomes publicly visible.
+      const { db } = await import('@/lib/server/db')
+      vi.mocked(db.query.posts.findFirst).mockResolvedValueOnce({
+        id: 'post_mock',
+        title: 'Test Post',
+        boardId: 'board_mock',
+        statusId: 'status_mock',
+        isCommentsLocked: false,
+        moderationState: 'published',
+        principalId: null,
+        board: {
+          id: 'board_mock',
+          slug: 'test',
+          access: {
+            view: 'anonymous',
+            comment: 'anonymous',
+            submit: 'anonymous',
+            segmentIds: [],
+            approval: { posts: false, comments: true },
+          },
+        },
+      } as never)
+
+      const { createComment } = await import('../comment.service')
+      await createComment(
+        { postId: 'post_mock' as PostId, content: 'Held' },
+        {
+          principalId: 'principal_mock' as PrincipalId,
+          role: 'user',
+        },
+        portalActor,
+        { skipDispatch: true }
+      )
+
+      // No set() call should have included commentCount — the only
+      // post-side write a held comment performs is the (skipped) bump.
+      const hasCommentCountUpdate = setCalls.some((args) => {
+        const setArg = (args as unknown[])[0] as Record<string, unknown>
+        return 'commentCount' in setArg
+      })
+      expect(hasCommentCountUpdate).toBe(false)
+    })
   })
 
   describe('softDeleteComment', () => {

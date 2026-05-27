@@ -835,6 +835,91 @@ describe('mutation TOCTOU guards — parent-deletedAt in the UPDATE WHERE', () =
     )
     expect(mockAnnouncePublishedComment).not.toHaveBeenCalled()
   })
+
+  it('approveCommentFn increments commentCount on approval', async () => {
+    // The insert path skipped the commentCount bump for pending comments
+    // (see comment.service.ts); approveCommentFn is what reconciles the
+    // public count when the comment becomes visible. Assert that the
+    // follow-up `db.update(posts).set({ commentCount: ... })` fires after
+    // the guarded comment UPDATE succeeds.
+    dbState.boards = [{ id: 'b1', name: 'Active', deletedAt: null }]
+    dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'published', deletedAt: null }]
+    dbState.comments = [
+      { ...COMMENT_DEFAULTS, id: 'c1', moderationState: 'pending', deletedAt: null },
+    ]
+    mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
+
+    // Capture every set(...) payload that hits db.update(...) so we can
+    // distinguish the (comments) moderationState flip from the (posts)
+    // commentCount bump.
+    const setPayloads: Array<Record<string, unknown>> = []
+    const realUpdate = vi.mocked(db.update).getMockImplementation()!
+    vi.mocked(db.update).mockImplementation((table: unknown) => {
+      const inner = realUpdate(table as never) as unknown as {
+        set: (patch: Record<string, unknown>) => unknown
+      }
+      return {
+        set: (patch: Record<string, unknown>) => {
+          setPayloads.push({ __table: tableNameOf(table), ...patch })
+          return inner.set(patch)
+        },
+      } as never
+    })
+
+    try {
+      await approveComment()({ data: { commentId: 'c1' } })
+    } finally {
+      vi.mocked(db.update).mockImplementation(realUpdate)
+    }
+
+    // Two writes total: comments flip → posts.commentCount bump.
+    const postsBump = setPayloads.find((p) => p.__table === 'posts' && 'commentCount' in p)
+    expect(postsBump).toBeDefined()
+  })
+
+  it('approveCommentFn does NOT touch commentCount for a private pending comment', async () => {
+    // Private comments never incremented the public count at insert time —
+    // approving them must not bump it either. (Private comments can't reach
+    // pending state today since `isPrivate` is team-only, but defend the
+    // invariant in case a future code path produces one.)
+    dbState.boards = [{ id: 'b1', name: 'Active', deletedAt: null }]
+    dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'published', deletedAt: null }]
+    // Comment type used by this test file doesn't declare `isPrivate`;
+    // the production code reads `before.isPrivate` directly, so attach
+    // the flag with a localized cast.
+    dbState.comments = [
+      {
+        ...COMMENT_DEFAULTS,
+        id: 'c1',
+        moderationState: 'pending',
+        deletedAt: null,
+      } as Comment,
+    ]
+    ;(dbState.comments[0] as Comment & { isPrivate?: boolean }).isPrivate = true
+    mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
+
+    const setPayloads: Array<Record<string, unknown>> = []
+    const realUpdate = vi.mocked(db.update).getMockImplementation()!
+    vi.mocked(db.update).mockImplementation((table: unknown) => {
+      const inner = realUpdate(table as never) as unknown as {
+        set: (patch: Record<string, unknown>) => unknown
+      }
+      return {
+        set: (patch: Record<string, unknown>) => {
+          setPayloads.push({ __table: tableNameOf(table), ...patch })
+          return inner.set(patch)
+        },
+      } as never
+    })
+    try {
+      await approveComment()({ data: { commentId: 'c1' } })
+    } finally {
+      vi.mocked(db.update).mockImplementation(realUpdate)
+    }
+
+    const postsBump = setPayloads.find((p) => p.__table === 'posts' && 'commentCount' in p)
+    expect(postsBump).toBeUndefined()
+  })
 })
 
 // ----------------------------------------------------------------------
