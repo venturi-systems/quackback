@@ -61,24 +61,53 @@ export function postViewFilter(actor: Actor): SQL {
   return and(boardViewFilter(actor), or(eq(posts.moderationState, 'published'), ownPending))!
 }
 
+export type CommentCreateDecision =
+  | { allowed: true; requiresApproval: boolean }
+  | { allowed: false; reason: string }
+
+function commentDenyMessage(tier: AccessTier): string {
+  switch (tier) {
+    case 'anonymous':
+      return 'Commenting is not allowed on this board'
+    case 'authenticated':
+      return 'Sign in to comment on this board'
+    case 'segments':
+      return 'Only specific groups can comment on this board'
+    case 'team':
+      return 'Only team members can comment on this board'
+  }
+}
+
 /**
  * Whether the requesting actor can post a comment on a post.
  *
  * Rules (applied in order):
- * 1. The actor must be able to view the post (board audience + moderation state).
- * 2. If comments are locked, only team members may bypass.
+ * 1. The actor must be able to view the post (board view tier + moderation state).
+ * 2. The actor must satisfy the board's comment tier — independent of view
+ *    (a board can be public-to-view but team-only-to-comment).
+ * 3. If comments are locked, only team members may bypass.
+ *
+ * On the allowed branch, `requiresApproval` is true when the actor is not
+ * a team member AND the board requires comment approval.
  */
 export function canCreateComment(
   actor: Actor,
   post: PostShape & { isCommentsLocked: boolean },
   board: BoardShape
-): Decision {
+): CommentCreateDecision {
   const view = canViewPost(actor, post, board)
-  if (!view.allowed) return view
-  if (post.isCommentsLocked && !isTeam(actor)) {
-    return denyDecision('Comments are locked on this post')
+  if (!view.allowed) return { allowed: false, reason: view.reason }
+
+  if (!tierAllows(actor, board.access.comment, board.access.segmentIds)) {
+    return { allowed: false, reason: commentDenyMessage(board.access.comment) }
   }
-  return allowDecision()
+  if (post.isCommentsLocked && !isTeam(actor)) {
+    return { allowed: false, reason: 'Comments are locked on this post' }
+  }
+  return {
+    allowed: true,
+    requiresApproval: !isTeam(actor) && board.access.approval.comments,
+  }
 }
 
 export type CreateDecision =

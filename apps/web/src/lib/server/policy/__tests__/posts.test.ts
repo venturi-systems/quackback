@@ -535,3 +535,119 @@ describe('canCreateComment — isCommentsLocked gate', () => {
     expect(canCreateComment(member, lockedPost, publicBoard).allowed).toBe(true)
   })
 })
+
+describe('canCreateComment — board.access.comment tier gates commenting independent of view', () => {
+  const publishedPost = {
+    moderationState: 'published' as ModerationState,
+    principalId: 'p_other' as PrincipalId,
+    isCommentsLocked: false,
+  }
+
+  it('rejects anon when comment=authenticated even if view=anonymous', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        comment: 'authenticated',
+        submit: 'authenticated',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(anon, publishedPost, board).allowed).toBe(false)
+  })
+
+  it('rejects portal user when comment=team even if view=anonymous', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        comment: 'team',
+        submit: 'team',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(portal, publishedPost, board).allowed).toBe(false)
+  })
+
+  it('admits team regardless of tier', () => {
+    const board = {
+      access: {
+        view: 'team',
+        comment: 'team',
+        submit: 'team',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(admin, publishedPost, board).allowed).toBe(true)
+  })
+
+  it('rejects portal user not in segment when comment=segments', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        comment: 'segments',
+        submit: 'segments',
+        segmentIds: ['segment_x'],
+        approval: { posts: false, comments: false },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(portal, publishedPost, board).allowed).toBe(false)
+  })
+})
+
+describe('canCreateComment — board.approval.comments composition', () => {
+  const publishedPost = {
+    moderationState: 'published' as ModerationState,
+    principalId: 'p_other' as PrincipalId,
+    isCommentsLocked: false,
+  }
+
+  it('non-team comments are held when board.approval.comments=true', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: true },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(portal, publishedPost, board)).toEqual({
+      allowed: true,
+      requiresApproval: true,
+    })
+  })
+
+  it('team comments are NEVER held even when board.approval.comments=true', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: true },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(admin, publishedPost, board)).toEqual({
+      allowed: true,
+      requiresApproval: false,
+    })
+  })
+
+  it('approval.comments=false → requiresApproval=false', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segmentIds: [],
+        approval: { posts: false, comments: false },
+      } satisfies BoardAccess,
+    }
+    expect(canCreateComment(portal, publishedPost, board)).toEqual({
+      allowed: true,
+      requiresApproval: false,
+    })
+  })
+})
