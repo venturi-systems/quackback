@@ -102,6 +102,16 @@ vi.mock('@/lib/server/db', async () => {
                 : (table.__name ?? (table as { [k: string]: unknown }).name ?? 'unknown')
             return chain(typeof label === 'string' ? label : 'posts')
           }),
+          // createPost runs SELECT ... FOR UPDATE on the board inside the txn
+          // to close the precheck/insert TOCTOU. Return a live (non-deleted)
+          // row so the existing tests below proceed past the guard.
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                for: vi.fn(async () => [{ deletedAt: null }]),
+              })),
+            })),
+          })),
         }
         return fn(tx)
       }),

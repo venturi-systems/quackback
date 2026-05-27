@@ -172,6 +172,21 @@ export async function createPost(
   })
 
   const post = await db.transaction(async (tx) => {
+    // Re-fetch the board with a row lock to close the TOCTOU window between
+    // the precheck above and the insert: an admin can soft-delete the board
+    // between the two, and the insert would otherwise land the post as a child
+    // of a deleted board (no FK violation — the row still exists, only
+    // deletedAt is set). SELECT ... FOR UPDATE blocks concurrent writers to
+    // the same row for the millisecond-scale lifetime of this transaction.
+    const lockedBoard = await tx
+      .select({ deletedAt: boards.deletedAt })
+      .from(boards)
+      .where(eq(boards.id, input.boardId))
+      .for('update')
+    if (lockedBoard.length === 0 || lockedBoard[0].deletedAt !== null) {
+      throw new NotFoundError('BOARD_NOT_FOUND', `Board with ID ${input.boardId} not found`)
+    }
+
     const [newPost] = await tx
       .insert(posts)
       .values({

@@ -13,6 +13,13 @@ const subscribeToPost = vi.fn()
 const dispatchPostCreated = vi.fn().mockResolvedValue(undefined)
 const syncPostMentions = vi.fn().mockResolvedValue(undefined)
 
+// Holder for what the in-transaction SELECT ... FOR UPDATE on boards returns.
+// Default: a single non-deleted row, which is what almost every test wants. The
+// TOCTOU test below mutates `.value` to simulate a concurrent soft-delete.
+const txLockedBoardRows: { value: Array<{ deletedAt: Date | null }> } = {
+  value: [{ deletedAt: null }],
+}
+
 vi.mock('@/lib/server/db', async () => {
   const { sql: realSql } = await vi.importActual<typeof import('drizzle-orm')>('drizzle-orm')
 
@@ -66,6 +73,10 @@ vi.mock('@/lib/server/db', async () => {
         },
       },
       transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
+        // Default: SELECT ... FOR UPDATE on the board returns a live (non-deleted)
+        // row. Specific tests can override the resolved value via
+        // `txLockedBoardRows.value` to simulate concurrent soft-delete (empty array
+        // or `deletedAt: <Date>`), exercising the createPost TOCTOU guard.
         const tx = {
           insert: vi.fn((table: { __name?: string }) => {
             const label =
@@ -74,6 +85,13 @@ vi.mock('@/lib/server/db', async () => {
                 : (table.__name ?? (table as { [k: string]: unknown }).name ?? 'unknown')
             return chain(typeof label === 'string' ? label : 'posts')
           }),
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                for: vi.fn(async () => txLockedBoardRows.value),
+              })),
+            })),
+          })),
         }
         return fn(tx)
       }),
@@ -134,6 +152,7 @@ describe('createPost author attribution', () => {
     insertedRows.votes.length = 0
     insertedRows.postTags.length = 0
     subscribeToPost.mockClear()
+    txLockedBoardRows.value = [{ deletedAt: null }]
   })
 
   it('attributes the post row, the auto-upvote, and the subscription to author.principalId', async () => {
@@ -165,6 +184,7 @@ describe('createPost held audit event', () => {
     insertedRows.postTags.length = 0
     subscribeToPost.mockClear()
     recordAuditEvent.mockClear()
+    txLockedBoardRows.value = [{ deletedAt: null }]
   })
 
   it('records post.moderation.held when the post resolves to pending', async () => {
@@ -262,6 +282,7 @@ describe('createPost dispatch guard (moderation)', () => {
     recordAuditEvent.mockClear()
     dispatchPostCreated.mockClear()
     syncPostMentions.mockClear()
+    txLockedBoardRows.value = [{ deletedAt: null }]
   })
 
   it('does NOT call dispatchPostCreated when the post is held (moderationState=pending)', async () => {
@@ -376,5 +397,63 @@ describe('createPost dispatch guard (moderation)', () => {
     )
 
     expect(subscribeToPost).toHaveBeenCalledWith(principalId, 'post_new', 'author')
+  })
+})
+
+describe('createPost TOCTOU board re-check', () => {
+  beforeEach(() => {
+    insertedRows.posts.length = 0
+    insertedRows.votes.length = 0
+    insertedRows.postTags.length = 0
+    subscribeToPost.mockClear()
+    txLockedBoardRows.value = [{ deletedAt: null }]
+  })
+
+  it('throws BOARD_NOT_FOUND when the board is soft-deleted between the precheck and the locked re-check', async () => {
+    // Simulate the race: the initial findFirst returned a live board (default
+    // mock above), but by the time the transaction acquires the row lock the
+    // board has been soft-deleted by a concurrent admin action.
+    txLockedBoardRows.value = [{ deletedAt: new Date() }]
+
+    const { createPost } = await import('../post.service')
+    const principalId = 'principal_user' as unknown as PrincipalId
+
+    await expect(
+      createPost(
+        {
+          boardId: 'board_b' as unknown as BoardId,
+          title: 'Racy post',
+          content: 'Body',
+          statusId: 'status_open' as unknown as StatusId,
+        },
+        { principalId }
+      )
+    ).rejects.toThrow(/BOARD_NOT_FOUND|not found/i)
+
+    // The insert must not have run.
+    expect(insertedRows.posts).toHaveLength(0)
+    expect(insertedRows.votes).toHaveLength(0)
+  })
+
+  it('throws BOARD_NOT_FOUND when the locked re-check returns no rows (board hard-deleted)', async () => {
+    txLockedBoardRows.value = []
+
+    const { createPost } = await import('../post.service')
+    const principalId = 'principal_user' as unknown as PrincipalId
+
+    await expect(
+      createPost(
+        {
+          boardId: 'board_b' as unknown as BoardId,
+          title: 'Racy post',
+          content: 'Body',
+          statusId: 'status_open' as unknown as StatusId,
+        },
+        { principalId }
+      )
+    ).rejects.toThrow(/BOARD_NOT_FOUND|not found/i)
+
+    expect(insertedRows.posts).toHaveLength(0)
+    expect(insertedRows.votes).toHaveLength(0)
   })
 })
