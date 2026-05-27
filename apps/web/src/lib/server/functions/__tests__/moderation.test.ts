@@ -278,18 +278,22 @@ vi.mock('@/lib/server/db', () => ({
 import { ForbiddenError, NotFoundError, ConflictError } from '@/lib/shared/errors'
 
 // Indexes correspond to declaration order in moderation.ts:
-// 0=listPending, 1=approve, 2=reject, 3=getModerationStatus
-function listPending(): Handler {
+// 0=listPendingPosts, 1=listPendingComments, 2=approve, 3=reject, 4=getModerationStatus
+function listPendingPosts(): Handler {
   return hoisted.handlersByIndex[0]
 }
-function approve(): Handler {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- accessor reserved for forthcoming comment-moderation tests; index slot must stay correct
+function listPendingComments(): Handler {
   return hoisted.handlersByIndex[1]
 }
-function reject(): Handler {
+function approve(): Handler {
   return hoisted.handlersByIndex[2]
 }
-function getModerationStatusHandler(): Handler {
+function reject(): Handler {
   return hoisted.handlersByIndex[3]
+}
+function getModerationStatusHandler(): Handler {
+  return hoisted.handlersByIndex[4]
 }
 
 // Import after mocks so handlers are captured.
@@ -342,12 +346,12 @@ describe('listPendingPostsFn — role gating', () => {
     // trace instead of a structured 401.
     const authError = new Error('UNAUTHORIZED: session expired')
     mockRequireAuth.mockRejectedValue(authError)
-    await expect(listPending()({ data: {} })).rejects.toBe(authError)
+    await expect(listPendingPosts()({ data: {} })).rejects.toBe(authError)
   })
 
   it('rejects role=user with ForbiddenError', async () => {
     mockRequireAuth.mockResolvedValue(AUTH_USER)
-    await expect(listPending()({ data: {} })).rejects.toBeInstanceOf(ForbiddenError)
+    await expect(listPendingPosts()({ data: {} })).rejects.toBeInstanceOf(ForbiddenError)
   })
 
   it('admin sees all pending', async () => {
@@ -359,7 +363,7 @@ describe('listPendingPostsFn — role gating', () => {
       { ...POST_DEFAULTS, id: 'p3', moderationState: 'pending', deletedAt: null },
     ]
     mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
-    const result = (await listPending()({ data: {} })) as { posts: Array<{ id: string }> }
+    const result = (await listPendingPosts()({ data: {} })) as { posts: Array<{ id: string }> }
     // Only the two pending posts are returned (published is excluded by query filter)
     expect(result.posts).toHaveLength(2)
     expect(result.posts.map((p) => p.id).sort()).toEqual(['p1', 'p3'])
@@ -370,13 +374,13 @@ describe('listPendingPostsFn — role gating', () => {
     dbState.principals = [{ id: 'pr1', displayName: 'Alice' }]
     dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'pending', deletedAt: null }]
     mockRequireAuth.mockResolvedValue(AUTH_MEMBER)
-    const result = (await listPending()({ data: {} })) as { posts: Post[] }
+    const result = (await listPendingPosts()({ data: {} })) as { posts: Post[] }
     expect(result.posts).toHaveLength(1)
   })
 
   it('returns empty when nothing is pending', async () => {
     mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
-    const result = (await listPending()({ data: {} })) as { posts: Post[] }
+    const result = (await listPendingPosts()({ data: {} })) as { posts: Post[] }
     expect(result.posts).toEqual([])
   })
 })
@@ -549,7 +553,7 @@ describe('listPendingPostsFn — listPendingPosts exclusion + enrichment', () =>
       },
     ]
     mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
-    const result = (await listPending()({ data: {} })) as {
+    const result = (await listPendingPosts()({ data: {} })) as {
       posts: Array<{ id: string }>
     }
     expect(result.posts).toHaveLength(1)
@@ -561,7 +565,7 @@ describe('listPendingPostsFn — listPendingPosts exclusion + enrichment', () =>
     dbState.principals = [{ id: 'pr1', displayName: 'Bob' }]
     dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'pending', deletedAt: null }]
     mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
-    const result = (await listPending()({ data: {} })) as {
+    const result = (await listPendingPosts()({ data: {} })) as {
       posts: Array<{ id: string; boardName: string; authorName: string | null }>
     }
     expect(result.posts).toHaveLength(1)
@@ -574,7 +578,7 @@ describe('listPendingPostsFn — listPendingPosts exclusion + enrichment', () =>
     dbState.principals = [{ id: 'pr1', displayName: null }]
     dbState.posts = [{ ...POST_DEFAULTS, id: 'p1', moderationState: 'pending', deletedAt: null }]
     mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
-    const result = (await listPending()({ data: {} })) as {
+    const result = (await listPendingPosts()({ data: {} })) as {
       posts: Array<{ id: string; authorName: string | null }>
     }
     expect(result.posts[0].authorName).toBeNull()
