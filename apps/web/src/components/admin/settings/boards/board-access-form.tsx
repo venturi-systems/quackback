@@ -163,8 +163,8 @@ export const PRESET_META: readonly PresetMeta[] = [
 // ─── Workspace anonymous feature flag ─────────────────────────────────
 
 /**
- * Workspace-wide anonymous-interaction ceiling. After M1 the legacy trio
- * of per-action toggles collapsed into a single `features.allowAnonymous`
+ * Workspace-wide anonymous-interaction ceiling. The legacy trio of
+ * per-action toggles was consolidated into a single `features.allowAnonymous`
  * master switch — flipping it off blocks the `anonymous` tier on
  * vote/comment/submit together. View has no ceiling: "anyone can view a
  * public board" is the definition of public access.
@@ -272,9 +272,9 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
     [values]
   )
 
-  // Actions whose anonymous tier is workspace-blocked. After M1 these are
-  // always the same three — vote/comment/submit move together — but the
-  // banner still renders the list explicitly so the copy stays unambiguous.
+  // Actions whose anonymous tier is workspace-blocked. These are always the
+  // same three — vote/comment/submit move together — but the banner still
+  // renders the list explicitly so the copy stays unambiguous.
   const wsBlockedActions = useMemo(
     () =>
       wsAllowAnonymous
