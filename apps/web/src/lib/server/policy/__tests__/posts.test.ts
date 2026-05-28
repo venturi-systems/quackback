@@ -12,7 +12,7 @@
  * Pairs with boards.test.ts (audience matrix) and segment-membership tests.
  */
 import { describe, it, expect, beforeAll } from 'vitest'
-import { canViewPost, canCreatePost, canCreateComment } from '../posts'
+import { canViewPost, canCreatePost, canCreateComment, canVotePost } from '../posts'
 import { ANONYMOUS_ACTOR, type Actor } from '../types'
 import type { SegmentId, PrincipalId } from '@quackback/ids'
 import type { AccessTier, BoardAccess, ModerationState } from '@/lib/server/db'
@@ -706,6 +706,124 @@ describe('canCreateComment — tri-state moderation.comments resolves against wo
       allowed: true,
       requiresApproval: false,
     })
+  })
+})
+
+// ----------------------------------------------------------------------
+// canVotePost — per-board vote tier matrix
+// ----------------------------------------------------------------------
+
+describe('canVotePost — per-board vote tier', () => {
+  const publishedPost = {
+    moderationState: 'published' as ModerationState,
+    principalId: 'p_other' as PrincipalId,
+  }
+
+  // The modern "Public" preset: anyone can read, but you must sign in
+  // to vote.
+  const publicViewAuthVoteBoard = {
+    access: {
+      view: 'anonymous',
+      vote: 'authenticated',
+      comment: 'anonymous',
+      submit: 'authenticated',
+      segments: { view: [], vote: [], comment: [], submit: [] },
+      moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+    } satisfies BoardAccess,
+  }
+
+  it('denies anonymous actor on board.vote=authenticated with sign-in hint', () => {
+    const decision = canVotePost(anon, publishedPost, publicViewAuthVoteBoard)
+    expect(decision.allowed).toBe(false)
+    if (!decision.allowed) expect(decision.reason).toMatch(/sign in/i)
+  })
+
+  it('allows authenticated actor on board.vote=authenticated', () => {
+    expect(canVotePost(portal, publishedPost, publicViewAuthVoteBoard).allowed).toBe(true)
+  })
+
+  it('allows anonymous actor on board.vote=anonymous', () => {
+    expect(canVotePost(anon, publishedPost, publicBoard).allowed).toBe(true)
+  })
+
+  it('denies a viewer who fails the view tier (composes canViewPost)', () => {
+    // anon on view=authenticated board: canViewPost denies first, so the
+    // resulting decision carries the view-deny reason rather than a vote
+    // hint. The point: a viewer who can't see the post can never vote on
+    // it regardless of vote tier.
+    const decision = canVotePost(anon, publishedPost, authBoard)
+    expect(decision.allowed).toBe(false)
+    // Reason comes from canViewBoard, not the vote branch.
+    if (!decision.allowed) expect(decision.reason).not.toMatch(/sign in to vote/i)
+  })
+
+  it('allows admin on any board (team always passes both gates)', () => {
+    const decision = canVotePost(admin, publishedPost, {
+      access: {
+        view: 'team',
+        vote: 'team',
+        comment: 'team',
+        submit: 'team',
+        segments: { view: [], vote: [], comment: [], submit: [] },
+        moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+      } satisfies BoardAccess,
+    })
+    expect(decision.allowed).toBe(true)
+  })
+
+  it('allows member on a board with vote=team', () => {
+    expect(
+      canVotePost(member, publishedPost, {
+        access: {
+          view: 'anonymous',
+          vote: 'team',
+          comment: 'anonymous',
+          submit: 'anonymous',
+          segments: { view: [], vote: [], comment: [], submit: [] },
+          moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+        } satisfies BoardAccess,
+      }).allowed
+    ).toBe(true)
+  })
+
+  it('allows an actor in the vote segment when board.vote=segments', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        vote: 'segments',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segments: { view: [], vote: ['segment_trusted'], comment: [], submit: [] },
+        moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+      } satisfies BoardAccess,
+    }
+    expect(canVotePost(trustedPortal, publishedPost, board).allowed).toBe(true)
+  })
+
+  it('denies an actor not in the vote segment when board.vote=segments', () => {
+    const board = {
+      access: {
+        view: 'anonymous',
+        vote: 'segments',
+        comment: 'anonymous',
+        submit: 'anonymous',
+        segments: { view: [], vote: ['segment_other'], comment: [], submit: [] },
+        moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+      } satisfies BoardAccess,
+    }
+    const decision = canVotePost(portal, publishedPost, board)
+    expect(decision.allowed).toBe(false)
+    if (!decision.allowed) expect(decision.reason).toMatch(/groups/i)
+  })
+
+  it('denies viewing a non-published post for non-team (composes canViewPost)', () => {
+    // Even if vote tier allows, the actor must still be able to view the
+    // post. A pending post by another author is invisible → vote denied.
+    const pendingPost = {
+      moderationState: 'pending' as ModerationState,
+      principalId: 'p_other' as PrincipalId,
+    }
+    expect(canVotePost(portal, pendingPost, publicBoard).allowed).toBe(false)
   })
 })
 
