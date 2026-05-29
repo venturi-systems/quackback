@@ -281,3 +281,69 @@ test.describe('vote tier — vote affordance + gating', () => {
     await expect(btn).toHaveAttribute('aria-pressed', String(before))
   })
 })
+
+// ── Moderation: hold-for-review + approve / reject ──────────────────────────
+// e2e-mod holds both anonymous AND signed-in posts (anonPosts:on, signedPosts:on),
+// so we submit as the authenticated `user` (more robust than an anon session)
+// and moderate from the team `admin` page. The submitter sees their own pending
+// post, but a held post must NOT reach other (anonymous) viewers' feeds.
+
+/** Submit a post to a board via the portal composer; resolves once accepted. */
+async function submitFeedback(page: Page, boardSlug: string, title: string) {
+  await page.goto(`/?board=${boardSlug}`)
+  await page.waitForLoadState('networkidle')
+  const composer = page.getByRole('textbox', { name: /what'?s your idea/i }).first()
+  await composer.click()
+  await composer.fill(title)
+  const submit = page.getByRole('button', { name: /^submit/i }).first()
+  await expect(submit).toBeEnabled()
+  await submit.click()
+  await expect(page.getByText('Feedback submitted')).toBeVisible({ timeout: 10000 })
+}
+
+/** Does the board's filtered feed (newest-first) surface a post with this title? */
+async function feedShowsPost(page: Page, boardSlug: string, title: string): Promise<boolean> {
+  await page.goto(`/?board=${boardSlug}&sort=new`)
+  await page.waitForLoadState('networkidle')
+  await page.waitForTimeout(600) // let the feed settle
+  return (await page.locator('body').innerText()).includes(title)
+}
+
+/** The admin moderation-queue row (a <li>) for a pending item with this title. */
+async function queueRow(adminPage: Page, title: string) {
+  await adminPage.goto('/admin/moderation')
+  await adminPage.waitForLoadState('networkidle')
+  return adminPage.locator('li').filter({ hasText: title }).first()
+}
+
+test.describe('moderation — hold for review + approve/reject', () => {
+  test('a held post is approved into the public feed', async () => {
+    const title = `E2E Hold-Approve ${Date.now()}`
+    await submitFeedback(user, 'e2e-mod', title)
+
+    // Held: the pending post is not visible to other (anonymous) viewers.
+    expect(await feedShowsPost(anon, 'e2e-mod', title)).toBe(false)
+
+    // It surfaces in the admin moderation queue; approving publishes it.
+    const row = await queueRow(admin, title)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    await row.getByRole('button', { name: 'Approve' }).click()
+    await expect(row).toBeHidden({ timeout: 10000 }) // leaves the queue once handled
+
+    // Now published → visible to anonymous viewers.
+    expect(await feedShowsPost(anon, 'e2e-mod', title)).toBe(true)
+  })
+
+  test('a held post is rejected and never shown publicly', async () => {
+    const title = `E2E Hold-Reject ${Date.now()}`
+    await submitFeedback(user, 'e2e-mod', title)
+
+    const row = await queueRow(admin, title)
+    await expect(row).toBeVisible({ timeout: 10000 })
+    await row.getByRole('button', { name: 'Reject' }).click()
+    await expect(row).toBeHidden({ timeout: 10000 }) // soft-deleted, leaves the queue
+
+    // Rejected → still hidden from the public feed.
+    expect(await feedShowsPost(anon, 'e2e-mod', title)).toBe(false)
+  })
+})

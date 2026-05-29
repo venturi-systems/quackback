@@ -13,7 +13,7 @@
  *   e2e-segview    all:segments[A]                                     (single-segment board)
  *   e2e-mixedseg   view/vote/comment:segments[A]  submit:team          (per-action independence)
  *   e2e-private    all:team                                            (team-only / hidden)
- *   e2e-mod        all:anonymous + moderation.anonPosts/comments:on    (held-for-review board)
+ *   e2e-mod        all:anonymous + moderation anon/signed posts + comments:on (held-for-review board)
  */
 import postgres from 'postgres'
 import { randomUUID } from 'crypto'
@@ -173,6 +173,7 @@ try {
       'E2E Moderated',
       access('anonymous', 'anonymous', 'anonymous', 'anonymous', [], {
         anonPosts: 'on',
+        signedPosts: 'on',
         comments: 'on',
       }),
     ],
