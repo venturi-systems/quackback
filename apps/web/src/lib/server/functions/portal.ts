@@ -544,43 +544,84 @@ export const fetchPublicRoadmapPosts = createServerFn({ method: 'GET' })
     }
   })
 
-export const getCommentsSectionDataFn = createServerFn({ method: 'GET' }).handler(async () => {
-  console.log(`[fn:portal] getCommentsSectionDataFn`)
-  try {
-    // Early bailout: no session cookie = anonymous user (skip DB queries)
-    if (!hasAuthCredentials()) {
-      return {
-        isMember: false,
-        canComment: false,
-        user: undefined,
+const getCommentsSectionDataSchema = z.object({ postId: z.string() })
+
+export const getCommentsSectionDataFn = createServerFn({ method: 'GET' })
+  .inputValidator(getCommentsSectionDataSchema)
+  .handler(async ({ data }) => {
+    console.log(`[fn:portal] getCommentsSectionDataFn: postId=${data.postId}`)
+    const denied = { isMember: false, isTeamMember: false, canComment: false, user: undefined }
+    try {
+      const postId = data.postId as PostId
+
+      // Portal-visibility gate: a caller who can't see the portal must not
+      // learn whether commenting is open. Mirrors getVoteSidebarDataFn.
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) return denied
+
+      const ctx = await getOptionalAuth()
+      const actor = await policyActorFromAuth(ctx)
+
+      // Per-post audience gate: a portal-granted caller can still be probing a
+      // post on a team-only / segment-restricted board. NotFound => denial.
+      try {
+        const { assertPostViewable } = await import('@/lib/server/domains/posts/post.access')
+        await assertPostViewable(postId, actor)
+      } catch (err) {
+        if (err instanceof Error && err.name === 'NotFoundError') return denied
+        throw err
       }
-    }
 
-    const ctx = await getOptionalAuth()
-    const isMember = !!(ctx?.user && ctx?.principal)
-    const isTeamMember =
-      isMember && (ctx.principal.role === 'admin' || ctx.principal.role === 'member')
+      // Per-board comment tier gate: a board can be public-to-view but
+      // authenticated-only-to-comment (the modern "Public" preset). Resolve
+      // board.access alongside the post and run canCreateComment so the UI
+      // renders the right CTA instead of letting the click learn the truth on
+      // submit. The workspace anonymous switch is composed below as a ceiling.
+      const { db, eq, and, isNull, posts, boards } = await import('@/lib/server/db')
+      const { canCreateComment } = await import('@/lib/server/policy')
+      const boardRow = await db
+        .select({ access: boards.access })
+        .from(posts)
+        .innerJoin(boards, eq(posts.boardId, boards.id))
+        .where(and(eq(posts.id, postId), isNull(posts.deletedAt), isNull(boards.deletedAt)))
+        .limit(1)
+      if (boardRow.length === 0) return denied
 
-    // Anonymous users can only comment if the workspace master switch
-    // is on. Collapsed from `features.anonymousCommenting` in migration
-    // 0084 — the per-board comment tier is the inner ceiling on top.
-    let canComment = isMember
-    if (isMember && ctx.principal.type === 'anonymous') {
-      const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
-      const config = await getPortalConfig()
-      canComment = config.features.allowAnonymous
-    }
+      // assertPostViewable already proved view-allowed for this actor; pass
+      // moderationState='published' so the inner view check is a no-op and the
+      // decision reflects the comment tier specifically. Comments-locked is
+      // handled by the component (lockedMessage), so it is not gated here.
+      const decision = canCreateComment(
+        actor,
+        { moderationState: 'published', principalId: null, isCommentsLocked: false },
+        { access: boardRow[0].access },
+        undefined
+      )
 
-    return {
-      isMember,
-      isTeamMember,
-      canComment,
-      user: isMember
-        ? { name: ctx.user.name, email: ctx.user.email, principalId: ctx.principal.id }
-        : undefined,
+      // Compose the workspace anonymous master switch (collapsed from the
+      // legacy anonymousCommenting flag in migration 0084) for anonymous /
+      // no-session viewers. The per-board tier is the inner ceiling.
+      let canComment = decision.allowed
+      if (actor.principalType !== 'user') {
+        const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+        const config = await getPortalConfig()
+        canComment = canComment && (config.features.allowAnonymous ?? false)
+      }
+
+      const isMember = !!(ctx?.user && ctx?.principal)
+      const isTeamMember =
+        isMember && (ctx.principal.role === 'admin' || ctx.principal.role === 'member')
+
+      return {
+        isMember,
+        isTeamMember,
+        canComment,
+        user: isMember
+          ? { name: ctx.user.name, email: ctx.user.email, principalId: ctx.principal.id }
+          : undefined,
+      }
+    } catch (error) {
+      console.error(`[fn:portal] getCommentsSectionDataFn failed:`, error)
+      throw error
     }
-  } catch (error) {
-    console.error(`[fn:portal] getCommentsSectionDataFn failed:`, error)
-    throw error
-  }
-})
+  })

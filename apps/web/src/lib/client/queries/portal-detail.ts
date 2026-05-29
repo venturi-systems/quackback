@@ -131,7 +131,7 @@ export const portalDetailQueries = {
   commentsSectionData: (postId: PostId) =>
     queryOptions({
       queryKey: ['comments-section', postId],
-      queryFn: () => getCommentsSectionDataFn(),
+      queryFn: () => getCommentsSectionDataFn({ data: { postId } }),
       staleTime: 60 * 1000, // 1min
     }),
 
