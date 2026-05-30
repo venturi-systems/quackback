@@ -229,7 +229,7 @@ import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-me
  * audience.kind='authenticated' and dodge the workspace requireApproval='anonymous'
  * moderation gate.
  */
-function normalizePrincipalType(raw: string | null | undefined): PrincipalType {
+export function normalizePrincipalType(raw: string | null | undefined): PrincipalType {
   if (raw === 'service') return 'service'
   if (raw === 'anonymous') return 'anonymous'
   return 'user'

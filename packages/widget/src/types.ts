@@ -32,6 +32,7 @@ export type Identity =
  * - `{ view: 'new-post', title?, body?, board? }` pre-fills the new-post form
  * - `{ view: 'changelog', entryId? }` opens the changelog, optionally to one entry
  * - `{ view: 'help', query? }` opens help, optionally with search prefilled
+ * - `{ view: 'chat' }` opens the live chat view
  * - `{ postId }` deep-links to a specific post
  * - `{ articleId }` deep-links to a help article
  *
@@ -45,6 +46,7 @@ export type OpenOptions =
   | { view: 'new-post'; title?: string; body?: string; board?: string }
   | { view: 'changelog'; entryId?: string }
   | { view: 'help'; query?: string }
+  | { view: 'chat' }
   | { postId: string }
   | { articleId: string }
 

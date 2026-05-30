@@ -44,6 +44,11 @@ vi.mock('@/lib/server/db', () => ({
   votes: { principalId: 'principalId', postId: 'postId', __name: 'votes' },
   comments: { principalId: 'principalId', id: 'id', __name: 'comments' },
   posts: { principalId: 'principalId', __name: 'posts' },
+  conversations: {
+    visitorPrincipalId: 'visitorPrincipalId',
+    __name: 'conversations',
+  },
+  chatMessages: { principalId: 'principalId', __name: 'chatMessages' },
   postSubscriptions: { principalId: 'principalId', postId: 'postId', __name: 'postSubscriptions' },
   inAppNotifications: {
     principalId: 'principalId',
@@ -129,6 +134,20 @@ describe('mergeAnonymousToIdentified', () => {
   it('transfers posts from anonymous to target principal', async () => {
     await mergeAnonymousToIdentified(defaultParams)
     expect(operations).toContain('update:posts')
+  })
+
+  it('re-points chat conversations + messages before deleting the principal', async () => {
+    // conversations.visitor_principal_id and chat_messages.principal_id are
+    // ON DELETE RESTRICT, so the anon-principal delete would throw if the chat
+    // rows were not transferred first. This pins that ordering.
+    await mergeAnonymousToIdentified(defaultParams)
+
+    expect(operations).toContain('update:conversations')
+    expect(operations).toContain('update:chatMessages')
+
+    const principalIdx = operations.indexOf('delete:principal')
+    expect(operations.indexOf('update:conversations')).toBeLessThan(principalIdx)
+    expect(operations.indexOf('update:chatMessages')).toBeLessThan(principalIdx)
   })
 
   it('transfers post subscriptions with conflict handling', async () => {

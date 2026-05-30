@@ -11,7 +11,7 @@ interface ServerTheme {
 
 interface ServerConfig {
   theme?: ServerTheme
-  tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean }
+  tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean; chat?: boolean }
   imageUploadsInWidget?: boolean
   hmacRequired?: boolean
 }

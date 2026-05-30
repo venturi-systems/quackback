@@ -177,6 +177,11 @@ export {
   changelogEntriesRelations,
   changelogEntryPosts,
   changelogEntryPostsRelations,
+  // Schema tables - live chat
+  conversations,
+  conversationsRelations,
+  chatMessages,
+  chatMessagesRelations,
   // Schema tables - notifications
   inAppNotifications,
   inAppNotificationsRelations,

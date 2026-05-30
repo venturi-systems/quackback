@@ -28,6 +28,10 @@ export const ID_PREFIXES = {
   roadmap: 'roadmap',
   changelog: 'changelog',
 
+  // Live chat
+  conversation: 'conversation',
+  chat_message: 'chat_msg',
+
   // Help center
   category: 'category',
   article: 'article',

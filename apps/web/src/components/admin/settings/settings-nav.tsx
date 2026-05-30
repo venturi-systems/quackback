@@ -32,7 +32,10 @@ interface NavSection {
   items: NavItem[]
 }
 
-export function buildNavSections(flags?: { helpCenter?: boolean }): NavSection[] {
+export function buildNavSections(flags?: {
+  helpCenter?: boolean
+  liveChat?: boolean
+}): NavSection[] {
   const sections: NavSection[] = [
     {
       label: 'Administration',
@@ -59,6 +62,15 @@ export function buildNavSections(flags?: { helpCenter?: boolean }): NavSection[]
         { label: 'Branding', to: '/admin/settings/branding', icon: PaintBrushIcon },
         { label: 'Portal', to: '/admin/settings/portal', icon: MegaphoneIcon },
         { label: 'Widget', to: '/admin/settings/portal-widget', icon: ChatBubbleLeftRightIcon },
+        ...(flags?.liveChat
+          ? [
+              {
+                label: 'Live Chat',
+                to: '/admin/settings/live-chat',
+                icon: ChatBubbleLeftRightIcon,
+              },
+            ]
+          : []),
       ],
     },
     {

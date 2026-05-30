@@ -716,6 +716,15 @@ const updateWidgetConfigSchema = z.object({
       feedback: z.boolean().optional(),
       changelog: z.boolean().optional(),
       help: z.boolean().optional(),
+      chat: z.boolean().optional(),
+    })
+    .optional(),
+  chat: z
+    .object({
+      enabled: z.boolean().optional(),
+      welcomeMessage: z.string().max(500).optional(),
+      offlineMessage: z.string().max(500).optional(),
+      teamName: z.string().max(80).optional(),
     })
     .optional(),
 })

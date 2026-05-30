@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useRouter, useRouterState, useRouteContext } from '@tanstack/react-router'
 import {
   ChatBubbleLeftIcon,
+  ChatBubbleLeftRightIcon,
   MapIcon,
   UsersIcon,
   ArrowRightOnRectangleIcon,
@@ -42,6 +43,7 @@ interface AdminSidebarProps {
 
 const navItems = [
   { label: 'Feedback', href: '/admin/feedback', icon: ChatBubbleLeftIcon },
+  { label: 'Chat', href: '/admin/chat', icon: ChatBubbleLeftRightIcon },
   { label: 'Roadmap', href: '/admin/roadmap', icon: MapIcon },
   { label: 'Changelog', href: '/admin/changelog', icon: DocumentTextIcon },
   { label: 'Help Center', href: '/admin/help-center', icon: BookOpenIcon },
@@ -93,11 +95,14 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
   const router = useRouter()
   const { session, settings } = useRouteContext({ from: '__root__' })
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const flags = settings?.featureFlags as { analytics?: boolean; helpCenter?: boolean } | undefined
+  const flags = settings?.featureFlags as
+    | { analytics?: boolean; helpCenter?: boolean; liveChat?: boolean }
+    | undefined
 
   const filteredNavItems = navItems.filter((item) => {
     if (item.href === '/admin/analytics') return flags?.analytics ?? false
     if (item.href === '/admin/help-center') return flags?.helpCenter ?? false
+    if (item.href === '/admin/chat') return flags?.liveChat ?? false
     return true
   })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)

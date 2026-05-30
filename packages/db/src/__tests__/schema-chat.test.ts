@@ -1,0 +1,106 @@
+import { describe, it, expect } from 'vitest'
+import { getTableName, getTableColumns } from 'drizzle-orm'
+import { getTableConfig } from 'drizzle-orm/pg-core'
+import { conversations, chatMessages } from '../schema/chat'
+import { CONVERSATION_STATUSES, CHAT_SENDER_TYPES } from '../types'
+
+describe('conversations schema', () => {
+  it('has correct table name', () => {
+    expect(getTableName(conversations)).toBe('conversations')
+  })
+
+  it('exposes the expected columns', () => {
+    const columns = Object.keys(getTableColumns(conversations))
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        'id',
+        'visitorPrincipalId',
+        'assignedAgentPrincipalId',
+        'status',
+        'subject',
+        'lastMessagePreview',
+        'lastMessageAt',
+        'visitorLastReadAt',
+        'agentLastReadAt',
+        'createdAt',
+        'updatedAt',
+      ])
+    )
+  })
+
+  it('visitorPrincipalId + lastMessageAt are not null; assignedAgent is nullable', () => {
+    const cols = getTableColumns(conversations)
+    expect(cols.visitorPrincipalId.notNull).toBe(true)
+    expect(cols.lastMessageAt.notNull).toBe(true)
+    expect(cols.assignedAgentPrincipalId.notNull).toBe(false)
+  })
+
+  it('status enum matches CONVERSATION_STATUSES and defaults to open', () => {
+    const cols = getTableColumns(conversations)
+    expect(cols.status.enumValues).toEqual([...CONVERSATION_STATUSES])
+    expect(cols.status.default).toBe('open')
+  })
+
+  it('restricts delete of the visitor principal so chat history is never orphaned', () => {
+    const cfg = getTableConfig(conversations)
+    const fk = cfg.foreignKeys.find((f) => {
+      const ref = f.reference()
+      return ref.columns.some((c) => c.name === 'visitor_principal_id')
+    })
+    expect(fk?.onDelete).toBe('restrict')
+  })
+})
+
+describe('chat_messages schema', () => {
+  it('has correct table name', () => {
+    expect(getTableName(chatMessages)).toBe('chat_messages')
+  })
+
+  it('exposes the expected columns', () => {
+    const columns = Object.keys(getTableColumns(chatMessages))
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        'id',
+        'conversationId',
+        'principalId',
+        'senderType',
+        'content',
+        'createdAt',
+        'updatedAt',
+        'deletedAt',
+        'deletedByPrincipalId',
+      ])
+    )
+  })
+
+  it('conversationId, principalId, senderType, content are not null', () => {
+    const cols = getTableColumns(chatMessages)
+    expect(cols.conversationId.notNull).toBe(true)
+    expect(cols.principalId.notNull).toBe(true)
+    expect(cols.senderType.notNull).toBe(true)
+    expect(cols.content.notNull).toBe(true)
+  })
+
+  it('senderType enum matches CHAT_SENDER_TYPES', () => {
+    const cols = getTableColumns(chatMessages)
+    expect(cols.senderType.enumValues).toEqual([...CHAT_SENDER_TYPES])
+  })
+
+  it('cascades delete from the parent conversation', () => {
+    const cfg = getTableConfig(chatMessages)
+    const fk = cfg.foreignKeys.find((f) => {
+      const ref = f.reference()
+      return getTableName(ref.foreignTable) === 'conversations'
+    })
+    expect(fk?.onDelete).toBe('cascade')
+  })
+
+  it('restricts delete of the author principal (merge must re-point first)', () => {
+    const cfg = getTableConfig(chatMessages)
+    const fk = cfg.foreignKeys.find((f) => {
+      const ref = f.reference()
+      return ref.columns.some((c) => c.name === 'principal_id')
+    })
+    expect(fk?.onDelete).toBe('restrict')
+  })
+})

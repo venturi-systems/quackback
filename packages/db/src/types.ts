@@ -12,6 +12,7 @@ import type {
 } from './schema/posts'
 import type { integrations } from './schema/integrations'
 import type { changelogEntries, changelogEntryPosts } from './schema/changelog'
+import type { conversations, chatMessages } from './schema/chat'
 import type { principal } from './schema/auth'
 
 // Status categories (defined here to avoid circular imports in tests)
@@ -231,6 +232,22 @@ export type NewPostNote = InferInsertModel<typeof postNotes>
 // Comment reaction types
 export type CommentReaction = InferSelectModel<typeof commentReactions>
 export type NewCommentReaction = InferInsertModel<typeof commentReactions>
+
+// Live chat conversation statuses — kept in sync with the conversations.status
+// column enum (schema.test.ts pins the match).
+export const CONVERSATION_STATUSES = ['open', 'snoozed', 'closed'] as const
+export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number]
+
+// Which side of a conversation a message came from — kept in sync with the
+// chat_messages.sender_type column enum.
+export const CHAT_SENDER_TYPES = ['visitor', 'agent'] as const
+export type ChatSenderType = (typeof CHAT_SENDER_TYPES)[number]
+
+// Live chat row types
+export type Conversation = InferSelectModel<typeof conversations>
+export type NewConversation = InferInsertModel<typeof conversations>
+export type ChatMessage = InferSelectModel<typeof chatMessages>
+export type NewChatMessage = InferInsertModel<typeof chatMessages>
 
 // Reaction emoji constants (client-safe)
 export const REACTION_EMOJIS = ['👍', '❤️', '🎉', '😄', '🤔', '👀'] as const

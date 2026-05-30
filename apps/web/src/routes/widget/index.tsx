@@ -13,6 +13,7 @@ import { WidgetChangelogDetail } from '@/components/widget/widget-changelog-deta
 import { WidgetHelp } from '@/components/widget/widget-help'
 import { WidgetHelpCategory } from '@/components/widget/widget-help-category'
 import { WidgetHelpDetail } from '@/components/widget/widget-help-detail'
+import { WidgetLiveChat } from '@/components/widget/widget-live-chat'
 import { useWidgetAuth } from '@/components/widget/widget-auth-provider'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { widgetQueryKeys, INITIAL_SESSION_VERSION } from '@/lib/client/hooks/use-widget-vote'
@@ -80,6 +81,11 @@ export const Route = createFileRoute('/widget/')({
           ((settings?.featureFlags as { helpCenter?: boolean } | undefined)?.helpCenter ?? false) &&
           (settings?.helpCenterConfig?.enabled ?? false) &&
           (settings?.publicWidgetConfig?.tabs?.help ?? false),
+        // Same triple-gate as help: experimental flag + chat enabled + tab on.
+        chat:
+          ((settings?.featureFlags as { liveChat?: boolean } | undefined)?.liveChat ?? false) &&
+          (settings?.publicWidgetConfig?.chat?.enabled ?? false) &&
+          (settings?.publicWidgetConfig?.tabs?.chat ?? false),
       },
       imageUploadsInWidget: settings?.publicWidgetConfig?.imageUploadsInWidget ?? true,
       defaultBoard: settings?.publicWidgetConfig?.defaultBoard,
@@ -105,6 +111,7 @@ type WidgetView =
   | 'help'
   | 'help-category'
   | 'help-detail'
+  | 'chat'
 
 interface SuccessPost {
   id: string
@@ -131,9 +138,21 @@ function WidgetPage() {
   const { isIdentified, ensureSession } = useWidgetAuth()
   const canVote = isIdentified || features.anonymousVoting
 
-  const initialTab: WidgetTab = tabs.feedback ? 'feedback' : tabs.changelog ? 'changelog' : 'help'
+  const initialTab: WidgetTab = tabs.feedback
+    ? 'feedback'
+    : tabs.changelog
+      ? 'changelog'
+      : tabs.help
+        ? 'help'
+        : 'chat'
   const [view, setView] = useState<WidgetView>(
-    initialTab === 'changelog' ? 'changelog' : initialTab === 'help' ? 'help' : 'home'
+    initialTab === 'changelog'
+      ? 'changelog'
+      : initialTab === 'help'
+        ? 'help'
+        : initialTab === 'chat'
+          ? 'chat'
+          : 'home'
   )
   const [activeTab, setActiveTab] = useState<WidgetTab>(initialTab)
   const [successPost, setSuccessPost] = useState<SuccessPost | null>(null)
@@ -166,11 +185,14 @@ function WidgetPage() {
       } else if (opts.view === 'help' && tabs.help) {
         setActiveTab('help')
         setView('help')
+      } else if ((opts.view === 'chat' || opts.view === 'live-chat') && tabs.chat) {
+        setActiveTab('chat')
+        setView('chat')
       }
     }
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [tabs.changelog, tabs.help])
+  }, [tabs.changelog, tabs.help, tabs.chat])
 
   const handlePostCreated = useCallback((post: SuccessPost) => {
     setCreatedPosts((prev) => [
@@ -225,6 +247,8 @@ function WidgetPage() {
     } else if (tab === 'changelog') {
       setSelectedChangelogId(null)
       setView('changelog')
+    } else if (tab === 'chat') {
+      setView('chat')
     } else {
       setSelectedHelpSlug(null)
       setSelectedCategory(null)
@@ -256,7 +280,9 @@ function WidgetPage() {
   }, [])
 
   const shellOnBack =
-    view !== 'home' && view !== 'changelog' && view !== 'help' ? handleBack : undefined
+    view !== 'home' && view !== 'changelog' && view !== 'help' && view !== 'chat'
+      ? handleBack
+      : undefined
 
   return (
     <WidgetShell
@@ -269,6 +295,8 @@ function WidgetPage() {
       portalOrigin={portalOrigin}
     >
       {view === 'changelog' && <WidgetChangelog onEntrySelect={handleChangelogEntrySelect} />}
+
+      {view === 'chat' && <WidgetLiveChat />}
 
       {view === 'changelog-detail' && selectedChangelogId && (
         <WidgetChangelogDetail entryId={selectedChangelogId} />

@@ -1,7 +1,12 @@
 import { randomBytes } from 'crypto'
 import { db, eq, settings } from '@/lib/server/db'
-import type { WidgetConfig, PublicWidgetConfig, UpdateWidgetConfigInput } from './settings.types'
-import { DEFAULT_WIDGET_CONFIG } from './settings.types'
+import type {
+  WidgetConfig,
+  PublicWidgetConfig,
+  UpdateWidgetConfigInput,
+  LiveChatConfig,
+} from './settings.types'
+import { DEFAULT_WIDGET_CONFIG, DEFAULT_LIVE_CHAT_CONFIG } from './settings.types'
 import {
   requireSettings,
   wrapDbError,
@@ -49,11 +54,28 @@ export async function getPublicWidgetConfig(): Promise<PublicWidgetConfig> {
       tabs: config.tabs,
       hmacRequired: config.identifyVerification ?? false,
       imageUploadsInWidget: config.imageUploadsInWidget ?? true,
+      // Chat fields are all client-safe (greeting/offline copy + team name).
+      chat: config.chat ?? DEFAULT_LIVE_CHAT_CONFIG,
     }
   } catch (error) {
     console.error(`[domain:settings] getPublicWidgetConfig failed:`, error)
     wrapDbError('fetch public widget config', error)
   }
+}
+
+/**
+ * Resolve the live chat config, deep-merged over defaults so callers always see
+ * welcome/offline copy even for tenants whose stored config predates chat.
+ */
+export async function getLiveChatConfig(): Promise<LiveChatConfig> {
+  const widget = await getWidgetConfig()
+  return { ...DEFAULT_LIVE_CHAT_CONFIG, ...(widget.chat ?? {}) }
+}
+
+/** Whether live chat is enabled for this workspace (master widget + chat toggle). */
+export async function isLiveChatEnabled(): Promise<boolean> {
+  const widget = await getWidgetConfig()
+  return Boolean(widget.enabled && widget.chat?.enabled)
 }
 
 /** Generate a new widget secret: 'wgt_' + 32 random bytes (64 hex chars) */

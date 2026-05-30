@@ -389,6 +389,22 @@ export interface UpdateDeveloperConfigInput {
  * Controls the embeddable feedback widget behavior
  * Note: widgetSecret is stored in its own DB column, NOT here
  */
+/**
+ * Live chat settings (sub-section of WidgetConfig). All fields are client-safe
+ * — they're projected verbatim into PublicWidgetConfig and rendered in the
+ * widget, so do not add secrets or internal routing rules here.
+ */
+export interface LiveChatConfig {
+  /** Master toggle for the chat tab + endpoints. */
+  enabled: boolean
+  /** Greeting shown when a visitor opens chat with no history. */
+  welcomeMessage?: string
+  /** Shown when no agents are currently available to reply. */
+  offlineMessage?: string
+  /** Heading shown for the chat tab/view (falls back to the workspace name). */
+  teamName?: string
+}
+
 export interface WidgetConfig {
   enabled: boolean
   /** Board slug to filter/default to */
@@ -402,9 +418,12 @@ export interface WidgetConfig {
     feedback?: boolean
     changelog?: boolean
     help?: boolean
+    chat?: boolean
   }
   /** Whether authenticated widget users can upload images in feedback submissions */
   imageUploadsInWidget?: boolean
+  /** Live chat settings */
+  chat?: LiveChatConfig
 }
 
 /**
@@ -413,10 +432,16 @@ export interface WidgetConfig {
  */
 export type PublicWidgetConfig = Pick<
   WidgetConfig,
-  'enabled' | 'defaultBoard' | 'position' | 'tabs' | 'imageUploadsInWidget'
+  'enabled' | 'defaultBoard' | 'position' | 'tabs' | 'imageUploadsInWidget' | 'chat'
 > & {
   /** Whether verified identity is required (derived from identifyVerification) */
   hmacRequired?: boolean
+}
+
+export const DEFAULT_LIVE_CHAT_CONFIG: LiveChatConfig = {
+  enabled: false,
+  welcomeMessage: 'Hi! 👋 How can we help you today?',
+  offlineMessage: "We're away right now — leave a message and we'll get back to you by email.",
 }
 
 export const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
@@ -425,7 +450,9 @@ export const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
   tabs: {
     feedback: true,
     changelog: false,
+    chat: false,
   },
+  chat: DEFAULT_LIVE_CHAT_CONFIG,
 }
 
 /**
@@ -440,8 +467,10 @@ export interface UpdateWidgetConfigInput {
     feedback?: boolean
     changelog?: boolean
     help?: boolean
+    chat?: boolean
   }
   imageUploadsInWidget?: boolean
+  chat?: Partial<LiveChatConfig>
 }
 
 // =============================================================================
@@ -617,12 +646,15 @@ export interface FeatureFlags {
   helpCenter: boolean
   /** AI-powered feedback extraction from external sources */
   aiFeedbackExtraction: boolean
+  /** Live chat in the widget + agent inbox */
+  liveChat: boolean
 }
 
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   analytics: false,
   helpCenter: false,
   aiFeedbackExtraction: false,
+  liveChat: false,
 }
 
 /**
@@ -644,5 +676,10 @@ export const FEATURE_FLAG_REGISTRY: Record<
     label: 'AI Feedback Extraction',
     description:
       'Automatically extract and categorize feedback from connected sources using large language models.',
+  },
+  liveChat: {
+    label: 'Live Chat',
+    description:
+      'Let visitors message your team in real time from the widget, with an agent inbox in the admin panel.',
   },
 }

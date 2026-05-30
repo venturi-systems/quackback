@@ -52,6 +52,10 @@ function wireGracefulShutdown(): void {
           if (r.status === 'rejected') console.error('[Shutdown] close error:', r.reason)
         }
 
+        // Drain the live-chat pub/sub subscriber connection before the
+        // shared client closes — it's a separate long-lived socket.
+        await import('./realtime/pubsub').then(({ closeSubscriber }) => closeSubscriber())
+
         // After all queues + workers have closed, quit the shared
         // IORedis client so we don't leave a half-open socket behind.
         await import('./queue/redis-config').then(({ closeQueueRedis }) => closeQueueRedis())

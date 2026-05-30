@@ -5,6 +5,7 @@ import {
   LightBulbIcon,
   NewspaperIcon,
   BookOpenIcon,
+  ChatBubbleLeftRightIcon,
   ArrowTopRightOnSquareIcon,
 } from '@heroicons/react/24/solid'
 import { FormattedMessage, useIntl } from 'react-intl'
@@ -15,7 +16,7 @@ import { getWidgetAuthHeaders, generateOneTimeToken } from '@/lib/client/widget-
 import { sendToHost } from '@/lib/client/widget-bridge'
 import { useWidgetAuth } from './widget-auth-provider'
 
-export type WidgetTab = 'feedback' | 'changelog' | 'help'
+export type WidgetTab = 'feedback' | 'changelog' | 'help' | 'chat'
 
 const TAB_CONFIG: {
   tab: WidgetTab
@@ -36,6 +37,12 @@ const TAB_CONFIG: {
     defaultLabel: 'Changelog',
   },
   { tab: 'help', icon: BookOpenIcon, labelId: 'widget.shell.tab.help', defaultLabel: 'Help' },
+  {
+    tab: 'chat',
+    icon: ChatBubbleLeftRightIcon,
+    labelId: 'widget.shell.tab.chat',
+    defaultLabel: 'Chat',
+  },
 ]
 
 interface PortalAccessProps {
@@ -50,7 +57,7 @@ interface WidgetShellProps {
   activeTab: WidgetTab
   onTabChange: (tab: WidgetTab) => void
   onBack?: () => void
-  enabledTabs?: { feedback?: boolean; changelog?: boolean; help?: boolean }
+  enabledTabs?: { feedback?: boolean; changelog?: boolean; help?: boolean; chat?: boolean }
   /** Portal access config used to decide whether to show the "Go to portal" CTA. */
   portalAccess?: PortalAccessProps
   /**
@@ -69,15 +76,18 @@ export function WidgetShell({
   activeTab,
   onTabChange,
   onBack,
-  enabledTabs = { feedback: true, changelog: false, help: false },
+  enabledTabs = { feedback: true, changelog: false, help: false, chat: false },
   portalAccess,
   portalOrigin,
   children,
 }: WidgetShellProps) {
   const intl = useIntl()
-  const enabledCount = [enabledTabs.feedback, enabledTabs.changelog, enabledTabs.help].filter(
-    Boolean
-  ).length
+  const enabledCount = [
+    enabledTabs.feedback,
+    enabledTabs.changelog,
+    enabledTabs.help,
+    enabledTabs.chat,
+  ].filter(Boolean).length
   const showTabBar = enabledCount > 1
   const { user, isIdentified, hmacRequired, closeWidget } = useWidgetAuth()
   const isNative =
@@ -164,6 +174,8 @@ export function WidgetShell({
                 />
               ) : activeTab === 'help' ? (
                 <FormattedMessage id="widget.shell.heading.help" defaultMessage="Help Center" />
+              ) : activeTab === 'chat' ? (
+                <FormattedMessage id="widget.shell.heading.chat" defaultMessage="Chat with us" />
               ) : (
                 <FormattedMessage id="widget.shell.heading.changelog" defaultMessage="What's new" />
               )}
