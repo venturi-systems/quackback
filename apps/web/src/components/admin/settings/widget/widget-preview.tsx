@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   ChevronUpIcon,
   MagnifyingGlassIcon,
@@ -6,35 +6,50 @@ import {
   LightBulbIcon,
   NewspaperIcon,
   BookOpenIcon,
+  ChatBubbleLeftRightIcon,
+  PaperAirplaneIcon,
+  PaperClipIcon,
 } from '@heroicons/react/24/solid'
 import { cn } from '@/lib/shared/utils'
 
-interface WidgetPreviewProps {
-  position: 'bottom-right' | 'bottom-left'
-  tabs?: { feedback: boolean; changelog: boolean; help?: boolean }
+type PreviewTab = 'feedback' | 'changelog' | 'help' | 'chat'
+
+// Tab bar order + icons/labels — mirrors TAB_CONFIG in the real widget shell
+// (components/widget/widget-shell.tsx) so the preview renders the same tabs in
+// the same order as the embedded widget.
+const TAB_ORDER: PreviewTab[] = ['feedback', 'changelog', 'help', 'chat']
+const TAB_META: Record<PreviewTab, { icon: typeof LightBulbIcon; label: string }> = {
+  feedback: { icon: LightBulbIcon, label: 'Feedback' },
+  changelog: { icon: NewspaperIcon, label: 'Changelog' },
+  help: { icon: BookOpenIcon, label: 'Help' },
+  chat: { icon: ChatBubbleLeftRightIcon, label: 'Chat' },
 }
 
-type PreviewTab = 'feedback' | 'changelog' | 'help'
+interface WidgetPreviewProps {
+  position: 'bottom-right' | 'bottom-left'
+  tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean; chat?: boolean }
+  /** Live chat config, surfaced so the chat view mirrors the real widget. */
+  chat?: { teamName?: string; welcomeMessage?: string }
+}
 
 export function WidgetPreview({
   position,
-  tabs = { feedback: true, changelog: false, help: false },
+  tabs = { feedback: true, changelog: false, help: false, chat: false },
+  chat,
 }: WidgetPreviewProps) {
   const [isOpen, setIsOpen] = useState(true)
-  const enabledCount = [tabs.feedback, tabs.changelog, tabs.help].filter(Boolean).length
-  const showTabBar = enabledCount > 1
-  const initialTab: PreviewTab = tabs.feedback ? 'feedback' : tabs.changelog ? 'changelog' : 'help'
-  const [activeTab, setActiveTab] = useState<PreviewTab>(initialTab)
+  const enabledTabs = TAB_ORDER.filter((t) => Boolean(tabs[t]))
+  const showTabBar = enabledTabs.length > 1
 
-  // Reset to a valid tab when config changes
-  useEffect(() => {
-    if (activeTab === 'feedback' && !tabs.feedback)
-      setActiveTab(tabs.changelog ? 'changelog' : 'help')
-    else if (activeTab === 'changelog' && !tabs.changelog)
-      setActiveTab(tabs.feedback ? 'feedback' : 'help')
-    else if (activeTab === 'help' && !tabs.help)
-      setActiveTab(tabs.feedback ? 'feedback' : 'changelog')
-  }, [tabs.feedback, tabs.changelog, tabs.help, activeTab])
+  // Active tab is derived: honour the user's selection while it's still enabled,
+  // otherwise fall back to the first enabled tab. Deriving (rather than syncing
+  // via an effect) means it can never lag, drift, or loop when the enabled set
+  // changes as tabs are toggled in the controls.
+  const [requestedTab, setRequestedTab] = useState<PreviewTab | null>(null)
+  const activeTab: PreviewTab =
+    requestedTab && enabledTabs.includes(requestedTab)
+      ? requestedTab
+      : (enabledTabs[0] ?? 'feedback')
 
   return (
     <div className="relative rounded-lg border border-border bg-muted/30 overflow-hidden h-[520px]">
@@ -57,7 +72,9 @@ export function WidgetPreview({
                 ? 'Share your ideas'
                 : activeTab === 'help'
                   ? 'Help Center'
-                  : "What's new"}
+                  : activeTab === 'chat'
+                    ? 'Chat with us'
+                    : "What's new"}
             </p>
             <button
               type="button"
@@ -104,6 +121,8 @@ export function WidgetPreview({
                   <MockHelpCategory icon="🔧" title="Troubleshooting" articles={5} />
                 </div>
               </>
+            ) : activeTab === 'chat' ? (
+              <MockChatView teamName={chat?.teamName} welcomeMessage={chat?.welcomeMessage} />
             ) : (
               <div className="space-y-1 pt-0.5">
                 <MockChangelogEntry
@@ -134,51 +153,26 @@ export function WidgetPreview({
           <div className="border-t border-border shrink-0">
             {showTabBar && (
               <div className="flex">
-                {tabs.feedback && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('feedback')}
-                    className={cn(
-                      'flex-1 flex flex-col items-center gap-0.5 py-1.5 transition-colors',
-                      activeTab === 'feedback'
-                        ? 'text-primary'
-                        : 'text-muted-foreground/60 hover:text-muted-foreground'
-                    )}
-                  >
-                    <LightBulbIcon className="w-3.5 h-3.5" />
-                    <span className="text-[8px] font-medium">Feedback</span>
-                  </button>
-                )}
-                {tabs.changelog && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('changelog')}
-                    className={cn(
-                      'flex-1 flex flex-col items-center gap-0.5 py-1.5 transition-colors',
-                      activeTab === 'changelog'
-                        ? 'text-primary'
-                        : 'text-muted-foreground/60 hover:text-muted-foreground'
-                    )}
-                  >
-                    <NewspaperIcon className="w-3.5 h-3.5" />
-                    <span className="text-[8px] font-medium">Changelog</span>
-                  </button>
-                )}
-                {tabs.help && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('help')}
-                    className={cn(
-                      'flex-1 flex flex-col items-center gap-0.5 py-1.5 transition-colors',
-                      activeTab === 'help'
-                        ? 'text-primary'
-                        : 'text-muted-foreground/60 hover:text-muted-foreground'
-                    )}
-                  >
-                    <BookOpenIcon className="w-3.5 h-3.5" />
-                    <span className="text-[8px] font-medium">Help</span>
-                  </button>
-                )}
+                {enabledTabs.map((t) => {
+                  const { icon: Icon, label } = TAB_META[t]
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-label={`${label} tab`}
+                      onClick={() => setRequestedTab(t)}
+                      className={cn(
+                        'flex-1 flex flex-col items-center gap-0.5 py-1.5 transition-colors',
+                        activeTab === t
+                          ? 'text-primary'
+                          : 'text-muted-foreground/60 hover:text-muted-foreground'
+                      )}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span className="text-[8px] font-medium">{label}</span>
+                    </button>
+                  )
+                })}
               </div>
             )}
             <div className={cn('text-center', showTabBar ? 'pb-0.5' : 'py-1')}>
@@ -287,6 +281,71 @@ function MockHelpCategory({
       <div className="text-xs mb-0.5">{icon}</div>
       <p className="text-[9px] font-semibold text-foreground line-clamp-1">{title}</p>
       <p className="text-[7px] text-muted-foreground/50 mt-0.5">{articles} articles</p>
+    </div>
+  )
+}
+
+function MockChatView({
+  teamName,
+  welcomeMessage,
+}: {
+  teamName?: string
+  welcomeMessage?: string
+}) {
+  // Faithful mini of widget-live-chat.tsx: an always-on presence strip, the
+  // greeting as an agent bubble authored by the (optional) team name, and the
+  // composer. When no welcome message is configured the real widget shows the
+  // empty-state prompt rather than a greeting bubble — mirror that here.
+  const author = teamName?.trim()
+  const greeting = welcomeMessage?.trim()
+  return (
+    <div className="flex flex-col h-full">
+      {/* Presence strip — the real widget always renders this availability row */}
+      <div className="flex items-center gap-1.5 pb-1.5 mb-1.5 border-b border-border/40 shrink-0">
+        <span className="size-1.5 rounded-full bg-emerald-500" aria-hidden />
+        <span className="text-[8px] text-muted-foreground">We&apos;re online</span>
+      </div>
+
+      <div className="flex-1 overflow-hidden">
+        {greeting ? (
+          <div className="space-y-1.5">
+            {/* Agent greeting */}
+            <div className="flex items-end gap-1">
+              <div className="w-4 h-4 rounded-full bg-muted-foreground/20 shrink-0" />
+              <div className="flex flex-col items-start max-w-[80%]">
+                {author && (
+                  <span className="text-[7px] text-muted-foreground/60 mb-0.5 px-0.5">
+                    {author}
+                  </span>
+                )}
+                <div className="rounded-lg rounded-bl-sm bg-muted px-2 py-1 text-[9px] text-foreground leading-snug line-clamp-3">
+                  {greeting}
+                </div>
+              </div>
+            </div>
+            {/* Visitor reply — illustrative, shows the two-sided bubble styling */}
+            <div className="flex items-end gap-1 flex-row-reverse">
+              <div className="rounded-lg rounded-br-sm bg-primary px-2 py-1 text-[9px] text-primary-foreground leading-snug max-w-[80%]">
+                Sounds great, thanks!
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center px-3">
+            <ChatBubbleLeftRightIcon className="w-5 h-5 text-muted-foreground/30 mb-1" />
+            <p className="text-[9px] font-medium text-muted-foreground/70">
+              Send us a message and we&apos;ll get back to you.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Composer — attach, message field, send (mirrors the real composer) */}
+      <div className="mt-1.5 flex items-center gap-1 rounded-lg border border-border bg-muted/30 px-2 py-1.5 shrink-0">
+        <PaperClipIcon className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+        <span className="flex-1 text-[9px] text-muted-foreground/60">Type your message…</span>
+        <PaperAirplaneIcon className="w-3 h-3 text-primary/70 shrink-0" />
+      </div>
     </div>
   )
 }

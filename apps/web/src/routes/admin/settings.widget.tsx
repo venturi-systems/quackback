@@ -1,6 +1,12 @@
-import { createFileRoute, useRouter, useRouteContext } from '@tanstack/react-router'
+import {
+  createFileRoute,
+  useRouter,
+  useRouteContext,
+  Link,
+  type LinkProps,
+} from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { useState, useTransition, useMemo, useEffect } from 'react'
+import { useState, useTransition, useMemo, useEffect, type ReactNode } from 'react'
 import {
   ChatBubbleLeftRightIcon,
   ArrowPathIcon,
@@ -96,6 +102,7 @@ export const Route = createFileRoute('/admin/settings/widget')({
       queryClient.ensureQueryData(settingsQueries.widgetConfig()),
       queryClient.ensureQueryData(settingsQueries.widgetSecret()),
       queryClient.ensureQueryData(adminQueries.boards()),
+      queryClient.ensureQueryData(settingsQueries.helpCenterConfig()),
     ])
 
     return {}
@@ -107,18 +114,40 @@ function WidgetSettingsPage() {
   const widgetConfigQuery = useSuspenseQuery(settingsQueries.widgetConfig())
   const widgetSecretQuery = useSuspenseQuery(settingsQueries.widgetSecret())
   const boardsQuery = useSuspenseQuery(adminQueries.boards())
-  const { baseUrl } = useRouteContext({ from: '__root__' })
+  const helpCenterConfigQuery = useSuspenseQuery(settingsQueries.helpCenterConfig())
+  const { baseUrl, settings } = useRouteContext({ from: '__root__' })
 
   const config = widgetConfigQuery.data
 
-  // Lift appearance state so the preview can react to changes
+  // A tab is only "available" when its experimental feature flag is on, and
+  // only "enabled" (active in the widget) when its feature is also turned on —
+  // mirroring the runtime triple-gate (flag → feature enabled → tab on) so the
+  // preview can never advertise a tab the live widget wouldn't render.
+  const flags = settings?.featureFlags as { liveChat?: boolean; helpCenter?: boolean } | undefined
+  const helpAvailable = flags?.helpCenter ?? false
+  const chatAvailable = flags?.liveChat ?? false
+  const helpEnabled = helpAvailable && (helpCenterConfigQuery.data.enabled ?? false)
+  const chatEnabled = chatAvailable && (config.chat?.enabled ?? false)
+
+  // Lift appearance state so the preview can react to changes. `rawTabs` holds
+  // the stored per-tab toggles; the preview gates help/chat by their enabled
+  // state below so it shows exactly what the embedded widget would.
   const [position, setPosition] = useState<'bottom-right' | 'bottom-left'>(
     (config.position as 'bottom-right' | 'bottom-left') ?? 'bottom-right'
   )
-  const [previewTabs, setPreviewTabs] = useState({
+  const [rawTabs, setRawTabs] = useState({
     feedback: config.tabs?.feedback ?? true,
     changelog: config.tabs?.changelog ?? false,
+    help: config.tabs?.help ?? false,
+    chat: config.tabs?.chat ?? false,
   })
+
+  const previewTabs = {
+    feedback: rawTabs.feedback,
+    changelog: rawTabs.changelog,
+    help: rawTabs.help && helpEnabled,
+    chat: rawTabs.chat && chatEnabled,
+  }
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -141,11 +170,19 @@ function WidgetSettingsPage() {
             boards={boardsQuery.data}
             position={position}
             onPositionChange={setPosition}
-            onTabsChange={setPreviewTabs}
+            onTabsChange={setRawTabs}
+            helpAvailable={helpAvailable}
+            helpEnabled={helpEnabled}
+            chatAvailable={chatAvailable}
+            chatEnabled={chatEnabled}
           />
         </BrandingControlsPanel>
         <BrandingPreviewPanel label="Preview">
-          <WidgetPreview position={position} tabs={previewTabs} />
+          <WidgetPreview
+            position={position}
+            tabs={previewTabs}
+            chat={{ teamName: config.chat?.teamName, welcomeMessage: config.chat?.welcomeMessage }}
+          />
         </BrandingPreviewPanel>
       </BrandingLayout>
 
@@ -201,30 +238,99 @@ function WidgetToggle({ initialEnabled }: { initialEnabled: boolean }) {
   )
 }
 
+type WidgetTabs = { feedback: boolean; changelog: boolean; help: boolean; chat: boolean }
+
+function FeatureDisabledHint({ to, label }: { to: LinkProps['to']; label: string }) {
+  return (
+    <p className="text-xs text-muted-foreground mt-1">
+      Enable on{' '}
+      <Link to={to} className="text-primary hover:underline">
+        {label}
+      </Link>
+    </p>
+  )
+}
+
+function TabToggleRow({
+  id,
+  label,
+  description,
+  checked,
+  saving,
+  disabled,
+  onChange,
+  hint,
+}: {
+  id: string
+  label: string
+  description: string
+  checked: boolean
+  saving: boolean
+  disabled: boolean
+  onChange: (checked: boolean) => void
+  hint?: ReactNode
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+      <div>
+        <Label htmlFor={id} className="text-xs font-medium cursor-pointer">
+          {label}
+        </Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+        {hint}
+      </div>
+      <div className="flex items-center gap-2">
+        <InlineSpinner visible={saving} />
+        <Switch
+          id={id}
+          checked={checked}
+          onCheckedChange={onChange}
+          disabled={disabled}
+          aria-label={`${label} tab`}
+        />
+      </div>
+    </div>
+  )
+}
+
 function WidgetAppearanceControls({
   config,
   boards,
   position,
   onPositionChange,
   onTabsChange,
+  helpAvailable,
+  helpEnabled,
+  chatAvailable,
+  chatEnabled,
 }: {
   config: {
     defaultBoard?: string
     position?: string
-    tabs?: { feedback?: boolean; changelog?: boolean }
+    tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean; chat?: boolean }
   }
   boards: { id: string; name: string; slug: string }[]
   position: 'bottom-right' | 'bottom-left'
   onPositionChange: (val: 'bottom-right' | 'bottom-left') => void
-  onTabsChange: (tabs: { feedback: boolean; changelog: boolean }) => void
+  onTabsChange: (tabs: WidgetTabs) => void
+  /** Help Center experimental flag is on (the row is shown). */
+  helpAvailable: boolean
+  /** Help Center is flag-on AND turned on (the toggle is interactive). */
+  helpEnabled: boolean
+  /** Live Chat experimental flag is on (the row is shown). */
+  chatAvailable: boolean
+  /** Live Chat is flag-on AND turned on (the toggle is interactive). */
+  chatEnabled: boolean
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [savingField, setSavingField] = useState<string | null>(null)
   const [defaultBoard, setDefaultBoard] = useState(config.defaultBoard ?? '')
-  const [widgetTabs, setWidgetTabs] = useState({
+  const [widgetTabs, setWidgetTabs] = useState<WidgetTabs>({
     feedback: config.tabs?.feedback ?? true,
     changelog: config.tabs?.changelog ?? false,
+    help: config.tabs?.help ?? false,
+    chat: config.tabs?.chat ?? false,
   })
 
   async function save(field: string, updates: Record<string, unknown>) {
@@ -238,6 +344,26 @@ function WidgetAppearanceControls({
   }
 
   const isBusy = savingField !== null || isPending
+
+  // Feedback and Changelog have no feature gate, so they are the widget's
+  // floor: keep at least one of them on. This guarantees the widget always has
+  // ≥1 visible tab even if the Help Center / Live Chat feature is later disabled
+  // on its own page (which would otherwise zero out a help/chat-only tab set and
+  // leave the widget with no navigable tab). Help and Chat are additive.
+  const coreCount = (t: WidgetTabs) => Number(t.feedback) + Number(t.changelog)
+
+  function toggleTab(key: keyof WidgetTabs, checked: boolean) {
+    const next = { ...widgetTabs, [key]: checked }
+    if (coreCount(next) === 0) return // never drop the last core tab
+    setWidgetTabs(next)
+    onTabsChange(next)
+    save(`tab-${key}`, { tabs: next })
+  }
+
+  // A core tab is locked when it is the only core tab still on.
+  const lastCore = (on: boolean) => on && coreCount(widgetTabs) === 1
+  const helpOn = widgetTabs.help && helpEnabled
+  const chatOn = widgetTabs.chat && chatEnabled
 
   return (
     <>
@@ -282,57 +408,62 @@ function WidgetAppearanceControls({
         </div>
 
         <div className="space-y-3">
-          <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
-            <div>
-              <Label htmlFor="tab-feedback" className="text-xs font-medium cursor-pointer">
-                Feedback
-              </Label>
-              <p className="text-xs text-muted-foreground">Search, vote, and submit ideas</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <InlineSpinner visible={savingField === 'tab-feedback'} />
-              <Switch
-                id="tab-feedback"
-                checked={widgetTabs.feedback}
-                onCheckedChange={(checked) => {
-                  if (!checked && !widgetTabs.changelog) return
-                  const next = { ...widgetTabs, feedback: checked }
-                  setWidgetTabs(next)
-                  onTabsChange(next)
-                  save('tab-feedback', { tabs: next })
-                }}
-                disabled={isBusy || (widgetTabs.feedback && !widgetTabs.changelog)}
-                aria-label="Feedback tab"
-              />
-            </div>
-          </div>
+          <TabToggleRow
+            id="tab-feedback"
+            label="Feedback"
+            description="Search, vote, and submit ideas"
+            checked={widgetTabs.feedback}
+            saving={savingField === 'tab-feedback'}
+            disabled={isBusy || lastCore(widgetTabs.feedback)}
+            onChange={(checked) => toggleTab('feedback', checked)}
+          />
 
-          <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
-            <div>
-              <Label htmlFor="tab-changelog" className="text-xs font-medium cursor-pointer">
-                Changelog
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Show product updates and shipped features
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <InlineSpinner visible={savingField === 'tab-changelog'} />
-              <Switch
-                id="tab-changelog"
-                checked={widgetTabs.changelog}
-                onCheckedChange={(checked) => {
-                  if (!checked && !widgetTabs.feedback) return
-                  const next = { ...widgetTabs, changelog: checked }
-                  setWidgetTabs(next)
-                  onTabsChange(next)
-                  save('tab-changelog', { tabs: next })
-                }}
-                disabled={isBusy || (widgetTabs.changelog && !widgetTabs.feedback)}
-                aria-label="Changelog tab"
-              />
-            </div>
-          </div>
+          <TabToggleRow
+            id="tab-changelog"
+            label="Changelog"
+            description="Show product updates and shipped features"
+            checked={widgetTabs.changelog}
+            saving={savingField === 'tab-changelog'}
+            disabled={isBusy || lastCore(widgetTabs.changelog)}
+            onChange={(checked) => toggleTab('changelog', checked)}
+          />
+
+          {helpAvailable && (
+            <TabToggleRow
+              id="tab-help"
+              label="Help"
+              description="Let users search your knowledge base"
+              checked={helpOn}
+              saving={savingField === 'tab-help'}
+              disabled={isBusy || !helpEnabled}
+              onChange={(checked) => toggleTab('help', checked)}
+              hint={
+                helpEnabled ? undefined : (
+                  <FeatureDisabledHint
+                    to="/admin/settings/help-center"
+                    label="the Help Center page"
+                  />
+                )
+              }
+            />
+          )}
+
+          {chatAvailable && (
+            <TabToggleRow
+              id="tab-chat"
+              label="Chat"
+              description="Let users message your team in real time"
+              checked={chatOn}
+              saving={savingField === 'tab-chat'}
+              disabled={isBusy || !chatEnabled}
+              onChange={(checked) => toggleTab('chat', checked)}
+              hint={
+                chatEnabled ? undefined : (
+                  <FeatureDisabledHint to="/admin/settings/live-chat" label="the Live Chat page" />
+                )
+              }
+            />
+          )}
         </div>
       </div>
 
