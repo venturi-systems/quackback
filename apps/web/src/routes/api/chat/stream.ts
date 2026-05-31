@@ -34,6 +34,9 @@ interface StreamPrincipal {
   principalId: PrincipalId
   role: string
   type: string
+  /** How the principal was authenticated: a minted token (portal access already
+   *  enforced at mint) vs a raw session cookie (must be re-gated here). */
+  via: 'token' | 'session'
 }
 
 /** Resolve the principal for a stream from a signed token (widget) or the
@@ -43,7 +46,7 @@ async function resolveStreamPrincipal(request: Request): Promise<StreamPrincipal
   const tokenPrincipalId = verifyStreamToken(url.searchParams.get('token'))
   if (tokenPrincipalId) {
     const row = await db.query.principal.findFirst({ where: eq(principal.id, tokenPrincipalId) })
-    if (row) return { principalId: row.id, role: row.role, type: row.type }
+    if (row) return { principalId: row.id, role: row.role, type: row.type, via: 'token' }
     return null
   }
 
@@ -53,7 +56,7 @@ async function resolveStreamPrincipal(request: Request): Promise<StreamPrincipal
     where: eq(principal.userId, session.user.id as never),
   })
   if (!row) return null
-  return { principalId: row.id, role: row.role, type: row.type }
+  return { principalId: row.id, role: row.role, type: row.type, via: 'session' }
 }
 
 function sse(event: string, data: unknown, id?: string): string {
@@ -103,6 +106,17 @@ export const Route = createFileRoute('/api/chat/stream')({
           channels.push(CHAT_INBOX_CHANNEL)
         } else if (conversationIdParam) {
           const conversationId = conversationIdParam as ConversationId
+          // A cookie-authed (non-token) visitor bypassed the mint-time portal
+          // gate, so re-check portal access here. Token streams were already
+          // gated at mint; team members reach chat from the admin inbox.
+          if (me.via === 'session' && !isTeamMember(me.role)) {
+            const { resolvePortalAccessForRequest } =
+              await import('@/lib/server/functions/portal-access')
+            const access = await resolvePortalAccessForRequest()
+            if (!access.granted) {
+              return new Response('Not found', { status: 404 })
+            }
+          }
           const conversation = await db.query.conversations.findFirst({
             where: eq(conversations.id, conversationId),
           })

@@ -243,10 +243,12 @@ export async function sendVisitorMessage(
   })
 
   const messageDTO = toMessageDTO(txResult.message, authorFromInput(author))
-  const conversationDTO = await conversationToDTO(txResult.conversation, 'agent')
 
+  // A new conversation appears in the agent inbox; publish the agent-side DTO
+  // there (publishConversationUpdate strips agent-only fields for the visitor).
   if (created) {
-    publishConversationUpdate(conversationDTO.id, conversationDTO)
+    const agentDTO = await conversationToDTO(txResult.conversation, 'agent')
+    publishConversationUpdate(agentDTO.id, agentDTO)
   }
   publishChatEvent(messageDTO.conversationId, {
     kind: 'message',
@@ -261,6 +263,9 @@ export async function sendVisitorMessage(
     isFirstMessage: created,
   })
 
+  // Return a VISITOR-side DTO to the caller — never leak agent-only tags /
+  // visitorEmail back to the visitor in the send response.
+  const conversationDTO = await conversationToDTO(txResult.conversation, 'visitor')
   return { conversation: conversationDTO, message: messageDTO, created }
 }
 
@@ -354,23 +359,28 @@ export async function addAgentNote(
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
   const content = validateContent(rawContent)
 
-  const conversation = await loadConversationOr404(conversationId)
-  const [message] = await db
-    .insert(chatMessages)
-    .values({
-      conversationId,
-      principalId: agent.principalId,
-      senderType: 'agent',
-      isInternal: true,
-      content,
-    })
-    .returning()
-  // Touch updatedAt only — internal notes don't change the visitor-facing
-  // last-message preview/time.
-  await db
-    .update(conversations)
-    .set({ updatedAt: message.createdAt })
-    .where(eq(conversations.id, conversationId))
+  await loadConversationOr404(conversationId)
+  // Insert + touch in one transaction so a note can't persist without its
+  // updatedAt bump.
+  const message = await db.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(chatMessages)
+      .values({
+        conversationId,
+        principalId: agent.principalId,
+        senderType: 'agent',
+        isInternal: true,
+        content,
+      })
+      .returning()
+    // Touch updatedAt only — internal notes don't change the visitor-facing
+    // last-message preview/time.
+    await tx
+      .update(conversations)
+      .set({ updatedAt: inserted.createdAt })
+      .where(eq(conversations.id, conversationId))
+    return inserted
+  })
 
   const messageDTO = toMessageDTO(message, authorFromInput(agent))
   // Agent inbox only — the visitor's conversation channel never receives it.
@@ -383,10 +393,11 @@ export async function addAgentNote(
     authorName: agent.displayName ?? 'A teammate',
   })
 
-  // The conversation isn't materially changed by a note; reuse the row we
-  // already loaded (with the bumped updatedAt) instead of re-querying.
+  // Reload so the published DTO reflects current status/assignment/tags rather
+  // than the pre-write snapshot (the admin client replaces its cached
+  // conversation with this payload).
   const conversationDTO = await conversationToDTO(
-    { ...conversation, updatedAt: message.createdAt },
+    await loadConversationOr404(conversationId),
     'agent'
   )
   return { conversation: conversationDTO, message: messageDTO }
@@ -443,7 +454,7 @@ export async function setConversationTags(
 ): Promise<ConversationDTO> {
   const decision = canActAsAgent(actor)
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
-  const conversation = await loadConversationOr404(conversationId)
+  await loadConversationOr404(conversationId)
 
   // Resolve to the subset of ids that name a real, non-deleted tag so a stale
   // client can't write dangling join rows.
@@ -463,7 +474,10 @@ export async function setConversationTags(
     }
   })
 
-  const dto = await conversationToDTO(conversation, 'agent')
+  // Reload so the published DTO carries current status/assignment alongside the
+  // new tags — the admin client replaces its cached conversation with this, so
+  // a stale snapshot would visually roll back a concurrent change.
+  const dto = await conversationToDTO(await loadConversationOr404(conversationId), 'agent')
   // Inbox-only: a tag change is an agent triage concern, never sent to the
   // visitor channel.
   publishAgentChatEvent({ kind: 'conversation', conversation: dto })
@@ -501,11 +515,18 @@ export async function deleteChatMessage(messageId: ChatMessageId, actor: Actor):
     .set({ deletedAt: new Date(), deletedByPrincipalId: actor.principalId, updatedAt: new Date() })
     .where(and(eq(chatMessages.id, messageId), isNull(chatMessages.deletedAt)))
 
-  publishChatEvent(message.conversationId, {
-    kind: 'message_deleted',
+  const deletedEvent = {
+    kind: 'message_deleted' as const,
     conversationId: message.conversationId,
     messageId,
-  })
+  }
+  // An internal note never reached the visitor, so its deletion must not either
+  // (the message id would otherwise surface on the visitor's channel).
+  if (message.isInternal) {
+    publishAgentChatEvent(deletedEvent)
+  } else {
+    publishChatEvent(message.conversationId, deletedEvent)
+  }
 }
 
 /** Record a visitor CSAT rating (1-5) on their conversation. */

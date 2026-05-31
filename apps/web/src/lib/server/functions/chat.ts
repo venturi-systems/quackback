@@ -134,6 +134,18 @@ export const sendChatMessageFn = createServerFn({ method: 'POST' })
       if (!isTeamMember(ctx.principal.role)) {
         const { assertChatSendRate } = await import('@/lib/server/domains/chat/chat.ratelimit')
         await assertChatSendRate(ctx.principal.id)
+
+        // Enforce required pre-chat email server-side (the widget gates the
+        // button, but a direct call must not bypass it): only on the first
+        // message of a new conversation, for a visitor with no email on file.
+        if (!data.conversationId && !data.visitorEmail && !ctx.user?.email) {
+          const { getLiveChatConfig } =
+            await import('@/lib/server/domains/settings/settings.widget')
+          const { preChatEmail } = await getLiveChatConfig()
+          if (preChatEmail === 'required') {
+            throw new Error('An email is required to start a conversation')
+          }
+        }
       }
 
       const actor = await policyActorFromAuth(ctx)

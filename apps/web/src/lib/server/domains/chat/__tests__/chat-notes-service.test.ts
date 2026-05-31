@@ -88,11 +88,17 @@ vi.mock('@/lib/server/db', () => {
     return c
   }
 
+  const tx = {
+    insert: (table: { __name?: string }) => chain(table?.__name ?? 'unknown'),
+    update: (table: { __name?: string }) => chain(table?.__name ?? 'unknown'),
+  }
+
   return {
     db: {
       select: vi.fn(() => chain('select')),
       insert: vi.fn((table: { __name?: string }) => chain(table?.__name ?? 'unknown')),
       update: vi.fn((table: { __name?: string }) => chain(table?.__name ?? 'unknown')),
+      transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
     },
     eq: vi.fn(),
     conversations: { __name: 'conversations', id: 'id' },
