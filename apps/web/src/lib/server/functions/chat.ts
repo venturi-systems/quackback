@@ -106,6 +106,19 @@ async function assertChatEnabled(): Promise<void> {
   }
 }
 
+/**
+ * Shared gate for every visitor-facing chat endpoint: chat must be enabled AND
+ * the caller must have portal access. Team members (agents) bypass the portal
+ * check — they reach these endpoints from the admin inbox. Throws on failure.
+ */
+async function assertVisitorChatAccess(role: string | null): Promise<void> {
+  await assertChatEnabled()
+  if (isTeamMember(role)) return
+  const { resolvePortalAccessForRequest } = await import('./portal-access')
+  const access = await resolvePortalAccessForRequest()
+  if (!access.granted) throw new Error('Portal access required')
+}
+
 // ── Visitor functions ────────────────────────────────────────────────────
 
 /** Send a visitor message; creates the conversation on the first message. */
@@ -113,13 +126,16 @@ export const sendChatMessageFn = createServerFn({ method: 'POST' })
   .inputValidator(sendMessageSchema)
   .handler(async ({ data }) => {
     try {
-      const { resolvePortalAccessForRequest } = await import('./portal-access')
-      const access = await resolvePortalAccessForRequest()
-      if (!access.granted) throw new Error('Portal access required')
-
-      await assertChatEnabled()
-
       const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      await assertVisitorChatAccess(ctx.principal.role)
+
+      // Throttle per principal: bounds write/notify fanout and runaway
+      // conversation creation. Agents (team) send via sendAgentMessageFn.
+      if (!isTeamMember(ctx.principal.role)) {
+        const { assertChatSendRate } = await import('@/lib/server/domains/chat/chat.ratelimit')
+        await assertChatSendRate(ctx.principal.id)
+      }
+
       const actor = await policyActorFromAuth(ctx)
 
       const { sendVisitorMessage } = await import('@/lib/server/domains/chat/chat.service')
@@ -174,6 +190,16 @@ export const getMyChatFn = createServerFn({ method: 'GET' }).handler(async () =>
       return { ...base, conversation: null, messages: [], hasMore: false, agentsOnline: false }
     }
 
+    // Gate reads behind portal access for non-team callers (degrade gracefully
+    // to the greeting-only state rather than throwing on the bootstrap path).
+    if (!isTeamMember(ctx.principal.role)) {
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        return { ...base, conversation: null, messages: [], hasMore: false, agentsOnline: false }
+      }
+    }
+
     const { getActiveConversationForVisitor, conversationToDTO, listMessages } =
       await import('@/lib/server/domains/chat/chat.query')
     const { isAnyAgentOnline } = await import('@/lib/server/realtime/presence')
@@ -218,6 +244,7 @@ export const listChatMessagesFn = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     try {
       const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      await assertVisitorChatAccess(ctx.principal.role)
       const actor = await policyActorFromAuth(ctx)
       const { assertConversationViewable } = await import('@/lib/server/domains/chat/chat.service')
       const { listMessages } = await import('@/lib/server/domains/chat/chat.query')
@@ -239,6 +266,7 @@ export const markChatReadFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     try {
       const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      await assertVisitorChatAccess(ctx.principal.role)
       const actor = await policyActorFromAuth(ctx)
       const side: ChatSenderType = isTeamMember(ctx.principal.role) ? 'agent' : 'visitor'
       const { markConversationRead } = await import('@/lib/server/domains/chat/chat.service')
@@ -256,6 +284,7 @@ export const sendChatTypingFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     try {
       const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      await assertVisitorChatAccess(ctx.principal.role)
       const actor = await policyActorFromAuth(ctx)
       const side: ChatSenderType = isTeamMember(ctx.principal.role) ? 'agent' : 'visitor'
       const { signalTyping } = await import('@/lib/server/domains/chat/chat.service')
@@ -273,6 +302,7 @@ export const submitCsatFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     try {
       const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      await assertVisitorChatAccess(ctx.principal.role)
       const actor = await policyActorFromAuth(ctx)
       const { recordCsat } = await import('@/lib/server/domains/chat/chat.service')
       await recordCsat(data.conversationId as ConversationId, data.rating, data.comment, actor)
@@ -286,8 +316,8 @@ export const submitCsatFn = createServerFn({ method: 'POST' })
 /** Mint a short-lived token authorizing this principal's SSE stream. */
 export const mintChatStreamTokenFn = createServerFn({ method: 'GET' }).handler(async () => {
   try {
-    await assertChatEnabled()
     const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+    await assertVisitorChatAccess(ctx.principal.role)
     const { mintStreamToken } = await import('@/lib/server/realtime/stream-token')
     return { token: mintStreamToken(ctx.principal.id) }
   } catch (error) {
@@ -302,6 +332,7 @@ export const deleteChatMessageFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     try {
       const ctx = await requireAuth({ roles: ['admin', 'member', 'user'] })
+      await assertVisitorChatAccess(ctx.principal.role)
       const actor = await policyActorFromAuth(ctx)
       const { deleteChatMessage } = await import('@/lib/server/domains/chat/chat.service')
       await deleteChatMessage(data.messageId as ChatMessageId, actor)
