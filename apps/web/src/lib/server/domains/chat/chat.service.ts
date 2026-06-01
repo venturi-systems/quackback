@@ -16,8 +16,10 @@ import {
   conversations,
   chatMessages,
   conversationTags,
+  principal,
   type Conversation,
 } from '@/lib/server/db'
+import { isTeamMember } from '@/lib/shared/roles'
 import type { ChatAttachment } from '@/lib/server/db'
 import type { ConversationId, ChatMessageId, PrincipalId, TagId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ForbiddenError } from '@/lib/shared/errors'
@@ -444,6 +446,17 @@ export async function assignConversation(
   const decision = canActAsAgent(actor)
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
   await loadConversationOr404(conversationId)
+  // Only a team member can be the assignee (any agent, not just the caller).
+  if (agentPrincipalId) {
+    const [target] = await db
+      .select({ role: principal.role })
+      .from(principal)
+      .where(eq(principal.id, agentPrincipalId))
+      .limit(1)
+    if (!target || !isTeamMember(target.role)) {
+      throw new ValidationError('INVALID_ASSIGNEE', 'Can only assign to a team member')
+    }
+  }
   const [updated] = await db
     .update(conversations)
     .set({ assignedAgentPrincipalId: agentPrincipalId, updatedAt: new Date() })

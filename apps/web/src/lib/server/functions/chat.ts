@@ -89,8 +89,9 @@ const setStatusSchema = z.object({
 
 const assignSchema = z.object({
   conversationId: z.string(),
-  /** null / omitted = unassign; 'me' = assign to the current agent. */
-  assignTo: z.union([z.literal('me'), z.null()]).optional(),
+  /** null/omitted = unassign; 'me' = the current agent; otherwise a team
+   *  member's principal id (validated server-side). */
+  assignTo: z.union([z.string(), z.null()]).optional(),
 })
 
 const setPrioritySchema = z.object({
@@ -572,7 +573,10 @@ export const assignConversationFn = createServerFn({ method: 'POST' })
       const ctx = await requireAuth({ roles: ['admin', 'member'] })
       const actor = await policyActorFromAuth(ctx)
       const { assignConversation } = await import('@/lib/server/domains/chat/chat.service')
-      const assignTo: PrincipalId | null = data.assignTo === 'me' ? ctx.principal.id : null
+      const assignTo: PrincipalId | null =
+        data.assignTo === 'me'
+          ? ctx.principal.id
+          : ((data.assignTo as PrincipalId | null | undefined) ?? null)
       await assignConversation(data.conversationId as ConversationId, assignTo, actor)
       return { ok: true }
     } catch (error) {
