@@ -170,6 +170,22 @@ export async function getActiveConversationForVisitor(
   return row ?? null
 }
 
+/** All of a visitor's conversations, newest-first — for the admin user profile. */
+export async function listConversationsForVisitor(
+  visitorPrincipalId: PrincipalId,
+  limit = 50
+): Promise<ConversationDTO[]> {
+  const rows = await db
+    .select()
+    .from(conversations)
+    .where(eq(conversations.visitorPrincipalId, visitorPrincipalId))
+    .orderBy(desc(conversations.lastMessageAt))
+    .limit(limit)
+  // Agent view (this is an admin surface) — small N per user, so per-row DTO
+  // building is fine.
+  return Promise.all(rows.map((c) => conversationToDTO(c, 'agent')))
+}
+
 export interface MessagePage {
   messages: ChatMessageDTO[]
   hasMore: boolean

@@ -393,6 +393,24 @@ export const listConversationsFn = createServerFn({ method: 'GET' })
     }
   })
 
+const userConversationsSchema = z.object({ principalId: z.string() })
+
+/** A single visitor's full chat history — for the admin user profile. */
+export const listConversationsForUserFn = createServerFn({ method: 'GET' })
+  .inputValidator(userConversationsSchema)
+  .handler(async ({ data }) => {
+    try {
+      await requireAuth({ roles: ['admin', 'member'] })
+      const { listConversationsForVisitor } = await import('@/lib/server/domains/chat/chat.query')
+      return {
+        conversations: await listConversationsForVisitor(data.principalId as PrincipalId),
+      }
+    } catch (error) {
+      console.error('[fn:chat] listConversationsForUserFn failed:', error)
+      throw error
+    }
+  })
+
 /** A single conversation (agent view) + first page of messages. */
 export const getConversationFn = createServerFn({ method: 'GET' })
   .inputValidator(listMessagesSchema)

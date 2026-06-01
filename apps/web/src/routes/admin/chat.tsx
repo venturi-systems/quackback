@@ -53,6 +53,10 @@ import {
 import { cn } from '@/lib/shared/utils'
 
 export const Route = createFileRoute('/admin/chat')({
+  // `?c=<conversationId>` deep-links a conversation open (e.g. from a user profile).
+  validateSearch: (search: Record<string, unknown>) => ({
+    c: typeof search.c === 'string' ? search.c : undefined,
+  }),
   loader: async () => {
     const { requireWorkspaceRole } = await import('@/lib/server/functions/workspace-utils')
     await requireWorkspaceRole({ data: { allowedRoles: ['admin', 'member'] } })
@@ -75,8 +79,11 @@ function relativeTime(iso: string): string {
 
 function ChatInboxPage() {
   const queryClient = useQueryClient()
+  const { c: deepLinkConversationId } = Route.useSearch()
   const [status, setStatus] = useState<StatusFilter>('open')
-  const [selectedId, setSelectedId] = useState<ConversationId | null>(null)
+  const [selectedId, setSelectedId] = useState<ConversationId | null>(
+    (deepLinkConversationId as ConversationId | undefined) ?? null
+  )
   const [searchInput, setSearchInput] = useState('')
   // Debounce the search box so we don't refetch on every keystroke.
   const search = useDebouncedValue(searchInput.trim(), 300)

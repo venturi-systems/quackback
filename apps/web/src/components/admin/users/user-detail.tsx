@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import {
   ArrowLeftIcon,
@@ -30,6 +31,7 @@ import { TimeAgo } from '@/components/ui/time-ago'
 import type { PortalUserDetail, EngagedPost } from '@/lib/shared/types'
 import { UserSegmentBadges } from '@/components/admin/users/user-segments'
 import { useUpdatePortalUser } from '@/lib/client/mutations'
+import { listConversationsForUserFn } from '@/lib/server/functions/chat'
 import type { PrincipalId } from '@quackback/ids'
 
 interface UserDetailProps {
@@ -170,6 +172,43 @@ function EngagedPostCard({ post }: { post: EngagedPost }) {
         </div>
       </div>
     </Link>
+  )
+}
+
+/** A user's live-chat history, linking each conversation into the Support inbox. */
+function UserConversations({ principalId }: { principalId: PrincipalId }) {
+  const { data } = useQuery({
+    queryKey: ['admin', 'user-conversations', principalId],
+    queryFn: () => listConversationsForUserFn({ data: { principalId } }),
+  })
+  const conversations = data?.conversations ?? []
+  if (conversations.length === 0) return null
+
+  return (
+    <div className="border-t border-border/50 pt-4">
+      <h3 className="text-sm font-medium mb-3">Support conversations</h3>
+      <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/50">
+        {conversations.map((c) => (
+          <Link
+            key={c.id}
+            to="/admin/chat"
+            search={{ c: c.id }}
+            className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
+          >
+            <ChatBubbleLeftIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm text-foreground">
+                {c.lastMessagePreview ?? c.subject ?? 'Conversation'}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                <span className="capitalize">{c.status}</span> · <TimeAgo date={c.lastMessageAt} />
+              </p>
+            </div>
+            {c.unreadCount > 0 && <Badge className="shrink-0">{c.unreadCount}</Badge>}
+          </Link>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -395,6 +434,9 @@ export function UserDetail({
             />
           </div>
         )}
+
+        {/* Support conversations */}
+        <UserConversations principalId={user.principalId as PrincipalId} />
 
         {/* Engaged Posts */}
         <div>
