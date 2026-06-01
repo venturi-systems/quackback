@@ -750,6 +750,19 @@ const updateWidgetConfigSchema = z.object({
         )
         .max(100)
         .optional(),
+      macros: z
+        .array(
+          z.object({
+            id: z.string().max(64),
+            name: z.string().max(80),
+            replyBody: z.string().max(2000).optional(),
+            setPriority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
+            assignToSelf: z.boolean().optional(),
+            setStatus: z.enum(['open', 'snoozed', 'pending', 'closed']).optional(),
+          })
+        )
+        .max(100)
+        .optional(),
     })
     .optional(),
 })

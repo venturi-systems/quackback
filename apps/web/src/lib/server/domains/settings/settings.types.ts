@@ -6,7 +6,12 @@
  */
 
 import type { TiptapContent } from '@/lib/shared/db-types'
-import type { OfficeHoursConfig, PreChatEmailMode } from '@/lib/shared/chat/types'
+import type {
+  OfficeHoursConfig,
+  PreChatEmailMode,
+  ConversationStatus,
+  ConversationPriority,
+} from '@/lib/shared/chat/types'
 
 // =============================================================================
 // Auth Configuration (Team sign-in settings)
@@ -431,6 +436,22 @@ export interface CannedReply {
 }
 
 /**
+ * An agent macro: a one-click bundle of conversation actions. Each field is
+ * optional; applying the macro runs the present actions in a fixed order
+ * (reply → priority → assign → status). At least one action should be set.
+ */
+export interface ChatMacro {
+  id: string
+  name: string
+  /** Reply sent to the visitor (skipped when empty). */
+  replyBody?: string
+  setPriority?: ConversationPriority
+  /** Assign the conversation to the agent applying the macro. */
+  assignToSelf?: boolean
+  setStatus?: ConversationStatus
+}
+
+/**
  * Live chat settings (sub-section of WidgetConfig). Most fields are client-safe
  * and projected into PublicLiveChatConfig; `cannedReplies` is agent-only and is
  * stripped from the public projection (see getPublicWidgetConfig).
@@ -450,10 +471,12 @@ export interface LiveChatConfig {
   preChatEmail?: PreChatEmailMode
   /** Agent-only saved replies — NEVER projected into the public widget config. */
   cannedReplies?: CannedReply[]
+  /** Agent-only one-click action macros — NEVER projected into the public config. */
+  macros?: ChatMacro[]
 }
 
 /** Client-safe subset of LiveChatConfig (drops agent-only fields). */
-export type PublicLiveChatConfig = Omit<LiveChatConfig, 'cannedReplies'>
+export type PublicLiveChatConfig = Omit<LiveChatConfig, 'cannedReplies' | 'macros'>
 
 export interface WidgetConfig {
   enabled: boolean

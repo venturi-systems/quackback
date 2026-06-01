@@ -31,6 +31,7 @@ import {
   hasAuthCredentials,
 } from './auth-helpers'
 import { isTeamMember } from '@/lib/shared/roles'
+import { ValidationError } from '@/lib/shared/errors'
 
 const attachmentSchema = z.object({
   url: z.string().min(1),
@@ -654,6 +655,45 @@ export const getLinkedConversationsForPostFn = createServerFn({ method: 'GET' })
       return await getLinkedConversationsForPost(data.postId as PostId)
     } catch (error) {
       console.error('[fn:chat] getLinkedConversationsForPostFn failed:', error)
+      throw error
+    }
+  })
+
+/** Agent macros configured for the workspace (one-click action bundles). */
+export const getMacrosFn = createServerFn({ method: 'GET' }).handler(async () => {
+  try {
+    await requireAuth({ roles: ['admin', 'member'] })
+    const { getLiveChatConfig } = await import('@/lib/server/domains/settings/settings.widget')
+    const chat = await getLiveChatConfig()
+    return { macros: chat.macros ?? [] }
+  } catch (error) {
+    console.error('[fn:chat] getMacrosFn failed:', error)
+    throw error
+  }
+})
+
+/** Apply a configured macro's action bundle to a conversation. */
+export const applyMacroFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ conversationId: z.string(), macroId: z.string() }))
+  .handler(async ({ data }) => {
+    try {
+      const ctx = await requireAuth({ roles: ['admin', 'member'] })
+      const actor = await policyActorFromAuth(ctx)
+      const { getLiveChatConfig } = await import('@/lib/server/domains/settings/settings.widget')
+      const chat = await getLiveChatConfig()
+      const macro = (chat.macros ?? []).find((m) => m.id === data.macroId)
+      if (!macro) {
+        throw new ValidationError('VALIDATION_ERROR', 'Macro not found')
+      }
+      const { applyMacro } = await import('@/lib/server/domains/chat/chat.macros')
+      return await applyMacro(
+        data.conversationId as ConversationId,
+        macro,
+        { principalId: ctx.principal.id, displayName: ctx.user.name, avatarUrl: ctx.user.image },
+        actor
+      )
+    } catch (error) {
+      console.error('[fn:chat] applyMacroFn failed:', error)
       throw error
     }
   })

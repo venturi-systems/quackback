@@ -3,9 +3,13 @@ import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { ChatBubbleLeftRightIcon, ArrowPathIcon } from '@heroicons/react/24/solid'
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline'
-import type { CannedReply } from '@/lib/server/domains/settings/settings.types'
+import type { CannedReply, ChatMacro } from '@/lib/server/domains/settings/settings.types'
 import { DEFAULT_OFFICE_HOURS } from '@/lib/server/domains/settings/settings.types'
-import type { OfficeHoursConfig } from '@/lib/shared/chat/types'
+import type {
+  OfficeHoursConfig,
+  ConversationStatus,
+  ConversationPriority,
+} from '@/lib/shared/chat/types'
 import { settingsQueries } from '@/lib/client/queries/settings'
 import { updateWidgetConfigFn } from '@/lib/server/functions/settings'
 import { BackLink } from '@/components/ui/back-link'
@@ -44,6 +48,7 @@ function LiveChatSettingsPage() {
   const [cannedReplies, setCannedReplies] = useState<CannedReply[]>(
     config.chat?.cannedReplies ?? []
   )
+  const [macros, setMacros] = useState<ChatMacro[]>(config.chat?.macros ?? [])
   const [officeHours, setOfficeHours] = useState<OfficeHoursConfig>(
     config.chat?.officeHours ?? DEFAULT_OFFICE_HOURS
   )
@@ -74,6 +79,15 @@ function LiveChatSettingsPage() {
       .map((r) => ({ id: r.id, title: r.title.trim(), body: r.body.trim() }))
       .filter((r) => r.title && r.body)
     void persist('cannedReplies', { chat: { cannedReplies: cleaned } })
+  }
+
+  function saveMacros(next: ChatMacro[]) {
+    setMacros(next)
+    // Persist only macros with a name and at least one action.
+    const cleaned = next
+      .map((m) => ({ ...m, name: m.name.trim(), replyBody: m.replyBody?.trim() || undefined }))
+      .filter((m) => m.name && (m.replyBody || m.setPriority || m.assignToSelf || m.setStatus))
+    void persist('macros', { chat: { macros: cleaned } })
   }
 
   async function persist(
@@ -395,6 +409,118 @@ function LiveChatSettingsPage() {
             }
           >
             <PlusIcon className="h-4 w-4" /> Add reply
+          </Button>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Macros"
+        description="One-click action bundles agents can apply to a conversation — send a reply, set priority, assign to self, and change status together."
+      >
+        <div className="space-y-3">
+          {macros.length === 0 && <p className="text-sm text-muted-foreground">No macros yet.</p>}
+          {macros.map((macro, i) => {
+            const patch = (next: Partial<ChatMacro>) =>
+              macros.map((m, idx) => (idx === i ? { ...m, ...next } : m))
+            return (
+              <div
+                key={macro.id}
+                className="flex items-start gap-2 rounded-lg border border-border/60 p-2.5"
+              >
+                <div className="flex-1 space-y-2">
+                  <Input
+                    value={macro.name}
+                    maxLength={80}
+                    placeholder="Macro name (e.g. Resolve as duplicate)"
+                    onChange={(e) => setMacros(patch({ name: e.target.value }))}
+                    onBlur={() => saveMacros(macros)}
+                    disabled={isBusy}
+                  />
+                  <Textarea
+                    value={macro.replyBody ?? ''}
+                    maxLength={2000}
+                    rows={2}
+                    placeholder="Reply to send (optional)…"
+                    onChange={(e) => setMacros(patch({ replyBody: e.target.value }))}
+                    onBlur={() => saveMacros(macros)}
+                    disabled={isBusy}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label="Set priority"
+                      value={macro.setPriority ?? ''}
+                      onChange={(e) =>
+                        saveMacros(
+                          patch({
+                            setPriority: (e.target.value || undefined) as
+                              | ConversationPriority
+                              | undefined,
+                          })
+                        )
+                      }
+                      disabled={isBusy}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                    >
+                      <option value="">Priority: keep</option>
+                      <option value="none">None</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                    <select
+                      aria-label="Set status"
+                      value={macro.setStatus ?? ''}
+                      onChange={(e) =>
+                        saveMacros(
+                          patch({
+                            setStatus: (e.target.value || undefined) as
+                              | ConversationStatus
+                              | undefined,
+                          })
+                        )
+                      }
+                      disabled={isBusy}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                    >
+                      <option value="">Status: keep</option>
+                      <option value="open">Open</option>
+                      <option value="snoozed">Snooze</option>
+                      <option value="pending">Pending</option>
+                      <option value="closed">Close</option>
+                    </select>
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={macro.assignToSelf ?? false}
+                        onChange={(e) => saveMacros(patch({ assignToSelf: e.target.checked }))}
+                        disabled={isBusy}
+                        className="rounded border-border"
+                      />
+                      Assign to me
+                    </label>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => saveMacros(macros.filter((_, idx) => idx !== i))}
+                  disabled={isBusy}
+                  className="mt-1 rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-destructive transition-colors"
+                  aria-label="Remove macro"
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              </div>
+            )
+          })}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isBusy}
+            onClick={() => setMacros((prev) => [...prev, { id: crypto.randomUUID(), name: '' }])}
+          >
+            <PlusIcon className="h-4 w-4" /> Add macro
           </Button>
         </div>
       </SettingsCard>

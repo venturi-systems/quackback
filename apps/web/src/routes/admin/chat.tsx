@@ -13,6 +13,7 @@ import {
   TrashIcon,
   ChatBubbleBottomCenterTextIcon,
   PencilSquareIcon,
+  BoltIcon,
 } from '@heroicons/react/24/outline'
 import { toast } from 'sonner'
 import type { ConversationId, ChatMessageId } from '@quackback/ids'
@@ -26,6 +27,8 @@ import {
   markChatReadFn,
   sendChatTypingFn,
   getCannedRepliesFn,
+  getMacrosFn,
+  applyMacroFn,
   deleteChatMessageFn,
 } from '@/lib/server/functions/chat'
 import { getPortalUserFn } from '@/lib/server/functions/admin'
@@ -509,6 +512,23 @@ function ChatThread({
   })
   const cannedReplies = cannedData?.cannedReplies ?? []
 
+  // Macros: one-click action bundles applied to the open conversation.
+  const { data: macrosData } = useQuery({
+    queryKey: ['admin', 'chat', 'macros'],
+    queryFn: () => getMacrosFn(),
+    staleTime: 60_000,
+  })
+  const macros = macrosData?.macros ?? []
+  const macroMutation = useMutation({
+    mutationFn: (macroId: string) => applyMacroFn({ data: { conversationId, macroId } }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: threadKey })
+      onChanged()
+      toast.success('Macro applied')
+    },
+    onError: () => toast.error('Failed to apply macro'),
+  })
+
   // Visitor context (email + past feedback); null for anonymous visitors.
   const visitorPrincipalId = conversation?.visitor.principalId
   const { data: visitorDetail } = useQuery({
@@ -774,6 +794,35 @@ function ChatThread({
                         <span className="block truncate text-xs text-muted-foreground">
                           {c.body}
                         </span>
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+            {macros.length > 0 && !noteMode && (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={macroMutation.isPending}
+                    className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                    aria-label="Apply a macro"
+                  >
+                    <BoltIcon className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-1">
+                  <p className="px-2 py-1 text-[11px] font-medium text-muted-foreground">Macros</p>
+                  <div className="max-h-64 overflow-y-auto">
+                    {macros.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => macroMutation.mutate(m.id)}
+                        className="block w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
+                      >
+                        {m.name}
                       </button>
                     ))}
                   </div>
