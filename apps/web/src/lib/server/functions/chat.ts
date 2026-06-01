@@ -289,6 +289,35 @@ export const getMyChatFn = createServerFn({ method: 'GET' }).handler(async () =>
   }
 })
 
+/**
+ * The current visitor's own conversations (newest-first) so they can browse and
+ * resume prior threads — useful once an anonymous visitor identifies and their
+ * history is merged onto the account (P2.4). Visitor-side DTOs (no agent-only
+ * fields). Returns an empty list rather than throwing on the bootstrap path.
+ */
+export const getMyConversationsFn = createServerFn({ method: 'GET' }).handler(async () => {
+  try {
+    const { isLiveChatEnabled } = await import('@/lib/server/domains/settings/settings.widget')
+    if (!(await isLiveChatEnabled()) || !hasAuthCredentials()) return { conversations: [] }
+
+    const ctx = await getOptionalAuth()
+    if (!ctx?.principal) return { conversations: [] }
+
+    // Non-team callers must hold portal access (mirrors getMyChatFn gating).
+    if (!isTeamMember(ctx.principal.role)) {
+      const { resolvePortalAccessForRequest } = await import('./portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) return { conversations: [] }
+    }
+
+    const { listConversationsForVisitor } = await import('@/lib/server/domains/chat/chat.query')
+    return { conversations: await listConversationsForVisitor(ctx.principal.id, 50, 'visitor') }
+  } catch (error) {
+    console.error('[fn:chat] getMyConversationsFn failed:', error)
+    throw error
+  }
+})
+
 /** Older messages for a conversation the caller can view (keyset pagination). */
 export const listChatMessagesFn = createServerFn({ method: 'GET' })
   .inputValidator(listMessagesSchema)

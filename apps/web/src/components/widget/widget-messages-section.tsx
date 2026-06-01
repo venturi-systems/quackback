@@ -3,6 +3,7 @@ import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
 import { chatAvailable } from '@/lib/shared/chat/presence'
 import { useChatSummary } from './use-chat-summary'
 import { WidgetResumeCard } from './widget-resume-card'
+import { WidgetConversationHistory } from './widget-conversation-history'
 import { ChatPresenceBadge } from './chat-presence-badge'
 
 interface WidgetMessagesSectionProps {
@@ -56,6 +57,8 @@ export function WidgetMessagesSection({ onOpenChat }: WidgetMessagesSectionProps
           <ChatPresenceBadge available={available} className="mt-0.5" />
         </span>
       </button>
+
+      <WidgetConversationHistory activeId={conversation?.id} />
     </div>
   )
 }

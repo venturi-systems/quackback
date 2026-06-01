@@ -300,10 +300,15 @@ export async function getActiveConversationForVisitor(
   return selectActiveConversation(rows)
 }
 
-/** All of a visitor's conversations, newest-first — for the admin user profile. */
+/**
+ * All of a visitor's conversations, newest-first. `side` controls the DTO
+ * audience: 'agent' for the admin user profile (default), 'visitor' for the
+ * visitor browsing their own history in the widget (drops agent-only fields).
+ */
 export async function listConversationsForVisitor(
   visitorPrincipalId: PrincipalId,
-  limit = 50
+  limit = 50,
+  side: ChatSenderType = 'agent'
 ): Promise<ConversationDTO[]> {
   const rows = await db
     .select()
@@ -311,9 +316,8 @@ export async function listConversationsForVisitor(
     .where(eq(conversations.visitorPrincipalId, visitorPrincipalId))
     .orderBy(desc(conversations.lastMessageAt))
     .limit(limit)
-  // Agent view (this is an admin surface) — small N per user, so per-row DTO
-  // building is fine.
-  return Promise.all(rows.map((c) => conversationToDTO(c, 'agent')))
+  // Small N per user, so per-row DTO building is fine.
+  return Promise.all(rows.map((c) => conversationToDTO(c, side)))
 }
 
 export interface MessagePage {
