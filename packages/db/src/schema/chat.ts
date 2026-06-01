@@ -2,7 +2,7 @@ import { pgTable, text, timestamp, index, jsonb, integer, boolean } from 'drizzl
 import { relations } from 'drizzle-orm'
 import { typeIdWithDefault, typeIdColumn, typeIdColumnNullable } from '@quackback/ids/drizzle'
 import { principal } from './auth'
-import { CONVERSATION_STATUSES, CHAT_SENDER_TYPES } from '../types'
+import { CONVERSATION_STATUSES, CHAT_SENDER_TYPES, CHANNELS } from '../types'
 import type { ChatAttachment } from '../types'
 
 /**
@@ -26,6 +26,10 @@ export const conversations = pgTable(
       'assigned_agent_principal_id'
     ).references(() => principal.id, { onDelete: 'set null' }),
     status: text('status', { enum: CONVERSATION_STATUSES }).notNull().default('open'),
+    // The inbound channel this conversation arrived on. Existing widget threads
+    // are 'live_chat'; 'email' / 'web_form' are added in later phases so the
+    // inbox is one polymorphic conversation type rather than separate objects.
+    channel: text('channel', { enum: CHANNELS }).notNull().default('live_chat'),
     // Optional human-readable subject, derived from the first message for the
     // inbox list. Plain text.
     subject: text('subject'),

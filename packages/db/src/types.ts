@@ -290,6 +290,13 @@ export type NewCommentReaction = InferInsertModel<typeof commentReactions>
 export const CONVERSATION_STATUSES = ['open', 'snoozed', 'closed'] as const
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number]
 
+// The inbound channel a conversation arrived on — kept in sync with the
+// conversations.channel column enum. Existing live-chat threads default to
+// 'live_chat'; 'email' and 'web_form' are wired up in later phases. This turns
+// "live chat vs ticket" into one polymorphic conversation with a channel field.
+export const CHANNELS = ['live_chat', 'email', 'web_form'] as const
+export type Channel = (typeof CHANNELS)[number]
+
 // Which side of a conversation a message came from — kept in sync with the
 // chat_messages.sender_type column enum.
 export const CHAT_SENDER_TYPES = ['visitor', 'agent'] as const

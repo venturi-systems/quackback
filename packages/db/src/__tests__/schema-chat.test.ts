@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { getTableName, getTableColumns } from 'drizzle-orm'
 import { getTableConfig } from 'drizzle-orm/pg-core'
 import { conversations, chatMessages } from '../schema/chat'
-import { CONVERSATION_STATUSES, CHAT_SENDER_TYPES } from '../types'
+import { CONVERSATION_STATUSES, CHAT_SENDER_TYPES, CHANNELS } from '../types'
 
 describe('conversations schema', () => {
   it('has correct table name', () => {
@@ -17,6 +17,7 @@ describe('conversations schema', () => {
         'visitorPrincipalId',
         'assignedAgentPrincipalId',
         'status',
+        'channel',
         'subject',
         'lastMessagePreview',
         'lastMessageAt',
@@ -39,6 +40,13 @@ describe('conversations schema', () => {
     const cols = getTableColumns(conversations)
     expect(cols.status.enumValues).toEqual([...CONVERSATION_STATUSES])
     expect(cols.status.default).toBe('open')
+  })
+
+  it('channel enum matches CHANNELS and defaults to live_chat (not null)', () => {
+    const cols = getTableColumns(conversations)
+    expect(cols.channel.enumValues).toEqual([...CHANNELS])
+    expect(cols.channel.default).toBe('live_chat')
+    expect(cols.channel.notNull).toBe(true)
   })
 
   it('restricts delete of the visitor principal so chat history is never orphaned', () => {
