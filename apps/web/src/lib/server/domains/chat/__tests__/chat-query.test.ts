@@ -36,6 +36,7 @@ vi.mock('@/lib/server/db', () => {
     chain.innerJoin = passthrough
     chain.where = passthrough
     chain.orderBy = passthrough
+    chain.limit = passthrough
     chain.then = (resolve: (rows: unknown[]) => unknown) =>
       resolve(kind === 'principal' ? principalRows : [])
     return chain
@@ -70,7 +71,9 @@ import {
   authorFromInput,
   fallbackAuthor,
   loadAuthors,
+  listConversationsForAgent,
 } from '../chat.query'
+import { isNull } from '@/lib/server/db'
 
 const visitorId = 'principal_visitor' as PrincipalId
 const agentId = 'principal_agent' as PrincipalId
@@ -243,5 +246,20 @@ describe('loadAuthors', () => {
       displayName: null,
       avatarUrl: 'https://x/a.png',
     })
+  })
+})
+
+describe('listConversationsForAgent assignee filter', () => {
+  // isNull is used in this builder ONLY for the unassigned-queue filter; the
+  // empty result short-circuits before any author load, so a call to isNull
+  // unambiguously means the unassigned condition was applied.
+  it('adds an "assigned agent IS NULL" condition for the unassigned queue', async () => {
+    await listConversationsForAgent({ unassignedOnly: true })
+    expect(isNull).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not constrain the assignee by default', async () => {
+    await listConversationsForAgent({})
+    expect(isNull).not.toHaveBeenCalled()
   })
 })

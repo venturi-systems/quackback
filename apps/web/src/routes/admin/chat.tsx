@@ -100,6 +100,7 @@ function ChatInboxPage() {
   const { c: deepLinkConversationId } = Route.useSearch()
   const [status, setStatus] = useState<StatusFilter>('open')
   const [priorityFilter, setPriorityFilter] = useState<ConversationPriority | 'all'>('all')
+  const [assignee, setAssignee] = useState<'all' | 'mine' | 'unassigned'>('all')
   const [selectedId, setSelectedId] = useState<ConversationId | null>(
     (deepLinkConversationId as ConversationId | undefined) ?? null
   )
@@ -108,8 +109,8 @@ function ChatInboxPage() {
   const search = useDebouncedValue(searchInput.trim(), 300)
 
   const listKey = useMemo(
-    () => ['admin', 'chat', 'conversations', status, priorityFilter, search] as const,
-    [status, priorityFilter, search]
+    () => ['admin', 'chat', 'conversations', status, priorityFilter, assignee, search] as const,
+    [status, priorityFilter, assignee, search]
   )
 
   const { data: listData, isLoading: listLoading } = useQuery({
@@ -119,6 +120,7 @@ function ChatInboxPage() {
         data: {
           status,
           priority: priorityFilter === 'all' ? undefined : priorityFilter,
+          assignee,
           search: search || undefined,
         },
       }),
@@ -235,6 +237,25 @@ function ChatInboxPage() {
             className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
+        <div className="px-3 pt-2">
+          <div className="inline-flex rounded-md border border-border p-0.5 text-xs">
+            {(['all', 'mine', 'unassigned'] as const).map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => setAssignee(a)}
+                className={cn(
+                  'rounded px-2.5 py-1 font-medium capitalize transition-colors',
+                  assignee === a
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:bg-muted'
+                )}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-3 py-2">
           {(['open', 'snoozed', 'pending', 'closed'] as const).map((s) => (
             <button
@@ -283,7 +304,11 @@ function ChatInboxPage() {
             </div>
           ) : conversations.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-              No {status} conversations
+              {assignee === 'mine'
+                ? `No ${status} conversations assigned to you`
+                : assignee === 'unassigned'
+                  ? `No unassigned ${status} conversations`
+                  : `No ${status} conversations`}
             </div>
           ) : (
             conversations.map((c) => (

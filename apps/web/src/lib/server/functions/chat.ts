@@ -59,7 +59,9 @@ const listMessagesSchema = z.object({
 const listConversationsSchema = z.object({
   status: z.enum(['open', 'snoozed', 'pending', 'closed']).optional(),
   priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']).optional(),
-  assignedToMe: z.boolean().optional(),
+  // Assignee queue: 'mine' = assigned to the requesting agent, 'unassigned' =
+  // no agent yet, 'all'/omitted = no assignee constraint.
+  assignee: z.enum(['all', 'mine', 'unassigned']).optional(),
   search: z.string().max(200).optional(),
   before: z.string().optional(),
 })
@@ -447,7 +449,8 @@ export const listConversationsFn = createServerFn({ method: 'GET' })
       return await listConversationsForAgent({
         status: data.status,
         priority: data.priority,
-        assignedAgentPrincipalId: data.assignedToMe ? ctx.principal.id : undefined,
+        assignedAgentPrincipalId: data.assignee === 'mine' ? ctx.principal.id : undefined,
+        unassignedOnly: data.assignee === 'unassigned',
         search: data.search,
         before: data.before,
       })

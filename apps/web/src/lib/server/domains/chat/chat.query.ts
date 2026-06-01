@@ -396,6 +396,8 @@ export interface ConversationListFilter {
   status?: 'open' | 'snoozed' | 'pending' | 'closed'
   priority?: 'none' | 'low' | 'medium' | 'high' | 'urgent'
   assignedAgentPrincipalId?: PrincipalId
+  /** Unassigned queue: only conversations with no assigned agent. */
+  unassignedOnly?: boolean
   /** Free-text match over the visitor name + message content. */
   search?: string
   /** Cursor: lastMessageAt ISO string — fetch conversations older than it. */
@@ -446,6 +448,7 @@ export async function listConversationsForAgent(
         filter.assignedAgentPrincipalId
           ? eq(conversations.assignedAgentPrincipalId, filter.assignedAgentPrincipalId)
           : undefined,
+        filter.unassignedOnly ? isNull(conversations.assignedAgentPrincipalId) : undefined,
         searchCondition,
         beforeDate ? lt(conversations.lastMessageAt, beforeDate) : undefined
       )
