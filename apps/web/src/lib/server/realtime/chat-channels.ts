@@ -37,7 +37,7 @@ export function publishAgentChatEvent(event: ChatStreamEvent): void {
  * Publish a conversation update to both channels with audience-appropriate
  * payloads: agents get the full DTO on the inbox channel, while the visitor's
  * conversation channel receives a copy with every agent-only field stripped
- * (tags, captured email). Keep this list in sync with the agent-only fields on
+ * (captured email). Keep this list in sync with the agent-only fields on
  * ConversationDTO so a new one can never silently reach the visitor.
  */
 export function publishConversationUpdate(
@@ -47,6 +47,6 @@ export function publishConversationUpdate(
   publish(CHAT_INBOX_CHANNEL, { kind: 'conversation', conversation: agentDto })
   publish(conversationChannel(conversationId), {
     kind: 'conversation',
-    conversation: { ...agentDto, tags: [], visitorEmail: null },
+    conversation: { ...agentDto, visitorEmail: null },
   })
 }

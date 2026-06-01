@@ -1,15 +1,15 @@
 /**
- * Pure DTO mappers + the two small batch loaders in chat.query. Covers the
- * normalization/defaulting branches (attachments → [], tags → [], visitorEmail
- * → null, csatRating null-coalesce, ISO timestamps, null read-watermarks,
- * displayName/avatarUrl null-coalesce) and the loaders' dedupe / empty-input /
+ * Pure DTO mappers + the small batch loader in chat.query. Covers the
+ * normalization/defaulting branches (attachments → [], visitorEmail → null,
+ * csatRating null-coalesce, ISO timestamps, null read-watermarks,
+ * displayName/avatarUrl null-coalesce) and the loader's dedupe / empty-input /
  * map-building behavior against a thenable db-chain mock. The big
  * listConversationsForAgent SQL builder is intentionally not exercised here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ConversationId, ChatMessageId, PrincipalId, TagId } from '@quackback/ids'
+import type { ConversationId, ChatMessageId, PrincipalId } from '@quackback/ids'
 import type { Conversation, ChatMessage } from '@/lib/server/db'
-import type { ChatAuthorDTO, ChatTagDTO } from '@/lib/shared/chat/types'
+import type { ChatAuthorDTO } from '@/lib/shared/chat/types'
 
 // Drives what the terminal db-chain promise resolves to per test.
 let principalRows: Array<{
@@ -17,38 +17,27 @@ let principalRows: Array<{
   displayName: string | null
   avatarUrl: string | null
 }> = []
-let tagRows: Array<{
-  conversationId: ConversationId
-  id: TagId
-  name: string
-  color: string
-}> = []
 // Records the argument handed to inArray so we can assert dedupe behavior.
 const inArrayCalls: unknown[][] = []
 
 vi.mock('@/lib/server/db', () => {
   // Thenable chain: every builder method returns the same chain, and the chain
   // itself resolves (via .then) to the row set the active query expects. We
-  // pick principal vs tag rows off the table passed to .from().
+  // pick principal rows off the table passed to .from().
   function makeChain() {
-    let kind: 'principal' | 'tags' | 'unknown' = 'unknown'
+    let kind: 'principal' | 'unknown' = 'unknown'
     const chain: Record<string, unknown> = {}
     const passthrough = () => chain
     chain.select = passthrough
     chain.from = (t: { __name?: string }) => {
-      kind =
-        t?.__name === 'principal'
-          ? 'principal'
-          : t?.__name === 'conversation_tags'
-            ? 'tags'
-            : 'unknown'
+      kind = t?.__name === 'principal' ? 'principal' : 'unknown'
       return chain
     }
     chain.innerJoin = passthrough
     chain.where = passthrough
     chain.orderBy = passthrough
     chain.then = (resolve: (rows: unknown[]) => unknown) =>
-      resolve(kind === 'principal' ? principalRows : kind === 'tags' ? tagRows : [])
+      resolve(kind === 'principal' ? principalRows : [])
     return chain
   }
 
@@ -58,8 +47,6 @@ vi.mock('@/lib/server/db', () => {
     },
     // Tables — only __name matters for routing the chain.
     principal: { __name: 'principal' },
-    conversationTags: { __name: 'conversation_tags' },
-    tags: { __name: 'tags', id: 'id', name: 'name', color: 'color' },
     conversations: { __name: 'conversations' },
     chatMessages: { __name: 'chat_messages' },
     // SQL helpers — no-op stubs; inArray records its second arg for assertions.
@@ -83,7 +70,6 @@ import {
   authorFromInput,
   fallbackAuthor,
   loadAuthors,
-  loadConversationTags,
 } from '../chat.query'
 
 const visitorId = 'principal_visitor' as PrincipalId
@@ -132,7 +118,6 @@ function makeConversation(extra: Partial<Conversation> = {}): Conversation {
 
 beforeEach(() => {
   principalRows = []
-  tagRows = []
   inArrayCalls.length = 0
   vi.clearAllMocks()
 })
@@ -161,9 +146,8 @@ describe('toMessageDTO', () => {
 })
 
 describe('toConversationDTO', () => {
-  it('defaults tags to [] and visitorEmail to null when omitted, and null-coalesces csatRating + read watermarks', () => {
+  it('defaults visitorEmail to null when omitted, and null-coalesces csatRating + read watermarks', () => {
     const dto = toConversationDTO(makeConversation(), visitorAuthor, null, 3)
-    expect(dto.tags).toEqual([])
     expect(dto.visitorEmail).toBeNull()
     expect(dto.assignedAgent).toBeNull()
     expect(dto.csatRating).toBeNull()
@@ -174,18 +158,15 @@ describe('toConversationDTO', () => {
     expect(dto.createdAt).toBe('2026-01-01T00:00:00.000Z')
   })
 
-  it('passes tagList and visitorEmail through when provided', () => {
-    const tagList: ChatTagDTO[] = [{ id: 'tag_1' as TagId, name: 'billing', color: '#ff0000' }]
+  it('passes visitorEmail through when provided', () => {
     const agent: ChatAuthorDTO = { principalId: agentId, displayName: 'Ann', avatarUrl: null }
     const dto = toConversationDTO(
       makeConversation({ csatRating: 5 }),
       visitorAuthor,
       agent,
       0,
-      tagList,
       'visitor@example.com'
     )
-    expect(dto.tags).toBe(tagList)
     expect(dto.visitorEmail).toBe('visitor@example.com')
     expect(dto.assignedAgent).toBe(agent)
     expect(dto.csatRating).toBe(5)
@@ -262,30 +243,5 @@ describe('loadAuthors', () => {
       displayName: null,
       avatarUrl: 'https://x/a.png',
     })
-  })
-})
-
-describe('loadConversationTags', () => {
-  it('returns an empty map without querying for empty input', async () => {
-    const map = await loadConversationTags([])
-    expect(map.size).toBe(0)
-    expect(inArrayCalls).toHaveLength(0)
-  })
-
-  it('dedupes conversation ids and groups tags per conversation', async () => {
-    const other = 'conversation_2' as ConversationId
-    tagRows = [
-      { conversationId, id: 'tag_1' as TagId, name: 'billing', color: '#ff0000' },
-      { conversationId, id: 'tag_2' as TagId, name: 'bug', color: '#00ff00' },
-      { conversationId: other, id: 'tag_3' as TagId, name: 'feature', color: '#0000ff' },
-    ]
-    const map = await loadConversationTags([conversationId, conversationId, other])
-    expect(inArrayCalls).toHaveLength(1)
-    expect(inArrayCalls[0]).toEqual([conversationId, other])
-    expect(map.get(conversationId)).toEqual([
-      { id: 'tag_1', name: 'billing', color: '#ff0000' },
-      { id: 'tag_2', name: 'bug', color: '#00ff00' },
-    ])
-    expect(map.get(other)).toEqual([{ id: 'tag_3', name: 'feature', color: '#0000ff' }])
   })
 })

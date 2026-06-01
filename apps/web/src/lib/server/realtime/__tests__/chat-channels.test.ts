@@ -1,7 +1,7 @@
 /**
  * Channel routing for chat events, with a focus on the security-critical
- * invariant that agent-only data (internal notes, conversation tags) never
- * reaches the visitor's conversation channel.
+ * invariant that agent-only data (internal notes, captured visitor email)
+ * never reaches the visitor's conversation channel.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ConversationId } from '@quackback/ids'
@@ -33,7 +33,6 @@ const agentDto = {
   visitorLastReadAt: null,
   agentLastReadAt: null,
   csatRating: null,
-  tags: [{ id: 'tag_1', name: 'billing', color: '#ff0000' }],
   visitorEmail: 'visitor@example.com',
 } as unknown as ConversationDTO
 
@@ -67,12 +66,10 @@ describe('publishConversationUpdate', () => {
 
     // Agents keep agent-only fields...
     const inboxConv = (inbox![1] as { conversation: ConversationDTO }).conversation
-    expect(inboxConv.tags).toHaveLength(1)
     expect(inboxConv.visitorEmail).toBe('visitor@example.com')
 
     // ...the visitor copy must have every agent-only field stripped.
     const visitorConv = (visitor![1] as { conversation: ConversationDTO }).conversation
-    expect(visitorConv.tags).toEqual([])
     expect(visitorConv.visitorEmail).toBeNull()
   })
 })

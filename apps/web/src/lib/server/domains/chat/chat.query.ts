@@ -5,10 +5,8 @@
 import {
   db,
   conversations,
-  conversationTags,
   chatMessages,
   principal,
-  tags,
   eq,
   and,
   or,
@@ -21,11 +19,10 @@ import {
   type Conversation,
   type ChatMessage,
 } from '@/lib/server/db'
-import type { ConversationId, PrincipalId, TagId } from '@quackback/ids'
+import type { ConversationId, PrincipalId } from '@quackback/ids'
 import type {
   ChatAuthorDTO,
   ChatMessageDTO,
-  ChatTagDTO,
   ConversationDTO,
   ChatSenderType,
 } from '@/lib/shared/chat/types'
@@ -93,8 +90,7 @@ export function toConversationDTO(
   visitor: ChatAuthorDTO,
   assignedAgent: ChatAuthorDTO | null,
   unreadCount: number,
-  // Agent-only fields; callers pass empty/null on visitor-facing paths.
-  tagList: ChatTagDTO[] = [],
+  // Agent-only field; callers pass null on visitor-facing paths.
   visitorEmail: string | null = null
 ): ConversationDTO {
   return {
@@ -110,38 +106,8 @@ export function toConversationDTO(
     visitorLastReadAt: conversation.visitorLastReadAt?.toISOString() ?? null,
     agentLastReadAt: conversation.agentLastReadAt?.toISOString() ?? null,
     csatRating: conversation.csatRating ?? null,
-    tags: tagList,
     visitorEmail,
   }
-}
-
-/**
- * Batch-load tags for conversations, ordered alphabetically by name within each.
- * Joins the shared `tags` table and skips soft-deleted tags. Returns a lookup map.
- */
-export async function loadConversationTags(
-  conversationIds: ReadonlyArray<ConversationId>
-): Promise<Map<ConversationId, ChatTagDTO[]>> {
-  const map = new Map<ConversationId, ChatTagDTO[]>()
-  const unique = [...new Set(conversationIds)]
-  if (unique.length === 0) return map
-  const rows = await db
-    .select({
-      conversationId: conversationTags.conversationId,
-      id: tags.id,
-      name: tags.name,
-      color: tags.color,
-    })
-    .from(conversationTags)
-    .innerJoin(tags, eq(conversationTags.tagId, tags.id))
-    .where(and(inArray(conversationTags.conversationId, unique), isNull(tags.deletedAt)))
-    .orderBy(tags.name)
-  for (const row of rows) {
-    const list = map.get(row.conversationId) ?? []
-    list.push({ id: row.id, name: row.name, color: row.color })
-    map.set(row.conversationId, list)
-  }
-  return map
 }
 
 /** Count messages on the other side that arrived after this side last read. */
@@ -173,15 +139,11 @@ export async function conversationToDTO(
   conversation: Conversation,
   side: ChatSenderType
 ): Promise<ConversationDTO> {
-  // Independent queries (principal info vs message count vs tags) — run
-  // concurrently; this runs on the send hot path for every message. Tags are
-  // agent-only, so the visitor side skips that query entirely.
-  const [authors, unread, tagMap] = await Promise.all([
+  // Independent queries (principal info vs message count) — run concurrently;
+  // this runs on the send hot path for every message.
+  const [authors, unread] = await Promise.all([
     loadAuthors([conversation.visitorPrincipalId, conversation.assignedAgentPrincipalId]),
     unreadCountFor(conversation, side),
-    side === 'agent'
-      ? loadConversationTags([conversation.id])
-      : Promise.resolve(new Map<ConversationId, ChatTagDTO[]>()),
   ])
   return toConversationDTO(
     conversation,
@@ -191,7 +153,6 @@ export async function conversationToDTO(
           fallbackAuthor(conversation.assignedAgentPrincipalId))
       : null,
     unread,
-    tagMap.get(conversation.id) ?? [],
     side === 'agent' ? (conversation.visitorEmail ?? null) : null
   )
 }
@@ -285,8 +246,6 @@ export interface ConversationListFilter {
   assignedAgentPrincipalId?: PrincipalId
   /** Free-text match over the visitor name + message content. */
   search?: string
-  /** Restrict to conversations carrying this tag. */
-  tagId?: TagId
   /** Cursor: lastMessageAt ISO string — fetch conversations older than it. */
   before?: string
   limit?: number
@@ -334,13 +293,6 @@ export async function listConversationsForAgent(
         filter.assignedAgentPrincipalId
           ? eq(conversations.assignedAgentPrincipalId, filter.assignedAgentPrincipalId)
           : undefined,
-        filter.tagId
-          ? sql`EXISTS (
-              SELECT 1 FROM ${conversationTags} ct
-              WHERE ct.conversation_id = ${conversations.id}
-                AND ct.tag_id = ${filter.tagId}
-            )`
-          : undefined,
         searchCondition,
         beforeDate ? lt(conversations.lastMessageAt, beforeDate) : undefined
       )
@@ -360,31 +312,27 @@ export async function listConversationsForAgent(
     page.flatMap((c) => [c.visitorPrincipalId, c.assignedAgentPrincipalId])
   )
 
-  // Unread (visitor-authored, after the agent's last read) + tags for all rows,
-  // both batched and run concurrently.
+  // Unread (visitor-authored, after the agent's last read) for all rows, batched.
   const ids = page.map((c) => c.id)
-  const [unreadRows, tagMap] = await Promise.all([
-    db
-      .select({
-        conversationId: chatMessages.conversationId,
-        c: sql<number>`count(*)::int`,
-      })
-      .from(chatMessages)
-      .innerJoin(conversations, eq(conversations.id, chatMessages.conversationId))
-      .where(
-        and(
-          inArray(chatMessages.conversationId, ids),
-          eq(chatMessages.senderType, 'visitor'),
-          isNull(chatMessages.deletedAt),
-          or(
-            isNull(conversations.agentLastReadAt),
-            sql`${chatMessages.createdAt} > ${conversations.agentLastReadAt}`
-          )
+  const unreadRows = await db
+    .select({
+      conversationId: chatMessages.conversationId,
+      c: sql<number>`count(*)::int`,
+    })
+    .from(chatMessages)
+    .innerJoin(conversations, eq(conversations.id, chatMessages.conversationId))
+    .where(
+      and(
+        inArray(chatMessages.conversationId, ids),
+        eq(chatMessages.senderType, 'visitor'),
+        isNull(chatMessages.deletedAt),
+        or(
+          isNull(conversations.agentLastReadAt),
+          sql`${chatMessages.createdAt} > ${conversations.agentLastReadAt}`
         )
       )
-      .groupBy(chatMessages.conversationId),
-    loadConversationTags(ids),
-  ])
+    )
+    .groupBy(chatMessages.conversationId)
   const unreadMap = new Map<string, number>()
   for (const row of unreadRows) unreadMap.set(row.conversationId, row.c)
 
@@ -397,7 +345,6 @@ export async function listConversationsForAgent(
           ? (authors.get(c.assignedAgentPrincipalId) ?? fallbackAuthor(c.assignedAgentPrincipalId))
           : null,
         unreadMap.get(c.id) ?? 0,
-        tagMap.get(c.id) ?? [],
         // Inbox is agent-only.
         c.visitorEmail ?? null
       )
