@@ -307,6 +307,7 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
                   <DropdownMenuItem asChild>
                     <Link to="/settings">Settings</Link>
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut}>Sign out</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -449,6 +450,7 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
               <DropdownMenuItem asChild>
                 <Link to="/settings">Settings</Link>
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut}>Sign out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
