@@ -46,6 +46,9 @@ import {
 import { AssigneeControl } from '@/components/admin/chat/assignee-control'
 import { ChannelBadge, NoEmailBadge } from '@/components/admin/chat/channel-badge'
 import { ConversationTagsEditor } from '@/components/admin/chat/conversation-tags-editor'
+import { ChatNoteEditor } from '@/components/admin/chat/chat-note-editor'
+import { NoteContent } from '@/components/admin/chat/note-content'
+import type { JSONContent } from '@tiptap/core'
 import { TagChip } from '@/components/shared/tag-chip'
 import { useChatStream } from '@/lib/client/hooks/use-chat-stream'
 import { useChatTyping } from '@/lib/client/hooks/use-chat-typing'
@@ -114,6 +117,9 @@ function InboxPage() {
   const [status, setStatus] = useState<StatusFilter>('open')
   const [priorityFilter, setPriorityFilter] = useState<ConversationPriority | 'all'>('all')
   const [assignee, setAssignee] = useState<'all' | 'mine' | 'unassigned'>('all')
+  // Top-level view: the triage inbox, or a personal feed of conversations whose
+  // internal notes @-mention me (any status/assignee).
+  const [view, setView] = useState<'inbox' | 'mentions'>('inbox')
   const [selectedId, setSelectedId] = useState<ConversationId | null>(
     (deepLinkConversationId as ConversationId | undefined) ?? null
   )
@@ -122,20 +128,26 @@ function InboxPage() {
   const search = useDebouncedValue(searchInput.trim(), 300)
 
   const listKey = useMemo(
-    () => ['admin', 'inbox', 'conversations', status, priorityFilter, assignee, search] as const,
-    [status, priorityFilter, assignee, search]
+    () =>
+      ['admin', 'inbox', 'conversations', view, status, priorityFilter, assignee, search] as const,
+    [view, status, priorityFilter, assignee, search]
   )
 
   const { data: listData, isLoading: listLoading } = useQuery({
     queryKey: listKey,
     queryFn: () =>
       listConversationsFn({
-        data: {
-          status,
-          priority: priorityFilter === 'all' ? undefined : priorityFilter,
-          assignee,
-          search: search || undefined,
-        },
+        data:
+          view === 'mentions'
+            ? // A personal feed: every conversation mentioning me, regardless of
+              // status/assignee. The principal is resolved server-side.
+              { view: 'mentions', search: search || undefined }
+            : {
+                status,
+                priority: priorityFilter === 'all' ? undefined : priorityFilter,
+                assignee,
+                search: search || undefined,
+              },
       }),
     refetchInterval: 30_000, // polling fallback if the stream drops
   })
@@ -242,6 +254,28 @@ function InboxPage() {
           </div>
         </div>
         <div className="px-3 pt-2">
+          <div className="inline-flex w-full rounded-md border border-border p-0.5 text-xs">
+            {(
+              [
+                { v: 'inbox', label: 'Inbox' },
+                { v: 'mentions', label: 'Mentions' },
+              ] as const
+            ).map(({ v, label }) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v)}
+                className={cn(
+                  'flex-1 rounded px-2.5 py-1 font-medium transition-colors',
+                  view === v ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="px-3 pt-2">
           <input
             type="search"
             value={searchInput}
@@ -250,66 +284,72 @@ function InboxPage() {
             className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-xs outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        <div className="px-3 pt-2">
-          <div className="inline-flex rounded-md border border-border p-0.5 text-xs">
-            {(['all', 'mine', 'unassigned'] as const).map((a) => (
-              <button
-                key={a}
-                type="button"
-                onClick={() => setAssignee(a)}
-                className={cn(
-                  'rounded px-2.5 py-1 font-medium capitalize transition-colors',
-                  assignee === a
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted'
-                )}
-              >
-                {a}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-3 py-2">
-          {(['open', 'pending', 'closed'] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setStatus(s)}
-              className={cn(
-                'shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
-                status === s ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted'
-              )}
-            >
-              {s}
-            </button>
-          ))}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label="Filter by priority"
-                className={cn(
-                  'ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors',
-                  priorityFilter !== 'all'
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted'
-                )}
-              >
-                <PriorityDot priority={priorityFilter === 'all' ? 'none' : priorityFilter} />
-                {priorityFilter === 'all' ? 'Priority' : priorityMeta(priorityFilter).label}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setPriorityFilter('all')} className="text-xs">
-                All priorities
-              </DropdownMenuItem>
-              <PriorityMenuItems
-                selected={priorityFilter === 'all' ? undefined : priorityFilter}
-                onSelect={setPriorityFilter}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        {view === 'inbox' && (
+          <>
+            <div className="px-3 pt-2">
+              <div className="inline-flex rounded-md border border-border p-0.5 text-xs">
+                {(['all', 'mine', 'unassigned'] as const).map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    onClick={() => setAssignee(a)}
+                    className={cn(
+                      'rounded px-2.5 py-1 font-medium capitalize transition-colors',
+                      assignee === a
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-3 py-2">
+              {(['open', 'pending', 'closed'] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setStatus(s)}
+                  className={cn(
+                    'shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+                    status === s
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-muted'
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Filter by priority"
+                    className={cn(
+                      'ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-xs font-medium transition-colors',
+                      priorityFilter !== 'all'
+                        ? 'bg-primary/10 text-primary'
+                        : 'text-muted-foreground hover:bg-muted'
+                    )}
+                  >
+                    <PriorityDot priority={priorityFilter === 'all' ? 'none' : priorityFilter} />
+                    {priorityFilter === 'all' ? 'Priority' : priorityMeta(priorityFilter).label}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setPriorityFilter('all')} className="text-xs">
+                    All priorities
+                  </DropdownMenuItem>
+                  <PriorityMenuItems
+                    selected={priorityFilter === 'all' ? undefined : priorityFilter}
+                    onSelect={setPriorityFilter}
+                  />
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </>
+        )}
         <ScrollArea className="min-h-0 flex-1">
           {listLoading ? (
             <div className="flex justify-center py-10">
@@ -317,11 +357,13 @@ function InboxPage() {
             </div>
           ) : conversations.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-muted-foreground">
-              {assignee === 'mine'
-                ? `No ${status} conversations assigned to you`
-                : assignee === 'unassigned'
-                  ? `No unassigned ${status} conversations`
-                  : `No ${status} conversations`}
+              {view === 'mentions'
+                ? 'No conversations mention you yet'
+                : assignee === 'mine'
+                  ? `No ${status} conversations assigned to you`
+                  : assignee === 'unassigned'
+                    ? `No unassigned ${status} conversations`
+                    : `No ${status} conversations`}
             </div>
           ) : (
             conversations.map((c) => (
@@ -423,6 +465,11 @@ function ChatThread({
   const [reply, setReply] = useState('')
   // Composer mode: a public reply to the visitor, or an internal team note.
   const [noteMode, setNoteMode] = useState(false)
+  // Internal-note composer state (separate from the plain reply textarea): the
+  // note is a rich TipTap doc so it can carry @-mention chips.
+  const [noteText, setNoteText] = useState('')
+  const noteDocRef = useRef<JSONContent | null>(null)
+  const [noteResetSignal, setNoteResetSignal] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const sendTyping = useCallback(() => {
@@ -532,7 +579,10 @@ function ChatThread({
   })
 
   const noteMutation = useMutation({
-    mutationFn: (content: string) => addChatNoteFn({ data: { conversationId, content } }),
+    mutationFn: (vars: { content: string; contentJson: JSONContent | null }) =>
+      addChatNoteFn({
+        data: { conversationId, content: vars.content, contentJson: vars.contentJson },
+      }),
     onSuccess: appendToThread,
     onError: () => toast.error('Failed to add note'),
   })
@@ -588,21 +638,25 @@ function ChatThread({
   }, [])
 
   const onSend = useCallback(() => {
-    const text = reply.trim()
     if (noteMode) {
-      // Notes are text-only; no attachments.
+      // Notes are rich (mention chips) but attachment-free. The plain text gates
+      // the send + drives the preview; the doc carries the mentions.
+      const text = noteText.trim()
       if (!text || noteMutation.isPending) return
-      setReply('')
-      noteMutation.mutate(text)
+      noteMutation.mutate({ content: text, contentJson: noteDocRef.current })
+      setNoteText('')
+      noteDocRef.current = null
+      setNoteResetSignal((n) => n + 1)
       return
     }
+    const text = reply.trim()
     if ((!text && pendingAttachments.length === 0) || sendMutation.isPending || uploading) return
     setReply('')
     sendMutation.mutate({
       content: text,
       attachments: pendingAttachments.length > 0 ? pendingAttachments : undefined,
     })
-  }, [reply, noteMode, noteMutation, pendingAttachments, uploading, sendMutation])
+  }, [reply, noteText, noteMode, noteMutation, pendingAttachments, uploading, sendMutation])
 
   if (isLoading) {
     return (
@@ -824,8 +878,8 @@ function ChatThread({
                 <PaperClipIcon className="h-4 w-4" />
               </button>
             )}
-            <EmojiPicker onSelect={(emoji) => setReply((prev) => prev + emoji)} />
-            {cannedReplies.length > 0 && (
+            {!noteMode && <EmojiPicker onSelect={(emoji) => setReply((prev) => prev + emoji)} />}
+            {!noteMode && cannedReplies.length > 0 && (
               <Popover>
                 <PopoverTrigger asChild>
                   <button
@@ -858,29 +912,40 @@ function ChatThread({
                 </PopoverContent>
               </Popover>
             )}
-            <textarea
-              value={reply}
-              onChange={(e) => {
-                setReply(e.target.value)
-                // Typing indicators are for visitor-facing replies only.
-                if (!noteMode) onLocalInput()
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  onSend()
-                }
-              }}
-              rows={1}
-              placeholder={noteMode ? 'Add an internal note for your team…' : 'Type your reply…'}
-              className="flex-1 resize-none bg-transparent text-sm outline-none max-h-32 py-1"
-            />
+            {noteMode ? (
+              <ChatNoteEditor
+                resetSignal={noteResetSignal}
+                disabled={noteMutation.isPending}
+                onChange={(text, doc) => {
+                  setNoteText(text)
+                  noteDocRef.current = doc
+                }}
+                onSubmit={onSend}
+              />
+            ) : (
+              <textarea
+                value={reply}
+                onChange={(e) => {
+                  setReply(e.target.value)
+                  onLocalInput()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    onSend()
+                  }
+                }}
+                rows={1}
+                placeholder="Type your reply…"
+                className="flex-1 resize-none bg-transparent text-sm outline-none max-h-32 py-1"
+              />
+            )}
             <button
               type="button"
               onClick={onSend}
               disabled={
                 noteMode
-                  ? !reply.trim() || noteMutation.isPending
+                  ? !noteText.trim() || noteMutation.isPending
                   : (!reply.trim() && pendingAttachments.length === 0) ||
                     sendMutation.isPending ||
                     uploading
@@ -930,7 +995,11 @@ function AdminBubble({ message, onDelete }: { message: ChatMessageDTO; onDelete:
           <PencilSquareIcon className="h-3 w-3" />
           {message.author?.displayName ?? 'Teammate'} · Internal note
         </div>
-        <p className="whitespace-pre-wrap break-words text-foreground/90">{message.content}</p>
+        <NoteContent
+          content={message.content}
+          contentJson={message.contentJson}
+          className="text-foreground/90"
+        />
         <span className="mt-0.5 block text-[10px] text-muted-foreground/50">
           {new Date(message.createdAt).toLocaleTimeString([], {
             hour: 'numeric',
