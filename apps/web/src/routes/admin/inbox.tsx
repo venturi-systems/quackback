@@ -30,7 +30,6 @@ import {
   getCannedRepliesFn,
   deleteChatMessageFn,
 } from '@/lib/server/functions/chat'
-import { getPortalUserFn } from '@/lib/server/functions/admin'
 import type {
   ChatAttachment,
   ChatMessageDTO,
@@ -40,8 +39,9 @@ import type {
 } from '@/lib/shared/chat/types'
 import { PriorityControl } from '@/components/admin/chat/priority-control'
 import { AssigneeControl } from '@/components/admin/chat/assignee-control'
-import { ChannelBadge, NoEmailBadge } from '@/components/admin/chat/channel-badge'
+import { ChannelBadge } from '@/components/admin/chat/channel-badge'
 import { ConversationTagsEditor } from '@/components/admin/chat/conversation-tags-editor'
+import { ConversationDetailPanel } from '@/components/admin/chat/conversation-detail-panel'
 import { ConversationListColumn } from '@/components/admin/chat/conversation-list-column'
 import { ChatNoteEditor } from '@/components/admin/chat/chat-note-editor'
 import { NoteContent } from '@/components/admin/chat/note-content'
@@ -318,6 +318,7 @@ function InboxPage() {
             conversationId={selectedId}
             onChanged={refreshInbox}
             onBack={() => setSelectedId(null)}
+            onSelectConversation={setSelectedId}
             isVisitorTyping={visitorTyping}
             isOtherAgentTyping={otherAgentTyping}
           />
@@ -339,6 +340,7 @@ function ChatThread({
   conversationId,
   onChanged,
   onBack,
+  onSelectConversation,
   isVisitorTyping,
   isOtherAgentTyping,
 }: {
@@ -346,6 +348,8 @@ function ChatThread({
   onChanged: () => void
   /** Mobile-only: return to the conversation list (single-column layout). */
   onBack: () => void
+  /** Open another conversation (e.g. from the detail panel's history). */
+  onSelectConversation: (id: ConversationId) => void
   isVisitorTyping: boolean
   isOtherAgentTyping: boolean
 }) {
@@ -513,15 +517,6 @@ function ChatThread({
   })
   const cannedReplies = cannedData?.cannedReplies ?? []
 
-  // Visitor context (email + past feedback); null for anonymous visitors.
-  const visitorPrincipalId = conversation?.visitor.principalId
-  const { data: visitorDetail } = useQuery({
-    queryKey: ['admin', 'inbox', 'visitor', visitorPrincipalId],
-    queryFn: () => getPortalUserFn({ data: { principalId: visitorPrincipalId! } }),
-    enabled: !!visitorPrincipalId,
-    staleTime: 60_000,
-  })
-
   const insertCanned = useCallback((body: string) => {
     setReply((r) => (r.trim() ? `${r}\n${body}` : body))
   }, [])
@@ -600,7 +595,9 @@ function ChatThread({
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
+          {/* Triage controls live in the detail panel at xl+; below that
+              (panel hidden) they stay in the header. */}
+          <div className="flex shrink-0 items-center gap-1.5 xl:hidden">
             {conversation && (
               <>
                 <PriorityControl
@@ -636,9 +633,9 @@ function ChatThread({
           </div>
         </div>
 
-        {/* Conversation labels */}
+        {/* Conversation labels — xl+ shows them in the detail panel. */}
         {conversation && (
-          <div className="flex items-center gap-1.5 border-b border-border/50 px-4 py-2 sm:px-5">
+          <div className="flex items-center gap-1.5 border-b border-border/50 px-4 py-2 sm:px-5 xl:hidden">
             <ConversationTagsEditor conversationId={conversationId} tags={conversation.tags} />
           </div>
         )}
@@ -855,7 +852,13 @@ function ChatThread({
         </div>
       </div>
 
-      <VisitorSidebar conversation={conversation} detail={visitorDetail} />
+      {conversation && (
+        <ConversationDetailPanel
+          conversation={conversation}
+          onChanged={refreshThread}
+          onSelectConversation={onSelectConversation}
+        />
+      )}
     </div>
   )
 }
@@ -963,72 +966,5 @@ function AdminBubble({ message, onDelete }: { message: ChatMessageDTO; onDelete:
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
-  )
-}
-
-function VisitorSidebar({
-  conversation,
-  detail,
-}: {
-  conversation?: ConversationDTO
-  detail?: Awaited<ReturnType<typeof getPortalUserFn>> | null
-}) {
-  if (!conversation) return null
-  const name = conversation.visitor.displayName ?? 'Visitor'
-  // Anonymous visitor with no captured email: an offline email reply can't reach them.
-  const hasEmail = Boolean(detail?.email || conversation.visitorEmail)
-  return (
-    <aside className="hidden w-64 shrink-0 flex-col border-l border-border/50 lg:flex">
-      <div className="flex flex-col items-center gap-2 border-b border-border/50 px-4 py-5 text-center">
-        <Avatar src={conversation.visitor.avatarUrl} name={name} className="size-12 text-base" />
-        <div className="w-full min-w-0">
-          <p className="truncate text-sm font-semibold">{name}</p>
-          {hasEmail ? (
-            <p className="truncate text-xs text-muted-foreground">
-              {detail?.email ?? conversation.visitorEmail}
-              {!detail?.email && conversation.visitorEmail && (
-                <span className="ml-1 text-muted-foreground/50">(provided in chat)</span>
-              )}
-            </p>
-          ) : (
-            <p className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-              Anonymous visitor <NoEmailBadge />
-            </p>
-          )}
-        </div>
-      </div>
-      {detail && (
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="px-4 py-4">
-            <div className="mb-4 grid grid-cols-3 gap-1 text-center">
-              {[
-                { label: 'Posts', value: detail.postCount },
-                { label: 'Comments', value: detail.commentCount },
-                { label: 'Votes', value: detail.voteCount },
-              ].map((s) => (
-                <div key={s.label} className="rounded-md bg-muted/40 py-1.5">
-                  <p className="text-sm font-semibold">{s.value}</p>
-                  <p className="text-[10px] text-muted-foreground">{s.label}</p>
-                </div>
-              ))}
-            </div>
-            {detail.engagedPosts.length > 0 && (
-              <>
-                <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
-                  Recent feedback
-                </p>
-                <div className="flex flex-col gap-1">
-                  {detail.engagedPosts.slice(0, 5).map((p) => (
-                    <span key={p.id} className="truncate text-xs text-foreground/80">
-                      {p.title}
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </ScrollArea>
-      )}
-    </aside>
   )
 }

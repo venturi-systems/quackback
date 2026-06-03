@@ -90,7 +90,7 @@ export function InboxNavSidebar({
   const activeKey = inboxNavKey(nav)
 
   return (
-    <nav className="hidden w-56 shrink-0 flex-col border-r border-border/50 bg-card/30 md:flex">
+    <nav className="hidden w-56 shrink-0 flex-col border-r border-border/50 bg-card/30 lg:flex">
       <div className="border-b border-border/50 px-4 py-3.5">
         <PageHeader icon={ChatBubbleLeftRightIcon} title="Conversations" />
       </div>

@@ -85,12 +85,12 @@ export function ConversationListColumn({
       )}
     >
       <div className="border-b border-border/50 px-4 py-[1.1rem]">
-        {/* Desktop: the nav sidebar owns scope selection, so the header is a
-            plain label. Mobile: the sidebar is hidden, so offer a dropdown. */}
-        <h2 className="hidden truncate text-sm font-semibold leading-tight md:block">
+        {/* At lg+ the nav sidebar owns scope selection, so the header is a
+            plain label. Below lg the sidebar is hidden, so offer a dropdown. */}
+        <h2 className="hidden truncate text-sm font-semibold leading-tight lg:block">
           {scopeLabel}
         </h2>
-        <div className="md:hidden">
+        <div className="lg:hidden">
           <InboxScopeMenu nav={nav} onSelect={onSelectNav} />
         </div>
       </div>
