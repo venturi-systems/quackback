@@ -16,6 +16,7 @@ import type { Actor } from '@/lib/server/policy/types'
 import { normalizePrincipalType } from '@/lib/server/functions/auth-helpers'
 import { parseInboundEmail, extractReplyText } from './chat.email-inbound'
 import { conversationIdFromInboundAddress } from './chat.email-channel'
+import { assertChatSendRate, ChatRateLimitError } from './chat.ratelimit'
 import { sendVisitorMessage } from './chat.service'
 
 export type IngestInboundResult =
@@ -23,6 +24,7 @@ export type IngestInboundResult =
   | { status: 'duplicate' }
   | { status: 'no_conversation' }
   | { status: 'empty' }
+  | { status: 'rate_limited' }
 
 /** Find the conversation id carried by any recipient plus-address. */
 function conversationIdFromRecipients(toAddresses: string[]): string | null {
@@ -67,6 +69,17 @@ export async function ingestInboundEmail(event: unknown): Promise<IngestInboundR
     where: eq(principal.id, visitorPrincipalId),
   })
   if (!visitor) return { status: 'no_conversation' }
+
+  // Same per-visitor throttle the widget send path enforces — the inbound email
+  // channel must not be an unbounded back door for the offline-notification
+  // fanout (a visitor mail-looping replies, or a client retrying with fresh
+  // Message-IDs). Fails open on Redis errors. Ack (200) so the provider stops.
+  try {
+    await assertChatSendRate(visitorPrincipalId)
+  } catch (err) {
+    if (err instanceof ChatRateLimitError) return { status: 'rate_limited' }
+    throw err
+  }
 
   const actor: Actor = {
     principalId: visitorPrincipalId,

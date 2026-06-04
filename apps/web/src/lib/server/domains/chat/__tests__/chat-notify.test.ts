@@ -295,9 +295,10 @@ describe('notifyAgentReply', () => {
         agentName: 'Agent',
       })
 
-      expect(sendChatMessageEmail.mock.calls[0][0]).toMatchObject({
-        replyTo: `reply+${conversationId}@tenaevexeo.resend.app`,
-      })
+      // Signed plus-address: reply+<id>.<hmac>@domain (unforgeable conversation id).
+      expect(sendChatMessageEmail.mock.calls[0][0].replyTo).toMatch(
+        new RegExp(`^reply\\+${conversationId}\\.[A-Za-z0-9_-]+@tenaevexeo\\.resend\\.app$`)
+      )
     })
 
     it('omits Reply-To when inbound email is not configured', async () => {
