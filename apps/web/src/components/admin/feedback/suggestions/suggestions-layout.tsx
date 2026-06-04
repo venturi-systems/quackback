@@ -1,3 +1,4 @@
+import { SparklesIcon } from '@heroicons/react/24/solid'
 import { AdminFilterLayout } from '@/components/admin/admin-filter-layout'
 
 interface SuggestionsLayoutProps {
@@ -8,7 +9,12 @@ interface SuggestionsLayoutProps {
 
 export function SuggestionsLayout({ filters, content, hasActiveFilters }: SuggestionsLayoutProps) {
   return (
-    <AdminFilterLayout filters={filters} hasActiveFilters={hasActiveFilters}>
+    <AdminFilterLayout
+      filters={filters}
+      hasActiveFilters={hasActiveFilters}
+      headerIcon={SparklesIcon}
+      headerTitle="Suggestions"
+    >
       {content}
     </AdminFilterLayout>
   )

@@ -11,6 +11,7 @@
  * drizzle's tagged-template binder.
  */
 import { db, sql } from '@/lib/server/db'
+import { ANON_EMAIL_DOMAIN } from '@/lib/shared/anonymous-email'
 
 export type SearchableAttribute = 'country' | 'locale' | 'name' | 'email' | 'signup_source'
 
@@ -89,6 +90,7 @@ function queryForAttribute(
         SELECT u.email AS value, COUNT(*)::int AS count
         ${baseJoin}
         AND u.email IS NOT NULL
+        AND u.email NOT ILIKE ${`%@${ANON_EMAIL_DOMAIN}`}
         ${prefixFilter(sql`u.email`, query)}
         GROUP BY u.email
         ORDER BY count DESC, value ASC

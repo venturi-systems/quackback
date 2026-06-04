@@ -52,6 +52,10 @@ function wireGracefulShutdown(): void {
           if (r.status === 'rejected') console.error('[Shutdown] close error:', r.reason)
         }
 
+        // Drain the live-chat pub/sub subscriber connection before the
+        // shared client closes — it's a separate long-lived socket.
+        await import('./realtime/pubsub').then(({ closeSubscriber }) => closeSubscriber())
+
         // After all queues + workers have closed, quit the shared
         // IORedis client so we don't leave a half-open socket behind.
         await import('./queue/redis-config').then(({ closeQueueRedis }) => closeQueueRedis())
@@ -120,6 +124,11 @@ export function logStartupBanner(): void {
   import('./domains/analytics/analytics-queue')
     .then(({ initAnalyticsWorker }) => initAnalyticsWorker())
     .catch((err) => console.error('[Startup] Failed to init analytics worker:', err))
+
+  // Initialize anonymous-principal sweep worker (daily; bounds anon-row bloat)
+  import('./domains/principals/anon-sweep-queue')
+    .then(({ initAnonSweepWorker }) => initAnonSweepWorker())
+    .catch((err) => console.error('[Startup] Failed to init anon-sweep worker:', err))
 
   // Periodic feedback maintenance (stuck-item recovery every 15min, suggestion expiry daily).
   // Runs under a cross-instance lock so only one replica executes per tick.

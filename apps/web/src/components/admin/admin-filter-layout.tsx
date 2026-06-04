@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, type ComponentType } from 'react'
 import { FunnelIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { PageHeader } from '@/components/shared/page-header'
 
 interface AdminFilterLayoutProps {
   filters: React.ReactNode
@@ -10,6 +11,10 @@ interface AdminFilterLayoutProps {
   hasActiveFilters?: boolean
   /** Whether main content area scrolls internally (default true). Set false for pages that manage their own scrolling. */
   scrollContent?: boolean
+  /** Optional icon+title heading at the top of the filter pane, matching the
+   *  other admin left panes (no separator). */
+  headerIcon?: ComponentType<{ className?: string }>
+  headerTitle?: string
 }
 
 export function AdminFilterLayout({
@@ -17,6 +22,8 @@ export function AdminFilterLayout({
   children,
   hasActiveFilters,
   scrollContent = true,
+  headerIcon,
+  headerTitle,
 }: AdminFilterLayoutProps) {
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
 
@@ -24,9 +31,20 @@ export function AdminFilterLayout({
     <div className="flex h-full">
       {/* Filters - Desktop */}
       <aside className="hidden lg:flex w-64 xl:w-72 shrink-0 flex-col border-r border-border/50 bg-card/30 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="p-5">{filters}</div>
-        </ScrollArea>
+        {headerTitle ? (
+          <>
+            <div className="shrink-0 px-4 py-3.5">
+              <PageHeader icon={headerIcon} title={headerTitle} />
+            </div>
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="px-5 pb-5">{filters}</div>
+            </ScrollArea>
+          </>
+        ) : (
+          <ScrollArea className="h-full">
+            <div className="p-5">{filters}</div>
+          </ScrollArea>
+        )}
       </aside>
 
       {/* Mobile filter button */}

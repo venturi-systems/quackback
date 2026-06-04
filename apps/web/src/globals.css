@@ -220,6 +220,10 @@
 
     /* OTP input caret blink */
     --animate-caret-blink: caret-blink 1.25s ease-out infinite;
+
+    /* "Jump to message" flash — brief brand-tinted background that fades out,
+       so a deep-linked / saved message is easy to spot on arrival. */
+    --animate-flash-highlight: flash-highlight 2.2s ease-out;
   }
 
 /* Collapsible keyframes */
@@ -254,6 +258,18 @@
   20%,
   50% {
     opacity: 0;
+  }
+}
+
+/* Jump-to-message flash: hold a brand tint briefly, then fade to transparent so
+   the row returns to its normal background. */
+@keyframes flash-highlight {
+  0%,
+  20% {
+    background-color: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
   }
 }
 

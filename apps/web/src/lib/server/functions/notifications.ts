@@ -59,19 +59,25 @@ export const getNotificationsFn = createServerFn({ method: 'GET' })
 
       // Serialize dates for JSON transport
       return {
-        notifications: result.notifications.map((n) => ({
-          id: n.id,
-          principalId: n.principalId,
-          type: n.type,
-          title: n.title,
-          body: n.body,
-          postId: n.postId,
-          commentId: n.commentId,
-          readAt: n.readAt?.toISOString() ?? null,
-          archivedAt: n.archivedAt?.toISOString() ?? null,
-          createdAt: n.createdAt.toISOString(),
-          post: n.post,
-        })),
+        notifications: result.notifications.map((n) => {
+          // Chat notifications carry their target conversation in metadata so
+          // the client can deep-link into the inbox.
+          const conversationId = n.metadata?.conversationId
+          return {
+            id: n.id,
+            principalId: n.principalId,
+            type: n.type,
+            title: n.title,
+            body: n.body,
+            postId: n.postId,
+            commentId: n.commentId,
+            conversationId: typeof conversationId === 'string' ? conversationId : null,
+            readAt: n.readAt?.toISOString() ?? null,
+            archivedAt: n.archivedAt?.toISOString() ?? null,
+            createdAt: n.createdAt.toISOString(),
+            post: n.post,
+          }
+        }),
         total: result.total,
         unreadCount: result.unreadCount,
         hasMore: result.hasMore,

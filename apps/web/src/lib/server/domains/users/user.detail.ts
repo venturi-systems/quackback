@@ -26,6 +26,7 @@ import {
 } from '@/lib/server/db'
 import type { PrincipalId, SegmentId } from '@quackback/ids'
 import { InternalError } from '@/lib/shared/errors'
+import { realEmail } from '@/lib/shared/anonymous-email'
 import { truncate } from '@/lib/shared/utils/string'
 import type {
   PortalUserDetail,
@@ -294,7 +295,8 @@ export async function getPortalUserDetail(
       principalId: principalData.principalId,
       userId: principalData.userId,
       name: principalData.name,
-      email: principalData.email,
+      // Synthetic anon placeholder must never surface (agent inbox, v1 API).
+      email: realEmail(principalData.email),
       image: principalData.image,
       emailVerified: principalData.emailVerified,
       metadata: principalData.metadata,

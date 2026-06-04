@@ -31,6 +31,7 @@ import {
 } from '@/lib/server/db'
 import type { PrincipalId, SegmentId } from '@quackback/ids'
 import { NotFoundError, InternalError } from '@/lib/shared/errors'
+import { realEmail } from '@/lib/shared/anonymous-email'
 import type {
   PortalUserListParams,
   PortalUserListResult,
@@ -338,7 +339,8 @@ export async function listPortalUsers(
       principalId: row.principalId,
       userId: row.userId,
       name: row.name,
-      email: row.email,
+      // Anonymous rows (shown only with "Include Anonymous") must render no email.
+      email: realEmail(row.email),
       image: row.image,
       emailVerified: row.emailVerified,
       metadata: row.metadata,

@@ -62,7 +62,7 @@ export type { ApiKey } from './api-keys'
 
 // Settings types
 export type { PortalAuthMethods, FeatureFlags } from './settings'
-export { FEATURE_FLAG_REGISTRY } from './settings'
+export { FEATURE_FLAG_REGISTRY, LAB_SECTIONS } from './settings'
 
 // Import types
 export type { ImportResult } from './import'

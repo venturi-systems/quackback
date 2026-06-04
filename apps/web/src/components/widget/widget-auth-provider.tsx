@@ -10,7 +10,14 @@ import {
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { IntlProvider } from 'react-intl'
-import { setWidgetToken, clearWidgetToken, getWidgetToken } from '@/lib/client/widget-auth'
+import {
+  setWidgetToken,
+  clearWidgetToken,
+  getWidgetToken,
+  persistAnonymousToken,
+  readPersistedToken,
+  clearPersistedToken,
+} from '@/lib/client/widget-auth'
 import { sendToHost } from '@/lib/client/widget-bridge'
 import { widgetQueryKeys } from '@/lib/client/hooks/use-widget-vote'
 import { authClient } from '@/lib/client/auth-client'
@@ -102,36 +109,79 @@ export function WidgetAuthProvider({
    * For anonymous users, the session is created eagerly during identify({ anonymous: true }).
    * This is kept as a fallback but should return true immediately after identify.
    */
+  // Acquire an anonymous session, preferring a persisted token (which survives
+  // reloads / new tabs / return visits). `allowMint=false` is the mount-time
+  // "restore only" mode — it adopts a still-valid persisted token but never
+  // creates a new session, honoring the lazy-mint-on-first-write model.
+  // Concurrent callers coalesce on the in-flight attempt; if a restore-only
+  // attempt establishes nothing, a mint-allowed caller falls through to mint.
   const sessionPromiseRef = useRef<Promise<boolean> | null>(null)
-  const ensureSession = useCallback(async (): Promise<boolean> => {
-    if (sessionReadyRef.current) return true
-    if (sessionPromiseRef.current) return sessionPromiseRef.current
-
-    const p = (async () => {
-      try {
-        const { data, error } = await authClient.signIn.anonymous({
-          fetchOptions: {
-            // credentials: 'omit' prevents the browser from sending the
-            // existing portal session cookie and from accepting the Set-Cookie
-            // response, so the widget iframe doesn't overwrite the portal session.
-            // The Bearer token is still returned via the set-auth-token header.
-            credentials: 'omit',
-            onSuccess: (ctx) => {
-              const token = ctx.response.headers.get('set-auth-token')
-              if (token) storeToken(token)
-            },
-          },
-        })
-        return !error && !!data
-      } catch {
-        return false
-      } finally {
-        sessionPromiseRef.current = null
+  const acquireSession = useCallback(
+    async (allowMint: boolean): Promise<boolean> => {
+      if (sessionReadyRef.current) return true
+      const inFlight = sessionPromiseRef.current
+      if (inFlight) {
+        const ok = await inFlight
+        if (ok || sessionReadyRef.current) return true
+        if (!allowMint) return false
       }
-    })()
-    sessionPromiseRef.current = p
-    return p
-  }, [storeToken])
+      if (sessionReadyRef.current) return true
+      if (sessionPromiseRef.current) return sessionPromiseRef.current
+
+      const p = (async (): Promise<boolean> => {
+        try {
+          // 1. Prefer a persisted anonymous token — validate it server-side
+          //    before adopting (it may have expired or been merged away).
+          const persisted = readPersistedToken()
+          if (persisted) {
+            try {
+              const res = await fetch('/api/widget/session', {
+                headers: { Authorization: `Bearer ${persisted}` },
+              })
+              if (res.ok) {
+                storeToken(persisted)
+                // Active use rolls the client expiry hint forward (the server
+                // session is rolled by the validation endpoint), so the 7-day
+                // window tracks activity instead of capping at first mint.
+                persistAnonymousToken(persisted)
+                return true
+              }
+            } catch {
+              // Server unreachable — fall through and mint if allowed.
+            }
+            clearWidgetToken() // stale/invalid → drop the persisted copy
+          }
+          if (!allowMint) return false
+
+          // 2. Lazy-mint a fresh anonymous session. credentials:'omit' keeps the
+          //    widget iframe from sending/accepting the portal cookie; the token
+          //    arrives via the set-auth-token header and is persisted so it
+          //    survives the next reload.
+          const { data, error } = await authClient.signIn.anonymous({
+            fetchOptions: {
+              credentials: 'omit',
+              onSuccess: (ctx) => {
+                const token = ctx.response.headers.get('set-auth-token')
+                if (token) {
+                  storeToken(token)
+                  persistAnonymousToken(token)
+                }
+              },
+            },
+          })
+          return !error && !!data
+        } catch {
+          return false
+        } finally {
+          sessionPromiseRef.current = null
+        }
+      })()
+      sessionPromiseRef.current = p
+      return p
+    },
+    [storeToken]
+  )
+  const ensureSession = useCallback((): Promise<boolean> => acquireSession(true), [acquireSession])
 
   const ensureSessionThen = useCallback(
     async (callback: () => void | Promise<void>) => {
@@ -151,6 +201,10 @@ export function WidgetAuthProvider({
   const applyIdentifyResult = useCallback(
     (result: { sessionToken: string; user: WidgetUser; votedPostIds?: string[] }) => {
       storeToken(result.sessionToken)
+      // Any anonymous session was merged into this identified user server-side,
+      // so drop its persisted token. Identified tokens are never persisted —
+      // they're re-established via SDK identify / portal passthrough on load.
+      clearPersistedToken()
       setUser(result.user)
       if (result.votedPostIds) {
         queryClient.setQueryData(
@@ -220,6 +274,20 @@ export function WidgetAuthProvider({
       sendToHost({ type: 'quackback:auth-change', user: portalUser })
     }
   }, [portalSessionToken, portalUser, storeToken])
+
+  // Restore a persisted anonymous session on mount so a returning visitor's
+  // conversation is visible immediately, without waiting for a write. Skipped
+  // when a portal session is present (it takes precedence) or one is already
+  // ready. Restore-only: never mints — the first write lazily mints if nothing
+  // valid was restored.
+  const restoreAttemptedRef = useRef(false)
+  useEffect(() => {
+    if (restoreAttemptedRef.current) return
+    if (portalSessionToken || sessionReadyRef.current) return
+    restoreAttemptedRef.current = true
+    if (!readPersistedToken()) return
+    void acquireSession(false)
+  }, [portalSessionToken, acquireSession])
 
   const closeWidget = useCallback(() => {
     sendToHost({ type: 'quackback:close' })

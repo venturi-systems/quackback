@@ -104,7 +104,8 @@ export const feedbackPipelineHook: HookHandler = {
         sourceCreatedAt: new Date(),
         author: {
           principalId: event.actor.principalId,
-          email: event.actor.type === 'user' ? event.actor.email : eventPost.authorEmail,
+          // eventPost.authorEmail is already realEmail-sanitized at dispatch.
+          email: eventPost.authorEmail,
           name: eventPost.authorName,
         },
         content: {

@@ -12,6 +12,7 @@ import {
 import { PencilSquareIcon, TrashIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { CheckBadgeIcon } from '@heroicons/react/24/solid'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { ReactionChip } from '@/components/shared/reaction-chip'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
@@ -739,26 +740,18 @@ function CommentItem({
               </Button>
             )}
 
-            {/* Existing reactions */}
+            {/* Existing reactions — hover shows who reacted. */}
             {!isDeleted &&
               reactions.map((reaction) => (
-                <button
+                <ReactionChip
                   key={reaction.emoji}
-                  data-testid="reaction-badge"
-                  onClick={() => handleReaction(reaction.emoji)}
+                  emoji={reaction.emoji}
+                  count={reaction.count}
+                  hasReacted={reaction.hasReacted}
+                  reactors={reaction.reactors}
                   disabled={isPending}
-                  className={cn(
-                    'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all duration-150',
-                    'border hover:bg-muted',
-                    'bg-muted/50',
-                    reaction.hasReacted
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground'
-                  )}
-                >
-                  <span>{reaction.emoji}</span>
-                  <span>{reaction.count}</span>
-                </button>
+                  onToggle={() => handleReaction(reaction.emoji)}
+                />
               ))}
 
             {/* Add reaction button */}

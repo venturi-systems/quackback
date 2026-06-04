@@ -1,0 +1,147 @@
+/**
+ * Offline notifications for support-inbox conversations. Fire-and-forget from the service after a
+ * write commits — a delivery failure must never break sending a message.
+ *
+ *  - Visitor message  -> in-app notification for the team; email the team only
+ *    when no agent currently has a live stream (offline coverage).
+ *  - Agent reply      -> email the visitor only when they're offline AND
+ *    identified (anonymous visitors have no deliverable address; the widget's
+ *    unread badge covers the online case).
+ */
+import { db, eq, inArray, principal, user } from '@/lib/server/db'
+import type { Conversation } from '@/lib/server/db'
+import type { PrincipalId, ConversationId } from '@quackback/ids'
+import { isAnyAgentOnline, isPrincipalOnline } from '@/lib/server/realtime/presence'
+import { createNotificationsBatch } from '@/lib/server/domains/notifications/notification.service'
+import { buildHookContext } from '@/lib/server/events/hook-context'
+import { truncate } from '@/lib/shared/utils/string'
+import { resolveReplyRecipient } from './chat.recipient'
+import { inboundReplyToAddress, isEmailInboundConfigured } from './chat.email-channel'
+
+const previewOf = (content: string) => truncate(content, 140)
+
+/** Notify the team of a new visitor message. */
+export async function notifyVisitorMessage(opts: {
+  conversation: Conversation
+  content: string
+  authorName: string
+  isFirstMessage: boolean
+}): Promise<void> {
+  try {
+    const agentsOnline = await isAnyAgentOnline()
+    // Avoid notification spam: only ping the team on the first message of a
+    // conversation, or when nobody is around to see it live.
+    if (!opts.isFirstMessage && agentsOnline) return
+
+    const team = await db
+      .select({ principalId: principal.id, email: user.email, name: user.name })
+      .from(principal)
+      .leftJoin(user, eq(principal.userId, user.id))
+      .where(inArray(principal.role, ['admin', 'member']))
+
+    if (team.length === 0) return
+
+    const title = `New chat message from ${opts.authorName}`
+    const body = previewOf(opts.content)
+
+    await createNotificationsBatch(
+      team.map((t) => ({
+        principalId: t.principalId,
+        type: 'chat_message' as const,
+        title,
+        body,
+        metadata: { conversationId: opts.conversation.id },
+      }))
+    )
+
+    // Email the team only when no agent is online to handle it live.
+    if (!agentsOnline) {
+      const ctx = await buildHookContext()
+      if (!ctx) return
+      const ctaUrl = `${ctx.portalBaseUrl.replace(/\/$/, '')}/admin/inbox?c=${opts.conversation.id}`
+      const { sendChatMessageEmail } = await import('@quackback/email')
+      await Promise.allSettled(
+        team
+          .filter((t) => t.email)
+          .map((t) =>
+            sendChatMessageEmail({
+              to: t.email!,
+              direction: 'visitor_message',
+              senderName: opts.authorName,
+              messagePreview: body,
+              ctaUrl,
+              workspaceName: ctx.workspaceName,
+              logoUrl: ctx.logoUrl ?? undefined,
+            })
+          )
+      )
+    }
+  } catch (err) {
+    console.warn('[chat:notify] notifyVisitorMessage failed:', (err as Error).message)
+  }
+}
+
+/**
+ * Email an offline visitor when an agent replies. An identified visitor's
+ * account email is preferred; an anonymous visitor is reachable only via the
+ * pre-chat email they captured on the conversation.
+ */
+export async function notifyAgentReply(opts: {
+  conversationId: ConversationId
+  visitorPrincipalId: PrincipalId
+  content: string
+  agentName: string
+  /** Pre-chat email captured on the conversation, if any. */
+  capturedEmail?: string | null
+}): Promise<void> {
+  try {
+    if (await isPrincipalOnline(opts.visitorPrincipalId)) return
+
+    const [visitor] = await db
+      .select({ type: principal.type, email: user.email, contactEmail: principal.contactEmail })
+      .from(principal)
+      .leftJoin(user, eq(principal.userId, user.id))
+      .where(eq(principal.id, opts.visitorPrincipalId))
+      .limit(1)
+
+    const recipient = resolveReplyRecipient(visitor, visitor?.contactEmail, opts.capturedEmail)
+    if (!recipient) {
+      // The visitor is offline and unreachable — surface it instead of dropping
+      // silently (the inbox can flag conversations with no reply-to address).
+      console.warn(
+        `[chat:notify] agent reply undeliverable (no email) for conversation ${opts.conversationId}`
+      )
+      return
+    }
+
+    const ctx = await buildHookContext()
+    if (!ctx) return
+    const { sendChatMessageEmail } = await import('@quackback/email')
+    // Deep-link straight to the widget's chat view. The thread is surfaced from
+    // the visitor's own session (or a re-identify in the host app), so the URL
+    // only navigates — it carries no capability of its own.
+    const ctaUrl = `${ctx.portalBaseUrl.replace(/\/$/, '')}/widget/?c=${encodeURIComponent(opts.conversationId)}`
+    // Only advertise a reply address we can actually receive on, so a visitor's
+    // email reply threads back into this conversation (inbound email channel).
+    const replyTo = isEmailInboundConfigured()
+      ? (inboundReplyToAddress(opts.conversationId) ?? undefined)
+      : undefined
+    const result = await sendChatMessageEmail({
+      to: recipient,
+      direction: 'agent_reply',
+      senderName: opts.agentName,
+      messagePreview: previewOf(opts.content),
+      ctaUrl,
+      workspaceName: ctx.workspaceName,
+      logoUrl: ctx.logoUrl ?? undefined,
+      replyTo,
+    })
+    if (result && result.sent === false) {
+      console.warn(
+        `[chat:notify] agent-reply email not sent (provider returned sent:false) for conversation ${opts.conversationId}`
+      )
+    }
+  } catch (err) {
+    console.warn('[chat:notify] notifyAgentReply failed:', (err as Error).message)
+  }
+}

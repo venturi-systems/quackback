@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, startTransition } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { BookOpenIcon } from '@heroicons/react/24/solid'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { InboxLayout } from '@/components/admin/feedback/inbox-layout'
 import { HelpCenterFiltersPanel } from './help-center-filters'
@@ -147,6 +148,8 @@ export function HelpCenterList() {
   return (
     <>
       <InboxLayout
+        headerIcon={BookOpenIcon}
+        headerTitle="Help Center"
         filters={
           <HelpCenterFiltersPanel
             status={filters.status}

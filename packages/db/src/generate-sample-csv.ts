@@ -2,8 +2,7 @@
 /**
  * Bulk sample data generator for CSV import.
  *
- * Generates realistic feedback posts with power-law distributions
- * similar to UserVoice, Canny, and other feedback platforms.
+ * Generates realistic feedback posts with power-law vote distributions.
  *
  * Usage:
  *   bun run db:generate-csv [count] [output]

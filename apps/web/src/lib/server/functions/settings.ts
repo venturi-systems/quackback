@@ -714,6 +714,48 @@ const updateWidgetConfigSchema = z.object({
       feedback: z.boolean().optional(),
       changelog: z.boolean().optional(),
       help: z.boolean().optional(),
+      chat: z.boolean().optional(),
+      home: z.boolean().optional(),
+    })
+    .optional(),
+  chat: z
+    .object({
+      enabled: z.boolean().optional(),
+      welcomeMessage: z.string().max(500).optional(),
+      offlineMessage: z.string().max(500).optional(),
+      teamName: z.string().max(80).optional(),
+      preChatEmail: z.enum(['off', 'optional', 'required']).optional(),
+      officeHours: z
+        .object({
+          enabled: z.boolean(),
+          timezone: z.string().max(64),
+          days: z
+            .array(
+              z.object({
+                enabled: z.boolean(),
+                start: z.string().regex(/^\d{2}:\d{2}$/),
+                end: z.string().regex(/^\d{2}:\d{2}$/),
+              })
+            )
+            .length(7),
+        })
+        .optional(),
+      cannedReplies: z
+        .array(
+          z.object({
+            id: z.string().max(64),
+            title: z.string().max(80),
+            body: z.string().max(2000),
+          })
+        )
+        .max(100)
+        .optional(),
+      routing: z
+        .object({
+          enabled: z.boolean(),
+          strategy: z.literal('auto_assign_active'),
+        })
+        .optional(),
     })
     .optional(),
 })

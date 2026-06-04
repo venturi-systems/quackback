@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { ChatBubbleLeftIcon } from '@heroicons/react/24/solid'
 import { Route } from '@/routes/admin/feedback'
 import { InboxLayout } from '@/components/admin/feedback/inbox-layout'
 import { InboxFiltersPanel } from '@/components/admin/feedback/inbox-filters'
@@ -128,6 +129,8 @@ export function InboxContainer({
   return (
     <InboxLayout
       hasActiveFilters={hasActiveFilters}
+      headerIcon={ChatBubbleLeftIcon}
+      headerTitle="Feedback"
       filters={
         <InboxFiltersPanel
           filters={filters}

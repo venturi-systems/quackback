@@ -20,6 +20,9 @@ import { incrementBucket } from '@/lib/server/utils/redis-rate-bucket'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 
 const MENTION_ELIGIBLE_ROLES = ['admin', 'member', 'user'] as const
+// `?scope=team` narrows to teammates only (no visitors), for contexts where a
+// mention is team-internal — e.g. agent notes in the support inbox.
+const TEAM_ROLES = ['admin', 'member'] as const
 const SUGGEST_LIMIT = 10
 const RATE_LIMIT = 60
 const RATE_WINDOW_SECONDS = 60
@@ -81,6 +84,8 @@ export async function handleMentionSuggest({ request }: { request: Request }): P
 
   const url = new URL(request.url)
   const q = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+  const eligibleRoles =
+    url.searchParams.get('scope') === 'team' ? TEAM_ROLES : MENTION_ELIGIBLE_ROLES
 
   // Non-empty `q` uses a prefix LIKE against the lower(display_name)
   // functional index (migration 0065). No substring search — that would
@@ -88,7 +93,7 @@ export async function handleMentionSuggest({ request }: { request: Request }): P
   // returns the first page of eligible users. Email is never selected.
   const predicates: SQL[] = [
     eq(principal.type, 'user'),
-    inArray(principal.role, [...MENTION_ELIGIBLE_ROLES]),
+    inArray(principal.role, [...eligibleRoles]),
   ]
   if (q.length > 0) {
     predicates.push(sql`lower(${principal.displayName}) LIKE ${`${q}%`}`)

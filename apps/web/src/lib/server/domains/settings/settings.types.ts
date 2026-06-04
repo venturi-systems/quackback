@@ -6,6 +6,7 @@
  */
 
 import type { TiptapContent } from '@/lib/shared/db-types'
+import type { OfficeHoursConfig, PreChatEmailMode } from '@/lib/shared/chat/types'
 
 // =============================================================================
 // Auth Configuration (Team sign-in settings)
@@ -422,6 +423,45 @@ export interface UpdateDeveloperConfigInput {
  * Controls the embeddable feedback widget behavior
  * Note: widgetSecret is stored in its own DB column, NOT here
  */
+/** An agent saved reply (canned response). */
+export interface CannedReply {
+  id: string
+  title: string
+  body: string
+}
+
+/**
+ * Chat settings (sub-section of WidgetConfig). Most fields are client-safe
+ * and projected into PublicLiveChatConfig; `cannedReplies` is agent-only and is
+ * stripped from the public projection (see getPublicWidgetConfig).
+ */
+export interface LiveChatConfig {
+  /** Master toggle for the chat tab + endpoints. */
+  enabled: boolean
+  /** Greeting shown when a visitor opens chat with no history. */
+  welcomeMessage?: string
+  /** Shown when no agents are currently available to reply. */
+  offlineMessage?: string
+  /** Heading shown for the chat tab/view (falls back to the workspace name). */
+  teamName?: string
+  /** Weekly office hours; when enabled, drives the widget's away state + copy. */
+  officeHours?: OfficeHoursConfig
+  /** Ask anonymous visitors for an email before chatting ('off' by default). */
+  preChatEmail?: PreChatEmailMode
+  /** Agent-only saved replies — NEVER projected into the public widget config. */
+  cannedReplies?: CannedReply[]
+  /** Conversation routing: auto-assign new conversations to an active agent.
+   *  Agent-only; never projected into the public config. */
+  routing?: {
+    enabled: boolean
+    /** Only one strategy today: assign to an online agent. */
+    strategy: 'auto_assign_active'
+  }
+}
+
+/** Client-safe subset of LiveChatConfig (drops agent-only fields). */
+export type PublicLiveChatConfig = Omit<LiveChatConfig, 'cannedReplies' | 'routing'>
+
 export interface WidgetConfig {
   enabled: boolean
   /** Board slug to filter/default to */
@@ -435,9 +475,14 @@ export interface WidgetConfig {
     feedback?: boolean
     changelog?: boolean
     help?: boolean
+    chat?: boolean
+    /** Show the aggregated Home tab (defaults to on; only appears with 2+ sections) */
+    home?: boolean
   }
   /** Whether authenticated widget users can upload images in feedback submissions */
   imageUploadsInWidget?: boolean
+  /** Chat settings */
+  chat?: LiveChatConfig
 }
 
 /**
@@ -450,6 +495,29 @@ export type PublicWidgetConfig = Pick<
 > & {
   /** Whether verified identity is required (derived from identifyVerification) */
   hmacRequired?: boolean
+  /** Client-safe chat config (no agent-only fields like cannedReplies). */
+  chat?: PublicLiveChatConfig
+}
+
+export const DEFAULT_LIVE_CHAT_CONFIG: LiveChatConfig = {
+  enabled: false,
+  welcomeMessage: 'Hi! 👋 How can we help you today?',
+  offlineMessage: "We're away right now — leave a message and we'll get back to you by email.",
+  // Default to capturing an email (optional, non-blocking) so an offline reply
+  // can actually reach the visitor. 'off' left the common "type and leave" case
+  // with no way to follow up.
+  preChatEmail: 'optional',
+}
+
+/** A sensible starting schedule for the settings UI: Mon–Fri, 9–5, disabled. */
+export const DEFAULT_OFFICE_HOURS: OfficeHoursConfig = {
+  enabled: false,
+  timezone: 'UTC',
+  days: [0, 1, 2, 3, 4, 5, 6].map((d) => ({
+    enabled: d >= 1 && d <= 5,
+    start: '09:00',
+    end: '17:00',
+  })),
 }
 
 export const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
@@ -458,7 +526,10 @@ export const DEFAULT_WIDGET_CONFIG: WidgetConfig = {
   tabs: {
     feedback: true,
     changelog: false,
+    chat: false,
+    home: true,
   },
+  chat: DEFAULT_LIVE_CHAT_CONFIG,
 }
 
 /**
@@ -473,8 +544,11 @@ export interface UpdateWidgetConfigInput {
     feedback?: boolean
     changelog?: boolean
     help?: boolean
+    chat?: boolean
+    home?: boolean
   }
   imageUploadsInWidget?: boolean
+  chat?: Partial<LiveChatConfig>
 }
 
 // =============================================================================
@@ -650,12 +724,15 @@ export interface FeatureFlags {
   helpCenter: boolean
   /** AI-powered feedback extraction from external sources */
   aiFeedbackExtraction: boolean
+  /** Support inbox: live-chat widget channel + unified admin inbox */
+  supportInbox: boolean
 }
 
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   analytics: false,
   helpCenter: false,
   aiFeedbackExtraction: false,
+  supportInbox: false,
 }
 
 /**
@@ -671,11 +748,39 @@ export const FEATURE_FLAG_REGISTRY: Record<
   },
   helpCenter: {
     label: 'Help Center',
-    description: 'Create and manage a knowledge base with categories and articles for your users.',
+    description: 'Publish a searchable help center so customers can find answers on their own.',
   },
   aiFeedbackExtraction: {
     label: 'AI Feedback Extraction',
+    description: 'Automatically pull in and categorize feedback from your connected sources.',
+  },
+  supportInbox: {
+    label: 'Conversations',
     description:
-      'Automatically extract and categorize feedback from connected sources using large language models.',
+      'Let visitors start a live chat from the widget; messages land in a shared inbox your team works from.',
   },
 }
+
+/**
+ * Labs page layout: experimental flags grouped into sections, each rendered as
+ * a card with a heading + high-level description. Every flag in FeatureFlags
+ * must belong to exactly one section (pinned by a test) so a new flag can never
+ * silently go unsurfaced.
+ */
+export const LAB_SECTIONS: Array<{
+  title: string
+  description: string
+  flags: Array<keyof FeatureFlags>
+}> = [
+  {
+    title: 'Support',
+    description: 'Support your customers with live chat and a self-serve help center.',
+    flags: ['supportInbox', 'helpCenter'],
+  },
+  {
+    title: 'Insights',
+    description:
+      'Understand your feedback faster, with usage analytics and AI that sorts it for you.',
+    flags: ['analytics', 'aiFeedbackExtraction'],
+  },
+]

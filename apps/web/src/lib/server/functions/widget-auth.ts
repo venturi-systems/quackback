@@ -4,6 +4,7 @@ import { getRequestHeaders } from '@tanstack/react-start/server'
 import type { Role } from '@/lib/server/auth'
 import { auth } from '@/lib/server/auth'
 import { db, session, principal, eq, and, gt } from '@/lib/server/db'
+import { shouldRollSession, WIDGET_SESSION_TTL_MS } from './widget-session-roll'
 
 export interface WidgetAuthContext {
   settings: {
@@ -24,15 +25,25 @@ export interface WidgetAuthContext {
   }
 }
 
-/** Returns widget auth context from `Authorization: Bearer <token>`, or null if invalid/expired. */
-export async function getWidgetSession(): Promise<WidgetAuthContext | null> {
+/**
+ * Returns widget auth context from `Authorization: Bearer <token>`, or null if
+ * invalid/expired.
+ *
+ * `roll` extends an active anonymous session's 7-day TTL on use (at most once
+ * per 24h, mirroring Better Auth's updateAge) — set it only on the validation-
+ * only `/api/widget/session` endpoint, never on per-message hot paths. The raw
+ * token lookup is unchanged; the roll is an additive UPDATE after validation, so
+ * the proven validation path can't regress.
+ */
+export async function getWidgetSession(opts?: {
+  roll?: boolean
+}): Promise<WidgetAuthContext | null> {
   console.log(`[fn:widget-auth] getWidgetSession`)
   try {
     const headers = getRequestHeaders()
     const authHeader = headers.get('authorization')
-    if (!authHeader?.startsWith('Bearer ')) return null
-
-    const token = authHeader.slice(7)
+    // Bearer is the widget's sole credential — the visitor's localStorage token.
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) || null : null
     if (!token) return null
 
     const sessionRecord = await db.query.session.findFirst({
@@ -65,6 +76,17 @@ export async function getWidgetSession(): Promise<WidgetAuthContext | null> {
         })
         .returning()
       principalRecord = created
+    }
+
+    // Roll the session's expiry forward on active use so a returning visitor
+    // isn't cut off 7 days after their first mint. Gated to ≥24h since the last
+    // touch so rapid reloads don't each write.
+    if (opts?.roll && shouldRollSession(sessionRecord.updatedAt, Date.now())) {
+      const nowDate = new Date()
+      await db
+        .update(session)
+        .set({ expiresAt: new Date(nowDate.getTime() + WIDGET_SESSION_TTL_MS), updatedAt: nowDate })
+        .where(eq(session.token, token))
     }
 
     return {

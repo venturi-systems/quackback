@@ -19,6 +19,7 @@ import {
 } from '@/lib/server/db'
 import { type PostId, type BoardId } from '@quackback/ids'
 import type { PostForExport } from './post.types'
+import { realEmail } from '@/lib/shared/anonymous-email'
 
 /**
  * List posts for export (all posts with full details)
@@ -103,7 +104,7 @@ export async function listPostsForExport(boardId: BoardId | undefined): Promise<
       statusId: post.statusId,
       voteCount: post.voteCount,
       authorName: post.author?.displayName ?? null,
-      authorEmail: post.author?.user?.email ?? null,
+      authorEmail: realEmail(post.author?.user?.email),
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
       board: {

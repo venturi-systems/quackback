@@ -14,6 +14,8 @@ export type NotificationType =
   | 'comment_created'
   | 'post_mentioned'
   | 'changelog_published'
+  | 'chat_message'
+  | 'chat_mention'
 
 /**
  * Input for creating a single notification

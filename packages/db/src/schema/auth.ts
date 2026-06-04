@@ -51,6 +51,11 @@ export const user = pgTable(
     // X-Country-Code) on session creation. NULL when no header is
     // present — local dev or deployments without a geo-aware proxy.
     country: text('country'),
+    // Stable external identity for widget-identified visitors: the verified JWT
+    // `sub` (the host app's durable user id). Set ONLY on the verified ssoToken
+    // identify path so a visitor is recognized on a new device even after an
+    // email change. Null for team accounts and unverified identifies.
+    externalId: text('external_id'),
     // Anonymous user flag (Better Auth anonymous plugin)
     isAnonymous: boolean('is_anonymous').default(false).notNull(),
     // Better-Auth twoFactor plugin — flips true once the user verifies
@@ -69,6 +74,11 @@ export const user = pgTable(
     index('user_email_lower_idx')
       .on(sql`LOWER(${table.email})`)
       .where(sql`email IS NOT NULL`),
+    // One account per external subject — backs the verified-identify lookup and
+    // stops two users claiming the same host-app `sub`. Partial: nulls allowed.
+    uniqueIndex('user_external_id_idx')
+      .on(table.externalId)
+      .where(sql`external_id IS NOT NULL`),
     // Partial b-tree on country / locale — both are referenced by the
     // dynamic-segment evaluator (IN / ILIKE predicates) and the column
     // is sparse, so partial indexes keep the on-disk footprint small.
@@ -401,12 +411,26 @@ export const principal = pgTable(
      * /oauth2/callback/:providerId hooks.after middleware.
      */
     lastSsoSignInAt: timestamp('last_sso_sign_in_at', { withTimezone: true }),
+    // Contact email for an anonymous visitor (captured in live chat) so an
+    // offline reply can reach them across conversations. Agent-only — the
+    // principal stays anonymous; never exposed to the visitor.
+    contactEmail: text('contact_email'),
+    // Manual agent availability override: 'online' (default — route chats to me)
+    // vs 'away' (connected but opted out of routing). The presence TTL handles
+    // auto-offline; this is the explicit opt-out, persisted across sessions.
+    chatAvailability: text('chat_availability', { enum: ['online', 'away'] })
+      .notNull()
+      .default('online'),
   },
   (table) => [
     // Ensure one principal record per human user (partial index excludes service principals)
     uniqueIndex('principal_user_idx')
       .on(table.userId)
       .where(sql`user_id IS NOT NULL`),
+    // Lookups by contact email (only the rows that have one).
+    index('principal_contact_email_idx')
+      .on(table.contactEmail)
+      .where(sql`contact_email IS NOT NULL`),
     // Index for user listings filtered by role
     index('principal_role_idx').on(table.role),
     // Index for filtering by principal type

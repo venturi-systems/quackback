@@ -6,7 +6,11 @@ export const Route = createFileRoute('/api/widget/session')({
     handlers: {
       GET: async () => {
         try {
-          const session = await getWidgetSession()
+          // `roll: true` extends an active anonymous session's TTL on this
+          // validation hit (the widget calls it once per mount), so a returning
+          // visitor's session — and thus their conversation — survives past the
+          // original 7-day window. Validation-only endpoint; hot paths stay raw.
+          const session = await getWidgetSession({ roll: true })
           if (!session) {
             return Response.json(
               { error: { code: 'AUTH_REQUIRED', message: 'Valid widget session required' } },
@@ -15,6 +19,7 @@ export const Route = createFileRoute('/api/widget/session')({
           }
 
           const isAnonymous = session.principal.type === 'anonymous'
+
           return Response.json(
             {
               data: {

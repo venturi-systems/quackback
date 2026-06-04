@@ -5,7 +5,8 @@
  * - Portal auth: onLinkAccount (anonymous → sign-in to existing account)
  * - Widget identify: previousToken merge (anonymous → SDK re-identify)
  *
- * Transfers: votes, comments, posts, postSubscriptions, inAppNotifications.
+ * Transfers: votes, comments, posts, postSubscriptions, inAppNotifications,
+ * chat conversations + messages.
  * Cleans up: anonymous principal, sessions, user record.
  */
 import type { PrincipalId, UserId } from '@quackback/ids'
@@ -16,6 +17,8 @@ import {
   posts,
   postSubscriptions,
   inAppNotifications,
+  conversations,
+  chatMessages,
   principal,
   session,
   user,
@@ -67,7 +70,9 @@ export async function mergeAnonymousToIdentified(params: MergeAnonymousParams): 
       .from(comments)
       .where(eq(comments.principalId, anonPrincipalId))
 
-    // 3. Transfer votes, comments, posts to target principal
+    // 3. Transfer votes, comments, posts, and chat history to target principal.
+    // Chat rows use onDelete:'restrict', so re-pointing them here is mandatory —
+    // otherwise the anon-principal delete in step 6 throws and breaks the merge.
     await Promise.all([
       tx
         .update(votes)
@@ -81,6 +86,14 @@ export async function mergeAnonymousToIdentified(params: MergeAnonymousParams): 
         .update(posts)
         .set({ principalId: targetPrincipalId })
         .where(eq(posts.principalId, anonPrincipalId)),
+      tx
+        .update(conversations)
+        .set({ visitorPrincipalId: targetPrincipalId })
+        .where(eq(conversations.visitorPrincipalId, anonPrincipalId)),
+      tx
+        .update(chatMessages)
+        .set({ principalId: targetPrincipalId })
+        .where(eq(chatMessages.principalId, anonPrincipalId)),
     ])
 
     // 4. Fix notifications for transferred comments

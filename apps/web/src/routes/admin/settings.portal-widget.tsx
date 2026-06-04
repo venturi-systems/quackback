@@ -174,7 +174,7 @@ function WidgetAppearanceControls({
   config: {
     defaultBoard?: string
     position?: string
-    tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean }
+    tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean; home?: boolean }
   }
   boards: { id: string; name: string; slug: string }[]
   position: 'bottom-right' | 'bottom-left'
@@ -192,6 +192,7 @@ function WidgetAppearanceControls({
     changelog: config.tabs?.changelog ?? false,
   })
   const [helpTab, setHelpTab] = useState(config.tabs?.help ?? false)
+  const [homeTab, setHomeTab] = useState(config.tabs?.home ?? true)
 
   const showHelpTabToggle = helpCenterFlagEnabled && helpCenterEnabled
 
@@ -250,6 +251,39 @@ function WidgetAppearanceControls({
         </div>
 
         <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
+            <div>
+              <Label htmlFor="tab-home" className="text-xs font-medium cursor-pointer">
+                Home
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Overview tab that greets users and links to your sections. Only appears when two or
+                more sections are enabled.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <InlineSpinner visible={saving} />
+              <Switch
+                id="tab-home"
+                checked={homeTab}
+                onCheckedChange={async (checked) => {
+                  setHomeTab(checked)
+                  setSaving(true)
+                  try {
+                    await updateWidgetConfigFn({ data: { tabs: { home: checked } } })
+                    startTransition(() => router.invalidate())
+                  } catch {
+                    setHomeTab(!checked)
+                  } finally {
+                    setSaving(false)
+                  }
+                }}
+                disabled={isBusy}
+                aria-label="Home tab"
+              />
+            </div>
+          </div>
+
           <div className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2.5">
             <div>
               <Label htmlFor="tab-feedback" className="text-xs font-medium cursor-pointer">

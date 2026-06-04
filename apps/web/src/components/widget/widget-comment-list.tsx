@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { TimeAgo } from '@/components/ui/time-ago'
 import { REACTION_EMOJIS } from '@/lib/shared/db-types'
+import { ReactionChip } from '@/components/shared/reaction-chip'
 import { addReactionFn, removeReactionFn } from '@/lib/server/functions/comments'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
 import { getInitials, cn } from '@/lib/shared/utils'
@@ -296,23 +297,17 @@ function WidgetCommentItem({
             </button>
           )}
 
-          {/* Existing reactions */}
+          {/* Existing reactions — hover shows who reacted. */}
           {reactions.map((reaction) => (
-            <button
+            <ReactionChip
               key={reaction.emoji}
-              onClick={() => handleReaction(reaction.emoji)}
+              emoji={reaction.emoji}
+              count={reaction.count}
+              hasReacted={reaction.hasReacted}
+              reactors={reaction.reactors}
               disabled={reactionPending}
-              className={cn(
-                'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] transition-all duration-150',
-                'border hover:bg-muted bg-muted/50',
-                reaction.hasReacted
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground'
-              )}
-            >
-              <span>{reaction.emoji}</span>
-              <span>{reaction.count}</span>
-            </button>
+              onToggle={() => handleReaction(reaction.emoji)}
+            />
           ))}
 
           {/* Add reaction button */}

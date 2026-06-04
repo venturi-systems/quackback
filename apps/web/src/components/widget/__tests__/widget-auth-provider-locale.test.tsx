@@ -17,6 +17,9 @@ vi.mock('@/lib/client/widget-auth', () => ({
   setWidgetToken: vi.fn(),
   clearWidgetToken: vi.fn(),
   getWidgetToken: vi.fn(() => null),
+  persistAnonymousToken: vi.fn(),
+  readPersistedToken: vi.fn(() => null),
+  clearPersistedToken: vi.fn(),
 }))
 vi.mock('@/lib/client/widget-bridge', () => ({ sendToHost: vi.fn() }))
 vi.mock('@/lib/client/auth-client', () => ({

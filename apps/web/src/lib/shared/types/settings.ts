@@ -25,6 +25,7 @@ export type { FeatureFlags } from '@/lib/server/domains/settings/settings.types'
 // Runtime constants — safe because settings.types has no DB dependencies
 export {
   FEATURE_FLAG_REGISTRY,
+  LAB_SECTIONS,
   DEFAULT_PORTAL_CONFIG,
   PORTAL_WELCOME_CARD_TITLE_MAX,
 } from '@/lib/server/domains/settings/settings.types'

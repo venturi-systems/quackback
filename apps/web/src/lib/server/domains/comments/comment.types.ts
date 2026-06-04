@@ -63,6 +63,9 @@ export interface CommentReactionCount {
   emoji: string
   count: number
   hasReacted: boolean
+  /** Display names of who reacted (capped), for the hover tooltip. May be empty
+   *  on optimistic updates until the server reconciles. */
+  reactors?: string[]
 }
 
 /**

@@ -10,6 +10,7 @@ import { db, eq, principal, user, posts } from '@/lib/server/db'
 import { getBaseUrl } from '@/lib/server/config'
 import { getEmailSafeUrl } from '@/lib/server/storage/s3'
 import { generateUnsubscribeToken } from '@/lib/server/domains/subscriptions/subscription.service'
+import { realEmail } from '@/lib/shared/anonymous-email'
 import { sendFeedbackLinkedEmail } from '@quackback/email'
 import type { PrincipalId, PostId } from '@quackback/ids'
 
@@ -30,7 +31,9 @@ export async function sendFeedbackAttributionEmail(
       where: eq(user.id, principalRow.userId),
       columns: { email: true, name: true },
     })
-    if (!userRow?.email) return
+    // Skip synthetic anonymous placeholders — they're never deliverable.
+    const recipientEmail = realEmail(userRow?.email)
+    if (!recipientEmail) return
 
     // Look up the team member who attributed the feedback
     let attributedByName: string | undefined
@@ -72,8 +75,8 @@ export async function sendFeedbackAttributionEmail(
     const unsubscribeUrl = `${baseUrl}/unsubscribe?token=${token}`
 
     await sendFeedbackLinkedEmail({
-      to: userRow.email,
-      recipientName: userRow.name ?? undefined,
+      to: recipientEmail,
+      recipientName: userRow?.name ?? undefined,
       postTitle: post.title,
       postUrl,
       workspaceName,

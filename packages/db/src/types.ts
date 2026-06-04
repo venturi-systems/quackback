@@ -12,6 +12,14 @@ import type {
 } from './schema/posts'
 import type { integrations } from './schema/integrations'
 import type { changelogEntries, changelogEntryPosts } from './schema/changelog'
+import type {
+  conversations,
+  chatMessages,
+  chatTags,
+  chatMessageMentions,
+  chatMessageReactions,
+  chatMessageFlags,
+} from './schema/chat'
 import type { principal } from './schema/auth'
 
 // Status categories (defined here to avoid circular imports in tests)
@@ -283,6 +291,79 @@ export type NewPostNote = InferInsertModel<typeof postNotes>
 // Comment reaction types
 export type CommentReaction = InferSelectModel<typeof commentReactions>
 export type NewCommentReaction = InferInsertModel<typeof commentReactions>
+
+// Support-inbox conversation statuses — kept in sync with the conversations.status
+// column enum (schema.test.ts pins the match).
+export const CONVERSATION_STATUSES = ['open', 'pending', 'closed'] as const
+export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number]
+
+// Per-agent manual availability (principal.chat_availability). 'online' = route
+// chats to me when connected; 'away' = connected but opted out of routing.
+export const AGENT_AVAILABILITY_VALUES = ['online', 'away'] as const
+export type AgentAvailability = (typeof AGENT_AVAILABILITY_VALUES)[number]
+
+// The inbound channel a conversation arrived on — kept in sync with the
+// conversations.channel column enum. Existing live-chat threads default to
+// 'live_chat'; 'email' and 'web_form' are wired up in later phases. This turns
+// "live chat vs ticket" into one polymorphic conversation with a channel field.
+export const CHANNELS = ['live_chat', 'email', 'web_form'] as const
+export type Channel = (typeof CHANNELS)[number]
+
+// Agent-set conversation priority for inbox triage — kept in sync with the
+// conversations.priority column enum. 'none' = unset (the default).
+export const CONVERSATION_PRIORITIES = ['none', 'low', 'medium', 'high', 'urgent'] as const
+export type ConversationPriority = (typeof CONVERSATION_PRIORITIES)[number]
+
+// Which side of a conversation a message came from — kept in sync with the
+// chat_messages.sender_type column enum. 'system' rows are status events (e.g.
+// assignment) shown to both sides; attributed to the relevant agent's principal
+// and never counted as unread.
+export const CHAT_SENDER_TYPES = ['visitor', 'agent', 'system'] as const
+export type ChatSenderType = (typeof CHAT_SENDER_TYPES)[number]
+
+// A single attachment ref stored on a chat message (chat_messages.attachments).
+export interface ChatAttachment {
+  url: string
+  name: string
+  contentType: string
+  size: number
+}
+
+// Channel provenance stored on a chat message (chat_messages.metadata). Null for
+// ordinary in-app live-chat messages; set when a message arrives over another
+// channel so the inbox can render it and dedupe provider retries.
+/** Author-less 'system' status events (chat ended/reopened, assignment). */
+export type ChatSystemEventKind = 'chat_ended' | 'chat_reopened' | 'assigned'
+
+export interface ChatSystemEvent {
+  kind: ChatSystemEventKind
+  /** Assignee display name for 'assigned'. */
+  agentName?: string
+}
+
+export interface ChatMessageMetadata {
+  /** The channel this message arrived through, when not in-app live chat. */
+  source?: 'email'
+  /** Provider Message-ID for an inbound email, used to dedupe webhook retries. */
+  emailMessageId?: string
+  /** For 'system' messages: the structured event, so clients can localize the
+   *  notice instead of rendering the stored (English) content. */
+  systemEvent?: ChatSystemEvent
+}
+
+// Support-inbox conversation row types
+export type Conversation = InferSelectModel<typeof conversations>
+export type NewConversation = InferInsertModel<typeof conversations>
+export type ChatMessage = InferSelectModel<typeof chatMessages>
+export type NewChatMessage = InferInsertModel<typeof chatMessages>
+export type ChatTag = InferSelectModel<typeof chatTags>
+export type NewChatTag = InferInsertModel<typeof chatTags>
+export type ChatMessageMention = InferSelectModel<typeof chatMessageMentions>
+export type NewChatMessageMention = InferInsertModel<typeof chatMessageMentions>
+export type ChatMessageReaction = InferSelectModel<typeof chatMessageReactions>
+export type NewChatMessageReaction = InferInsertModel<typeof chatMessageReactions>
+export type ChatMessageFlag = InferSelectModel<typeof chatMessageFlags>
+export type NewChatMessageFlag = InferInsertModel<typeof chatMessageFlags>
 
 // Reaction emoji constants (client-safe)
 export const REACTION_EMOJIS = ['👍', '❤️', '🎉', '😄', '🤔', '👀'] as const

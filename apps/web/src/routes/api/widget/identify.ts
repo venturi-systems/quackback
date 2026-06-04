@@ -238,9 +238,20 @@ export const Route = createFileRoute('/api/widget/identify')({
         // "one email per account" invariant. The fix mirrors the
         // segment-evaluator + recovery-codes case-insensitive lookups.
         const normalizedEmail = identified.email.toLowerCase()
-        let userRecord = await db.query.user.findFirst({
-          where: sql`LOWER(${user.email}) = ${normalizedEmail}`,
-        })
+        // Verified ssoToken: the JWT `sub` is the durable cross-device identity
+        // key — resolve by it first so a returning visitor is recognized even
+        // after an email change in the host app. NEVER trust `sub` on the
+        // unverified path (the client controls it there), so external_id stays
+        // null and unread for id+email bodies.
+        const externalId = claimsAreVerified ? identified.id : null
+        let userRecord = externalId
+          ? await db.query.user.findFirst({ where: eq(user.externalId, externalId) })
+          : undefined
+        if (!userRecord) {
+          userRecord = await db.query.user.findFirst({
+            where: sql`LOWER(${user.email}) = ${normalizedEmail}`,
+          })
+        }
 
         // Team-role guard: refuse to mint a session-Bearer for an email
         // that already backs a team principal (admin or member). The Bearer
@@ -278,6 +289,23 @@ export const Route = createFileRoute('/api/widget/identify')({
           if (country && country !== userRecord.country) {
             updates.country = country
           }
+          if (externalId && userRecord.externalId !== externalId) {
+            // First verified sight of this account — stamp the durable subject.
+            updates.externalId = externalId
+          }
+          if (externalId && userRecord.email !== normalizedEmail) {
+            // `sub` is authoritative on a verified email change. Adopt the new
+            // address unless another row already holds it — the partial-unique
+            // email index would otherwise reject the move, and external_id still
+            // resolves this visitor either way.
+            const emailHolder = await db.query.user.findFirst({
+              columns: { id: true },
+              where: sql`LOWER(${user.email}) = ${normalizedEmail}`,
+            })
+            if (!emailHolder || emailHolder.id === userRecord.id) {
+              updates.email = normalizedEmail
+            }
+          }
 
           if (Object.keys(updates).length > 0) {
             await db.update(user).set(updates).where(eq(user.id, userRecord.id))
@@ -296,6 +324,8 @@ export const Route = createFileRoute('/api/widget/identify')({
               image: identified.avatarURL ?? null,
               metadata: hasAttrs ? JSON.stringify(validAttrs) : null,
               country: country ?? null,
+              // Only the verified path supplies a trusted subject; null otherwise.
+              externalId,
               createdAt: new Date(),
               updatedAt: new Date(),
             })

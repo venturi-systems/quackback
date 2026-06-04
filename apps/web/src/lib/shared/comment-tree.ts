@@ -14,6 +14,9 @@ export interface CommentReactionCount {
   emoji: string
   count: number
   hasReacted: boolean
+  /** Display names of who reacted (capped), for the hover tooltip. May be empty
+   *  on optimistic updates until the server reconciles. */
+  reactors?: string[]
 }
 
 /**
@@ -98,17 +101,31 @@ export interface CommentTreeNode {
  * @param principalId - Optional principal ID to check for current user's reactions
  * @returns Array of aggregated reaction counts
  */
+/** Cap on how many reactor names we carry per emoji (the tooltip elides the
+ *  rest as "and N others"). */
+const MAX_REACTORS = 20
+
 export function aggregateReactions(
-  reactions: Array<{ emoji: string; principalId: string }>,
+  reactions: Array<{ emoji: string; principalId: string; displayName?: string | null }>,
   principalId?: string
 ): CommentReactionCount[] {
-  const reactionCounts = new Map<string, { count: number; hasReacted: boolean }>()
+  const reactionCounts = new Map<
+    string,
+    { count: number; hasReacted: boolean; reactors: string[] }
+  >()
 
   for (const reaction of reactions) {
-    const existing = reactionCounts.get(reaction.emoji) || { count: 0, hasReacted: false }
+    const existing = reactionCounts.get(reaction.emoji) || {
+      count: 0,
+      hasReacted: false,
+      reactors: [],
+    }
     existing.count++
     if (principalId && reaction.principalId === principalId) {
       existing.hasReacted = true
+    }
+    if (existing.reactors.length < MAX_REACTORS) {
+      existing.reactors.push(reaction.displayName?.trim() || 'Anonymous')
     }
     reactionCounts.set(reaction.emoji, existing)
   }
@@ -117,6 +134,7 @@ export function aggregateReactions(
     emoji,
     count: data.count,
     hasReacted: data.hasReacted,
+    reactors: data.reactors,
   }))
 }
 

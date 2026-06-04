@@ -7,6 +7,7 @@ import { MagnifyingGlassIcon, QuestionMarkCircleIcon } from '@heroicons/react/24
 import { publicHelpCenterQueries } from '@/lib/client/queries/help-center'
 import { getTopLevelCategories } from '@/components/help-center/help-center-utils'
 import { CategoryIcon } from '@/components/help-center/category-icon'
+import { WidgetMessagesSection } from './widget-messages-section'
 
 interface WidgetHelpArticle {
   id: string
@@ -19,9 +20,15 @@ interface WidgetHelpArticle {
 interface WidgetHelpProps {
   onArticleSelect?: (articleSlug: string) => void
   onCategorySelect?: (categoryId: string, categoryName: string, categoryIcon: string | null) => void
+  /**
+   * When live chat is part of this (merged) support surface, open the chat
+   * thread. Surfaced as a Messages entry above the articles. Omit when chat is
+   * disabled — the support surface is then help articles only.
+   */
+  onOpenChat?: () => void
 }
 
-export function WidgetHelp({ onArticleSelect, onCategorySelect }: WidgetHelpProps) {
+export function WidgetHelp({ onArticleSelect, onCategorySelect, onOpenChat }: WidgetHelpProps) {
   const intl = useIntl()
   const [search, setSearch] = useState('')
   const [results, setResults] = useState<WidgetHelpArticle[]>([])
@@ -151,6 +158,9 @@ export function WidgetHelp({ onArticleSelect, onCategorySelect }: WidgetHelpProp
                   ))}
                 </div>
               )}
+
+              {/* Messages — the chat half of the combined support surface. */}
+              {onOpenChat && <WidgetMessagesSection onOpenChat={onOpenChat} />}
             </>
           )}
 

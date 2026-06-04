@@ -1,17 +1,28 @@
 import { lazy, Suspense, useState } from 'react'
+import { useRouteContext } from '@tanstack/react-router'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import type { FeatureFlags } from '@/lib/shared/types/settings'
 import { analyticsQueries, type AnalyticsPeriod } from '@/lib/client/queries/analytics'
 import { formatDistanceToNow } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PageHeader } from '@/components/shared/page-header'
+import { FilterSection } from '@/components/shared/filter-section'
 import { cn } from '@/lib/shared/utils'
-import { ChartBarIcon, InboxIcon, DocumentTextIcon, UsersIcon } from '@heroicons/react/24/solid'
+import {
+  ChartBarIcon,
+  InboxIcon,
+  DocumentTextIcon,
+  UsersIcon,
+  ChatBubbleLeftRightIcon,
+} from '@heroicons/react/24/solid'
 import { AnalyticsSummaryCards, METRICS, type MetricKey } from './analytics-summary-cards'
 import { AnalyticsBoardChart } from './analytics-board-chart'
 import { AnalyticsChangelogCard } from './analytics-changelog-card'
 import { AnalyticsTopPosts } from './analytics-top-posts'
 import { AnalyticsTopContributors } from './analytics-top-contributors'
+import { AnalyticsCsatCard } from './analytics-csat-card'
 
 // Defer recharts (~580KB minified, including victory-vendor) and the chart
 // primitives that wrap it. Analytics is admin-gated and rarely the first
@@ -27,7 +38,7 @@ function ChartSkeleton({ className }: { className?: string }) {
   return <div className={cn('w-full rounded-md bg-muted/50 animate-pulse', className)} />
 }
 
-type Section = 'overview' | 'feedback' | 'changelog' | 'users'
+type Section = 'overview' | 'feedback' | 'support' | 'changelog' | 'users'
 
 const periods: Array<{ value: AnalyticsPeriod; label: string }> = [
   { value: '7d', label: '7d' },
@@ -39,11 +50,18 @@ const periods: Array<{ value: AnalyticsPeriod; label: string }> = [
 const navItems: Array<{ key: Section; label: string; icon: React.ElementType }> = [
   { key: 'overview', label: 'Overview', icon: ChartBarIcon },
   { key: 'feedback', label: 'Feedback', icon: InboxIcon },
+  { key: 'support', label: 'Support', icon: ChatBubbleLeftRightIcon },
   { key: 'changelog', label: 'Changelog', icon: DocumentTextIcon },
   { key: 'users', label: 'Users', icon: UsersIcon },
 ]
 
 export function AnalyticsPage() {
+  const { settings } = useRouteContext({ from: '__root__' })
+  const flags = settings?.featureFlags as FeatureFlags | undefined
+  // The Support section reports CSAT metrics, so hide it unless the experimental
+  // Support Inbox flag is on — same gate as the inbox itself.
+  const sections = navItems.filter((i) => i.key !== 'support' || (flags?.supportInbox ?? false))
+
   const [period, setPeriod] = useState<AnalyticsPeriod>('30d')
   const [section, setSection] = useState<Section>('overview')
   const [activeMetric, setActiveMetric] = useState<MetricKey>('posts')
@@ -59,14 +77,14 @@ export function AnalyticsPage() {
     <div className="flex h-full bg-background">
       {/* Left sidebar */}
       <aside className="hidden lg:flex w-64 xl:w-72 shrink-0 flex-col border-r border-border/50 bg-card/30 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="p-5 space-y-0">
-            <div className="pb-4">
-              <span className="inline-block py-1 text-xs uppercase tracking-wider text-muted-foreground">
-                Sections
-              </span>
-              <div className="mt-2 space-y-1">
-                {navItems.map(({ key, label, icon: Icon }) => (
+        <div className="shrink-0 px-4 py-3.5">
+          <PageHeader icon={ChartBarIcon} title="Analytics" />
+        </div>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="px-5 pb-5">
+            <FilterSection title="Sections" collapsible={false}>
+              <div className="space-y-1">
+                {sections.map(({ key, label, icon: Icon }) => (
                   <button
                     key={key}
                     type="button"
@@ -85,7 +103,7 @@ export function AnalyticsPage() {
                   </button>
                 ))}
               </div>
-            </div>
+            </FilterSection>
           </div>
         </ScrollArea>
       </aside>
@@ -171,6 +189,19 @@ export function AnalyticsPage() {
                       </CardHeader>
                       <CardContent>
                         <AnalyticsTopPosts posts={data.topPosts} />
+                      </CardContent>
+                    </Card>
+                  </div>
+                )}
+
+                {section === 'support' && (
+                  <div className="flex flex-col gap-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Customer satisfaction (CSAT)</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <AnalyticsCsatCard csat={data.csat} />
                       </CardContent>
                     </Card>
                   </div>

@@ -10,6 +10,7 @@ const ALLOWED_PREFIXES = new Set([
   'changelog',
   'post-images',
   'help-center',
+  'chat-images',
 ])
 
 export async function handleAdminUpload({ request }: { request: Request }): Promise<Response> {

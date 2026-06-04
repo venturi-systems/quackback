@@ -1,6 +1,17 @@
-import { db, eq, asc, comments, posts, boards, type Comment } from '@/lib/server/db'
+import {
+  db,
+  eq,
+  asc,
+  inArray,
+  comments,
+  posts,
+  boards,
+  principal,
+  type Comment,
+} from '@/lib/server/db'
 import { type CommentId, type PostId, type PrincipalId } from '@quackback/ids'
 import { NotFoundError } from '@/lib/shared/errors'
+import { realEmail } from '@/lib/shared/anonymous-email'
 import type { CommentThread } from './comment.types'
 import { buildCommentTree, toStatusChange } from '@/lib/shared'
 
@@ -44,7 +55,7 @@ export async function getCommentById(
   return {
     ...comment,
     authorName: comment.author?.displayName ?? null,
-    authorEmail: comment.author?.user?.email ?? null,
+    authorEmail: realEmail(comment.author?.user?.email),
   }
 }
 
@@ -92,6 +103,20 @@ export async function getCommentsByPost(
     orderBy: asc(comments.createdAt),
   })
 
+  // Batch-load the reactors' display names (for the reaction hover tooltip);
+  // comment_reactions has no principal relation, so resolve ids in one query.
+  const reactorIds = [
+    ...new Set(commentsWithReactions.flatMap((c) => c.reactions.map((r) => r.principalId))),
+  ]
+  const reactorName = new Map<string, string | null>()
+  if (reactorIds.length > 0) {
+    const principals = await db.query.principal.findMany({
+      where: inArray(principal.id, reactorIds),
+      columns: { id: true, displayName: true },
+    })
+    for (const p of principals) reactorName.set(p.id, p.displayName)
+  }
+
   // Transform to the format expected by buildCommentTree
   const formattedComments = commentsWithReactions.map((comment) => ({
     id: comment.id,
@@ -111,6 +136,7 @@ export async function getCommentsByPost(
     reactions: comment.reactions.map((r) => ({
       emoji: r.emoji,
       principalId: r.principalId,
+      displayName: reactorName.get(r.principalId) ?? null,
     })),
   }))
 

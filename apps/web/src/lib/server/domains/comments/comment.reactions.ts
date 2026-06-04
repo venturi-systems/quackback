@@ -4,12 +4,30 @@
  * Handles adding and removing emoji reactions on comments.
  */
 
-import { db, eq, and, commentReactions } from '@/lib/server/db'
+import { db, eq, and, commentReactions, principal } from '@/lib/server/db'
 import { type CommentId, type PrincipalId } from '@quackback/ids'
 import { aggregateReactions } from '@/lib/shared'
 import { type Actor } from '@/lib/server/policy'
 import { assertCommentViewable } from '@/lib/server/domains/posts/post.access'
-import type { ReactionResult } from './comment.types'
+import type { CommentReactionCount, ReactionResult } from './comment.types'
+
+/** Load a comment's reactions aggregated with the reactors' display names (for
+ *  the hover tooltip) and the viewer's hasReacted flag. */
+async function aggregatedReactionsFor(
+  commentId: CommentId,
+  viewerPrincipalId: PrincipalId
+): Promise<CommentReactionCount[]> {
+  const rows = await db
+    .select({
+      emoji: commentReactions.emoji,
+      principalId: commentReactions.principalId,
+      displayName: principal.displayName,
+    })
+    .from(commentReactions)
+    .leftJoin(principal, eq(principal.id, commentReactions.principalId))
+    .where(eq(commentReactions.commentId, commentId))
+  return aggregateReactions(rows, viewerPrincipalId)
+}
 
 /**
  * Add a reaction to a comment
@@ -49,20 +67,7 @@ export async function addReaction(
 
   const added = inserted.length > 0
 
-  // Fetch updated reactions
-  const reactions = await db.query.commentReactions.findMany({
-    where: eq(commentReactions.commentId, commentId),
-  })
-
-  const aggregatedReactions = aggregateReactions(
-    reactions.map((r) => ({
-      emoji: r.emoji,
-      principalId: r.principalId,
-    })),
-    principalId
-  )
-
-  return { added, reactions: aggregatedReactions }
+  return { added, reactions: await aggregatedReactionsFor(commentId, principalId) }
 }
 
 /**
@@ -96,18 +101,5 @@ export async function removeReaction(
       )
     )
 
-  // Fetch updated reactions
-  const reactions = await db.query.commentReactions.findMany({
-    where: eq(commentReactions.commentId, commentId),
-  })
-
-  const aggregatedReactions = aggregateReactions(
-    reactions.map((r) => ({
-      emoji: r.emoji,
-      principalId: r.principalId,
-    })),
-    principalId
-  )
-
-  return { added: false, reactions: aggregatedReactions }
+  return { added: false, reactions: await aggregatedReactionsFor(commentId, principalId) }
 }

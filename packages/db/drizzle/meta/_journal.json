@@ -596,6 +596,146 @@
       "when": 1779926400000,
       "tag": "0084_workspace_allow_anonymous_master",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1780012800000,
+      "tag": "0085_live_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1780099200000,
+      "tag": "0086_chat_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1780185600000,
+      "tag": "0087_chat_csat",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1780272000000,
+      "tag": "0088_chat_internal_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1780358400000,
+      "tag": "0089_conversation_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1780444800000,
+      "tag": "0090_chat_visitor_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1780531200000,
+      "tag": "0091_drop_conversation_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1780617600000,
+      "tag": "0092_chat_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1780704000000,
+      "tag": "0093_chat_pending_resolved_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1780790400000,
+      "tag": "0094_conversation_priority_and_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1780876800000,
+      "tag": "0095_principal_contact_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1780963200000,
+      "tag": "0096_chat_message_metadata",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1781049600000,
+      "tag": "0097_user_external_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1781136000000,
+      "tag": "0098_normalize_snoozed_conversations",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1781222400000,
+      "tag": "0099_agent_availability",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1781308800000,
+      "tag": "0100_chat_tags_and_message_mentions",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1781395200000,
+      "tag": "0101_chat_message_content_json",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1781481600000,
+      "tag": "0102_chat_message_reactions",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1781568000000,
+      "tag": "0103_chat_message_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1781654400000,
+      "tag": "0104_chat_message_flags_per_agent",
+      "breakpoints": true
     }
   ]
 }

@@ -331,6 +331,35 @@ describe('GET /api/v1/mentions/suggest', () => {
     expect(sawPrefixValue).toBe(true)
   })
 
+  it('restricts roles to admin/member when scope=team (no visitors)', async () => {
+    // Chat notes are team-internal, so the picker must not offer role:'user'
+    // principals (visitors) — the server would silently drop such a mention.
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(identifiedSession)
+    vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(userPrincipal)
+    const capture: QueryChainCapture = {}
+    mockSelect.mockReturnValueOnce(makeChain([], capture))
+
+    const req = new Request('http://localhost/api/v1/mentions/suggest?q=ja&scope=team', {
+      method: 'GET',
+    })
+    await handleMentionSuggest({ request: req })
+
+    function* walk(node: unknown): Generator<unknown> {
+      if (node == null || typeof node !== 'object') return
+      yield node
+      for (const v of Object.values(node as Record<string, unknown>)) {
+        if (Array.isArray(v)) for (const item of v) yield* walk(item)
+        else yield* walk(v)
+      }
+    }
+    let roleVals: unknown[] | undefined
+    for (const node of walk(capture.whereArg)) {
+      const ia = (node as { _inArray?: [unknown, unknown[]] })._inArray
+      if (ia && ia[0] === 'role') roleVals = ia[1]
+    }
+    expect(roleVals).toEqual(['admin', 'member'])
+  })
+
   it('returns 429 once the rate-limit bucket is exceeded', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValueOnce(identifiedSession)
     vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(userPrincipal)

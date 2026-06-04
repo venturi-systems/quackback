@@ -9,6 +9,7 @@
 import type { BoardId, ChangelogId, CommentId, PostId, PrincipalId, UserId } from '@quackback/ids'
 
 import type { EventActor, EventData, EventPostRef } from './types.js'
+import { realEmail } from '@/lib/shared/anonymous-email'
 
 // Re-export EventActor for API routes that need to construct actor objects
 export type { EventActor } from './types.js'
@@ -36,7 +37,9 @@ export function buildEventActor(actor: {
       type: 'user',
       principalId: actor.principalId,
       userId: actor.userId,
-      email: actor.email,
+      // Anonymous users carry a synthetic placeholder email — never put it on
+      // the event actor (it reaches webhooks, integrations, the pipeline).
+      email: realEmail(actor.email) ?? undefined,
       displayName,
     }
   }

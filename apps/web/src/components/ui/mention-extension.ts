@@ -1,6 +1,6 @@
 import Mention from '@tiptap/extension-mention'
 import type { Editor } from '@tiptap/core'
-import type { SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion'
+import type { SuggestionOptions, SuggestionProps, SuggestionKeyDownProps } from '@tiptap/suggestion'
 import { ReactRenderer } from '@tiptap/react'
 import tippy, { type Instance } from 'tippy.js'
 import 'tippy.js/dist/tippy.css'
@@ -8,9 +8,14 @@ import { MentionPicker, type MentionItem, type MentionPickerHandle } from './men
 
 const DEBOUNCE_MS = 200
 
-async function fetchSuggestions(q: string): Promise<MentionItem[]> {
+/** Restrict the typeahead to teammates only (admin/member) — no visitors. */
+type MentionScope = 'team' | undefined
+
+async function fetchSuggestions(q: string, scope: MentionScope): Promise<MentionItem[]> {
   try {
-    const res = await fetch(`/api/v1/mentions/suggest?q=${encodeURIComponent(q)}`, {
+    const params = new URLSearchParams({ q })
+    if (scope) params.set('scope', scope)
+    const res = await fetch(`/api/v1/mentions/suggest?${params.toString()}`, {
       credentials: 'include',
     })
     if (!res.ok) return []
@@ -24,74 +29,85 @@ async function fetchSuggestions(q: string): Promise<MentionItem[]> {
 // each other's pending fetches.
 const pendingTimers = new WeakMap<Editor, ReturnType<typeof setTimeout>>()
 
-export const MentionExtension = Mention.configure({
-  HTMLAttributes: { class: 'mention' },
-  suggestion: {
-    char: '@',
-    // Display names often contain spaces — keep the suggestion open so a
-    // second word can keep narrowing. Escape or a pick dismisses.
-    allowSpaces: true,
-    items: ({ editor, query }) =>
-      new Promise<MentionItem[]>((resolve) => {
-        const prev = pendingTimers.get(editor)
-        if (prev) clearTimeout(prev)
-        const t = setTimeout(async () => {
-          resolve(await fetchSuggestions(query.toLowerCase()))
-        }, DEBOUNCE_MS)
-        pendingTimers.set(editor, t)
-      }),
-    render: () => {
-      let component: ReactRenderer<MentionPickerHandle> | null = null
-      let popup: Instance | null = null
+// The popup render lifecycle is identical regardless of scope.
+const renderSuggestion: SuggestionOptions<MentionItem>['render'] = () => {
+  let component: ReactRenderer<MentionPickerHandle> | null = null
+  let popup: Instance | null = null
 
-      return {
-        onStart: (props: SuggestionProps<MentionItem>) => {
-          component = new ReactRenderer(MentionPicker, {
-            props: {
-              items: props.items,
-              command: props.command,
-            },
-            editor: props.editor,
-          })
-          if (!props.clientRect) return
-          popup = tippy(document.body, {
-            getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
-            appendTo: () => document.body,
-            content: component.element,
-            showOnCreate: true,
-            interactive: true,
-            trigger: 'manual',
-            placement: 'bottom-start',
-            arrow: false,
-            // Custom theme so our CSS can strip tippy's default chrome and
-            // let .mention-picker be the only visible surface.
-            theme: 'mention-picker',
-            duration: 0,
-          })
+  return {
+    onStart: (props: SuggestionProps<MentionItem>) => {
+      component = new ReactRenderer(MentionPicker, {
+        props: {
+          items: props.items,
+          command: props.command,
         },
-        onUpdate: (props: SuggestionProps<MentionItem>) => {
-          component?.updateProps({
-            items: props.items,
-            command: props.command,
-          })
-          popup?.setProps({
-            getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
-          })
-        },
-        onKeyDown: (props: SuggestionKeyDownProps) => {
-          if (props.event.key === 'Escape') {
-            popup?.hide()
-            return true
-          }
-          return component?.ref?.onKeyDown(props) ?? false
-        },
-        onExit: () => {
-          popup?.destroy()
-          popup = null
-          component?.destroy()
-          component = null
-        },
-      }
+        editor: props.editor,
+      })
+      if (!props.clientRect) return
+      popup = tippy(document.body, {
+        getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
+        appendTo: () => document.body,
+        content: component.element,
+        showOnCreate: true,
+        interactive: true,
+        trigger: 'manual',
+        placement: 'bottom-start',
+        arrow: false,
+        // Custom theme so our CSS can strip tippy's default chrome and
+        // let .mention-picker be the only visible surface.
+        theme: 'mention-picker',
+        duration: 0,
+      })
     },
-  },
-})
+    onUpdate: (props: SuggestionProps<MentionItem>) => {
+      component?.updateProps({
+        items: props.items,
+        command: props.command,
+      })
+      popup?.setProps({
+        getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(),
+      })
+    },
+    onKeyDown: (props: SuggestionKeyDownProps) => {
+      if (props.event.key === 'Escape') {
+        popup?.hide()
+        return true
+      }
+      return component?.ref?.onKeyDown(props) ?? false
+    },
+    onExit: () => {
+      popup?.destroy()
+      popup = null
+      component?.destroy()
+      component = null
+    },
+  }
+}
+
+function buildMentionExtension(scope: MentionScope) {
+  return Mention.configure({
+    HTMLAttributes: { class: 'mention' },
+    suggestion: {
+      char: '@',
+      // Display names often contain spaces — keep the suggestion open so a
+      // second word can keep narrowing. Escape or a pick dismisses.
+      allowSpaces: true,
+      items: ({ editor, query }) =>
+        new Promise<MentionItem[]>((resolve) => {
+          const prev = pendingTimers.get(editor)
+          if (prev) clearTimeout(prev)
+          const t = setTimeout(async () => {
+            resolve(await fetchSuggestions(query.toLowerCase(), scope))
+          }, DEBOUNCE_MS)
+          pendingTimers.set(editor, t)
+        }),
+      render: renderSuggestion,
+    },
+  })
+}
+
+/** Default: any mentionable user (admin/member/user). Used by comments. */
+export const MentionExtension = buildMentionExtension(undefined)
+
+/** Team-only: admin/member, for team-internal contexts like agent chat notes. */
+export const TeamMentionExtension = buildMentionExtension('team')

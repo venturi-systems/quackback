@@ -8,6 +8,7 @@
 
 import type { PrincipalId } from '@quackback/ids'
 import { db, integrations, principal, user, eq, and, inArray } from '@/lib/server/db'
+import { realEmail } from '@/lib/shared/anonymous-email'
 import { getIntegration, getIntegrationTypesWithSegmentSync } from './index'
 import { decryptSecrets } from './encryption'
 
@@ -83,7 +84,9 @@ async function resolveUserRefs(principalIds: PrincipalId[]): Promise<UserRef[]> 
     .where(inArray(principal.id, principalIds))
 
   return rows.map((r) => ({
-    email: r.email,
+    // Drop the synthetic anon placeholder so it's never synced to a CDP (the
+    // email !== null filter below then excludes these users).
+    email: realEmail(r.email),
     externalUserId: parseExternalUserId(r.metadata),
   }))
 }

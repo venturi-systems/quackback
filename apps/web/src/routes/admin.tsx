@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
-import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router'
+import { createFileRoute, Outlet, useRouterState, useRouteContext } from '@tanstack/react-router'
 import { IntlProvider } from 'react-intl'
+import { useAdminPresence } from '@/lib/client/hooks/use-admin-presence'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 import { fetchUserAvatar } from '@/lib/server/functions/portal'
 import { getLatestVersion, isNewerVersion } from '@/lib/server/functions/version'
@@ -57,6 +58,7 @@ export const Route = createFileRoute('/admin')({
       name: user.name,
       email: user.email,
       avatarUrl: avatarData.avatarUrl,
+      chatAvailability: (principal.chatAvailability ?? 'online') as 'online' | 'away',
     }
 
     return {
@@ -85,6 +87,13 @@ function usePostIdFromUrl(): string | undefined {
 function AdminLayout() {
   const { initialUserData, latestVersion, currentUser } = Route.useLoaderData()
   const postId = usePostIdFromUrl()
+
+  // Mark team members online for chat routing across the whole admin (not just
+  // the inbox), but only when the support inbox feature is on.
+  const { settings } = useRouteContext({ from: '__root__' })
+  const chatEnabled =
+    (settings?.featureFlags as { supportInbox?: boolean } | undefined)?.supportInbox ?? false
+  useAdminPresence(Boolean(initialUserData) && chatEnabled)
 
   // For public routes (login, signup), render just the outlet without the admin layout
   if (!initialUserData) {

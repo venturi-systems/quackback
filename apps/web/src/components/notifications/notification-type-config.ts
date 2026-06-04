@@ -1,6 +1,7 @@
 import {
   CheckCircleIcon,
   ChatBubbleLeftEllipsisIcon,
+  ChatBubbleLeftRightIcon,
   SparklesIcon,
   NewspaperIcon,
   BellIcon,
@@ -33,6 +34,16 @@ export const notificationTypeConfigs: Record<NotificationType, NotificationTypeC
     icon: NewspaperIcon,
     iconClass: 'text-green-500',
     bgClass: 'bg-green-500/10',
+  },
+  chat_message: {
+    icon: ChatBubbleLeftRightIcon,
+    iconClass: 'text-teal-500',
+    bgClass: 'bg-teal-500/10',
+  },
+  chat_mention: {
+    icon: ChatBubbleLeftRightIcon,
+    iconClass: 'text-teal-500',
+    bgClass: 'bg-teal-500/10',
   },
 }
 

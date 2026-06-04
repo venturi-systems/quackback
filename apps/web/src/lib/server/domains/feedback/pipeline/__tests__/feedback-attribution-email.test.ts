@@ -81,10 +81,10 @@ describe('sendFeedbackAttributionEmail', () => {
     )
   })
 
-  it('should skip synthetic emails', async () => {
-    mockPrincipalFindFirst.mockResolvedValueOnce({ userId: 'user_1' })
+  it('should skip the synthetic anonymous placeholder address', async () => {
+    mockPrincipalFindFirst.mockResolvedValueOnce({ userId: 'user_anon' })
     mockUserFindFirst.mockResolvedValueOnce({
-      email: 'intercom+abc123@external.quackback.io',
+      email: 'temp-ni7j5mnendrdtsjwbesk4mubz4jzszhj@anon.quackback.io',
       name: null,
     })
 
@@ -92,6 +92,9 @@ describe('sendFeedbackAttributionEmail', () => {
     await sendFeedbackAttributionEmail(principalId, postId)
 
     expect(mockSendEmail).not.toHaveBeenCalled()
+    // Bailing before the post lookup proves it's the synthetic-email guard that
+    // stopped us, not some downstream "not found" bail.
+    expect(mockPostFindFirst).not.toHaveBeenCalled()
   })
 
   it('should skip when no email found', async () => {

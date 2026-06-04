@@ -64,6 +64,17 @@ export function NotificationItem({
     )
   }
 
+  // Chat mentions deep-link into the inbox conversation. Recipients are always
+  // team members (the mention sync is admin/member-only), so /admin/inbox is
+  // the correct target in both the dropdown and the full notifications page.
+  if (notification.type === 'chat_mention' && notification.conversationId) {
+    return (
+      <Link to="/admin/inbox" search={{ c: notification.conversationId }} onClick={handleClick}>
+        {content}
+      </Link>
+    )
+  }
+
   const isAdminContext = pathname.startsWith('/admin')
   const fallbackTo = isAdminContext ? '/admin/notifications' : '/notifications'
 

@@ -11,12 +11,14 @@ import { render } from '@react-email/components'
 import nodemailer from 'nodemailer'
 import type { Transporter } from 'nodemailer'
 import { Resend } from 'resend'
+import { isSyntheticAnonEmail } from './anon'
 import { MagicLinkEmail } from './templates/magic-link'
 import { InvitationEmail } from './templates/invitation'
 import { PortalInviteEmail } from './templates/portal-invite'
 import { WelcomeEmail } from './templates/welcome'
 import { StatusChangeEmail } from './templates/status-change'
 import { NewCommentEmail } from './templates/new-comment'
+import { ChatMessageEmail } from './templates/chat-message'
 import { PostMentionEmail } from './templates/post-mention'
 import { ChangelogPublishedEmail } from './templates/changelog-published'
 import { FeedbackLinkedEmail } from './templates/feedback-linked'
@@ -104,7 +106,17 @@ async function sendEmail(options: {
   to: string
   subject: string
   react: React.ReactElement
+  /** Conversation-specific reply address (e.g. plus-addressed inbound). */
+  replyTo?: string
 }): Promise<EmailResult> {
+  // Defense in depth: the synthetic anonymous placeholder domain
+  // (temp-<id>@anon.quackback.io) is never deliverable. Callers sanitize via
+  // realEmail(), but if one slips through, drop it here rather than bounce.
+  if (isSyntheticAnonEmail(options.to)) {
+    console.warn(`[Email] Refusing to send to synthetic anonymous address: ${options.to}`)
+    return { sent: false }
+  }
+
   const provider = getProvider()
 
   if (provider === 'smtp') {
@@ -115,6 +127,7 @@ async function sendEmail(options: {
         to: options.to,
         subject: options.subject,
         html,
+        replyTo: options.replyTo,
       })
       console.log(`[Email] Sent via SMTP to ${options.to}, messageId: ${result.messageId}`)
     } catch (error) {
@@ -141,6 +154,7 @@ async function sendEmail(options: {
       to: options.to,
       subject: options.subject,
       react: options.react,
+      replyTo: options.replyTo,
     })
     if (result.error) {
       console.error(`[Email] Resend API error:`, JSON.stringify(result.error, null, 2))
@@ -526,6 +540,90 @@ export async function sendNewCommentEmail(params: SendNewCommentParams): Promise
       unsubscribeUrl,
       logoUrl,
     }),
+  })
+}
+
+// ============================================================================
+// Live Chat Email
+// ============================================================================
+
+interface SendChatMessageEmailParams {
+  to: string
+  /** Phrasing differs for an agent reply vs a new visitor message. */
+  direction: 'agent_reply' | 'visitor_message'
+  senderName: string
+  messagePreview: string
+  /** Link to the conversation (admin inbox for agents; portal/widget for visitors). */
+  ctaUrl: string
+  workspaceName: string
+  logoUrl?: string
+  unsubscribeUrl?: string
+  /** Conversation-specific reply address so a visitor's reply routes back to
+   *  the right thread (inbound email channel). */
+  replyTo?: string
+}
+
+/**
+ * Notify someone of a chat message when they're offline: an agent of a new
+ * visitor message, or a visitor of an agent reply.
+ */
+export async function sendChatMessageEmail(
+  params: SendChatMessageEmailParams
+): Promise<EmailResult> {
+  const {
+    to,
+    direction,
+    senderName,
+    messagePreview,
+    ctaUrl,
+    workspaceName,
+    logoUrl,
+    unsubscribeUrl,
+    replyTo,
+  } = params
+
+  const isReply = direction === 'agent_reply'
+  const heading = isReply ? `New reply from ${workspaceName}` : 'New chat message'
+  const intro = isReply
+    ? `${senderName} replied to your conversation with ${workspaceName}.`
+    : `${senderName} started a conversation in ${workspaceName}.`
+  const ctaLabel = isReply ? 'View conversation' : 'Open inbox'
+  const reason = isReply
+    ? 'You received this email because you have an open conversation with this team.'
+    : 'You received this email because you are a member of this workspace.'
+  const subject = isReply
+    ? `New reply from ${workspaceName}`
+    : `New chat message in ${workspaceName}`
+
+  if (getProvider() === 'console') {
+    console.log('\n┌────────────────────────────────────────────────────────────')
+    console.log('│ [DEV] Chat Message Email')
+    console.log('├────────────────────────────────────────────────────────────')
+    console.log(`│ To: ${to}`)
+    console.log(`│ ${heading}`)
+    console.log(`│ From: ${senderName}`)
+    console.log(`│ Message: ${messagePreview.substring(0, 50)}`)
+    console.log(`│ URL: ${ctaUrl}`)
+    console.log('└────────────────────────────────────────────────────────────\n')
+    return { sent: false }
+  }
+
+  return sendEmail({
+    to,
+    subject,
+    react: ChatMessageEmail({
+      heading,
+      intro,
+      senderName,
+      messagePreview,
+      ctaUrl,
+      ctaLabel,
+      organizationName: workspaceName,
+      reason,
+      unsubscribeUrl,
+      logoUrl,
+    }),
+    replyTo,
   })
 }
 

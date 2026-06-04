@@ -7,6 +7,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import type { NotificationId } from '@quackback/ids'
+import type { NotificationType } from '@/lib/shared/types'
 import { getNotificationsFn, getUnreadCountFn } from '@/lib/server/functions/notifications'
 
 // ============================================================================
@@ -27,11 +28,13 @@ export const notificationsKeys = {
 export interface SerializedNotification {
   id: NotificationId
   principalId: string
-  type: 'post_status_changed' | 'comment_created' | 'post_mentioned'
+  type: NotificationType
   title: string
   body: string | null
   postId: string | null
   commentId: string | null
+  /** Target conversation for chat notifications (from metadata); null otherwise. */
+  conversationId: string | null
   readAt: string | null
   archivedAt: string | null
   createdAt: string

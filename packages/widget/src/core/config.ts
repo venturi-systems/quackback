@@ -12,7 +12,7 @@ export interface ServerConfig {
     darkPrimaryForeground?: string
     themeMode?: 'light' | 'dark' | 'user'
   }
-  tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean }
+  tabs?: { feedback?: boolean; changelog?: boolean; help?: boolean; chat?: boolean }
   imageUploadsInWidget?: boolean
   hmacRequired?: boolean
 }
