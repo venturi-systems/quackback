@@ -24,6 +24,8 @@ import { emitMessageCreated } from './chat.webhooks'
 import { createPostFromConversation } from './chat.convert'
 import { findSimilarPostsByText } from '@/lib/server/domains/embeddings/embedding.service'
 import { addVoteOnBehalf } from '@/lib/server/domains/posts/post.voting'
+import { scheduleDispatch, cancelScheduledDispatch } from '@/lib/server/events/scheduler'
+import { DRAFT_NUDGE_DELAY_MS } from './chat.nudge'
 import type { ChatAuthorInput, SendAgentMessageResult } from './chat.types'
 
 export interface DraftPostAgentCtx {
@@ -99,7 +101,7 @@ async function insertCardMessage(
 }
 
 /** Agent proposes a draft feedback post (visitor can publish it). */
-export function proposePost(
+export async function proposePost(
   input: { conversationId: ConversationId; boardId: BoardId; title: string; content: string },
   ctx: DraftPostAgentCtx
 ): Promise<SendAgentMessageResult> {
@@ -111,7 +113,24 @@ export function proposePost(
     title,
     content: input.content,
   }
-  return insertCardMessage(input.conversationId, `📝 Draft feedback: ${title}`, card, ctx)
+  const result = await insertCardMessage(
+    input.conversationId,
+    `📝 Draft feedback: ${title}`,
+    card,
+    ctx
+  )
+
+  // Schedule a one-shot reminder: if the visitor hasn't published/dismissed the
+  // draft a day from now (and is reachable by email), nudge them. Cancelled when
+  // the card is acted on. Fire-and-forget — a scheduling hiccup must not fail the send.
+  scheduleDispatch({
+    jobId: `draft-nudge--${result.message.id}`,
+    handler: '__draft_nudge__',
+    delayMs: DRAFT_NUDGE_DELAY_MS,
+    payload: { messageId: result.message.id, conversationId: input.conversationId },
+  }).catch((err) => console.error('[chat:draft-post] Failed to schedule nudge:', err))
+
+  return result
 }
 
 /** Agent shares (embeds) an existing post into the conversation. */
@@ -164,6 +183,8 @@ export async function dismissProposedPost(
     .set({ metadata: { ...message.metadata, card: next } })
     .where(eq(chatMessages.id, message.id))
   publishCardUpdated(message.conversationId, message.id, next)
+  // The draft is resolved — drop the pending stale-draft reminder.
+  void cancelScheduledDispatch(`draft-nudge--${input.messageId}`).catch(() => {})
 }
 
 /**
@@ -300,6 +321,8 @@ export async function publishProposedPost(
     .set({ metadata: { ...message.metadata, card: next } })
     .where(eq(chatMessages.id, message.id))
   publishCardUpdated(conversation.id, message.id, next)
+  // The draft is published — drop the pending stale-draft reminder.
+  void cancelScheduledDispatch(`draft-nudge--${input.messageId}`).catch(() => {})
 
   return { postId: result.postId, created: result.created, boardSlug: result.boardSlug }
 }

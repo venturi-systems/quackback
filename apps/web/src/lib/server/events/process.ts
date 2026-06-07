@@ -90,6 +90,16 @@ async function initializeQueue() {
         return
       }
 
+      // Handle stale-draft nudge sentinel
+      if (hookType === '__draft_nudge__') {
+        const { handleDraftNudge } = await import('@/lib/server/domains/chat/chat.nudge')
+        await handleDraftNudge({
+          messageId: hookConfig.messageId as import('@quackback/ids').ChatMessageId,
+          conversationId: hookConfig.conversationId as import('@quackback/ids').ConversationId,
+        })
+        return
+      }
+
       const hook = await getHook(hookType)
       if (!hook) throw new UnrecoverableError(`Unknown hook: ${hookType}`)
 

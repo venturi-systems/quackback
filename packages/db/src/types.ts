@@ -366,6 +366,8 @@ export interface ChatMessageMetadata {
    *  notice instead of rendering the stored (English) content. */
   systemEvent?: ChatSystemEvent
   card?: ChatCard // draft-post suggestion or embedded existing post
+  /** ISO timestamp a stale-draft nudge email was sent, so it fires at most once. */
+  nudgedAt?: string
 }
 
 // Support-inbox conversation row types
