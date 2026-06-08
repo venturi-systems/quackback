@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import {
   EllipsisVerticalIcon,
   TrashIcon,
@@ -63,6 +62,9 @@ interface AdminBubbleProps {
   onSharePost?: () => void
   /** Visitor-only: open the full dialog prefilled from this message. */
   onSuggestWithOptions?: () => void
+  /** Open an embedded post in the inbox's in-place `?post=` modal (the host owns
+   *  the route-bound navigation so the agent never leaves the conversation). */
+  onOpenPost?: (postId: string) => void
   /** Briefly flash this row (deep-link / "Saved for later" jump target). */
   highlighted?: boolean
 }
@@ -76,20 +78,13 @@ export function AdminBubble({
   onSendAsDraft,
   onSharePost,
   onSuggestWithOptions,
+  onOpenPost,
   highlighted = false,
 }: AdminBubbleProps) {
   // Keep the hover toolbar visible while its emoji popover or overflow menu is
   // open (the pointer leaves the row to interact with the portal'd content).
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-
-  // An embedded post card opens in place — the `?post=` modal the whole admin
-  // layout already mounts (same as clicking a roadmap card), so the agent never
-  // leaves the inbox. Merges into the current search so filters/open chat survive.
-  const navigate = useNavigate()
-  const openPostInModal = (postId: string) => {
-    void navigate({ to: '.', search: (prev) => ({ ...(prev as object), post: postId }) })
-  }
 
   // A draft-post / post_ref card the agent proposed or shared: render it
   // read-only (the visitor is the one who acts) — no avatar/toolbar, just the
@@ -197,7 +192,7 @@ export function AdminBubble({
           // Rich reply (inline embeds / images). No mention overlay — replies
           // carry no @-mentions, unlike internal notes. An embedded post opens
           // in the admin `?post=` modal rather than navigating away.
-          <EmbedHydration openMode="modal" onOpenInModal={openPostInModal}>
+          <EmbedHydration openMode="modal" onOpenInModal={onOpenPost}>
             <RichTextContent
               content={message.contentJson}
               className="mt-0.5 text-sm leading-relaxed text-foreground/90"

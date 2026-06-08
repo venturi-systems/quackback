@@ -609,10 +609,23 @@ function ChatThread({
   isOtherAgentTyping: boolean
 }) {
   const queryClient = useQueryClient()
+  const navigate = Route.useNavigate()
   const threadKey = ['admin', 'inbox', 'thread', conversationId] as const
   // The current agent's display name, for attributing optimistic reactions.
   const { session } = useRouteContext({ from: '__root__' })
   const myName = session?.user?.name ?? 'You'
+
+  // Open an embedded post (clicked in a chat message) in the in-place `?post=`
+  // modal the admin layout mounts — route-bound + search-only, so it stays on
+  // /admin/inbox with `?c=` intact, and closing returns to the exact chat.
+  // Mirrors how the roadmap board opens a card; NOT `replace`, so the browser
+  // back button closes the modal.
+  const openPost = useCallback(
+    (postId: string) => {
+      void navigate({ to: '/admin/inbox', search: (prev) => ({ ...prev, post: postId }) })
+    },
+    [navigate]
+  )
   // Reply composer is a rich TipTap doc (inline images + post embeds). `replyText`
   // is the doc's plain text (gates send + drives typing); `replyDocRef` holds the
   // doc persisted as contentJson; `replyResetSignal` clears the editor after send.
@@ -1129,6 +1142,7 @@ function ChatThread({
                 <AdminBubble
                   message={m}
                   highlighted={m.id === highlightId}
+                  onOpenPost={openPost}
                   onDelete={() => deleteMutation.mutate(m.id)}
                   onToggleReaction={(emoji, hasReacted) =>
                     reactionMutation.mutate({ messageId: m.id, emoji, hasReacted })
