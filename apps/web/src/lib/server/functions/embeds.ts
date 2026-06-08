@@ -128,17 +128,19 @@ export const getEmbedPreviewFn = createServerFn({ method: 'GET' })
       const { getOptionalAuth, policyActorFromAuth } = await import('./auth-helpers')
       const actor = await policyActorFromAuth(await getOptionalAuth())
 
-      const [{ getPublicPostDetail }, { listPublicStatuses }, { getPublicChangelogById }] =
+      const [{ getPublicPostDetail }, { listPublicStatuses }, { getPublicChangelogMetaById }] =
         await Promise.all([
           import('@/lib/server/domains/posts/post.public.detail'),
           import('@/lib/server/domains/statuses/status.service'),
           import('@/lib/server/domains/changelog/changelog.public'),
         ])
 
+      // Slim, null-returning changelog getter: no view-count increment (an embed
+      // renders on every page view) and an honest null contract for resolveEmbed.
       return await resolveEmbed(data.kind, data.id, actor, {
         getPostDetail: getPublicPostDetail,
         listStatuses: listPublicStatuses,
-        getChangelog: getPublicChangelogById,
+        getChangelog: getPublicChangelogMetaById,
       })
     } catch {
       // Belt-and-braces: portal-access/auth resolution could throw too. A
