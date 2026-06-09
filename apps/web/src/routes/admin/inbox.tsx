@@ -1268,6 +1268,7 @@ function ChatThread({
                   noteDocRef.current = doc
                 }}
                 onSubmit={onSend}
+                onImageFiles={(files) => void addFiles(files)}
               />
             ) : (
               <ChatRichComposer

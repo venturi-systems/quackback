@@ -949,7 +949,9 @@ const EmojiSuggestionList = forwardRef<EmojiSuggestionListRef, EmojiSuggestionLi
 )
 EmojiSuggestionList.displayName = 'EmojiSuggestionList'
 
-function createEmojiExtension() {
+/** The `:`-triggered inline emoji picker, shared with the chat composers so
+ *  reply + note get the same emoji UX as posts. */
+export function createEmojiExtension() {
   return Emoji.configure({
     enableEmoticons: true,
     suggestion: {

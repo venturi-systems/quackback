@@ -5,7 +5,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import type { Editor, JSONContent } from '@tiptap/core'
 import { QuackbackEmbed } from '@/components/ui/quackback-embed-extension'
 import { ChatImage } from '@/components/ui/chat-image-node'
-import { hasActiveSuggestion } from '@/components/ui/rich-text-editor'
+import { hasActiveSuggestion, createEmojiExtension } from '@/components/ui/rich-text-editor'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/shared/utils'
 
@@ -123,6 +123,8 @@ export const ChatRichComposer = forwardRef<ChatRichComposerHandle, ChatRichCompo
         QuackbackEmbed.configure({ enablePaste: true }),
         // Inline, removable images inserted on paste/drop upload.
         ChatImage,
+        // `:`-triggered inline emoji picker (same as posts).
+        createEmojiExtension(),
       ],
       editorProps: {
         attributes: {

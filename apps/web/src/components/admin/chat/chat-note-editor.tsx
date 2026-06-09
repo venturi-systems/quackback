@@ -5,7 +5,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import type { Editor, JSONContent } from '@tiptap/core'
 import { TeamMentionExtension } from '@/components/ui/mention-extension'
 import { QuackbackEmbed } from '@/components/ui/quackback-embed-extension'
-import { hasActiveSuggestion } from '@/components/ui/rich-text-editor'
+import { hasActiveSuggestion, createEmojiExtension } from '@/components/ui/rich-text-editor'
 import { cn } from '@/lib/shared/utils'
 
 interface ChatNoteEditorProps {
@@ -18,6 +18,9 @@ interface ChatNoteEditorProps {
   onChange: (text: string, doc: JSONContent) => void
   /** Plain Enter with the @-mention picker CLOSED. */
   onSubmit: () => void
+  /** Pasted/dropped image files — handed to the parent to add to the note's
+   *  attachment tray (notes attach images as files, not inline nodes). */
+  onImageFiles?: (files: File[]) => void
   className?: string
 }
 
@@ -40,7 +43,7 @@ export interface ChatNoteEditorHandle {
  */
 export const ChatNoteEditor = forwardRef<ChatNoteEditorHandle, ChatNoteEditorProps>(
   function ChatNoteEditor(
-    { placeholder, disabled, resetSignal, onChange, onSubmit, className },
+    { placeholder, disabled, resetSignal, onChange, onSubmit, onImageFiles, className },
     ref
   ) {
     // Keep callbacks fresh without tearing down + rebuilding the editor.
@@ -48,6 +51,8 @@ export const ChatNoteEditor = forwardRef<ChatNoteEditorHandle, ChatNoteEditorPro
     onSubmitRef.current = onSubmit
     const onChangeRef = useRef(onChange)
     onChangeRef.current = onChange
+    const onImageFilesRef = useRef(onImageFiles)
+    onImageFilesRef.current = onImageFiles
     // The live TipTap editor, captured on create so the keymap can ask it whether
     // the @-mention picker is open (matches hasActiveSuggestion's call pattern).
     const editorRef = useRef<Editor | null>(null)
@@ -76,6 +81,8 @@ export const ChatNoteEditor = forwardRef<ChatNoteEditorHandle, ChatNoteEditorPro
         TeamMentionExtension,
         // Pasting a Quackback post/changelog link becomes a live embed card.
         QuackbackEmbed.configure({ enablePaste: true }),
+        // `:`-triggered inline emoji picker (same as posts).
+        createEmojiExtension(),
       ],
       editorProps: {
         attributes: {
@@ -91,6 +98,32 @@ export const ChatNoteEditor = forwardRef<ChatNoteEditorHandle, ChatNoteEditorPro
             return true
           }
           return false
+        },
+        // Pasted images go to the note's attachment tray (handed up to the
+        // parent); non-image paste falls through to default handling.
+        handlePaste: (_view, event) => {
+          const handler = onImageFilesRef.current
+          if (!handler) return false
+          const images = Array.from(event.clipboardData?.files ?? []).filter((f) =>
+            f.type.startsWith('image/')
+          )
+          if (images.length === 0) return false
+          event.preventDefault()
+          handler(images)
+          return true
+        },
+        // Dropped image files go to the tray too. `moved` is an in-editor drag,
+        // not an external file — leave those to ProseMirror.
+        handleDrop: (_view, event, _slice, moved) => {
+          const handler = onImageFilesRef.current
+          if (!handler || moved) return false
+          const images = Array.from(event.dataTransfer?.files ?? []).filter((f) =>
+            f.type.startsWith('image/')
+          )
+          if (images.length === 0) return false
+          event.preventDefault()
+          handler(images)
+          return true
         },
       },
       onUpdate: ({ editor }) => onChangeRef.current(editor.getText().trim(), editor.getJSON()),
