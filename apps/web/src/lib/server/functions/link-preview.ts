@@ -17,11 +17,18 @@ import { createHash } from 'node:crypto'
 import { requireAuth } from './auth-helpers'
 import { isTeamMember } from '@/lib/shared/roles'
 import { parseEmbedUrl } from '@/lib/shared/embeds/parse-embed-url'
+import { getRequestHeaders } from '@tanstack/react-start/server'
 import { cacheGet, cacheSet, getRedis } from '@/lib/server/redis'
+import { getClientIp } from '@/lib/server/domains/api/rate-limit'
 import type { LinkPreview } from '@/lib/server/content/unfurl'
 
 const RATE_LIMIT_WINDOW_S = 60
+// Per-principal cap. A per-IP cap (below) backs it up because an attacker can
+// mint fresh anonymous principals cheaply, which would otherwise reset this key.
 const RATE_LIMIT_MAX = 30
+// Per-client-IP cap — bounds aggregate outbound fetches from one source even as
+// it rotates anonymous principals, so the endpoint can't be a fetch-proxy/amp.
+const RATE_LIMIT_IP_MAX = 60
 
 /** Sentinel stored in Redis when a URL yields no preview (negative cache). */
 interface NoneCache {
@@ -31,10 +38,6 @@ interface NoneCache {
 function urlCacheKey(url: string): string {
   const hash = createHash('sha256').update(url).digest('hex')
   return `linkpreview:v1:${hash}`
-}
-
-function rlKey(principalId: string): string {
-  return `linkpreview:rl:${principalId}`
 }
 
 export const unfurlLinkFn = createServerFn({ method: 'GET' })
@@ -60,16 +63,22 @@ export const unfurlLinkFn = createServerFn({ method: 'GET' })
       // 4. Exclude internal Quackback URLs
       if (parseEmbedUrl(data.url) !== null) return null
 
-      // 5. Rate limit (best-effort; failures don't block the request)
+      // 5. Rate limit (best-effort; failures don't block the request). Cap per
+      //    principal AND per client IP — the per-IP cap holds even when an
+      //    attacker rotates cheap anonymous principals.
       try {
         const redis = getRedis()
-        const key = rlKey(ctx.principal.id)
-        const count = await redis.incr(key)
-        if (count === 1) {
-          // Set expiry on first hit; subsequent hits within the window don't reset it.
-          await redis.expire(key, RATE_LIMIT_WINDOW_S)
+        const ip = getClientIp(getRequestHeaders())
+        const checks: Array<[string, number]> = [
+          [`linkpreview:rl:p:${ctx.principal.id}`, RATE_LIMIT_MAX],
+          [`linkpreview:rl:ip:${ip}`, RATE_LIMIT_IP_MAX],
+        ]
+        for (const [key, max] of checks) {
+          const count = await redis.incr(key)
+          // Set expiry on first hit; later hits in the window don't reset it.
+          if (count === 1) await redis.expire(key, RATE_LIMIT_WINDOW_S)
+          if (count > max) return null
         }
-        if (count > RATE_LIMIT_MAX) return null
       } catch {
         // Redis unavailable — allow the request through
       }

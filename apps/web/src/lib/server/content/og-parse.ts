@@ -7,6 +7,12 @@
 
 const MAX_SCAN_BYTES = 200 * 1024
 
+/** Codepoint → char, ignoring out-of-range refs (e.g. &#x110000;) rather than
+ *  throwing — a single malformed entity must never discard the whole preview. */
+function fromCodePointSafe(n: number): string {
+  return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ''
+}
+
 /** Decode the five named HTML entities plus decimal and hex character references. */
 function decodeEntities(s: string): string {
   return s
@@ -15,8 +21,8 @@ function decodeEntities(s: string): string {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-    .replace(/&#(\d+);/gi, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => fromCodePointSafe(parseInt(hex, 16)))
+    .replace(/&#(\d+);/gi, (_, dec) => fromCodePointSafe(Number(dec)))
 }
 
 /** Strip ASCII control characters (U+0000-U+001F, U+007F). */
@@ -77,7 +83,7 @@ export function parseOpenGraph(html: string, baseUrl: string): OpenGraphData {
     // Extract <title>...</title>
     const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(head)
     if (titleMatch) {
-      htmlTitle = decodeEntities(stripControl(titleMatch[1]))
+      htmlTitle = stripControl(decodeEntities(titleMatch[1]))
     }
 
     // Walk all <meta ...> tags
@@ -90,7 +96,7 @@ export function parseOpenGraph(html: string, baseUrl: string): OpenGraphData {
       const content = extractAttr(tag, 'content')
 
       if (content === null) continue
-      const decoded = decodeEntities(stripControl(content))
+      const decoded = stripControl(decodeEntities(content))
 
       if (property === 'og:title') ogTitle = decoded
       else if (property === 'og:description') ogDescription = decoded
