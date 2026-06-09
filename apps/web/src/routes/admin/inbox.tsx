@@ -806,11 +806,21 @@ function ChatThread({
   }
 
   const sendMutation = useMutation({
-    mutationFn: (vars: { content: string; contentJson: JSONContent | null }) =>
+    mutationFn: (vars: {
+      content: string
+      contentJson: JSONContent | null
+      attachments?: ChatAttachment[]
+    }) =>
       sendAgentMessageFn({
-        data: { conversationId, content: vars.content, contentJson: vars.contentJson },
+        data: {
+          conversationId,
+          content: vars.content,
+          contentJson: vars.contentJson,
+          attachments: vars.attachments,
+        },
       }),
     onSuccess: (res) => {
+      clearAttachments()
       appendToThread(res)
     },
     onError: () => toast.error('Failed to send message'),
@@ -980,11 +990,22 @@ function ChatThread({
       return
     }
     // Reply is rich: send the plain text (preview/search) + the doc (inline
-    // images/embeds). A doc with only an image/embed and no text is still valid.
+    // images/embeds) + any tray attachments. A doc/attachment with no text is
+    // still valid (e.g. an image-only reply).
     const text = replyText.trim()
     const doc = replyDocRef.current
-    if ((!text && !replyDocHasContentNode(doc)) || sendMutation.isPending) return
-    sendMutation.mutate({ content: text, contentJson: doc })
+    const hasAttachments = pendingAttachments.length > 0
+    if (
+      (!text && !replyDocHasContentNode(doc) && !hasAttachments) ||
+      sendMutation.isPending ||
+      uploading
+    )
+      return
+    sendMutation.mutate({
+      content: text,
+      contentJson: doc,
+      attachments: hasAttachments ? pendingAttachments : undefined,
+    })
     setReplyText('')
     replyDocRef.current = null
     setReplyHasContentNode(false)
@@ -1190,8 +1211,9 @@ function ChatThread({
               </button>
             ))}
           </div>
-          {/* Attachment tray is note-only — replies put images inline instead. */}
-          {noteMode && pendingAttachments.length > 0 && (
+          {/* Attachment tray — shared by reply + note; images upload here and
+              send as `attachments`. */}
+          {pendingAttachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-1 pb-2">
               {pendingAttachments.map((a, i) => {
                 const isImage = a.contentType?.startsWith('image/') && a.url
@@ -1244,20 +1266,9 @@ function ChatThread({
               className="hidden"
               onChange={(e) => {
                 const files = e.target.files
-                if (files && files.length > 0) {
-                  if (noteMode) {
-                    // Notes keep the attachment tray.
-                    void addFiles(files)
-                  } else {
-                    // Replies inline the image: upload, then insert a chatImage
-                    // node — matching paste/drop in the composer.
-                    Array.from(files).forEach((file) => {
-                      void upload(file)
-                        .then((url) => replyComposerRef.current?.insertImage(url))
-                        .catch(() => toast.error('Failed to upload image'))
-                    })
-                  }
-                }
+                // Reply and note both attach via the shared tray — uploaded and
+                // sent as `attachments`, then rendered below the bubble.
+                if (files && files.length > 0) void addFiles(files)
                 e.target.value = ''
               }}
             />
@@ -1286,7 +1297,7 @@ function ChatThread({
                 }}
                 onSubmit={onSend}
                 onLocalInput={onLocalInput}
-                uploadImage={upload}
+                onImageFiles={(files) => void addFiles(files)}
               />
             )}
             <div className="flex items-center gap-0.5 pt-1">
@@ -1346,8 +1357,12 @@ function ChatThread({
                 onClick={onSend}
                 disabled={
                   noteMode
-                    ? !noteText.trim() || noteMutation.isPending
-                    : (!replyText.trim() && !replyHasContentNode) || sendMutation.isPending
+                    ? !noteText.trim() || noteMutation.isPending || uploading
+                    : (!replyText.trim() &&
+                        !replyHasContentNode &&
+                        pendingAttachments.length === 0) ||
+                      sendMutation.isPending ||
+                      uploading
                 }
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-md text-primary-foreground disabled:opacity-40 transition-opacity',

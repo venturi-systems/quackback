@@ -24,6 +24,10 @@ interface ChatRichComposerProps {
   /** Uploads an image file and resolves to its public URL. When provided, image
    *  paste/drop is intercepted and inserted as an inline `chatImage` node. */
   uploadImage?: (file: File) => Promise<string>
+  /** When provided, pasted/dropped image files are handed to the parent (e.g. an
+   *  attachment tray) instead of being inlined. Takes precedence over
+   *  `uploadImage`, so a composer using a tray never inlines. */
+  onImageFiles?: (files: File[]) => void
   className?: string
 }
 
@@ -57,6 +61,7 @@ export const ChatRichComposer = forwardRef<ChatRichComposerHandle, ChatRichCompo
       onSubmit,
       onLocalInput,
       uploadImage,
+      onImageFiles,
       className,
     },
     ref
@@ -70,6 +75,8 @@ export const ChatRichComposer = forwardRef<ChatRichComposerHandle, ChatRichCompo
     onLocalInputRef.current = onLocalInput
     const uploadImageRef = useRef(uploadImage)
     uploadImageRef.current = uploadImage
+    const onImageFilesRef = useRef(onImageFiles)
+    onImageFilesRef.current = onImageFiles
     // The live TipTap editor, captured on create so the keymap can ask it whether
     // a suggestion popup is open and so paste/drop handlers can insert nodes.
     const editorRef = useRef<Editor | null>(null)
@@ -141,28 +148,31 @@ export const ChatRichComposer = forwardRef<ChatRichComposerHandle, ChatRichCompo
           }
           return false
         },
-        // Intercept image paste so it uploads + inserts a chatImage; let any
-        // other paste (text, Quackback links) fall through to the paste rules.
+        // Intercept image paste: hand files to the tray when `onImageFiles` is
+        // set, otherwise inline them. Other paste (text, Quackback links) falls
+        // through to the paste rules.
         handlePaste: (_view, event) => {
-          if (!uploadImageRef.current) return false
+          if (!onImageFilesRef.current && !uploadImageRef.current) return false
           const images = Array.from(event.clipboardData?.files ?? []).filter((f) =>
             f.type.startsWith('image/')
           )
           if (images.length === 0) return false
           event.preventDefault()
-          images.forEach(insertUploadedImage)
+          if (onImageFilesRef.current) onImageFilesRef.current(images)
+          else images.forEach(insertUploadedImage)
           return true
         },
         // Intercept image drop the same way. `moved` is an in-editor drag, not
         // an external file — leave those to ProseMirror.
         handleDrop: (_view, event, _slice, moved) => {
-          if (!uploadImageRef.current || moved) return false
+          if ((!onImageFilesRef.current && !uploadImageRef.current) || moved) return false
           const images = Array.from(event.dataTransfer?.files ?? []).filter((f) =>
             f.type.startsWith('image/')
           )
           if (images.length === 0) return false
           event.preventDefault()
-          images.forEach(insertUploadedImage)
+          if (onImageFilesRef.current) onImageFilesRef.current(images)
+          else images.forEach(insertUploadedImage)
           return true
         },
       },
