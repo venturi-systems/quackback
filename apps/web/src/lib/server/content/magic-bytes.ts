@@ -16,7 +16,20 @@ export const ALLOWED_REHOST_MIMES = new Set([
   'image/gif',
   'image/webp',
   'image/avif',
+  'image/x-icon',
 ])
+
+/**
+ * Map equivalent MIME spellings to the canonical form `sniffImageMime` returns,
+ * so a header cross-check accepts e.g. `image/vnd.microsoft.icon` as `image/x-icon`.
+ * Owns the alias vocabulary alongside the canonical set above.
+ */
+export function canonicalizeImageMime(mime: string): string {
+  if (mime === 'image/vnd.microsoft.icon' || mime === 'image/icon' || mime === 'image/ico') {
+    return 'image/x-icon'
+  }
+  return mime
+}
 
 function startsWithAt(buf: Buffer, offset: number, pattern: number[]): boolean {
   if (buf.length < offset + pattern.length) return false
@@ -56,6 +69,10 @@ export function sniffImageMime(buf: Buffer): string | null {
   if (buf.length >= 12 && buf.slice(4, 8).toString('ascii') === 'ftyp') {
     const brand = buf.slice(8, 12).toString('ascii')
     if (brand === 'avif' || brand === 'avis') return 'image/avif'
+  }
+  // ICO: 00 00 01 00
+  if (startsWithAt(buf, 0, [0x00, 0x00, 0x01, 0x00])) {
+    return 'image/x-icon'
   }
   return null
 }
