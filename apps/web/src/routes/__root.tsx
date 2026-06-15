@@ -20,6 +20,8 @@ import { DefaultErrorPage } from '@/components/shared/error-page'
 import { OttHandler } from '@/components/shared/ott-handler'
 import { SuspendedView } from '@/components/shared/suspended-view'
 import { isSuspensionExempt } from '@/lib/server/middleware/suspension-paths'
+import { documentLocale, htmlLangDir } from '@/lib/shared/document-locale'
+import { normalizeLocale, DEFAULT_LOCALE, type SupportedLocale } from '@/lib/shared/i18n'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -31,6 +33,7 @@ export interface RouterContext {
   managedFieldPaths?: string[]
   state?: 'active' | 'suspended' | 'deleting'
   registeredAuthProviders?: string[]
+  acceptLanguageLocale?: SupportedLocale
 }
 
 // Paths that are allowed before onboarding is complete
@@ -61,6 +64,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       managedFieldPaths,
       state,
       registeredAuthProviders,
+      acceptLanguageLocale,
     } = await getBootstrapData()
 
     if (!isOnboardingExempt(location.pathname)) {
@@ -116,6 +120,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       managedFieldPaths,
       state,
       registeredAuthProviders,
+      acceptLanguageLocale,
     }
   },
   head: () => ({
@@ -218,8 +223,20 @@ class SafeRootDocument extends Component<{ children: ReactNode }, { hasError: bo
 const NON_PORTAL_PREFIXES = ['/admin', '/onboarding', '/api', '/complete-signup']
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
-  const { settings, themeCookie } = Route.useRouteContext()
+  const { settings, themeCookie, acceptLanguageLocale } = Route.useRouteContext()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  // structuralSharing keeps the array reference stable across store updates that
+  // don't change the matched routes, so RootDocument doesn't re-render every tick.
+  const routeIds = useRouterState({
+    select: (s) => s.matches.map((m) => m.routeId),
+    structuralSharing: true,
+  })
+  // The widget honors a `?locale=` override (its SDK appends it); read it so the
+  // iframe document advertises the widget's actual language, not just the
+  // Accept-Language one. Only the widget route reads this param.
+  const widgetLocaleParam = useRouterState({
+    select: (s) => (s.location.search as { locale?: string }).locale,
+  })
 
   // Portal routes can force a specific theme (light/dark) via branding config.
   // Admin and other non-portal routes always respect the user's preference.
@@ -231,8 +248,18 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   // We pass the resolved default so the script knows what to apply.
   const defaultTheme = forcedTheme ?? themeCookie ?? 'system'
 
+  // Advertise the rendered language on the document during SSR so non-English
+  // visitors don't get an English `<html lang>` (and so RTL locales aren't laid
+  // out LTR until hydration). Decided from the matched route IDs so only
+  // actually-localized routes are tagged; see documentLocale. On the widget a
+  // valid `?locale=` override wins, matching what the widget itself renders.
+  const widgetOverride =
+    routeIds.includes('/widget') && widgetLocaleParam ? normalizeLocale(widgetLocaleParam) : null
+  const resolvedLocale = widgetOverride ?? acceptLanguageLocale ?? DEFAULT_LOCALE
+  const { lang, dir } = htmlLangDir(documentLocale(routeIds, resolvedLocale))
+
   return (
-    <html suppressHydrationWarning>
+    <html lang={lang} dir={dir} suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

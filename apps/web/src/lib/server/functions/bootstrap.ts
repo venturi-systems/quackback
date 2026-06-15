@@ -1,5 +1,6 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { getThemeCookie, type Theme } from '@/lib/shared/theme'
+import { resolveLocale, type SupportedLocale } from '@/lib/shared/i18n'
 import type { Session, PrincipalType } from '@/lib/server/auth/session'
 import type { TenantSettings } from '@/lib/server/domains/settings'
 import type { SessionId, UserId } from '@quackback/ids'
@@ -26,6 +27,10 @@ export interface BootstrapData {
    *  `auth_sso` row in `platform_credentials` will NOT include 'sso'
    *  here, so the UI never renders an SSO button that would 404. */
   registeredAuthProviders: string[]
+  /** Locale resolved from the request's Accept-Language header, used by the
+   *  root document to set `<html lang>`/`dir` during SSR. Resolved here so it
+   *  rides the bootstrap request without a separate round-trip. */
+  acceptLanguageLocale: SupportedLocale
 }
 
 // Returns both the session (with principalType) AND the user role in
@@ -145,6 +150,7 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
 
   const headers = getRequestHeaders()
   const themeCookie = getThemeCookie(headers.get('cookie') ?? null)
+  const acceptLanguageLocale = resolveLocale(headers.get('accept-language'))
 
   return {
     baseUrl: config.baseUrl,
@@ -155,6 +161,7 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
     managedFieldPaths: settings?.managedFieldPaths ?? [],
     state: settings?.state ?? 'active',
     registeredAuthProviders,
+    acceptLanguageLocale,
   }
 })
 

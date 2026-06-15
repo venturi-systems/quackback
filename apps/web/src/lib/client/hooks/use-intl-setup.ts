@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { loadMessages, isRtlLocale, isRtlForced, type SupportedLocale } from '@/lib/shared/i18n'
+import { loadMessages, type SupportedLocale } from '@/lib/shared/i18n'
 
 /**
- * Shared hook that loads locale messages and sets `lang`/`dir` on <html>.
- * Used by both PortalIntlProvider and WidgetAuthProvider.
+ * Shared hook that loads the message catalog for a locale (used by
+ * PortalIntlProvider and WidgetAuthProvider). It does NOT touch `<html lang>`/
+ * `dir`: the root document owns those reactively (see `documentLocale`), so
+ * only one place decides the document language. The widget, a separate iframe
+ * document with its own runtime locale, sets its own `lang`/`dir`.
  *
  * Pass `initialMessages` (loaded server-side and serialized into the route's
  * loader data) so SSR renders translated and the client hydrates from the same
@@ -31,17 +34,6 @@ export function useIntlSetup(
     })
     return () => {
       cancelled = true
-    }
-  }, [locale])
-
-  useEffect(() => {
-    const prevLang = document.documentElement.lang
-    const prevDir = document.documentElement.dir
-    document.documentElement.lang = locale
-    document.documentElement.dir = isRtlForced() || isRtlLocale(locale) ? 'rtl' : 'ltr'
-    return () => {
-      document.documentElement.lang = prevLang
-      document.documentElement.dir = prevDir || 'ltr'
     }
   }, [locale])
 
