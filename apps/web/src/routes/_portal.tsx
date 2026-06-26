@@ -150,7 +150,7 @@ export const Route = createFileRoute('/_portal')({
     const customCss = settings?.customCss ?? ''
     const publicPortalConfig = settings?.publicPortalConfig ?? null
 
-    const themeMode = brandingConfig.themeMode ?? 'user'
+    const themeMode = 'dark'
 
     // Always generate CSS from theme config (if structured vars exist)
     const hasThemeConfig = brandingConfig.light || brandingConfig.dark
