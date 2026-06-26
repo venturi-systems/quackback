@@ -1,0 +1,45 @@
+name: portability
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portability-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check fork portability contract
+        run: |
+          set -euo pipefail
+
+          test "$(node -p "require('./package.json').packageManager")" = "bun@1.3.7"
+          test -f apps/web/Dockerfile
+          test -f docker-compose.yml
+          test -f .env.example
+
+          grep -q '^DATABASE_URL=' .env.example
+          grep -q '^REDIS_URL=' .env.example
+          grep -q 'SKIP_ENV_VALIDATION' .github/workflows/ci.yml
+          grep -q 'ghcr.io' .github/workflows/docker.yml
+
+          if grep -R "richard@venturi.systems" \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude-dir=.output \
+            --exclude='*.lock' \
+            --exclude='bun.lock' \
+            .; then
+            echo "Private operator email leaked into tracked files." >&2
+            exit 1
+          fi
