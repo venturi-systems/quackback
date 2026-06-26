@@ -222,10 +222,10 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     select: (s) => (s.location.search as { locale?: string }).locale,
   })
 
-  // Portal routes can force a specific theme (light/dark) via branding config.
-  // Admin and other non-portal routes always respect the user's preference.
+  // Venturi runs a single corpus-governed dark system on public portal routes.
+  // Admin and other non-portal routes still respect the user's preference.
   const isPortalRoute = !NON_PORTAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  const themeMode = settings?.brandingConfig?.themeMode ?? 'user'
+  const themeMode = isPortalRoute ? 'dark' : (settings?.brandingConfig?.themeMode ?? 'user')
   const forcedTheme = isPortalRoute && themeMode !== 'user' ? themeMode : undefined
 
   // next-themes' inline script sets the class on <html> before first paint.
