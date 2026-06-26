@@ -1,11 +1,11 @@
 /**
- * Shared email styles for Quackback emails
+ * Shared email styles for Venturi Feedback emails
  *
  * Ensures consistent branding across all email templates.
  * Colors are derived from the app's design system.
  */
 
-export const DEFAULT_LOGO_URL = 'https://quackback.io/logo.png'
+export const DEFAULT_LOGO_URL = 'https://venturi.systems/favicon.svg'
 
 // Brand colors (converted from oklch to hex for email compatibility)
 export const colors = {

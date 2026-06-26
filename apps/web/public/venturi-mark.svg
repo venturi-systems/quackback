@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Venturi</title>
+  <rect width="64" height="64" rx="14" fill="#080B12" />
+  <path
+    d="M18 46 29.5 18h5L46 46h-6.2l-2.2-5.9H26.5L24.2 46Zm10.3-11.2h7.5L32 24.7Z"
+    fill="#7EB6FF"
+  />
+  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#7EB6FF" stroke-opacity=".32" />
+</svg>

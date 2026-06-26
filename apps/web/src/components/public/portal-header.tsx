@@ -220,7 +220,7 @@ export function PortalHeader({
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-9 w-9">
+          <Button variant="ghost" size="icon" className="h-11 w-11">
             <CurrentIcon className="h-4 w-4" />
             <span className="sr-only">
               {intl.formatMessage({
@@ -254,7 +254,7 @@ export function PortalHeader({
 
       {/* Admin Button (visible for team members) */}
       {canAccessAdmin && (
-        <Button variant="outline" size="sm" asChild className="ms-1 me-2">
+        <Button variant="outline" size="sm" asChild className="ms-1 me-2 min-h-11">
           <Link to="/admin">
             <ShieldCheckIcon className="me-2 h-4 w-4" />
             <FormattedMessage id="portal.header.auth.admin" defaultMessage="Admin" />
@@ -270,7 +270,7 @@ export function PortalHeader({
         // Logged-in user - show user dropdown
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-9 w-9 rounded-full">
+            <Button variant="ghost" className="relative h-11 w-11 rounded-full">
               <Avatar className="h-9 w-9" src={avatarUrl} name={name} />
             </Button>
           </DropdownMenuTrigger>
@@ -312,6 +312,7 @@ export function PortalHeader({
           <Button
             variant="ghost"
             size="sm"
+            className="min-h-11"
             onClick={() =>
               soleOidcProviderId ? redirectToSoleProvider() : openAuthPopover({ mode: 'login' })
             }
@@ -320,6 +321,7 @@ export function PortalHeader({
           </Button>
           <Button
             size="sm"
+            className="min-h-11"
             onClick={() =>
               soleOidcProviderId ? redirectToSoleProvider() : openAuthPopover({ mode: 'signup' })
             }
@@ -338,7 +340,7 @@ export function PortalHeader({
       <div>
         <div className="max-w-6xl mx-auto w-full px-4 sm:px-6">
           <div className="flex h-12 items-center justify-between">
-            <Link to="/" className="portal-header__logo flex items-center gap-2">
+            <Link to="/" className="portal-header__logo flex min-h-11 items-center gap-2">
               {orgLogo ? (
                 <img
                   src={orgLogo}

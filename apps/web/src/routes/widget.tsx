@@ -131,9 +131,9 @@ function WidgetLayout() {
             body { overflow: hidden; margin: 0; }
             html, body, #root { height: 100%; }
             /* Prevent white flash before theme resolves */
-            html.system { background: #fff; }
+            html.system { background: #080b12; }
             @media (prefers-color-scheme: dark) {
-              html.system { background: #09090b; }
+              html.system { background: #080b12; }
             }
           `,
         }}

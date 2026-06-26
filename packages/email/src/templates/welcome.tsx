@@ -12,12 +12,12 @@ interface WelcomeEmailProps {
 export function WelcomeEmail({ name, workspaceName, dashboardUrl, logoUrl }: WelcomeEmailProps) {
   return (
     <EmailLayout
-      preview={`Welcome to ${workspaceName} on Quackback`}
+      preview={`Welcome to ${workspaceName} on Venturi Feedback`}
       logoUrl={logoUrl}
       logoAlt={workspaceName}
     >
       {/* Content */}
-      <Heading style={typography.h1}>Welcome to Quackback!</Heading>
+      <Heading style={typography.h1}>Welcome to Venturi Feedback</Heading>
       <Text style={typography.text}>
         Hi {name}, your workspace <strong>{workspaceName}</strong> is ready. Start collecting and
         managing customer feedback today.
@@ -53,7 +53,7 @@ export function WelcomeEmail({ name, workspaceName, dashboardUrl, logoUrl }: Wel
       <TransactionalFooter>
         Happy collecting!
         <br />
-        The Quackback Team
+        The Venturi Team
       </TransactionalFooter>
     </EmailLayout>
   )

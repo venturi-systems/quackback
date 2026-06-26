@@ -43,7 +43,7 @@ export interface InviteBranding {
 }
 
 const DEFAULT_BRANDING: InviteBranding = {
-  workspaceName: 'Quackback',
+  workspaceName: 'Venturi Feedback',
   logoUrl: null,
   inviterName: null,
 }
@@ -136,8 +136,8 @@ function PageShell({ children }: { children: React.ReactNode }) {
       />
       <div className="relative w-full max-w-md py-12">
         <div className="mb-8 flex items-center justify-center gap-2">
-          <img src="/logo.png" alt="" className="h-6 w-6 rounded" />
-          <span className="text-sm font-medium text-muted-foreground">Quackback</span>
+          <img src="/venturi-mark.svg" alt="" className="h-6 w-6 rounded" />
+          <span className="text-sm font-medium text-muted-foreground">Venturi Feedback</span>
         </div>
         {children}
       </div>

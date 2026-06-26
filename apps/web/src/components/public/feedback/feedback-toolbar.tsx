@@ -79,7 +79,7 @@ export function FeedbackToolbar({
               type="button"
               onClick={() => onSortChange(option.value)}
               className={cn(
-                'flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer',
+                'flex min-h-11 items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer',
                 isActive
                   ? 'bg-muted text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -99,7 +99,7 @@ export function FeedbackToolbar({
         {/* Search */}
         <Popover open={searchOpen} onOpenChange={setSearchOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="min-h-11 gap-1.5">
               <MagnifyingGlassIcon className="h-4 w-4" />
               <span className="hidden sm:inline">
                 <FormattedMessage id="portal.feedback.toolbar.search" defaultMessage="Search" />

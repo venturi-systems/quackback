@@ -13,13 +13,12 @@
 }
 
 /* ==============================================
-   QUACKBACK THEME - tweakcn Compatible
+   VENTURI UNIFIED DARK THEME
 
-   Full compatibility with https://tweakcn.com
-   themes. All variables defined for easy theme
-   swapping via tweakcn JSON exports.
-
-   Colors in OKLCH format for perceptual uniformity
+   Default fork theme for feedback.venturi.systems. Tenant-provided branding
+   can still override these variables at runtime, but the app fallback now
+   matches the corpus-governed Venturi Unified Dark system used by the public
+   website.
    ============================================== */
 
   :root {
@@ -153,6 +152,70 @@
     --nav-inactive-color: var(--muted-foreground);
     --portal-button-background: var(--primary);
     --portal-button-foreground: var(--primary-foreground);
+  }
+
+  :root,
+  .dark {
+    color-scheme: dark;
+    --background: #080b12;
+    --foreground: #eff3f8;
+    --card: #0e131e;
+    --card-foreground: #eff3f8;
+    --popover: #0e131e;
+    --popover-foreground: #eff3f8;
+    --primary: #7eb6ff;
+    --primary-foreground: #06090f;
+    --secondary: #121926;
+    --secondary-foreground: #eff3f8;
+    --muted: #121926;
+    --muted-foreground: #bac5d4;
+    --accent: #172033;
+    --accent-foreground: #eff3f8;
+    --destructive: #f87171;
+    --destructive-foreground: #06090f;
+    --success: #4ade80;
+    --success-foreground: #06120d;
+    --border: #313e54;
+    --input: #313e54;
+    --ring: #7eb6ff;
+    --chart-1: #7eb6ff;
+    --chart-2: #5ec4b6;
+    --chart-3: #bac5d4;
+    --chart-4: #fbbf24;
+    --chart-5: #f87171;
+    --metric-posts: #7eb6ff;
+    --metric-votes: #5ec4b6;
+    --metric-comments: #bac5d4;
+    --metric-users: #fbbf24;
+    --sidebar: #0b1019;
+    --sidebar-foreground: #eff3f8;
+    --sidebar-primary: #7eb6ff;
+    --sidebar-primary-foreground: #06090f;
+    --sidebar-accent: #172033;
+    --sidebar-accent-foreground: #eff3f8;
+    --sidebar-border: #313e54;
+    --sidebar-ring: #7eb6ff;
+    --radius: 0.5rem;
+    --letter-spacing: 0em;
+    --shadow-2xs: 0 1px 0 rgba(0, 0, 0, 0.28);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.22);
+    --shadow: 0 12px 32px rgba(0, 0, 0, 0.26);
+    --shadow-md: 0 18px 45px rgba(0, 0, 0, 0.34);
+    --shadow-lg: 0 22px 70px rgba(0, 0, 0, 0.42);
+    --shadow-xl: 0 32px 95px rgba(0, 0, 0, 0.5);
+    --shadow-2xl: 0 45px 140px rgba(0, 0, 0, 0.62);
+    --header-background: rgba(8, 11, 18, 0.88);
+    --header-foreground: #eff3f8;
+    --header-border: rgba(126, 182, 255, 0.18);
+    --post-card-background: #0e131e;
+    --post-card-border: rgba(126, 182, 255, 0.18);
+    --post-card-voted-color: #7eb6ff;
+    --nav-active-background: rgba(126, 182, 255, 0.13);
+    --nav-active-foreground: #eff3f8;
+    --nav-inactive-color: #bac5d4;
+    --portal-button-background: #7eb6ff;
+    --portal-button-foreground: #06090f;
   }
 
   @theme inline {
@@ -294,7 +357,7 @@
 
 @layer base {
   * {
-    color-scheme: light dark;
+    color-scheme: dark;
     @apply border-border outline-ring/50;
   }
   body {
@@ -306,6 +369,39 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+}
+
+html {
+  background: #080b12;
+}
+
+body {
+  background:
+    radial-gradient(circle at 78% 6%, rgba(126, 182, 255, 0.16), transparent 28rem),
+    radial-gradient(circle at 12% 18%, rgba(94, 196, 182, 0.11), transparent 24rem),
+    linear-gradient(180deg, #080b12 0%, #0a0f18 44%, #080b12 100%);
+}
+
+.portal-nav__item,
+.portal-action {
+  min-height: 44px;
+}
+
+.portal-nav__item {
+  border: 1px solid transparent;
+}
+
+.portal-nav__item--active {
+  border-color: rgba(126, 182, 255, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.venturi-portal-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+    var(--card);
+  border-color: rgba(126, 182, 255, 0.18);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.28);
 }
 
 /* Interactive elements — pointer cursor for native controls.
@@ -419,4 +515,3 @@ a svg,
 .custom-scrollbar-hover:hover::-webkit-scrollbar-thumb:hover {
   background: var(--color-muted-foreground);
 }
-

@@ -119,10 +119,10 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
     | { helpCenter?: boolean; supportInbox?: boolean }
     | undefined
   // The org's own logo (resolved in brandingData by the root loader, same source
-  // PortalBrandMark uses); fall back to the Quackback mark when none is set.
+  // PortalBrandMark uses); fall back to the Venturi mark for this fork.
   const branding = (settings as { brandingData?: SettingsBrandingData } | undefined)?.brandingData
-  const orgLogo = branding?.logoUrl ?? branding?.headerLogoUrl ?? '/logo.png'
-  const orgName = branding?.name ?? 'Quackback'
+  const orgLogo = branding?.logoUrl ?? branding?.headerLogoUrl ?? '/venturi-mark.svg'
+  const orgName = branding?.name ?? 'Venturi Feedback'
 
   const filteredNavItems = navItems.filter((item) => {
     if (item.href === '/admin/help-center') return flags?.helpCenter ?? false
@@ -349,7 +349,7 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
                     className="h-7 w-7 rounded object-contain"
                   />
                 </Link>
-                <span className="text-base font-semibold">Quackback</span>
+                <span className="text-base font-semibold">{orgName}</span>
               </SheetTitle>
             </SheetHeader>
             <nav className="flex flex-col gap-1.5 px-4 py-3">
