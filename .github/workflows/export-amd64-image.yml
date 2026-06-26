@@ -1,0 +1,51 @@
+name: Export amd64 image
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA or ref to build."
+        required: true
+      image_tag:
+        description: "Local image tag embedded in the exported archive."
+        required: false
+        default: "deploy"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: export-amd64-image-${{ github.event.inputs.sha }}
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.event.inputs.sha }}
+
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+
+      - name: Build amd64 image archive
+        run: |
+          set -euo pipefail
+          tag="venturi-feedback-quackback:${{ github.event.inputs.image_tag }}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --file apps/web/Dockerfile \
+            --tag "$tag" \
+            --output type=docker,dest=/tmp/quackback-amd64.tar \
+            .
+          gzip -1 /tmp/quackback-amd64.tar
+          sha256sum /tmp/quackback-amd64.tar.gz > /tmp/quackback-amd64.tar.gz.sha256
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quackback-amd64-image
+          path: |
+            /tmp/quackback-amd64.tar.gz
+            /tmp/quackback-amd64.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
