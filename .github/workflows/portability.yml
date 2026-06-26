@@ -33,7 +33,8 @@ jobs:
           grep -q 'SKIP_ENV_VALIDATION' .github/workflows/ci.yml
           grep -q 'ghcr.io' .github/workflows/docker.yml
 
-          if grep -R "richard@venturi.systems" \
+          private_operator_email="richard@""venturi.systems"
+          if grep -R "$private_operator_email" \
             --exclude-dir=.git \
             --exclude-dir=node_modules \
             --exclude-dir=.output \
