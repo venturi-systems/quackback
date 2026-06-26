@@ -24,7 +24,7 @@ export const Route = createFileRoute('/_portal/hc/')({
       editors,
       helpCenterConfig: helpCenterConfig ?? null,
       workspaceName: settings?.name ?? 'Help Center',
-      logoUrl: settings?.brandingData?.logoUrl || '/logo.png',
+      logoUrl: settings?.brandingData?.logoUrl || '/venturi-mark.svg',
     }
   },
   head: ({ loaderData }) => {

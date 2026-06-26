@@ -149,7 +149,7 @@ export function WidgetPreview({
             )}
           </div>
 
-          {/* Footer: Tab bar + Powered by */}
+          {/* Footer: Tab bar + Venturi feedback link */}
           <div className="border-t border-border shrink-0">
             {showTabBar && (
               <div className="flex">
@@ -177,8 +177,8 @@ export function WidgetPreview({
             )}
             <div className={cn('text-center', showTabBar ? 'pb-0.5' : 'py-1')}>
               <span className="inline-flex items-center gap-0.5 text-[8px] text-muted-foreground/60">
-                <img src="/logo.png" alt="" width={10} height={10} className="opacity-60" />
-                Powered by Quackback
+                <img src="/venturi-mark.svg" alt="" width={10} height={10} className="opacity-70" />
+                Venturi feedback
               </span>
             </div>
           </div>

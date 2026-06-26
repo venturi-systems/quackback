@@ -240,12 +240,11 @@ export function WidgetShell({
 
         <div className="border-t border-border/20 py-2 flex items-center justify-center">
           <a
-            href={`https://quackback.io?utm_campaign=${encodeURIComponent(orgSlug || 'unknown')}&utm_content=widget&utm_medium=referral&utm_source=powered-by`}
-            target="_blank"
+            href={`https://venturi.systems/?utm_campaign=${encodeURIComponent(orgSlug || 'feedback')}&utm_content=widget&utm_medium=referral&utm_source=feedback-widget`}
             className="group inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-all"
           >
             <img
-              src="/logo.png"
+              src="/venturi-mark.svg"
               alt=""
               width={11}
               height={11}
@@ -254,8 +253,8 @@ export function WidgetShell({
             <span>
               <FormattedMessage
                 id="widget.shell.poweredBy"
-                defaultMessage="Powered by {brand}"
-                values={{ brand: <span className="font-medium">Quackback</span> }}
+                defaultMessage="{brand} feedback"
+                values={{ brand: <span className="font-medium">Venturi</span> }}
               />
             </span>
           </a>

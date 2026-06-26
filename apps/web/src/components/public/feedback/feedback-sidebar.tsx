@@ -29,7 +29,7 @@ export function FeedbackSidebar({
               type="button"
               onClick={() => onBoardChange(undefined)}
               className={cn(
-                'max-w-full flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer w-full text-left',
+                'max-w-full flex min-h-11 items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer w-full text-left',
                 !currentBoard
                   ? 'bg-muted text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -53,7 +53,7 @@ export function FeedbackSidebar({
                   type="button"
                   onClick={() => onBoardChange(board.slug)}
                   className={cn(
-                    'max-w-full flex items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer w-full text-left',
+                    'max-w-full flex min-h-11 items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer w-full text-left',
                     isActive
                       ? 'bg-muted text-foreground font-medium'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -79,26 +79,22 @@ export function FeedbackSidebar({
           </nav>
         </div>
 
-        {/* Powered by */}
+        {/* Venturi feedback link */}
         <div className="flex justify-center mt-3">
           <a
-            href={`https://quackback.io?utm_campaign=${encodeURIComponent(workspaceSlug || 'unknown')}&utm_content=feedback-board&utm_medium=referral&utm_source=powered-by`}
-            target="_blank"
-            className="group inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-all px-2.5 py-1 rounded-full bg-muted/50 hover:bg-muted border border-transparent hover:border-border/50"
+            href={`https://venturi.systems/?utm_campaign=${encodeURIComponent(workspaceSlug || 'feedback')}&utm_content=feedback-board&utm_medium=referral&utm_source=feedback-portal`}
+            className="group inline-flex min-h-11 items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1 rounded-full bg-muted/50 hover:bg-muted border border-transparent hover:border-border/50"
           >
-            <img
-              src="/logo.png"
-              alt=""
-              width={14}
-              height={14}
-              className="-mt-px opacity-60 group-hover:opacity-100 transition-opacity"
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_16px_rgba(126,182,255,.65)]"
             />
             <span>
               <FormattedMessage
                 id="portal.feedback.sidebar.poweredBy"
-                defaultMessage="Powered by {brand}"
+                defaultMessage="{brand} feedback"
                 values={{
-                  brand: <span className="font-semibold">Quackback</span>,
+                  brand: <span className="font-semibold">Venturi</span>,
                 }}
               />
             </span>

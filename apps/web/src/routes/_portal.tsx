@@ -207,17 +207,17 @@ export const Route = createFileRoute('/_portal')({
           { title: `Sign in · ${loaderData.gate.workspaceName}` },
           { name: 'robots', content: 'noindex, nofollow' },
         ],
-        links: [{ rel: 'icon', href: loaderData.gate.logoUrl || '/logo.png' }],
+        links: [{ rel: 'icon', href: loaderData.gate.logoUrl || '/venturi-mark.svg' }],
       }
     }
 
-    // Favicon priority: dedicated favicon > workspace logo > default logo.png
+    // Favicon priority: dedicated favicon > workspace logo > default Venturi mark
     const faviconUrl =
-      loaderData?.faviconData?.url || loaderData?.brandingData?.logoUrl || '/logo.png'
+      loaderData?.faviconData?.url || loaderData?.brandingData?.logoUrl || '/venturi-mark.svg'
 
-    const workspaceName = loaderData?.org?.name ?? 'Quackback'
+    const workspaceName = loaderData?.org?.name ?? 'Venturi'
     const description = `Share feedback, vote on feature requests, and track the ${workspaceName} roadmap.`
-    const logoUrl = loaderData?.brandingData?.logoUrl || '/logo.png'
+    const logoUrl = loaderData?.brandingData?.logoUrl || '/venturi-mark.svg'
 
     const meta: Array<Record<string, string>> = [
       { title: workspaceName },

@@ -38,8 +38,8 @@ function OnboardingHeader() {
     <div className="flex flex-col items-center">
       {/* Logo */}
       <div className="flex items-center justify-center gap-2 mb-8">
-        <img src="/logo.png" alt="Quackback" width={32} height={32} />
-        <span className="text-xl font-bold">Quackback</span>
+        <img src="/venturi-mark.svg" alt="Venturi" width={32} height={32} />
+        <span className="text-xl font-bold">Venturi Feedback</span>
       </div>
 
       {/* Stepper */}

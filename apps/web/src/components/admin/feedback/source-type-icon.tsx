@@ -38,7 +38,7 @@ const SOURCE_TYPE_ICONS: Record<string, ComponentType<{ className?: string }>> =
   ...INTEGRATION_ICON_MAP,
 }
 
-/** Source types that use the Quackback logo image instead of an SVG icon */
+/** Source types that use the Venturi feedback logo image instead of an SVG icon */
 const LOGO_SOURCE_TYPES = new Set(['quackback'])
 
 /** Source type → background + text color for the icon badge (solid backgrounds for clean overlap) */
@@ -67,7 +67,7 @@ const SOURCE_TYPE_COLORS: Record<string, string> = {
 
 /** Human-readable label for source types */
 export const SOURCE_TYPE_LABELS: Record<string, string> = {
-  quackback: 'Quackback',
+  quackback: 'Venturi Feedback',
   api: 'API',
   csv: 'CSV Import',
   email: 'Email',
@@ -119,7 +119,9 @@ export function SourceTypeIcon({ sourceType, size = 'md', className }: SourceTyp
       )}
       title={SOURCE_TYPE_LABELS[sourceType] ?? sourceType}
     >
-      {isLogo && <img src="/logo.png" alt="Quackback" className={cn('rounded-sm', s.logo)} />}
+      {isLogo && (
+        <img src="/venturi-mark.svg" alt="Venturi Feedback" className={cn('rounded-sm', s.logo)} />
+      )}
       {!isLogo && Icon && <Icon className={s.icon} />}
       {!isLogo && !Icon && (
         <span className={cn('font-semibold', s.fallback)}>
