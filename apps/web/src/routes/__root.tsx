@@ -222,15 +222,16 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     select: (s) => (s.location.search as { locale?: string }).locale,
   })
 
-  // Venturi runs a single corpus-governed dark system on public portal routes.
-  // Admin and other non-portal routes still respect the user's preference.
+  // Venturi public portal routes use the corpus-governed light-default Web
+  // Standard while preserving the normal light/dark selector. Admin and other
+  // non-portal routes still respect tenant/user branding as before.
   const isPortalRoute = !NON_PORTAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  const themeMode = isPortalRoute ? 'dark' : (settings?.brandingConfig?.themeMode ?? 'user')
+  const themeMode = isPortalRoute ? 'user' : (settings?.brandingConfig?.themeMode ?? 'user')
   const forcedTheme = isPortalRoute && themeMode !== 'user' ? themeMode : undefined
 
   // next-themes' inline script sets the class on <html> before first paint.
   // We pass the resolved default so the script knows what to apply.
-  const defaultTheme = forcedTheme ?? themeCookie ?? 'system'
+  const defaultTheme = forcedTheme ?? themeCookie ?? (isPortalRoute ? 'light' : 'system')
 
   // Advertise the rendered language on the document during SSR so non-English
   // visitors don't get an English `<html lang>` (and so RTL locales aren't laid
