@@ -13,12 +13,13 @@
 }
 
 /* ==============================================
-   VENTURI UNIFIED DARK THEME
+   VENTURI WEB STANDARD THEME
 
    Default fork theme for feedback.venturi.systems. Tenant-provided branding
    can still override these variables at runtime, but the app fallback now
-   matches the corpus-governed Venturi Unified Dark system used by the public
-   website.
+   matches the corpus-governed light-default Venturi Web Standard used by the
+   public website outside the protected homepage. The previous A+B dark register
+   remains selectable through the normal theme control.
    ============================================== */
 
   :root {
@@ -154,7 +155,69 @@
     --portal-button-foreground: var(--primary-foreground);
   }
 
-  :root,
+  :root {
+    color-scheme: light;
+    --background: #f8fafc;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+    --primary: #2563eb;
+    --primary-foreground: #ffffff;
+    --secondary: #f1f5f9;
+    --secondary-foreground: #0f172a;
+    --muted: #f1f5f9;
+    --muted-foreground: #475569;
+    --accent: #eff6ff;
+    --accent-foreground: #1d4ed8;
+    --destructive: #b91c1c;
+    --destructive-foreground: #ffffff;
+    --success: #047857;
+    --success-foreground: #ffffff;
+    --border: #e2e8f0;
+    --input: #cbd5e1;
+    --ring: #2563eb;
+    --chart-1: #2563eb;
+    --chart-2: #0f766e;
+    --chart-3: #475569;
+    --chart-4: #b45309;
+    --chart-5: #b91c1c;
+    --metric-posts: #2563eb;
+    --metric-votes: #0f766e;
+    --metric-comments: #475569;
+    --metric-users: #b45309;
+    --sidebar: #ffffff;
+    --sidebar-foreground: #0f172a;
+    --sidebar-primary: #2563eb;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #f1f5f9;
+    --sidebar-accent-foreground: #0f172a;
+    --sidebar-border: #e2e8f0;
+    --sidebar-ring: #2563eb;
+    --radius: 0.5rem;
+    --letter-spacing: 0em;
+    --shadow-2xs: 0 1px 0 rgba(15, 23, 42, 0.04);
+    --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow: 0 14px 36px -28px rgba(15, 23, 42, 0.22);
+    --shadow-md: 0 18px 42px -30px rgba(15, 23, 42, 0.24);
+    --shadow-lg: 0 24px 64px -38px rgba(15, 23, 42, 0.28);
+    --shadow-xl: 0 30px 80px -44px rgba(15, 23, 42, 0.32);
+    --shadow-2xl: 0 45px 110px -52px rgba(15, 23, 42, 0.38);
+    --header-background: rgba(255, 255, 255, 0.88);
+    --header-foreground: #0f172a;
+    --header-border: #e2e8f0;
+    --post-card-background: #ffffff;
+    --post-card-border: #e2e8f0;
+    --post-card-voted-color: #2563eb;
+    --nav-active-background: rgba(37, 99, 235, 0.08);
+    --nav-active-foreground: #0f172a;
+    --nav-inactive-color: #475569;
+    --portal-button-background: #2563eb;
+    --portal-button-foreground: #ffffff;
+  }
+
   .dark {
     color-scheme: dark;
     --background: #080b12;
@@ -357,7 +420,6 @@
 
 @layer base {
   * {
-    color-scheme: dark;
     @apply border-border outline-ring/50;
   }
   body {
@@ -372,10 +434,17 @@
 }
 
 html {
-  background: #080b12;
+  background: var(--background);
 }
 
 body {
+  background:
+    radial-gradient(circle at 78% 6%, rgba(37, 99, 235, 0.07), transparent 28rem),
+    radial-gradient(circle at 12% 18%, rgba(15, 118, 110, 0.06), transparent 24rem),
+    linear-gradient(180deg, #f8fafc 0%, #ffffff 44%, #f8fafc 100%);
+}
+
+.dark body {
   background:
     radial-gradient(circle at 78% 6%, rgba(126, 182, 255, 0.16), transparent 28rem),
     radial-gradient(circle at 12% 18%, rgba(94, 196, 182, 0.11), transparent 24rem),
@@ -392,16 +461,26 @@ body {
 }
 
 .portal-nav__item--active {
-  border-color: rgba(126, 182, 255, 0.24);
+  border-color: color-mix(in srgb, var(--primary) 24%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.66);
+}
+
+.dark .portal-nav__item--active {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .venturi-portal-card {
   background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.58)),
+    var(--card);
+  border-color: var(--post-card-border);
+  box-shadow: var(--shadow);
+}
+
+.dark .venturi-portal-card {
+  background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
     var(--card);
-  border-color: rgba(126, 182, 255, 0.18);
-  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.28);
 }
 
 /* Interactive elements — pointer cursor for native controls.

@@ -130,8 +130,8 @@ function WidgetLayout() {
           __html: `
             body { overflow: hidden; margin: 0; }
             html, body, #root { height: 100%; }
-            /* Prevent white flash before theme resolves */
-            html.system { background: #080b12; }
+            /* Prevent mismatched flash before theme resolves */
+            html.system { background: #f8fafc; }
             @media (prefers-color-scheme: dark) {
               html.system { background: #080b12; }
             }
