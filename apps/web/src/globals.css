@@ -456,6 +456,23 @@ body {
   min-height: 44px;
 }
 
+.portal-header {
+  backdrop-filter: saturate(1.05) blur(18px);
+}
+
+.portal-header__logo {
+  letter-spacing: -0.01em;
+}
+
+.portal-header__logo img,
+.portal-header__logo > div {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.portal-header__name {
+  font-size: 1rem;
+}
+
 .portal-nav__item {
   border: 1px solid transparent;
 }
@@ -481,6 +498,36 @@ body {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
     var(--card);
+}
+
+.portal-empty-state {
+  margin-inline: auto;
+  margin-top: clamp(3rem, 8vh, 6rem);
+  max-width: 34rem;
+  padding: clamp(2rem, 5vw, 3.5rem) clamp(1.25rem, 4vw, 2rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.7)),
+    var(--card);
+  box-shadow: var(--shadow-sm);
+}
+
+.portal-empty-state > div:first-child {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.portal-empty-state h3 {
+  font-size: clamp(1.25rem, 2vw, 1.5rem);
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.portal-empty-state p {
+  max-width: 29rem;
+  color: var(--muted-foreground);
+  line-height: 1.6;
 }
 
 /* Interactive elements — pointer cursor for native controls.

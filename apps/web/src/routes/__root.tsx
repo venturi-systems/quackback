@@ -222,11 +222,10 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     select: (s) => (s.location.search as { locale?: string }).locale,
   })
 
-  // Venturi public portal routes use the corpus-governed light-default Web
-  // Standard while preserving the normal light/dark selector. Admin and other
-  // non-portal routes still respect tenant/user branding as before.
+  // Venturi public portal routes use the corpus-governed light Web Standard.
+  // Admin and other non-portal routes still respect tenant/user branding as before.
   const isPortalRoute = !NON_PORTAL_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  const themeMode = isPortalRoute ? 'user' : (settings?.brandingConfig?.themeMode ?? 'user')
+  const themeMode = isPortalRoute ? 'light' : (settings?.brandingConfig?.themeMode ?? 'user')
   const forcedTheme = isPortalRoute && themeMode !== 'user' ? themeMode : undefined
 
   // next-themes' inline script sets the class on <html> before first paint.

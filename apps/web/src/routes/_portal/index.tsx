@@ -133,17 +133,17 @@ function PublicPortalPage() {
           icon={ChatBubbleOvalLeftEllipsisIcon}
           title={intl.formatMessage({
             id: 'portal.feedback.empty.comingSoonTitle',
-            defaultMessage: 'Coming Soon',
+            defaultMessage: 'Feedback intake is coming online.',
           })}
           description={intl.formatMessage(
             {
               id: 'portal.feedback.empty.comingSoonDescription',
               defaultMessage:
-                '{orgName} is setting up their feedback portal. Check back soon to share your ideas and suggestions.',
+                '{orgName} is preparing a workspace for product feedback, roadmap signals, and attribution workflow requests.',
             },
             { orgName: org.name }
           )}
-          className="py-24"
+          className="portal-empty-state py-24"
         />
       </div>
     )
