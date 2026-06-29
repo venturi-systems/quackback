@@ -287,7 +287,11 @@ function PortalLayout() {
           error={prompt.error}
           isAuthenticated={isAuthenticated}
         />
-        <div className="min-h-screen bg-background flex flex-col">
+        <div
+          className="min-h-screen bg-background flex flex-col"
+          data-theme={themeMode}
+          data-venturi-web-theme={themeMode}
+        >
           {googleFontsUrl && <link rel="stylesheet" href={googleFontsUrl} />}
           {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
           {/* Custom CSS is injected after theme styles so it can override */}
