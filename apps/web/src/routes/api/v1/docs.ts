@@ -52,25 +52,25 @@ export const Route = createFileRoute('/api/v1/docs')({
       --border-subtle: rgba(15, 23, 42, 0.06);
       --border-emphasis: rgba(15, 23, 42, 0.16);
 
-      --method-get: #10b981;
-      --method-get-bg: rgba(16, 185, 129, 0.08);
-      --method-get-border: rgba(16, 185, 129, 0.25);
+      --method-get: #047857;
+      --method-get-bg: rgba(4, 120, 87, 0.08);
+      --method-get-border: rgba(4, 120, 87, 0.28);
 
-      --method-post: #3b82f6;
-      --method-post-bg: rgba(59, 130, 246, 0.08);
-      --method-post-border: rgba(59, 130, 246, 0.25);
+      --method-post: #1d4ed8;
+      --method-post-bg: rgba(29, 78, 216, 0.08);
+      --method-post-border: rgba(29, 78, 216, 0.28);
 
-      --method-put: #f59e0b;
-      --method-put-bg: rgba(245, 158, 11, 0.08);
-      --method-put-border: rgba(245, 158, 11, 0.25);
+      --method-put: #b45309;
+      --method-put-bg: rgba(180, 83, 9, 0.08);
+      --method-put-border: rgba(180, 83, 9, 0.28);
 
-      --method-patch: #8b5cf6;
-      --method-patch-bg: rgba(139, 92, 246, 0.08);
-      --method-patch-border: rgba(139, 92, 246, 0.25);
+      --method-patch: #6d28d9;
+      --method-patch-bg: rgba(109, 40, 217, 0.08);
+      --method-patch-border: rgba(109, 40, 217, 0.28);
 
-      --method-delete: #ef4444;
-      --method-delete-bg: rgba(239, 68, 68, 0.08);
-      --method-delete-border: rgba(239, 68, 68, 0.25);
+      --method-delete: #b91c1c;
+      --method-delete-bg: rgba(185, 28, 28, 0.08);
+      --method-delete-border: rgba(185, 28, 28, 0.28);
 
       --radius-sm: 6px;
       --radius-md: 8px;
@@ -228,7 +228,7 @@ export const Route = createFileRoute('/api/v1/docs')({
       border-radius: 100px;
       font-size: 12px;
       font-weight: 600;
-      color: var(--measurement-blue);
+      color: #1d4ed8;
       margin-bottom: 20px;
       letter-spacing: 0.02em;
     }
@@ -494,10 +494,10 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
     .swagger-ui .opblock.opblock-get .opblock-summary-method {
       background: var(--method-get);
-      color: #022c22;
+      color: #ffffff;
     }
     .swagger-ui .opblock.opblock-get .opblock-summary-path {
-      color: #34d399;
+      color: var(--method-get);
     }
     .swagger-ui .opblock.opblock-get:hover {
       border-color: var(--method-get);
@@ -509,10 +509,10 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
     .swagger-ui .opblock.opblock-post .opblock-summary-method {
       background: var(--method-post);
-      color: #eff6ff;
+      color: #ffffff;
     }
     .swagger-ui .opblock.opblock-post .opblock-summary-path {
-      color: #60a5fa;
+      color: var(--method-post);
     }
     .swagger-ui .opblock.opblock-post:hover {
       border-color: var(--method-post);
@@ -524,10 +524,10 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
     .swagger-ui .opblock.opblock-put .opblock-summary-method {
       background: var(--method-put);
-      color: #422006;
+      color: #ffffff;
     }
     .swagger-ui .opblock.opblock-put .opblock-summary-path {
-      color: #fbbf24;
+      color: var(--method-put);
     }
     .swagger-ui .opblock.opblock-put:hover {
       border-color: var(--method-put);
@@ -539,10 +539,10 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
     .swagger-ui .opblock.opblock-patch .opblock-summary-method {
       background: var(--method-patch);
-      color: #f5f3ff;
+      color: #ffffff;
     }
     .swagger-ui .opblock.opblock-patch .opblock-summary-path {
-      color: #a78bfa;
+      color: var(--method-patch);
     }
     .swagger-ui .opblock.opblock-patch:hover {
       border-color: var(--method-patch);
@@ -554,10 +554,10 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
     .swagger-ui .opblock.opblock-delete .opblock-summary-method {
       background: var(--method-delete);
-      color: #fef2f2;
+      color: #ffffff;
     }
     .swagger-ui .opblock.opblock-delete .opblock-summary-path {
-      color: #f87171;
+      color: var(--method-delete);
     }
     .swagger-ui .opblock.opblock-delete:hover {
       border-color: var(--method-delete);
