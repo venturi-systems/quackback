@@ -121,6 +121,14 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         content: 'width=device-width, initial-scale=1, viewport-fit=cover',
       },
       {
+        name: 'theme-color',
+        content: '#F8FAFC',
+      },
+      {
+        name: 'color-scheme',
+        content: 'light',
+      },
+      {
         title: 'Venturi Feedback',
       },
       {
@@ -177,6 +185,8 @@ function MinimalDocument({ children }: Readonly<{ children: ReactNode }>) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#F8FAFC" />
+        <meta name="color-scheme" content="light" />
         <title>Venturi Feedback</title>
         <HeadContent />
       </head>
