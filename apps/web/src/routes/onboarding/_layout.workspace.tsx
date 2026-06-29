@@ -98,7 +98,7 @@ function WorkspaceStep() {
       </div>
 
       {/* Form card */}
-      <div className="overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <form
           onSubmit={(e) => {
             e.preventDefault()

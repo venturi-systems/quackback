@@ -1,8 +1,10 @@
 import { useEffect } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useIntl } from 'react-intl'
 import { MapIcon } from '@heroicons/react/24/solid'
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import type { PostStatusEntity } from '@/lib/shared/db-types'
 import { usePublicRoadmaps, type RoadmapView } from '@/lib/client/hooks/use-roadmaps-query'
@@ -58,7 +60,7 @@ export function RoadmapBoard({
   if (availableRoadmaps.length === 0) {
     return (
       <div className="flex items-center justify-center py-16 animate-in fade-in duration-200 fill-mode-backwards">
-        <div className="text-center">
+        <div className="portal-empty-state text-center">
           <MapIcon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <h3 className="text-lg font-medium text-foreground">
             {intl.formatMessage({
@@ -72,6 +74,18 @@ export function RoadmapBoard({
               defaultMessage: "Check back later to see what we're working on.",
             })}
           </p>
+          <div className="mt-5 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+            <Button asChild>
+              <Link to="/admin/roadmap">
+                {isTeamMember ? 'Add roadmap component' : 'Team sign in'}
+              </Link>
+            </Button>
+            {isTeamMember && (
+              <Button asChild variant="outline">
+                <Link to="/admin/feedback">Create feedback item</Link>
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     )

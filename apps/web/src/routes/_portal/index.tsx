@@ -1,11 +1,10 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { z } from 'zod'
-import { useIntl } from 'react-intl'
-import { ChatBubbleOvalLeftEllipsisIcon } from '@heroicons/react/24/outline'
-import { EmptyState } from '@/components/shared/empty-state'
+import { ArrowRightIcon, ClipboardDocumentListIcon, MapIcon } from '@heroicons/react/24/outline'
 import { Spinner } from '@/components/shared/spinner'
 import { FeedbackContainer } from '@/components/public/feedback/feedback-container'
+import { Button } from '@/components/ui/button'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
 
@@ -96,7 +95,6 @@ export const Route = createFileRoute('/_portal/')({
 })
 
 function PublicPortalPage() {
-  const intl = useIntl()
   const loaderData = Route.useLoaderData()
   const search = Route.useSearch()
   const { org, session, welcomeCard } = loaderData
@@ -128,24 +126,58 @@ function PublicPortalPage() {
   // Show empty state if no boards exist
   if (loaderData.isEmpty && !isFetching && (!portalData || portalData.boards.length === 0)) {
     return (
-      <div className="mx-auto max-w-6xl w-full px-4 sm:px-6 py-6">
-        <EmptyState
-          icon={ChatBubbleOvalLeftEllipsisIcon}
-          title={intl.formatMessage({
-            id: 'portal.feedback.empty.comingSoonTitle',
-            defaultMessage: 'Feedback intake is coming online.',
-          })}
-          description={intl.formatMessage(
-            {
-              id: 'portal.feedback.empty.comingSoonDescription',
-              defaultMessage:
-                '{orgName} is preparing a workspace for product feedback, roadmap signals, and attribution workflow requests.',
-            },
-            { orgName: org.name }
-          )}
-          className="portal-empty-state py-24"
-        />
-      </div>
+      <section className="venturi-feedback-empty mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+        <div className="venturi-feedback-empty__grid">
+          <div className="venturi-feedback-empty__copy">
+            <div className="venturi-feedback-empty__mark" aria-hidden="true">
+              <img src="/venturi-mark.svg" alt="" />
+            </div>
+            <p className="venturi-feedback-empty__eyebrow">Venturi Feedback</p>
+            <h1>Roadmap intake</h1>
+            <p className="venturi-feedback-empty__lede">
+              {org.name} will collect attribution workflow requests, classify them into product
+              signals, and publish the roadmap states that are ready for customer review.
+            </p>
+            <div className="venturi-feedback-empty__actions">
+              <Button asChild>
+                <Link to="/admin/roadmap">
+                  Add roadmap component
+                  <ArrowRightIcon className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link to="/admin/feedback">Create feedback item</Link>
+              </Button>
+            </div>
+            <p className="venturi-feedback-empty__note">
+              Venturi employees and admins can sign in to create roadmap components now; public
+              feedback opens once boards are configured.
+            </p>
+          </div>
+          <div className="venturi-feedback-empty__panel" aria-label="Portal setup state">
+            <div className="venturi-feedback-empty__panel-header">
+              <span>Workspace setup</span>
+              <span>Admin required</span>
+            </div>
+            <div className="venturi-feedback-empty__steps">
+              <div>
+                <ClipboardDocumentListIcon className="h-5 w-5" />
+                <div>
+                  <strong>Create feedback boards</strong>
+                  <span>Define where customer and team signals enter the system.</span>
+                </div>
+              </div>
+              <div>
+                <MapIcon className="h-5 w-5" />
+                <div>
+                  <strong>Add roadmap components</strong>
+                  <span>Attach planned, in-progress, and shipped work to the public roadmap.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     )
   }
 

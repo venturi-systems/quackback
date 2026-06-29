@@ -42,7 +42,7 @@ interface CreatePostDialogProps {
   tags: Tag[]
   statuses: PostStatusEntity[]
   currentUser: CurrentUser
-  onPostCreated?: () => void
+  onPostCreated?: (post: { id: string }) => void | Promise<void>
   open?: boolean
   onOpenChange?: (open: boolean) => void
   trigger?: React.ReactNode
@@ -118,12 +118,12 @@ export function CreatePostDialog({
         authorPrincipalId,
       } as CreatePostInput & { authorPrincipalId?: string },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           setOpen(false)
           form.reset()
           setContentJson(null)
           setAuthorPrincipalId(currentUser.principalId)
-          onPostCreated?.()
+          void onPostCreated?.({ id: String(result.id) })
         },
       }
     )

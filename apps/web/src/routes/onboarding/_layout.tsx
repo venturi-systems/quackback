@@ -71,7 +71,7 @@ function OnboardingHeader() {
                       flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold
                       transition-all duration-300
                       ${isCompleted ? 'bg-primary text-primary-foreground' : ''}
-                      ${isCurrent ? 'bg-primary text-primary-foreground ring-[3px] ring-primary/25 shadow-[0_0_12px_rgba(255,212,59,0.3)]' : ''}
+                      ${isCurrent ? 'bg-primary text-primary-foreground ring-[3px] ring-primary/25 shadow-[0_0_12px_rgba(37,99,235,0.22)]' : ''}
                       ${!isCompleted && !isCurrent ? 'border border-border bg-background text-muted-foreground' : ''}
                     `}
                   >
@@ -102,7 +102,7 @@ function OnboardingLayout() {
   return (
     <div className="min-h-screen bg-background">
       {/* Background effects - matching website */}
-      <div className="fixed inset-0 bg-[radial-gradient(ellipse_50%_50%_at_50%_30%,rgba(255,212,59,0.06),transparent)]" />
+      <div className="fixed inset-0 bg-[radial-gradient(ellipse_50%_50%_at_50%_30%,rgba(37,99,235,0.035),transparent)]" />
       <div
         className="fixed inset-0 opacity-[0.015]"
         style={{

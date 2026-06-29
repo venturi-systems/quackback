@@ -174,10 +174,9 @@ function PageShell({ children }: { children: React.ReactNode }) {
 function Card({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-b from-card to-card/80 p-8 text-center backdrop-blur-sm"
+      className="overflow-hidden rounded-lg border border-border bg-card p-8 text-center shadow-sm"
       style={{
-        boxShadow:
-          '0 0 80px -20px oklch(0.886 0.176 86 / 0.12), 0 20px 40px -12px rgb(0 0 0 / 0.08)',
+        boxShadow: '0 18px 42px -30px rgba(15, 23, 42, 0.24)',
       }}
     >
       {children}

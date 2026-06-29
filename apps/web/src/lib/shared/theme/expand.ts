@@ -71,13 +71,7 @@ export function computeContrastForeground(bgOklch: string): string {
 export function generateChartColors(primary: string): [string, string, string, string, string] {
   const parsed = parseOklch(primary)
   if (!parsed) {
-    return [
-      'oklch(0.886 0.176 86)',
-      'oklch(0.696 0.149 163)',
-      'oklch(0.769 0.165 70)',
-      'oklch(0.645 0.215 16)',
-      'oklch(0.606 0.219 293)',
-    ]
+    return ['#2563EB', '#0F766E', '#475569', '#B45309', '#B91C1C']
   }
 
   const { l, c, h } = parsed

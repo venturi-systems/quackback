@@ -30,7 +30,7 @@
       "type": "text",
       "required": true,
       "label": "API Key",
-      "helpText": "Your Quackback API key (starts with qb_)"
+      "helpText": "Your Venturi Feedback API key (starts with qb_)"
     }
   ]
 }

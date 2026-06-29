@@ -61,8 +61,8 @@ function NtfyIntegrationPage() {
             </p>,
             <p key="2">
               Paste the topic URL below. If your topic is protected, add an access token too. Click{' '}
-              <span className="font-medium text-foreground">Save</span> — Quackback will send a test
-              notification to verify the channel.
+              <span className="font-medium text-foreground">Save</span> — Venturi Feedback will send
+              a test notification to verify the channel.
             </p>,
             <p key="3">
               Choose which events should trigger notifications, then install the ntfy app on your

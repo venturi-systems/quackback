@@ -109,7 +109,7 @@ function vscodeConfig(url: string) {
         {
           type: 'promptString',
           id: 'quackback-api-key',
-          description: 'Quackback API Key (qb_...)',
+          description: 'Venturi Feedback API key (qb_...)',
           password: true,
         },
       ],

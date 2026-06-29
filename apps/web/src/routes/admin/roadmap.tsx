@@ -52,7 +52,7 @@ function RoadmapPage() {
 
   return (
     <main className="h-full">
-      <RoadmapAdmin statuses={roadmapStatusesQuery.data} />
+      <RoadmapAdmin statuses={roadmapStatusesQuery.data} currentUser={currentUser} />
       <RoadmapModal postId={search.post} currentUser={currentUser} />
     </main>
   )
