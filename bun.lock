@@ -44,7 +44,7 @@
     },
     "apps/web": {
       "name": "@quackback/web",
-      "version": "0.12.2",
+      "version": "0.12.4",
       "dependencies": {
         "@aws-sdk/client-s3": "^3.1032.0",
         "@aws-sdk/s3-request-presigner": "^3.1032.0",
@@ -194,7 +194,7 @@
       "dependencies": {
         "@quackback/logger": "workspace:*",
         "@react-email/components": "^1.0.11",
-        "nodemailer": "^8.0.4",
+        "nodemailer": "^9.0.1",
         "react": "^19.2.4",
         "resend": "^6.10.0",
       },
@@ -2042,7 +2042,7 @@
 
     "node-releases": ["node-releases@2.0.37", "", {}, "sha512-1h5gKZCF+pO/o3Iqt5Jp7wc9rH3eJJ0+nh/CIoiRwjRxde/hAHyLPXYN4V3CqKAbiZPSeJFSWHmJsbkicta0Eg=="],
 
-    "nodemailer": ["nodemailer@8.0.5", "", {}, "sha512-0PF8Yb1yZuQfQbq+5/pZJrtF6WQcjTd5/S4JOHs9PGFxuTqoB/icwuB44pOdURHJbRKX1PPoJZtY7R4VUoCC8w=="],
+    "nodemailer": ["nodemailer@9.0.1", "", {}, "sha512-Gwv8SQewT616ZM/URn0H54b8PWo/Wum7md3EW2aWy1lO27+WZCX+Xyak3J+NlmHUjDh5ME+uesJUDRbR3Ye8Bw=="],
 
     "normalize-wheel": ["normalize-wheel@1.0.1", "", {}, "sha512-1OnlAPZ3zgrk8B91HyRj+eVv+kS5u+Z0SCsak6Xil/kmgEia50ga7zfkumayonZrImffAxPU/5WcyGhzetHNPA=="],
 
