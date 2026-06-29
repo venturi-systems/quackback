@@ -173,7 +173,7 @@ function RootComponent() {
  */
 function MinimalDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" data-theme="light" data-venturi-web-theme="light" suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -241,9 +241,15 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
     routeIds.includes('/widget') && widgetLocaleParam ? normalizeLocale(widgetLocaleParam) : null
   const resolvedLocale = widgetOverride ?? acceptLanguageLocale ?? DEFAULT_LOCALE
   const { lang, dir } = htmlLangDir(documentLocale(routeIds, resolvedLocale))
+  const documentThemeAttrs = forcedTheme
+    ? ({
+        'data-theme': forcedTheme,
+        'data-venturi-web-theme': forcedTheme,
+      } as const)
+    : {}
 
   return (
-    <html lang={lang} dir={dir} suppressHydrationWarning>
+    <html lang={lang} dir={dir} {...documentThemeAttrs} suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
