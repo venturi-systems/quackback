@@ -18,8 +18,8 @@ export const Route = createFileRoute('/api/v1/docs')({
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Quackback API Documentation - Build powerful integrations" />
-  <title>API Reference | Quackback</title>
+  <meta name="description" content="Venturi API Reference - Build enterprise AI attribution integrations" />
+  <title>API Reference | Venturi</title>
   <link rel="icon" href="/favicon.ico" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -33,24 +33,24 @@ export const Route = createFileRoute('/api/v1/docs')({
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 
-      --gold: #F7CC29;
-      --gold-hover: #ffdb4d;
-      --gold-muted: rgba(247, 204, 41, 0.15);
+      --measurement-blue: #2563EB;
+      --measurement-blue-hover: #1D4ED8;
+      --measurement-blue-muted: rgba(37, 99, 235, 0.1);
 
-      --bg-base: #09090b;
-      --bg-subtle: #0c0c0e;
-      --bg-muted: #121214;
-      --bg-elevated: #18181b;
-      --bg-surface: #1c1c1f;
+      --bg-base: #F8FAFC;
+      --bg-subtle: #FFFFFF;
+      --bg-muted: #F1F5F9;
+      --bg-elevated: #FFFFFF;
+      --bg-surface: #FFFFFF;
 
-      --text-primary: #fafafa;
-      --text-secondary: #a1a1aa;
-      --text-muted: #71717a;
-      --text-faint: #52525b;
+      --text-primary: #0F172A;
+      --text-secondary: #334155;
+      --text-muted: #475569;
+      --text-faint: #64748B;
 
-      --border-default: rgba(255, 255, 255, 0.08);
-      --border-subtle: rgba(255, 255, 255, 0.04);
-      --border-emphasis: rgba(255, 255, 255, 0.12);
+      --border-default: rgba(15, 23, 42, 0.10);
+      --border-subtle: rgba(15, 23, 42, 0.06);
+      --border-emphasis: rgba(15, 23, 42, 0.16);
 
       --method-get: #10b981;
       --method-get-bg: rgba(16, 185, 129, 0.08);
@@ -77,10 +77,10 @@ export const Route = createFileRoute('/api/v1/docs')({
       --radius-lg: 12px;
       --radius-xl: 16px;
 
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-      --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
-      --shadow-glow: 0 0 40px rgba(247, 204, 41, 0.12);
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+      --shadow-md: 0 12px 32px -26px rgba(15, 23, 42, 0.24);
+      --shadow-lg: 0 24px 64px -40px rgba(15, 23, 42, 0.30);
+      --shadow-glow: 0 0 40px rgba(37, 99, 235, 0.12);
 
       --transition-fast: 120ms ease;
       --transition-base: 200ms ease;
@@ -121,8 +121,8 @@ export const Route = createFileRoute('/api/v1/docs')({
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: #1a1a1c;
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--border-default);
       border-radius: 100px;
       padding: 0 8px 0 18px;
     }
@@ -183,26 +183,26 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
 
     .header-link--github {
-      background: #2a2a2c;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: var(--bg-muted);
+      border: 1px solid var(--border-default);
       padding: 7px 12px;
     }
 
     .header-link--github:hover {
-      background: #333335;
-      border-color: rgba(255, 255, 255, 0.12);
+      background: #E2E8F0;
+      border-color: var(--border-emphasis);
     }
 
     .header-link--primary {
-      background: var(--gold);
-      color: #000;
+      background: var(--measurement-blue);
+      color: #FFFFFF;
       font-weight: 600;
       padding: 7px 14px;
     }
 
     .header-link--primary:hover {
-      background: var(--gold-hover);
-      color: #000;
+      background: var(--measurement-blue-hover);
+      color: #FFFFFF;
     }
 
     /* ════════════════════════════════════════════════════════════════════════════
@@ -223,12 +223,12 @@ export const Route = createFileRoute('/api/v1/docs')({
       align-items: center;
       gap: 6px;
       padding: 5px 12px 5px 8px;
-      background: var(--gold-muted);
-      border: 1px solid rgba(247, 204, 41, 0.2);
+      background: var(--measurement-blue-muted);
+      border: 1px solid rgba(37, 99, 235, 0.18);
       border-radius: 100px;
       font-size: 12px;
       font-weight: 600;
-      color: var(--gold);
+      color: var(--measurement-blue);
       margin-bottom: 20px;
       letter-spacing: 0.02em;
     }
@@ -344,8 +344,8 @@ export const Route = createFileRoute('/api/v1/docs')({
       font-size: 13px;
       font-weight: 600;
       background: transparent;
-      border: 1px solid var(--gold);
-      color: var(--gold);
+      border: 1px solid var(--measurement-blue);
+      color: var(--measurement-blue);
       padding: 8px 16px;
       border-radius: var(--radius-md);
       cursor: pointer;
@@ -356,18 +356,18 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
 
     .swagger-ui .btn.authorize:hover {
-      background: var(--gold-muted);
+      background: var(--measurement-blue-muted);
     }
 
     .swagger-ui .btn.authorize svg {
-      fill: var(--gold);
+      fill: var(--measurement-blue);
       width: 14px;
       height: 14px;
     }
 
     .swagger-ui .btn.authorize.locked {
-      background: var(--gold-muted);
-      border-color: var(--gold);
+      background: var(--measurement-blue-muted);
+      border-color: var(--measurement-blue);
     }
 
     /* ════════════════════════════════════════════════════════════════════════════
@@ -602,7 +602,7 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
 
     .swagger-ui .opblock-body pre {
-      background: var(--bg-base) !important;
+      background: var(--bg-muted) !important;
       border: 1px solid var(--border-subtle);
       border-radius: var(--radius-md);
       padding: 12px;
@@ -764,14 +764,14 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
 
     .swagger-ui .btn.execute {
-      background: var(--gold);
+      background: var(--measurement-blue);
       color: var(--bg-base);
       width: auto !important;
       min-width: 120px;
     }
 
     .swagger-ui .btn.execute:hover {
-      background: var(--gold-hover);
+      background: var(--measurement-blue-hover);
     }
 
     .swagger-ui .execute-wrapper {
@@ -786,7 +786,7 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
 
     .swagger-ui .btn.cancel:hover {
-      background: rgba(255, 255, 255, 0.04);
+      background: rgba(15, 23, 42, 0.04);
       color: var(--text-primary);
       border-color: var(--border-emphasis);
     }
@@ -824,7 +824,7 @@ export const Route = createFileRoute('/api/v1/docs')({
     .swagger-ui select {
       font-family: var(--font-mono);
       font-size: 13px;
-      background: var(--bg-base);
+      background: var(--bg-elevated);
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
       color: var(--text-primary);
@@ -837,8 +837,8 @@ export const Route = createFileRoute('/api/v1/docs')({
     .swagger-ui textarea:focus,
     .swagger-ui select:focus {
       outline: none;
-      border-color: var(--gold);
-      box-shadow: 0 0 0 3px var(--gold-muted);
+      border-color: var(--measurement-blue);
+      box-shadow: 0 0 0 3px var(--measurement-blue-muted);
     }
 
     .swagger-ui input::placeholder,
@@ -927,7 +927,7 @@ export const Route = createFileRoute('/api/v1/docs')({
       font-family: var(--font-mono);
       font-size: 12px;
       line-height: 1.6;
-      background: var(--bg-base) !important;
+      background: var(--bg-muted) !important;
       color: var(--text-secondary);
       border-radius: var(--radius-md);
       padding: 14px;
@@ -1093,7 +1093,7 @@ export const Route = createFileRoute('/api/v1/docs')({
 
     .swagger-ui .tab li.active {
       color: var(--text-primary);
-      border-bottom-color: var(--gold);
+      border-bottom-color: var(--measurement-blue);
     }
 
     .swagger-ui .tab li button.tablinks {
@@ -1121,7 +1121,7 @@ export const Route = createFileRoute('/api/v1/docs')({
 
     .swagger-ui .loading-container .loading::before {
       border-color: var(--border-default);
-      border-top-color: var(--gold);
+      border-top-color: var(--measurement-blue);
     }
 
     /* ════════════════════════════════════════════════════════════════════════════
@@ -1146,7 +1146,7 @@ export const Route = createFileRoute('/api/v1/docs')({
     }
 
     .swagger-ui .locked svg {
-      fill: var(--gold);
+      fill: var(--measurement-blue);
     }
 
     /* ════════════════════════════════════════════════════════════════════════════
@@ -1236,8 +1236,8 @@ export const Route = createFileRoute('/api/v1/docs')({
   <header class="header">
     <div class="header-inner">
       <a href="/" class="logo">
-        <img src="/logo.png" alt="Quackback" />
-        <span>Quackback</span>
+        <img src="/venturi-mark.svg" alt="Venturi" />
+        <span>Venturi</span>
         <span class="logo-sep">/</span>
         <span class="logo-context">API</span>
       </a>
@@ -1256,7 +1256,7 @@ export const Route = createFileRoute('/api/v1/docs')({
         REST API v1
       </div>
       <h1>API Reference</h1>
-      <p>Build integrations and automate workflows with the Quackback API</p>
+          <p>Build integrations and automate enterprise AI attribution workflows with the Venturi API</p>
       <div class="hero-meta">
         <div class="hero-meta-item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

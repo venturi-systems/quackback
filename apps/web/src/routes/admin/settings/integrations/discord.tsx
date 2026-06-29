@@ -69,8 +69,8 @@ function DiscordIntegrationPage() {
           description="Connect Discord to receive notifications when users submit feedback, when statuses change, and when comments are added."
           steps={[
             <p key="1">
-              Click <span className="font-medium text-foreground">Connect</span> to add the
-              Quackback bot to your Discord server.
+              Click <span className="font-medium text-foreground">Connect</span> to add the Venturi
+              Feedback bot to your Discord server.
             </p>,
             <p key="2">
               Select which text channel notifications should be posted to. The bot needs access to

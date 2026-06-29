@@ -298,7 +298,7 @@ function PortalLayout() {
           {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
           <PortalHeader
             orgName={org.name}
-            orgLogo={brandingData?.logoUrl ?? null}
+            orgLogo={brandingData?.logoUrl ?? '/venturi-mark.svg'}
             userRole={userRole}
             initialUserData={initialUserData}
             showThemeToggle={themeMode === 'user'}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import {
   DndContext,
   DragOverlay,
@@ -11,29 +11,36 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core'
-import { MapIcon } from '@heroicons/react/24/solid'
+import { MapIcon, PlusIcon } from '@heroicons/react/24/solid'
+import { toast } from 'sonner'
 import { RoadmapSidebar } from './roadmap-sidebar'
 import { RoadmapColumn } from './roadmap-column'
 import { RoadmapCardOverlay } from './roadmap-card'
 import { RoadmapFiltersBar } from './roadmap/roadmap-filters-bar'
+import { CreatePostDialog } from './feedback/create-post-dialog'
 import { EmptyState } from '@/components/shared/empty-state'
+import { Button } from '@/components/ui/button'
 import { useRoadmaps } from '@/lib/client/hooks/use-roadmaps-query'
+import { roadmapPostsKeys } from '@/lib/client/hooks/use-roadmap-posts-query'
 import { useRoadmapSelection } from './use-roadmap-selection'
 import { useRoadmapFilters } from './roadmap/use-roadmap-filters'
 import { useChangePostStatusId } from '@/lib/client/mutations/posts'
 import { useSegments } from '@/lib/client/hooks/use-segments-queries'
 import { adminQueries } from '@/lib/client/queries/admin'
+import { addPostToRoadmapFn } from '@/lib/server/functions/roadmaps'
 import { Route } from '@/routes/admin/roadmap'
 import type { PostStatusEntity } from '@/lib/shared/db-types'
-import type { RoadmapPostEntry } from '@/lib/shared/types'
+import type { CurrentUser, RoadmapPostEntry } from '@/lib/shared/types'
 import type { StatusId, PostId, RoadmapId } from '@quackback/ids'
 
 interface RoadmapAdminProps {
   statuses: PostStatusEntity[]
+  currentUser: CurrentUser
 }
 
-export function RoadmapAdmin({ statuses }: RoadmapAdminProps) {
+export function RoadmapAdmin({ statuses, currentUser }: RoadmapAdminProps) {
   const navigate = useNavigate({ from: Route.fullPath })
+  const queryClient = useQueryClient()
   const search = Route.useSearch()
 
   // Filter state (URL-driven)
@@ -60,6 +67,25 @@ export function RoadmapAdmin({ statuses }: RoadmapAdminProps) {
   }, [roadmaps, selectedRoadmapId, setSelectedRoadmap])
 
   const selectedRoadmap = roadmaps?.find((r) => r.id === selectedRoadmapId)
+
+  async function handleRoadmapItemCreated(post: { id: string }) {
+    if (!selectedRoadmapId) return
+
+    try {
+      await addPostToRoadmapFn({
+        data: {
+          roadmapId: selectedRoadmapId,
+          postId: post.id,
+        },
+      })
+      await queryClient.invalidateQueries({ queryKey: roadmapPostsKeys.all })
+      toast.success('Roadmap item created')
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Created post, but could not add it to the roadmap'
+      )
+    }
+  }
 
   // Track dragged post for overlay
   const [activePost, setActivePost] = useState<RoadmapPostEntry | null>(null)
@@ -106,12 +132,29 @@ export function RoadmapAdmin({ statuses }: RoadmapAdminProps) {
         {selectedRoadmap ? (
           <>
             <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border/50 bg-card/50 space-y-3">
-              <div>
-                <h2 className="text-lg font-semibold">{selectedRoadmap.name}</h2>
-                {selectedRoadmap.description && (
-                  <p className="mt-0.5 text-sm text-muted-foreground">
-                    {selectedRoadmap.description}
-                  </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold">{selectedRoadmap.name}</h2>
+                  {selectedRoadmap.description && (
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {selectedRoadmap.description}
+                    </p>
+                  )}
+                </div>
+                {boards.length > 0 && (
+                  <CreatePostDialog
+                    boards={boards}
+                    tags={tags}
+                    statuses={statuses}
+                    currentUser={currentUser}
+                    onPostCreated={handleRoadmapItemCreated}
+                    trigger={
+                      <Button size="sm" className="min-h-10 gap-2">
+                        <PlusIcon className="h-4 w-4" />
+                        Add roadmap item
+                      </Button>
+                    }
+                  />
                 )}
               </div>
               <RoadmapFiltersBar

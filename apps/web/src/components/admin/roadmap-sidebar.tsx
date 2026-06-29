@@ -202,6 +202,12 @@ export function RoadmapSidebar({ selectedRoadmapId, onSelectRoadmap }: RoadmapSi
                 icon={MapIcon}
                 title="No roadmaps yet"
                 description="Create your first roadmap to get started"
+                action={
+                  <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
+                    <PlusIcon className="h-4 w-4" />
+                    Create roadmap
+                  </Button>
+                }
                 className="py-12"
               />
             ) : (

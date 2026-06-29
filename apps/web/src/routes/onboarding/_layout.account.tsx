@@ -59,7 +59,7 @@ function AccountStep() {
   if (ssoEnabled) {
     return (
       <div className="w-full max-w-md mx-auto">
-        <div className="overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-sm">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <div className="p-8 text-center">
             <h1 className="text-2xl font-bold">Welcome to Venturi Feedback</h1>
             <p className="mt-2 text-muted-foreground">Sign in with single sign-on to continue</p>
@@ -125,7 +125,7 @@ function AccountStep() {
   return (
     <div className="w-full max-w-md mx-auto">
       {/* Main card */}
-      <div className="overflow-hidden rounded-2xl border border-border/50 bg-gradient-to-b from-card/90 to-card/70 backdrop-blur-sm">
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         <div className="p-8">
           <div className="mb-6 text-center">
             <h1 className="text-2xl font-bold">Welcome to Venturi Feedback</h1>
