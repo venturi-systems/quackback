@@ -340,7 +340,11 @@ export function PortalHeader({
       <div>
         <div className="max-w-6xl mx-auto w-full px-4 sm:px-6">
           <div className="flex h-12 items-center justify-between">
-            <Link to="/" className="portal-header__logo flex min-h-11 items-center gap-2">
+            <Link
+              to="/"
+              className="portal-header__logo flex min-h-11 items-center gap-2"
+              aria-label={`${orgName} feedback home`}
+            >
               {orgLogo ? (
                 <img
                   src={orgLogo}
@@ -352,7 +356,7 @@ export function PortalHeader({
                   {orgName.charAt(0).toUpperCase()}
                 </div>
               )}
-              <span className="portal-header__name font-semibold hidden sm:block max-w-[18ch] line-clamp-2 text-[var(--header-foreground)]">
+              <span className="portal-header__name font-semibold max-w-[18ch] line-clamp-2 text-[var(--header-foreground)]">
                 {orgName}
               </span>
             </Link>
