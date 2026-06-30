@@ -205,6 +205,7 @@
   "portal.roadmap.empty.title": "Дорожные карты недоступны",
   "portal.roadmap.empty.description": "Загляните позже, чтобы посмотреть, над чем мы работаем.",
   "portal.roadmap.column.empty": "Пока пусто",
+  "portal.roadmap.column.empty.signInRequired": "Войдите, чтобы посмотреть элементы дорожной карты.",
   "portal.help.title": "Помощь",
   "portal.help.description": "Найдите ответы на вопросы и узнайте, как получить максимум от нашего продукта.",
   "portal.help.categoryNotFound.title": "Категория не найдена",

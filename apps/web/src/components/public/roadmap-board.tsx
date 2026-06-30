@@ -26,6 +26,7 @@ interface RoadmapBoardProps {
   initialRoadmaps?: RoadmapView[]
   initialSelectedRoadmapId?: string | null
   isTeamMember?: boolean
+  isAuthenticated?: boolean
 }
 
 export function RoadmapBoard({
@@ -33,6 +34,7 @@ export function RoadmapBoard({
   initialRoadmaps,
   initialSelectedRoadmapId,
   isTeamMember,
+  isAuthenticated,
 }: RoadmapBoardProps): React.ReactElement {
   const intl = useIntl()
   const { selectedRoadmapId, setSelectedRoadmap } = usePublicRoadmapSelection()
@@ -50,6 +52,8 @@ export function RoadmapBoard({
   const availableRoadmaps = initialRoadmaps ?? roadmaps ?? []
   const effectiveSelectedId = selectedRoadmapId ?? initialSelectedRoadmapId
   const selectedRoadmap = availableRoadmaps.find((r) => r.id === effectiveSelectedId)
+  const signInRequiredForRoadmapItems =
+    !isAuthenticated && availableRoadmaps.length > 0 && (boards?.length ?? 0) === 0
 
   useEffect(() => {
     if (availableRoadmaps.length > 0 && !selectedRoadmapId) {
@@ -157,6 +161,7 @@ export function RoadmapBoard({
                   title={status.name}
                   color={status.color}
                   filters={filters}
+                  signInRequiredForItems={signInRequiredForRoadmapItems}
                 />
               </div>
             ))}
