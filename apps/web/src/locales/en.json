@@ -205,6 +205,7 @@
   "portal.roadmap.empty.title": "No roadmaps available",
   "portal.roadmap.empty.description": "Check back later to see what we're working on.",
   "portal.roadmap.column.empty": "No items yet",
+  "portal.roadmap.column.empty.signInRequired": "Sign in to view roadmap items.",
   "portal.help.title": "Help Center",
   "portal.help.description": "Find answers to your questions and learn how to get the most out of our product.",
   "portal.help.categoryNotFound.title": "Category not found",

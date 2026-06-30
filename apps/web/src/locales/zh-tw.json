@@ -205,6 +205,7 @@
   "portal.roadmap.empty.title": "目前沒有產品藍圖",
   "portal.roadmap.empty.description": "稍後再回來看看我們正在進行的工作。",
   "portal.roadmap.column.empty": "還沒有項目",
+  "portal.roadmap.column.empty.signInRequired": "登入以查看產品藍圖項目。",
   "portal.help.title": "說明中心",
   "portal.help.description": "尋找問題的解答，了解如何充分運用我們的產品。",
   "portal.help.categoryNotFound.title": "找不到分類",

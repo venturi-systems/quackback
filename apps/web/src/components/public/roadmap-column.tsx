@@ -18,9 +18,17 @@ interface RoadmapColumnProps {
   title: string
   color: string
   filters?: RoadmapFilters
+  signInRequiredForItems?: boolean
 }
 
-export function RoadmapColumn({ roadmapId, statusId, title, color, filters }: RoadmapColumnProps) {
+export function RoadmapColumn({
+  roadmapId,
+  statusId,
+  title,
+  color,
+  filters,
+  signInRequiredForItems,
+}: RoadmapColumnProps) {
   const intl = useIntl()
   const { data, isFetchingNextPage, hasNextPage, fetchNextPage, isLoading } = usePublicRoadmapPosts(
     {
@@ -61,10 +69,15 @@ export function RoadmapColumn({ roadmapId, statusId, title, color, filters }: Ro
           ) : posts.length === 0 ? (
             <div className="h-full flex items-center justify-center py-8 animate-in fade-in duration-200">
               <p className="text-sm text-muted-foreground">
-                {intl.formatMessage({
-                  id: 'portal.roadmap.column.empty',
-                  defaultMessage: 'No items yet',
-                })}
+                {signInRequiredForItems
+                  ? intl.formatMessage({
+                      id: 'portal.roadmap.column.empty.signInRequired',
+                      defaultMessage: 'Sign in to view roadmap items.',
+                    })
+                  : intl.formatMessage({
+                      id: 'portal.roadmap.column.empty',
+                      defaultMessage: 'No items yet',
+                    })}
               </p>
             </div>
           ) : (

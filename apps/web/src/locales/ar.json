@@ -205,6 +205,7 @@
   "portal.roadmap.empty.title": "لا توجد خارطة طريق متاحة",
   "portal.roadmap.empty.description": "عد لاحقًا لمعرفة ما نعمل عليه.",
   "portal.roadmap.column.empty": "لا توجد عناصر بعد",
+  "portal.roadmap.column.empty.signInRequired": "سجّل الدخول لعرض عناصر خارطة الطريق.",
   "portal.help.title": "مركز المساعدة",
   "portal.help.description": "ابحث عن إجابات لأسئلتك وتعلّم كيفية الاستفادة القصوى من منتجنا.",
   "portal.help.categoryNotFound.title": "الفئة غير موجودة",

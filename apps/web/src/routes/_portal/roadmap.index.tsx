@@ -17,7 +17,7 @@ const searchSchema = z.object({
 export const Route = createFileRoute('/_portal/roadmap/')({
   validateSearch: searchSchema,
   loader: async ({ context }) => {
-    const { queryClient, settings, baseUrl, userRole } = context
+    const { queryClient, settings, baseUrl, userRole, session } = context
 
     const [roadmaps] = await Promise.all([
       queryClient.ensureQueryData(portalQueries.roadmaps()),
@@ -31,6 +31,7 @@ export const Route = createFileRoute('/_portal/roadmap/')({
       workspaceName: settings?.name ?? 'Venturi',
       baseUrl: baseUrl ?? '',
       userRole: userRole ?? null,
+      isAuthenticated: !!session?.user && session.user.principalType !== 'anonymous',
     }
   },
   head: ({ loaderData }) => {
@@ -56,7 +57,7 @@ export const Route = createFileRoute('/_portal/roadmap/')({
 })
 
 function RoadmapPage() {
-  const { firstRoadmapId, userRole } = Route.useLoaderData()
+  const { firstRoadmapId, userRole, isAuthenticated } = Route.useLoaderData()
   const { roadmap: selectedRoadmapFromUrl } = Route.useSearch()
 
   const { data: roadmaps } = useSuspenseQuery(portalQueries.roadmaps())
@@ -94,6 +95,7 @@ function RoadmapPage() {
           initialRoadmaps={roadmaps}
           initialSelectedRoadmapId={initialSelectedId}
           isTeamMember={isTeamMember}
+          isAuthenticated={isAuthenticated}
         />
       </div>
     </div>

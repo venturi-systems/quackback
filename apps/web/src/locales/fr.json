@@ -205,6 +205,7 @@
   "portal.roadmap.empty.title": "Aucune feuille de route disponible",
   "portal.roadmap.empty.description": "Revenez plus tard pour voir ce sur quoi nous travaillons.",
   "portal.roadmap.column.empty": "Aucun élément pour le moment",
+  "portal.roadmap.column.empty.signInRequired": "Connectez-vous pour voir les éléments de la feuille de route.",
   "portal.help.title": "Centre d'aide",
   "portal.help.description": "Trouvez des réponses à vos questions et apprenez à tirer le meilleur parti de notre produit.",
   "portal.help.categoryNotFound.title": "Catégorie introuvable",

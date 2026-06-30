@@ -205,6 +205,7 @@
   "portal.roadmap.empty.title": "暂无可用的路线图",
   "portal.roadmap.empty.description": "请稍后再来查看我们正在进行的工作。",
   "portal.roadmap.column.empty": "暂无条目",
+  "portal.roadmap.column.empty.signInRequired": "登录以查看路线图项目。",
   "portal.help.title": "帮助中心",
   "portal.help.description": "查找问题的答案，了解如何充分利用我们的产品。",
   "portal.help.categoryNotFound.title": "未找到分类",
