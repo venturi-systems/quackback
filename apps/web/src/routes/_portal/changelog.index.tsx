@@ -4,9 +4,13 @@ import { RssIcon } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/shared/page-header'
 import { ChangelogListPublic } from '@/components/portal/changelog'
+import { publicChangelogQueries } from '@/lib/client/queries/changelog'
 
 export const Route = createFileRoute('/_portal/changelog/')({
   loader: async ({ context }) => {
+    const { queryClient } = context
+    await queryClient.ensureInfiniteQueryData(publicChangelogQueries.list())
+
     return {
       workspaceName: context.settings?.name ?? 'Venturi',
       baseUrl: context.baseUrl ?? '',
