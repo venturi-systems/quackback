@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
-  <title>Venturi</title>
-  <rect width="64" height="64" rx="14" fill="#080B12" />
-  <path
-    d="M18 46 29.5 18h5L46 46h-6.2l-2.2-5.9H26.5L24.2 46Zm10.3-11.2h7.5L32 24.7Z"
-    fill="#7EB6FF"
-  />
-  <rect x="1" y="1" width="62" height="62" rx="13" fill="none" stroke="#7EB6FF" stroke-opacity=".32" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Venturi app icon">
+  <rect width="128" height="128" fill="#0F172A" />
+  <g>
+    <path
+      d="M62.254 91 L22.176 30.883 L33.824 23.117 L69.746 77 H71.897 L98.813 47.299 L109.187 56.701 L78.103 91 Z"
+      fill="#FFFFFF"
+    />
+    <rect x="64" y="75" width="9" height="9" fill="#2563EB" shape-rendering="crispEdges" />
+  </g>
 </svg>
