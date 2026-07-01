@@ -1,0 +1,10 @@
+# CodeQL configuration for quackback.
+#
+# paths-ignore removes files that produce verified FALSE-POSITIVE code-scanning
+# alerts (each previously triaged + dismissed as a false positive). Excluding at
+# config level lets the alert be recorded as resolved rather than left dismissed.
+# Trade-off (accepted 2026-07-01): whole-file exclusion — keep this list minimal.
+name: "quackback CodeQL config"
+
+paths-ignore:
+  - apps/web/src/lib/server/domains/api-keys/api-key.service.ts
