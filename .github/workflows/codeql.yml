@@ -1,10 +1,9 @@
 name: CodeQL
 
 # Advanced-setup CodeQL producer (replaces GitHub-managed default setup).
-# Converted 2026-07-01 so config-level paths-ignore can record verified
-# false-positive alerts as resolved instead of leaving them dismissed. Query
-# suite (security-extended) and languages mirror the prior default setup, so
-# scan coverage is unchanged except for the explicitly excluded FP files.
+# The config keeps security-extended coverage and loads the source-level
+# suppression query so verified false positives can be suppressed in place
+# without excluding whole files from future scanning.
 
 on:
   push:
@@ -42,7 +41,6 @@ jobs:
         uses: github/codeql-action/init@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6
         with:
           languages: ${{ matrix.language }}
-          queries: security-extended
           config-file: ./.github/codeql/codeql-config.yml
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@c35d1b164463ee62a100735382aaaa525c5d3496 # codeql-bundle-v2.25.6

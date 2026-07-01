@@ -1,10 +1,12 @@
-# CodeQL configuration for quackback.
-#
-# paths-ignore removes files that produce verified FALSE-POSITIVE code-scanning
-# alerts (each previously triaged + dismissed as a false positive). Excluding at
-# config level lets the alert be recorded as resolved rather than left dismissed.
-# Trade-off (accepted 2026-07-01): whole-file exclusion — keep this list minimal.
 name: "quackback CodeQL config"
 
-paths-ignore:
-  - apps/web/src/lib/server/domains/api-keys/api-key.service.ts
+# Keep repository source fully scanned. The JavaScript suppression query lets
+# the existing source-level codeql[js/insufficient-password-hash] annotation
+# suppress only the verified false positive without excluding the rest of the
+# file from future CodeQL coverage.
+queries:
+  - uses: security-extended
+
+packs:
+  javascript:
+    - codeql/javascript-queries:AlertSuppression.ql
