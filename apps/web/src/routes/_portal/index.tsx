@@ -1,10 +1,12 @@
 import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
+import { FormattedMessage } from 'react-intl'
 import { z } from 'zod'
 import { ArrowRightIcon, ClipboardDocumentListIcon, MapIcon } from '@heroicons/react/24/outline'
 import { Spinner } from '@/components/shared/spinner'
 import { FeedbackContainer } from '@/components/public/feedback/feedback-container'
 import { Button } from '@/components/ui/button'
+import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
 
@@ -98,6 +100,8 @@ function PublicPortalPage() {
   const loaderData = Route.useLoaderData()
   const search = Route.useSearch()
   const { org, session, welcomeCard } = loaderData
+  const authPopover = useAuthPopoverSafe()
+  const openAuthPopover = authPopover?.openAuthPopover
 
   // Read filters directly from URL for instant updates
   const currentBoard = search.board
@@ -123,8 +127,48 @@ function PublicPortalPage() {
     placeholderData: keepPreviousData,
   })
 
-  // Show empty state if no boards exist
+  // Show empty state if no boards are visible. Signed-out visitors land here
+  // whenever every board requires authentication to view — for them the empty
+  // state must route to sign-in, not to admin setup (which they cannot use).
+  // Anonymous sessions also populate session.user, so !!session is not the
+  // right signed-in signal here (matches feedback-container/portal-header).
+  const isRealUser = !!session?.user && session.user.principalType !== 'anonymous'
   if (loaderData.isEmpty && !isFetching && (!portalData || portalData.boards.length === 0)) {
+    if (!isRealUser) {
+      return (
+        <section className="venturi-feedback-empty mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+          <div className="venturi-feedback-empty__copy venturi-feedback-empty__copy--solo">
+            <div className="venturi-feedback-empty__mark" aria-hidden="true">
+              <img src="/venturi-mark.svg" alt="" />
+            </div>
+            <p className="venturi-feedback-empty__eyebrow">Venturi Feedback</p>
+            <h1>Roadmap intake</h1>
+            <p className="venturi-feedback-empty__lede">
+              {org.name} will collect attribution workflow requests, classify them into product
+              signals, and publish the roadmap states that are ready for customer review.
+            </p>
+            <div className="venturi-feedback-empty__actions">
+              <Button onClick={() => openAuthPopover?.({ mode: 'login' })}>
+                <FormattedMessage id="portal.header.auth.logIn" defaultMessage="Log in" />
+                <ArrowRightIcon className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" onClick={() => openAuthPopover?.({ mode: 'signup' })}>
+                <FormattedMessage
+                  id="portal.auth.switch.createAccount"
+                  defaultMessage="Create an account"
+                />
+              </Button>
+            </div>
+            <p className="venturi-feedback-empty__note">
+              <FormattedMessage
+                id="portal.auth.login.tagline"
+                defaultMessage="Sign in to vote and comment on feedback."
+              />
+            </p>
+          </div>
+        </section>
+      )
+    }
     return (
       <section className="venturi-feedback-empty mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="venturi-feedback-empty__grid">
@@ -196,6 +240,9 @@ function PublicPortalPage() {
 
   return (
     <div className="mx-auto max-w-6xl w-full px-4 sm:px-6 py-6">
+      <h1 className="sr-only">
+        <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
+      </h1>
       <FeedbackContainer
         workspaceName={org.name}
         workspaceSlug={org.slug}

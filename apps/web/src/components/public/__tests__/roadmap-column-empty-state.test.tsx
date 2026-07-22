@@ -43,6 +43,8 @@ describe('RoadmapColumn empty state', () => {
 
     expect(screen.getByText('No items yet')).toBeInTheDocument()
     expect(screen.queryByText('Sign in to view roadmap items.')).not.toBeInTheDocument()
+    // A genuinely empty column shows its zero count.
+    expect(screen.getByText('0')).toBeInTheDocument()
   })
 
   it('uses an auth-aware empty state when anonymous visitors have no viewable boards', () => {
@@ -50,5 +52,7 @@ describe('RoadmapColumn empty state', () => {
 
     expect(screen.getByText('Sign in to view roadmap items.')).toBeInTheDocument()
     expect(screen.queryByText('No items yet')).not.toBeInTheDocument()
+    // The true count is unknown to a signed-out visitor — no misleading "0" badge.
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
   })
 })
