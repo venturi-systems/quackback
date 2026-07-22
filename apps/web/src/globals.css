@@ -18,8 +18,9 @@
    Default fork theme for feedback.venturi.systems. Tenant-provided branding
    can still override these variables at runtime, but the app fallback now
    matches the corpus-governed light-default Venturi Web Standard used by the
-   public website, product UI, and feedback portal. The previous A+B dark
-   register remains selectable through the normal theme control.
+   public website, product UI, and feedback portal. Portal routes force this
+   light register (__root themeMode); the A+B dark tokens below remain for
+   any surface where user/tenant theming is enabled.
    ============================================== */
 
 :root {
@@ -435,14 +436,19 @@ body {
 }
 
 .venturi-feedback-empty__mark img {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
+}
+
+/* Signed-out variant: the copy card stands alone (no admin setup panel), so it
+   keeps the lede's own measure instead of stretching across the container. */
+.venturi-feedback-empty__copy--solo {
+  max-width: 42rem;
 }
 
 .venturi-feedback-empty__eyebrow {
   margin: 0 0 12px;
-  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 650;
   line-height: 1;
@@ -492,7 +498,7 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 18px;
+  padding: 16px;
 }
 
 .venturi-feedback-empty__panel-header {
@@ -503,7 +509,6 @@ body {
   padding-bottom: 14px;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
-  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.06em;
@@ -513,7 +518,7 @@ body {
 .venturi-feedback-empty__steps {
   display: grid;
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .venturi-feedback-empty__steps > div {

@@ -55,9 +55,13 @@ export function RoadmapColumn({
             <div className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
             <CardTitle className="text-base font-semibold">{title}</CardTitle>
           </div>
-          <Badge variant="secondary" className="text-xs">
-            {total}
-          </Badge>
+          {/* When items are hidden behind sign-in the true count is unknown to
+              this visitor — a "0" badge would misread as an empty column. */}
+          {!(signInRequiredForItems && total === 0) && (
+            <Badge variant="secondary" className="text-xs">
+              {total}
+            </Badge>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-0">

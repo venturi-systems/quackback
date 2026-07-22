@@ -173,7 +173,7 @@ async function postState(page: Page, board: { slug: string; postId: string }) {
   await page.goto(`/b/${board.slug}/posts/${board.postId}`)
   await page.waitForLoadState('networkidle')
   const body = (await page.locator('main, body').first().innerText()).toLowerCase()
-  const denied = /post not found|tripped us up|flown the pond/.test(body)
+  const denied = /post not found|page not found|something went wrong/.test(body)
   return {
     denied,
     renders: !denied && body.includes('e2e access probe post'),

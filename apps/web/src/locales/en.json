@@ -257,7 +257,7 @@
   "portal.postCard.vote.ariaRemoveVote": "Remove vote ({count, plural, one {# vote} other {# votes}})",
   "portal.postCard.toast.linkCopied": "Link copied to clipboard",
   "portal.postCard.toast.linkCopyFailed": "Failed to copy link",
-  "portal.commentThread.empty": "No comments yet. Be the first to share your thoughts!",
+  "portal.commentThread.empty": "No comments yet. Be the first to share your thoughts.",
   "portal.commentThread.signInToComment": "Sign in to comment",
   "portal.commentThread.signIn": "Sign in",
   "portal.commentThread.deleted": "[deleted]",
