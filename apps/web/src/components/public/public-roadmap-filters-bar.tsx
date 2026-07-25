@@ -189,7 +189,17 @@ function AddFilterButton({
     >
       <PopoverTrigger asChild>
         {variant === 'toolbar' ? (
-          <Button variant="outline" size="sm" className="gap-1.5">
+          // The label is display:none below sm, leaving the control unnamed on
+          // mobile (the icon is aria-hidden). aria-label names it at every width.
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            aria-label={intl.formatMessage({
+              id: 'portal.feedback.toolbar.filter',
+              defaultMessage: 'Filter',
+            })}
+          >
             <FunnelIcon className="h-4 w-4" />
             <span className="hidden sm:inline">
               <FormattedMessage id="portal.feedback.toolbar.filter" defaultMessage="Filter" />
