@@ -73,14 +73,15 @@ function RoadmapPage() {
   return (
     // Cap at viewport height so a column with many cards scrolls internally
     // instead of pushing the body taller. 7rem ≈ PortalHeader.
-    // The board is a data surface, so it composes across the viewport instead of
-    // being capped to the prose container: at max-w-6xl the four status columns
-    // needed 1248px of runway but only ever got 1104px, so the last column was
-    // clipped by a constant 144px while the dead gutter grew to 40% of a 1920px
-    // screen. The heading below keeps the prose cap so it still aligns with the
-    // header; only the board itself goes full-bleed.
+    // The board is a data surface, so the page composes across the viewport
+    // instead of being capped to a prose container: at max-w-6xl the four status
+    // columns needed 1248px of runway but only ever got 1104px, so the last
+    // column was clipped by a constant 144px while the dead gutter grew to 40%
+    // of a 1920px screen. Heading, toolbar and board all share the page's own
+    // left edge so the route stays internally aligned; text measure is capped on
+    // the text itself, not on the composition.
     <div className="mx-auto w-full px-4 sm:px-6 py-8 h-[calc(100dvh-7rem)] flex flex-col min-h-0">
-      <div className="mx-auto w-full max-w-6xl mb-6 animate-in fade-in duration-200 fill-mode-backwards">
+      <div className="mb-6 animate-in fade-in duration-200 fill-mode-backwards">
         <h1 className="text-3xl font-bold mb-2">
           <FormattedMessage id="portal.roadmap.title" defaultMessage="Roadmap" />
         </h1>
