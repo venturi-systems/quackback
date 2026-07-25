@@ -48,7 +48,11 @@ export function RoadmapColumn({
   })
 
   return (
-    <Card className="flex-1 min-w-[300px] max-w-[350px] flex flex-col h-full">
+    // No max-width: the 350px cap kept columns narrow on large screens, which is
+    // the "condensed content stranded in dead space" the board is meant to avoid.
+    // The min-width only engages below ~1280px, where the board's existing
+    // snap-scroll + chevron controls take over.
+    <Card className="flex-1 min-w-[280px] flex flex-col h-full">
       <CardHeader className="pb-3 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

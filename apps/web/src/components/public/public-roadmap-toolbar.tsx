@@ -92,7 +92,18 @@ export function PublicRoadmapToolbar({
       <div className="flex items-center gap-2">
         <Popover open={searchOpen} onOpenChange={setSearchOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            {/* The label is display:none below sm, which leaves the control with
+                no accessible name on mobile -- the icon is aria-hidden. The
+                aria-label keeps it named at every width. */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              aria-label={intl.formatMessage({
+                id: 'portal.feedback.toolbar.search',
+                defaultMessage: 'Search',
+              })}
+            >
               <MagnifyingGlassIcon className="h-4 w-4" />
               <span className="hidden sm:inline">
                 <FormattedMessage id="portal.feedback.toolbar.search" defaultMessage="Search" />

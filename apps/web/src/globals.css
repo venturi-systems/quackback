@@ -441,10 +441,38 @@ body {
   object-fit: contain;
 }
 
-/* Signed-out variant: the copy card stands alone (no admin setup panel), so it
-   keeps the lede's own measure instead of stretching across the container. */
+/* Signed-out variant: this is the public face of the portal and the only thing
+   on the page, so it composes rather than sitting in a panel. Boxing it left a
+   672px card against ~600px of dead band with the page only ~21% inked — the
+   "narrow boxed column stranded in dead space" the design direction rules out.
+   Dropping the card chrome keeps the composition; the measure stays capped on
+   the text itself (the lede and note already carry their own max-widths). */
 .venturi-feedback-empty__copy--solo {
-  max-width: 42rem;
+  max-width: 46rem;
+  margin-inline: auto;
+  padding: clamp(8px, 2vw, 16px) 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  text-align: center;
+}
+
+.venturi-feedback-empty__copy--solo .venturi-feedback-empty__mark {
+  margin-inline: auto;
+}
+
+.venturi-feedback-empty__copy--solo h1 {
+  max-width: none;
+}
+
+.venturi-feedback-empty__copy--solo .venturi-feedback-empty__lede,
+.venturi-feedback-empty__copy--solo .venturi-feedback-empty__note {
+  margin-inline: auto;
+}
+
+.venturi-feedback-empty__copy--solo .venturi-feedback-empty__actions {
+  justify-content: center;
 }
 
 .venturi-feedback-empty__eyebrow {

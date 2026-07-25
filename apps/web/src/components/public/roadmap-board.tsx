@@ -152,7 +152,11 @@ export function RoadmapBoard({
             {statuses.map((status, index) => (
               <div
                 key={status.id}
-                className="snap-center sm:snap-start flex flex-col animate-in fade-in duration-200 fill-mode-backwards"
+                // flex-1 lets the columns divide the board's runway evenly and
+                // widen with the viewport. Without it the wrapper is shrink-to-fit,
+                // so every column froze at its 300px min-width and the column's own
+                // max-width never engaged at any desktop size.
+                className="snap-center sm:snap-start flex flex-col flex-1 animate-in fade-in duration-200 fill-mode-backwards"
                 style={{ animationDelay: `${index * 75}ms` }}
               >
                 <RoadmapColumn
