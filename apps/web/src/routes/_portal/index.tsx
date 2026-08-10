@@ -1,14 +1,20 @@
 import { createFileRoute, Link, redirect } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { FormattedMessage } from 'react-intl'
+import { lazy, Suspense } from 'react'
 import { z } from 'zod'
 import { ArrowRightIcon, ClipboardDocumentListIcon, MapIcon } from '@heroicons/react/24/outline'
 import { Spinner } from '@/components/shared/spinner'
-import { FeedbackContainer } from '@/components/public/feedback/feedback-container'
 import { Button } from '@/components/ui/button'
 import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
+
+const FeedbackContainer = lazy(() =>
+  import('@/components/public/feedback/feedback-container').then((module) => ({
+    default: module.FeedbackContainer,
+  }))
+)
 
 const searchSchema = z.object({
   board: z.string().optional(),
@@ -243,23 +249,31 @@ function PublicPortalPage() {
       <h1 className="sr-only">
         <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
       </h1>
-      <FeedbackContainer
-        workspaceName={org.name}
-        workspaceSlug={org.slug}
-        boards={portalData.boards}
-        posts={portalData.posts.items}
-        statuses={portalData.statuses}
-        tags={portalData.tags}
-        hasMore={portalData.posts.hasMore}
-        votedPostIds={portalData.votedPostIds}
-        currentBoard={currentBoard}
-        currentSearch={currentSearch}
-        currentSort={currentSort}
-        defaultBoardId={portalData.boards[0]?.id}
-        user={user}
-        boardPermissions={portalData.boardPermissions}
-        welcomeCard={welcomeCard}
-      />
+      <Suspense
+        fallback={
+          <div className="flex justify-center py-16">
+            <Spinner size="lg" />
+          </div>
+        }
+      >
+        <FeedbackContainer
+          workspaceName={org.name}
+          workspaceSlug={org.slug}
+          boards={portalData.boards}
+          posts={portalData.posts.items}
+          statuses={portalData.statuses}
+          tags={portalData.tags}
+          hasMore={portalData.posts.hasMore}
+          votedPostIds={portalData.votedPostIds}
+          currentBoard={currentBoard}
+          currentSearch={currentSearch}
+          currentSort={currentSort}
+          defaultBoardId={portalData.boards[0]?.id}
+          user={user}
+          boardPermissions={portalData.boardPermissions}
+          welcomeCard={welcomeCard}
+        />
+      </Suspense>
     </div>
   )
 }
