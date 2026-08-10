@@ -40,3 +40,13 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci.toLowerCase()).not.toContain('codebuild-')
   })
 })
+
+describe('root dependency contract', () => {
+  it('does not install the unused native image-processing stack', () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+    const lockfile = readFileSync(join(process.cwd(), 'bun.lock'), 'utf8')
+
+    expect(packageJson.devDependencies?.sharp).toBeUndefined()
+    expect(lockfile).not.toContain('"sharp": ["sharp@')
+  })
+})
