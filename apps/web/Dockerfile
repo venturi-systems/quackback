@@ -12,8 +12,9 @@
 #   docker run -e DATABASE_URL=... -e SEED_DATABASE=true quackback
 # ============================================================================
 
-# Base image with Bun
-FROM oven/bun:1.3.11 AS base
+# Base image with Bun. Pin the multi-architecture manifest so rebuilds use the
+# exact reviewed image rather than a mutable registry tag.
+FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS base
 WORKDIR /app
 
 # ============================================================================
@@ -76,7 +77,14 @@ RUN bun build packages/db/src/migrate.ts \
 # ============================================================================
 # Production runner
 # ============================================================================
-FROM oven/bun:1.3.11-alpine AS runner
+FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS runner
+
+# Pin the patched OpenSSL package set so the immutable production artifact is
+# both reproducible and free of the vulnerabilities present in 3.5.6-r0.
+RUN apk add --no-cache --upgrade \
+    libcrypto3=3.5.7-r0 \
+    libssl3=3.5.7-r0 \
+    openssl=3.5.7-r0
 
 WORKDIR /app
 
