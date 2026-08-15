@@ -122,6 +122,8 @@ describe('QB-GOV-001 repository governance contract', () => {
       expect(workflow).toContain('dry_run:')
       expect(workflow).toContain('default: true')
       expect(workflow).toContain("github.repository == 'venturi-systems/quackback'")
+      expect(workflow).toMatch(/\nconcurrency:\n {2}group: .+\n {2}cancel-in-progress: false\n/)
+      expect(workflow).toMatch(/\n {4}timeout-minutes: \d+\n/)
     }
     expect(widget).toContain('npm pack --dry-run')
     expect(openapi).toContain("if: github.event_name == 'release' || inputs.dry_run == false")

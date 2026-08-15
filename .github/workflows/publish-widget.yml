@@ -14,10 +14,15 @@ on:
         default: true
         type: boolean
 
+concurrency:
+  group: publish-widget-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   validate:
     if: github.repository == 'venturi-systems/quackback'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -77,6 +82,7 @@ jobs:
     if: github.repository == 'venturi-systems/quackback' && (github.event_name == 'push' || inputs.dry_run == false)
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write # Required for npm trusted publishing (OIDC)
