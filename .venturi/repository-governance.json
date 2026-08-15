@@ -1,0 +1,76 @@
+{
+  "$schema": "https://raw.githubusercontent.com/venturi-systems/.github/main/.github/schemas/repository-governance.schema.json",
+  "schema_version": 1,
+  "repository": {
+    "owner": "venturi-systems",
+    "name": "quackback",
+    "default_branch": "main"
+  },
+  "authority": {
+    "operational_source": "github",
+    "repository_source": "github",
+    "deployment_owner": "repository release workflows",
+    "upstream": {
+      "repository": "QuackbackIO/quackback",
+      "mode": "manual-reviewed-intake",
+      "ledger": "upstream-intake-ledger.jsonl",
+      "auto_merge": false
+    }
+  },
+  "harness": {
+    "classification": "product-application",
+    "status": "implemented",
+    "entrypoints": ["package.json", "apps/web", "packages/widget"],
+    "capabilities": []
+  },
+  "validation": {
+    "baseline_context": "portability-gate",
+    "authoritative_contexts": ["portability-gate"],
+    "merge_group": true,
+    "local_commands": [
+      "bun run lint",
+      "bun run --filter @quackback/widget build",
+      "SKIP_ENV_VALIDATION=true bun run build",
+      "bun run --filter @quackback/web typecheck",
+      "bun run test --run"
+    ]
+  },
+  "runners": {
+    "classes": ["github-hosted-linux-amd64", "github-hosted-linux-arm64"]
+  },
+  "identities": {
+    "github_token_permissions": "read",
+    "write_identities": [
+      "github-token:ghcr-publisher",
+      "github-oidc:npm-trusted-publisher",
+      "github-token:release-asset-uploader"
+    ],
+    "aws_oidc_roles": []
+  },
+  "environments": ["npm", "github-release", "ghcr"],
+  "schedules": [],
+  "deployment": {
+    "owner": "repository release workflows",
+    "method": "tagged npm package, signed multi-architecture GHCR image, and release asset",
+    "rollback": "re-publish an exact prior source SHA under an explicit immutable version"
+  },
+  "release": {
+    "provenance": "git tag plus GitHub OIDC for npm and cosign",
+    "artifact": "@quackback/widget, ghcr image index, and openapi.json",
+    "manual_default": "dry-run"
+  },
+  "recovery": {
+    "procedure": "dispatch the release workflow at the exact reviewed tag or source SHA",
+    "evidence": "package dry-run, release identity check, digest, signature, and workflow run"
+  },
+  "evidence": {
+    "producer": "Vitest contracts and GitHub release workflows",
+    "retention": "Git history, release assets, package registry provenance, and workflow logs"
+  },
+  "cost": {
+    "cache_limit_gb": null,
+    "budget_increase_allowed": false,
+    "circuit_breaker": "workflow timeouts, concurrency cancellation, and no scheduled workflows",
+    "cache_policy": "per-architecture-gha"
+  }
+}
