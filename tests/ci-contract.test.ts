@@ -33,6 +33,9 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain('name: portability-gate')
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
+    expect(ci).toContain(
+      'venturi-systems/.github/.github/actions/repository-governance@0d21e9b9a9bcf3e3dba86cc7b0ed9a778af273d9'
+    )
     expect(ci).toContain('Check fork portability contract')
     expect(ci).toContain('bun run lint')
     expect(ci).toContain('bun run build')
