@@ -44,6 +44,24 @@ export const Route = createFileRoute('/_portal/')({
       throw redirect({ to: '/onboarding' })
     }
 
+    // The parent route renders the sign-in wall when portal visibility is
+    // authenticated, but TanStack still executes matched child loaders. Stop
+    // here before any board/post/status query so an anonymous SSR response
+    // cannot dehydrate tenant-shaped portal data behind that wall.
+    const isRealUser = !!session?.user && session.user.principalType !== 'anonymous'
+    const accessGated = org.publicPortalConfig?.portalAccess?.isPrivate === true && !isRealUser
+    const welcomeCard = org.publicPortalConfig?.welcomeCard
+    if (accessGated) {
+      return {
+        org,
+        baseUrl: context.baseUrl ?? '',
+        isEmpty: true,
+        session,
+        welcomeCard,
+        accessGated: true,
+      }
+    }
+
     // Parse search params for initial SSR (not using loaderDeps to avoid re-execution)
     const searchParams = location.search as z.infer<typeof searchSchema>
 
@@ -70,18 +88,18 @@ export const Route = createFileRoute('/_portal/')({
 
     // Per-board vote/submit gating is server-computed (portalData.boardPermissions);
     // the feed and header read it per board instead of a workspace-wide flag.
-    const welcomeCard = org.publicPortalConfig?.welcomeCard
-
     return {
       org,
       baseUrl: context.baseUrl ?? '',
       isEmpty: portalData.boards.length === 0,
       session,
       welcomeCard,
+      accessGated: false,
     }
   },
   head: ({ loaderData }) => {
-    if (!loaderData) return {}
+    // Let the authenticated parent gate own title, metadata, and indexing.
+    if (!loaderData || loaderData.accessGated) return {}
     const workspaceName = loaderData.org.name
     const { baseUrl } = loaderData
     const title = `Feedback - ${workspaceName}`
@@ -104,6 +122,18 @@ export const Route = createFileRoute('/_portal/')({
 
 function PublicPortalPage() {
   const loaderData = Route.useLoaderData()
+  // The parent gate replaces the outlet, but keep this child fail-closed if
+  // router behavior changes or the component is rendered independently.
+  if (loaderData.accessGated) return null
+
+  return <AccessiblePublicPortalPage loaderData={loaderData} />
+}
+
+function AccessiblePublicPortalPage({
+  loaderData,
+}: {
+  loaderData: ReturnType<typeof Route.useLoaderData>
+}) {
   const search = Route.useSearch()
   const { org, session, welcomeCard } = loaderData
   const authPopover = useAuthPopoverSafe()
