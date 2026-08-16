@@ -109,7 +109,9 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
         onModeSwitch={() => {}}
       />
     )
-    expect(screen.getByRole('button', { name: /sign in with custom oidc/i })).toBeInTheDocument()
+    const oauthButton = screen.getByRole('button', { name: /sign in with custom oidc/i })
+    expect(oauthButton).toBeInTheDocument()
+    expect(oauthButton).toHaveClass('h-11')
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
     expect(screen.queryByText('or')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create an account/i })).not.toBeInTheDocument()
