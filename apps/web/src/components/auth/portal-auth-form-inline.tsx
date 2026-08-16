@@ -99,6 +99,7 @@ function OAuthButton({
     <Button
       type="button"
       variant="outline"
+      size="lg"
       onClick={onClick}
       className="w-full"
       disabled={disabled}
