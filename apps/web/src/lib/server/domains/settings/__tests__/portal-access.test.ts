@@ -35,6 +35,34 @@ describe('evaluatePortalAccess — public portal', () => {
   })
 })
 
+describe('evaluatePortalAccess — authenticated portal', () => {
+  it('denies an anonymous visitor without exposing portal content', () => {
+    expect(
+      evaluatePortalAccess({
+        visibility: 'authenticated',
+        role: null,
+        isAuthenticated: false,
+        userEmail: null,
+        emailVerified: false,
+        allowedDomains: [],
+      })
+    ).toEqual({ granted: false, reason: 'unauthenticated' })
+  })
+
+  it('grants any real signed-in account without a private-portal allowlist match', () => {
+    expect(
+      evaluatePortalAccess({
+        visibility: 'authenticated',
+        role: 'user',
+        isAuthenticated: true,
+        userEmail: 'visitor@example.com',
+        emailVerified: false,
+        allowedDomains: [],
+      })
+    ).toEqual({ granted: true, reason: 'authenticated' })
+  })
+})
+
 describe('evaluatePortalAccess — private portal, team members', () => {
   it('grants access for admin', () => {
     const result = evaluatePortalAccess({

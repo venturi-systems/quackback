@@ -29,7 +29,7 @@ const log = logger.child({ component: 'portal-access' })
 export type PortalAccessDecision =
   | {
       granted: true
-      reason: 'public' | 'team' | 'domain' | 'invite' | 'widget' | 'segment'
+      reason: 'public' | 'authenticated' | 'team' | 'domain' | 'invite' | 'widget' | 'segment'
     }
   | {
       granted: false
@@ -335,7 +335,7 @@ function normalizeDomains(raw: string[]): string[] {
 // ---------------------------------------------------------------------------
 
 export const updatePortalVisibilitySchema = z.object({
-  visibility: z.enum(['public', 'private']),
+  visibility: z.enum(['public', 'authenticated', 'private']),
   allowedDomains: z.array(z.string()).optional(),
   widgetSignIn: z.boolean().optional(),
   allowedSegmentIds: z.array(z.string()).optional(),

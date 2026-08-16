@@ -703,3 +703,20 @@ a svg,
 .custom-scrollbar-hover:hover::-webkit-scrollbar-thumb:hover {
   background: var(--color-muted-foreground);
 }
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (pointer: coarse) {
+  [data-slot='button'] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

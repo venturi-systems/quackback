@@ -116,7 +116,7 @@ describe('PortalHeader — Admin dropdown item', () => {
     renderHeader({ userRole: 'admin', isLoggedIn: true })
     // The avatar button is the only button in the header (theme toggle off,
     // NotificationBell mocked away, standalone Admin renders as a link).
-    const trigger = screen.getByRole('button')
+    const trigger = screen.getByRole('button', { name: /user menu/i })
     // Radix DropdownMenuTrigger opens on pointerDown (not click).
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
     expect(await screen.findByRole('menuitem', { name: /admin/i })).toBeInTheDocument()
@@ -124,7 +124,7 @@ describe('PortalHeader — Admin dropdown item', () => {
 
   it('hides the Admin item for portal users', async () => {
     renderHeader({ userRole: 'user', isLoggedIn: true })
-    const trigger = screen.getByRole('button')
+    const trigger = screen.getByRole('button', { name: /user menu/i })
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false })
     // Wait for the dropdown to open (Settings will appear), then confirm
     // no Admin menuitem is present.
@@ -156,5 +156,22 @@ describe('PortalHeader — single-IdP redirect', () => {
     fireEvent.click(screen.getByRole('button', { name: /log in/i }))
     expect(mockOpenAuthPopover).toHaveBeenCalledWith(expect.objectContaining({ mode: 'login' }))
     expect(mockOauth2).not.toHaveBeenCalled()
+  })
+})
+
+describe('PortalHeader — mobile navigation', () => {
+  afterEach(() => cleanup())
+
+  it('uses an explicit menu button and controlled navigation panel', () => {
+    renderHeader({ userRole: null, isLoggedIn: false })
+
+    const trigger = screen.getByRole('button', { name: /menu/i })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).toHaveAttribute('aria-controls', 'portal-mobile-navigation')
+
+    fireEvent.click(trigger)
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(document.getElementById('portal-mobile-navigation')).toBeInTheDocument()
   })
 })

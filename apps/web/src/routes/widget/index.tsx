@@ -477,14 +477,8 @@ function WidgetPage() {
               </div>
 
               <div className="px-3">
-                <div
-                  className="flex items-center gap-2 rounded-lg bg-muted/20 border border-border/50 px-2 py-2 cursor-pointer hover:bg-muted/30 transition-colors"
-                  onClick={() => {
-                    setSelectedPostId(successPost.id)
-                    setView('post-detail')
-                  }}
-                >
-                  <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                <div className="flex items-center gap-2 rounded-lg bg-muted/20 border border-border/50 px-2 py-2 hover:bg-muted/30 transition-colors">
+                  <div className="shrink-0">
                     <WidgetVoteButton
                       postId={successPost.id as PostId}
                       voteCount={successPost.voteCount}
@@ -494,7 +488,14 @@ function WidgetPage() {
                       }
                     />
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 rounded-md text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    onClick={() => {
+                      setSelectedPostId(successPost.id)
+                      setView('post-detail')
+                    }}
+                  >
                     <h3 className="text-sm font-medium text-foreground line-clamp-2">
                       {successPost.title}
                     </h3>
@@ -512,7 +513,7 @@ function WidgetPage() {
                         {successPost.board.name}
                       </span>
                     </div>
-                  </div>
+                  </button>
                 </div>
               </div>
 

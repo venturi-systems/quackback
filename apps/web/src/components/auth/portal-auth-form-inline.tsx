@@ -664,7 +664,7 @@ export function PortalAuthFormInline({
         {/* OAuth tile failures (initiateOAuth) set `error` too, so surface it
             above both paths — not only inside the email form, which is hidden in
             OAuth-only setups. */}
-        {error && <FormError message={error} />}
+        {error && <FormError id="portal-auth-error" message={error} />}
         {showOAuth && (
           <>
             <div className="space-y-3">
@@ -710,7 +710,6 @@ export function PortalAuthFormInline({
                   id="inline-email"
                   type="email"
                   autoComplete="email"
-                  autoFocus
                   placeholder={intl.formatMessage({
                     id: 'portal.auth.email.placeholder',
                     defaultMessage: 'you@example.com',
@@ -718,6 +717,8 @@ export function PortalAuthFormInline({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={loadingAction !== null}
+                  aria-invalid={!!error}
+                  aria-describedby={error ? 'portal-auth-error' : undefined}
                   required
                 />
               </div>
@@ -831,7 +832,7 @@ export function PortalAuthFormInline({
             )}
           </p>
         </div>
-        {error && <FormError message={error} />}
+        {error && <FormError id="portal-auth-error" message={error} />}
         <Button
           type="button"
           className="w-full"
@@ -998,7 +999,7 @@ export function PortalAuthFormInline({
       {/* Password credentials form */}
       {step === 'credentials' && passwordEnabled && (
         <form onSubmit={handlePasswordSubmit} className="space-y-4">
-          {error && <FormError message={error} />}
+          {error && <FormError id="portal-auth-error" message={error} />}
 
           {mode === 'signup' && (
             <div className="space-y-2">
@@ -1044,7 +1045,8 @@ export function PortalAuthFormInline({
               onChange={(e) => setPassword(e.target.value)}
               disabled={loadingAction !== null}
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              autoFocus
+              aria-invalid={!!error}
+              aria-describedby={error ? 'portal-auth-error' : undefined}
             />
           </div>
 
@@ -1109,7 +1111,7 @@ export function PortalAuthFormInline({
       {/* Magic-link send (password disabled OR user clicked "email me a link") */}
       {step === 'email' && magicLinkEnabled && (
         <form onSubmit={handleEmailSubmit} className="space-y-4">
-          {error && <FormError message={error} />}
+          {error && <FormError id="portal-auth-error" message={error} />}
 
           <input type="hidden" name="email" value={email} autoComplete="email" readOnly />
 
@@ -1189,7 +1191,7 @@ export function PortalAuthFormInline({
             </p>
           </div>
 
-          {error && <FormError message={error} />}
+          {error && <FormError id="portal-auth-error" message={error} />}
 
           <div className="space-y-2">
             <Label htmlFor="inline-forgot-email">
@@ -1206,6 +1208,8 @@ export function PortalAuthFormInline({
               onChange={(e) => setEmail(e.target.value)}
               disabled={loadingAction !== null}
               autoComplete="email"
+              aria-invalid={!!error}
+              aria-describedby={error ? 'portal-auth-error' : undefined}
             />
           </div>
 

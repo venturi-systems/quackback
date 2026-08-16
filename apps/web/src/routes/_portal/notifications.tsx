@@ -269,8 +269,8 @@ function NotificationRow({ notification, onMarkAsRead, style }: NotificationRowP
   }
 
   return (
-    <div onClick={handleClick} className="cursor-default">
+    <button type="button" onClick={handleClick} className="block w-full cursor-default text-start">
       {content}
-    </div>
+    </button>
   )
 }

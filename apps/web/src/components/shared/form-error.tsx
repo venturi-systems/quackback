@@ -1,13 +1,19 @@
 import { cn } from '@/lib/shared/utils'
 
 interface FormErrorProps {
+  id?: string
   message: string
   className?: string
 }
 
-export function FormError({ message, className }: FormErrorProps) {
+export function FormError({ id, message, className }: FormErrorProps) {
   return (
-    <div className={cn('rounded-md bg-destructive/10 p-3 text-sm text-destructive', className)}>
+    <div
+      id={id}
+      role="alert"
+      aria-live="assertive"
+      className={cn('rounded-md bg-destructive/10 p-3 text-sm text-destructive', className)}
+    >
       {message}
     </div>
   )

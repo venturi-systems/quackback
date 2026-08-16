@@ -19,6 +19,7 @@ import { parseAuthPromptSearch } from '@/lib/shared/auth-prompt'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { useAutoOpenAuthDialog } from '@/components/auth/use-auto-open-auth'
 import { resolveInstantSsoRedirectFn } from '@/lib/server/functions/instant-sso'
+import { FormattedMessage } from 'react-intl'
 
 export const Route = createFileRoute('/_portal')({
   // Only type the auth-prompt keys; child routes receive their own params from
@@ -292,6 +293,15 @@ function PortalLayout() {
           data-theme={themeMode}
           data-venturi-web-theme={themeMode}
         >
+          <a
+            href="#portal-main"
+            className="sr-only z-50 rounded-md bg-background px-4 py-3 text-foreground shadow-lg focus:not-sr-only focus:fixed focus:start-4 focus:top-4"
+          >
+            <FormattedMessage
+              id="portal.accessibility.skipToContent"
+              defaultMessage="Skip to content"
+            />
+          </a>
           {googleFontsUrl && <link rel="stylesheet" href={googleFontsUrl} />}
           {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
           {/* Custom CSS is injected after theme styles so it can override */}
@@ -303,7 +313,7 @@ function PortalLayout() {
             initialUserData={initialUserData}
             showThemeToggle={themeMode === 'user'}
           />
-          <main className="flex-1 w-full flex flex-col">
+          <main id="portal-main" tabIndex={-1} className="flex-1 w-full flex flex-col">
             <Outlet />
           </main>
           <AuthDialog authConfig={authConfig} workspaceName={org.name} />

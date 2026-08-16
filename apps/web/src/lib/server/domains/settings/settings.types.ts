@@ -230,7 +230,7 @@ export const PORTAL_WELCOME_CARD_TITLE_MAX = 120
  * carries only `visibility` from this shape (redacted in `__root.tsx`).
  */
 export interface PortalAccessConfig {
-  visibility: 'public' | 'private'
+  visibility: 'public' | 'authenticated' | 'private'
   /** Email domains whose verified users are automatically granted access. */
   allowedDomains: string[]
   /** Whether widget-authenticated users may access a private portal. */

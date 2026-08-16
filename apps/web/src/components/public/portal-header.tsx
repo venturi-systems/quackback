@@ -21,9 +21,11 @@ import {
   ArrowRightStartOnRectangleIcon,
   Cog6ToothIcon,
   ComputerDesktopIcon,
+  Bars3Icon,
   MoonIcon,
   ShieldCheckIcon,
   SunIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/solid'
 import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { hasAnyPortalAuthMethod, resolveSoleOidcProvider } from '@/components/auth/oauth-buttons'
@@ -89,11 +91,25 @@ export function PortalHeader({
   const openAuthPopover = authPopover?.openAuthPopover
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   // Avoid hydration mismatch for theme toggle
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [mobileNavOpen])
 
   // Listen for auth success to refetch session and role via router invalidation
   useAuthBroadcast({
@@ -150,8 +166,14 @@ export function PortalHeader({
   }
 
   // Navigation component
-  const Navigation = () => (
-    <nav className="portal-nav flex items-center gap-1 whitespace-nowrap">
+  const Navigation = ({ mobile = false }: { mobile?: boolean }) => (
+    <nav
+      aria-label={mobile ? 'Mobile portal navigation' : 'Portal navigation'}
+      className={cn(
+        'portal-nav gap-1',
+        mobile ? 'flex flex-col py-2' : 'flex items-center whitespace-nowrap'
+      )}
+    >
       {navItems.map((item) => {
         const isActive =
           item.to === '/'
@@ -166,6 +188,7 @@ export function PortalHeader({
             to={item.to}
             className={cn(
               'portal-nav__item px-3 py-2 text-sm font-medium transition-colors [border-radius:calc(var(--radius)*0.8)]',
+              mobile && 'flex min-h-11 items-center',
               isActive
                 ? 'portal-nav__item--active bg-[var(--nav-active-background)] text-[var(--nav-active-foreground)]'
                 : 'text-[var(--nav-inactive-color)] hover:text-[var(--nav-active-foreground)] hover:bg-[var(--nav-active-background)]/50'
@@ -270,7 +293,14 @@ export function PortalHeader({
         // Logged-in user - show user dropdown
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="relative h-11 w-11 rounded-full">
+            <Button
+              variant="ghost"
+              className="relative h-11 w-11 rounded-full"
+              aria-label={intl.formatMessage({
+                id: 'portal.header.auth.userMenu',
+                defaultMessage: 'User menu',
+              })}
+            >
               <Avatar className="h-9 w-9" src={avatarUrl} name={name} />
             </Button>
           </DropdownMenuTrigger>
@@ -365,9 +395,30 @@ export function PortalHeader({
         </div>
       </div>
 
-      {/* Row 2: Navigation */}
-      <div className="mt-2 overflow-x-auto scrollbar-none">
-        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6">
+      {/* Row 2: controlled mobile menu and full desktop navigation. */}
+      <div className="mt-2 max-w-6xl mx-auto w-full px-4 sm:px-6">
+        <Button
+          type="button"
+          variant="ghost"
+          shape="default"
+          className="min-h-11 w-full justify-between sm:hidden"
+          aria-expanded={mobileNavOpen}
+          aria-controls="portal-mobile-navigation"
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <FormattedMessage id="portal.header.menu" defaultMessage="Menu" />
+          {mobileNavOpen ? (
+            <XMarkIcon className="h-5 w-5" aria-hidden="true" />
+          ) : (
+            <Bars3Icon className="h-5 w-5" aria-hidden="true" />
+          )}
+        </Button>
+        {mobileNavOpen && (
+          <div id="portal-mobile-navigation" className="sm:hidden">
+            <Navigation mobile />
+          </div>
+        )}
+        <div className="hidden sm:block">
           <Navigation />
         </div>
       </div>
