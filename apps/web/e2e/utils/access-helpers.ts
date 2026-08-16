@@ -84,7 +84,10 @@ export function flushMagicLinkRateLimit(): void {
     ['exec', 'quackback-dragonfly', 'redis-cli', '--scan', '--pattern', 'signin:magiclink:*'],
     { encoding: 'utf-8' }
   )
-  const keys = scan.split('\n').map((k) => k.trim()).filter(Boolean)
+  const keys = scan
+    .split('\n')
+    .map((k) => k.trim())
+    .filter(Boolean)
   for (const key of keys) {
     execFileSync('docker', ['exec', 'quackback-dragonfly', 'redis-cli', 'del', key], {
       stdio: 'pipe',
@@ -135,13 +138,13 @@ export function removeIdentityProvider(registrationId: string): void {
 }
 
 /**
- * Set the portal visibility to 'private' or 'public' and bust the tenant-settings
+ * Set the portal visibility and bust the tenant-settings
  * cache so the running dev server sees the change immediately.
  *
  * Always restore to 'public' in a `finally` block so subsequent tests and dev
  * sessions are not left behind a locked gate.
  */
-export function setPortalVisibility(visibility: 'private' | 'public'): void {
+export function setPortalVisibility(visibility: 'private' | 'authenticated' | 'public'): void {
   runScript('../scripts/set-portal-visibility.ts', [visibility])
   // The portal-access decision is cached under 'settings:tenant'. Drop it so
   // the dev server evaluates the new visibility on the next request.

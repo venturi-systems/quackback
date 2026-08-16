@@ -1,5 +1,5 @@
 /**
- * CLI: set portal visibility to 'public' or 'private' in settings.portal_config.
+ * CLI: set portal visibility in settings.portal_config.
  * settings.portal_config is a JSON *text* column, so we read → patch → write.
  * There is a single workspace settings row.
  *
@@ -10,13 +10,13 @@
  * Always restore to 'public' in a `finally` block so subsequent tests and
  * dev sessions are not left with a locked portal.
  *
- * Usage: bun set-portal-visibility.ts <private|public>
+ * Usage: bun set-portal-visibility.ts <private|authenticated|public>
  */
 import postgres from 'postgres'
 
 const arg = (process.argv[2] || '').toLowerCase()
-if (arg !== 'private' && arg !== 'public') {
-  console.error('Usage: bun set-portal-visibility.ts <private|public>')
+if (arg !== 'private' && arg !== 'authenticated' && arg !== 'public') {
+  console.error('Usage: bun set-portal-visibility.ts <private|authenticated|public>')
   process.exit(1)
 }
 

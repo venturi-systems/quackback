@@ -720,7 +720,7 @@ export async function getPublicPortalConfig(): Promise<PublicPortalConfig> {
       ...(oidcProviders.length > 0 && { oidcProviders }),
       ...(welcome && { welcomeCard: welcome }),
       portalAccess: {
-        isPrivate: portalConfig.access?.visibility === 'private',
+        isPrivate: portalConfig.access?.visibility !== 'public',
         widgetSignIn: portalConfig.access?.widgetSignIn ?? false,
       },
     }
@@ -802,7 +802,7 @@ export async function getTenantSettings(): Promise<TenantSettings | null> {
           ...(portalOidcProviders.length > 0 && { oidcProviders: portalOidcProviders }),
           ...(welcome && { welcomeCard: welcome }),
           portalAccess: {
-            isPrivate: portalConfig.access?.visibility === 'private',
+            isPrivate: portalConfig.access?.visibility !== 'public',
             widgetSignIn: portalConfig.access?.widgetSignIn ?? false,
           },
         }

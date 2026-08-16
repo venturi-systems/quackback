@@ -16,7 +16,7 @@
 // Types
 // =============================================================================
 
-export type PortalVisibility = 'public' | 'private'
+export type PortalVisibility = 'public' | 'authenticated' | 'private'
 
 /** Caller-supplied context — everything the evaluator needs, nothing more. */
 export interface PortalAccessContext {
@@ -98,7 +98,10 @@ export interface PortalAccessContext {
 
 /** Discriminated union — narrows cleanly in if/switch. */
 export type PortalAccessResult =
-  | { granted: true; reason: 'public' | 'team' | 'domain' | 'invite' | 'widget' | 'segment' }
+  | {
+      granted: true
+      reason: 'public' | 'authenticated' | 'team' | 'domain' | 'invite' | 'widget' | 'segment'
+    }
   | { granted: false; reason: 'unauthenticated' | 'unauthorized' }
 
 // =============================================================================
@@ -125,7 +128,8 @@ function emailDomain(email: string | null): string | null {
  *
  * Execution order:
  * 1. Public portal → always granted.
- * 2. Team member (admin | member) → granted.
+ * 2. Authenticated portal + real signed-in account → granted.
+ * 3. Team member (admin | member) → granted.
  * 3. Verified email on allowed-domain list → granted.
  * 4. Accepted portal invite (email match, verified) → granted.
  * 5. Allowed segment grant (authenticated member of an allowed segment) → granted.
@@ -147,11 +151,20 @@ function emailDomain(email: string | null): string | null {
  */
 export function evaluatePortalAccess(ctx: PortalAccessContext): PortalAccessResult {
   // 1. Public portal — open to everyone.
-  if (ctx.visibility !== 'private') {
+  if (ctx.visibility === 'public') {
     return { granted: true, reason: 'public' }
   }
 
-  // 2. Team members always have access — but only when actually authenticated.
+  // 2. Authenticated portal — any real signed-in account may enter. An
+  //    anonymous Better Auth principal is not authenticated and must remain
+  //    behind the sign-in wall.
+  if (ctx.visibility === 'authenticated') {
+    return ctx.isAuthenticated
+      ? { granted: true, reason: 'authenticated' }
+      : { granted: false, reason: 'unauthenticated' }
+  }
+
+  // 3. Team members always have access — but only when actually authenticated.
   //    An anonymous principal carrying a team role must not bypass the gate.
   if (ctx.isAuthenticated && (ctx.role === 'admin' || ctx.role === 'member')) {
     return { granted: true, reason: 'team' }

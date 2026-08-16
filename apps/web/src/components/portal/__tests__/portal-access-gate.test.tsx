@@ -81,16 +81,12 @@ describe('PortalAccessGate — inline auth form', () => {
   })
 })
 
-describe('PortalAccessGate — decorative backdrop', () => {
-  it('renders an inert, screen-reader-hidden faux board (nothing focusable)', () => {
+describe('PortalAccessGate — content privacy', () => {
+  it('does not render a real or simulated board before authentication', () => {
     render(<PortalAccessGate {...baseProps} />)
-    const backdrop = screen.getByTestId('portal-gate-backdrop')
-    expect(backdrop).toHaveAttribute('aria-hidden', 'true')
-    // The fake board only exists to suggest a real portal sits behind the wall.
-    // It must never be tabbable or announced to assistive tech.
-    expect(
-      backdrop.querySelectorAll('button, a, input, select, textarea, [tabindex]')
-    ).toHaveLength(0)
+    expect(screen.queryByTestId('portal-gate-backdrop')).not.toBeInTheDocument()
+    expect(screen.queryByText('Roadmap')).not.toBeInTheDocument()
+    expect(screen.queryByText('Dark mode for the dashboard')).not.toBeInTheDocument()
   })
 })
 

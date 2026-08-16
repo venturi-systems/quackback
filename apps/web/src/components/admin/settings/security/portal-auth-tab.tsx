@@ -5,6 +5,7 @@ import {
   ArrowRightIcon,
   GlobeAltIcon,
   LockClosedIcon,
+  UserGroupIcon,
   PlusIcon,
   XMarkIcon,
 } from '@heroicons/react/24/solid'
@@ -29,7 +30,7 @@ interface PortalAuthTabProps {
 /**
  * Portal access tab — first of three concern-scoped tabs on the
  * /authentication page. Sole purpose is to control WHO can view the
- * portal: visibility (public/private), and the four authorization
+ * portal: visibility (public/authenticated/private), and the four authorization
  * channels that grant access to additional visitors when private
  * (allowed email domains, email invites, allowed segments, widget
  * sign-in).
@@ -44,13 +45,19 @@ interface PortalAuthTabProps {
 // ---------------------------------------------------------------------------
 
 interface VisibilityOption {
-  value: 'public' | 'private'
+  value: 'public' | 'authenticated' | 'private'
   label: string
   description: string
   icon: typeof LockClosedIcon
 }
 
 const VISIBILITY_OPTIONS: VisibilityOption[] = [
+  {
+    value: 'authenticated',
+    label: 'Signed in',
+    description: 'Anyone with an account can view after signing in.',
+    icon: UserGroupIcon,
+  },
   {
     value: 'public',
     label: 'Public',
@@ -76,8 +83,13 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
   // that every call to `applyAccess` reads fresh state regardless of when
   // the closure was created — no stale capture is possible.
 
-  const currentVisibility = (portalConfig.access?.visibility ?? 'public') as 'public' | 'private'
-  const [visibility, setVisibility] = useState<'public' | 'private'>(currentVisibility)
+  const currentVisibility = (portalConfig.access?.visibility ?? 'public') as
+    | 'public'
+    | 'authenticated'
+    | 'private'
+  const [visibility, setVisibility] = useState<'public' | 'authenticated' | 'private'>(
+    currentVisibility
+  )
   const visibilityRef = useRef(visibility)
   visibilityRef.current = visibility
 
@@ -107,7 +119,7 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
 
   const [accessBusy, setAccessBusy] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [pendingVisibility, setPendingVisibility] = useState<'public' | 'private' | null>(null)
+  const [pendingVisibility, setPendingVisibility] = useState<'private' | null>(null)
   const [domainInput, setDomainInput] = useState('')
   const [domainInputError, setDomainInputError] = useState<string | null>(null)
 
@@ -124,7 +136,7 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
    *    the peers.
    */
   async function applyAccess(
-    nextVisibility: 'public' | 'private',
+    nextVisibility: 'public' | 'authenticated' | 'private',
     nextDomains: string[],
     nextWidgetSignIn?: boolean,
     nextSegmentIds?: string[]
@@ -166,15 +178,16 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
     }
   }
 
-  function handleVisibilitySelect(next: 'public' | 'private') {
+  function handleVisibilitySelect(next: 'public' | 'authenticated' | 'private') {
     if (next === visibilityRef.current || isAccessBusy) return
 
     if (next === 'private') {
       setPendingVisibility('private')
       setDialogOpen(true)
     } else {
-      // Changing to public: keep current domains (ref) alongside new visibility
-      void applyAccess('public', allowedDomainsRef.current)
+      // Public and signed-in modes do not use the private allowlist, but keep
+      // its configuration so switching back to Private is lossless.
+      void applyAccess(next, allowedDomainsRef.current)
     }
   }
 
@@ -237,11 +250,11 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
 
   return (
     <div className="space-y-6">
-      {/* Portal visibility — sole purpose is the public/private switch. The
+      {/* Portal visibility. The
           four authorization channels each get their own SettingsCard below
           (only when Private) so each one stands on its own. */}
       <SettingsCard title="Portal visibility" description="Choose who can view your portal.">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {VISIBILITY_OPTIONS.map((option) => {
             const isSelected = visibility === option.value
             const Icon = option.icon
