@@ -40,7 +40,12 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Enforce repository governance
-        uses: venturi-systems/.github/.github/actions/repository-governance@0d21e9b9a9bcf3e3dba86cc7b0ed9a778af273d9
+        uses: docker://ghcr.io/venturi-systems/repository-governance-validator@sha256:9687a75b75ec9d653a3ede789a6baa05bdc1dd1c2711aac476f7990b15eb1fc7
+        with:
+          args: >-
+            --manifest .venturi/repository-governance.json
+            --repository ${{ github.repository }}
+            --root /github/workspace
 
       - name: Check fork portability contract
         run: |
