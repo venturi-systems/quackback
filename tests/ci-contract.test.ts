@@ -33,11 +33,14 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain('name: portability-gate')
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
+    expect(ci).toContain('docker run --rm --read-only --network none')
     expect(ci).toContain(
-      'docker://ghcr.io/venturi-systems/repository-governance-validator@sha256:9687a75b75ec9d653a3ede789a6baa05bdc1dd1c2711aac476f7990b15eb1fc7'
+      'ghcr.io/venturi-systems/repository-governance-validator@sha256:9687a75b75ec9d653a3ede789a6baa05bdc1dd1c2711aac476f7990b15eb1fc7'
     )
+    expect(ci).not.toContain('uses: docker://')
+    expect(ci).toContain('--volume "$GITHUB_WORKSPACE:/github/workspace:ro"')
     expect(ci).toContain('--manifest .venturi/repository-governance.json')
-    expect(ci).toContain('--repository ${{ github.repository }}')
+    expect(ci).toContain('--repository "$GITHUB_REPOSITORY"')
     expect(ci).toContain('--root /github/workspace')
     expect(ci).not.toContain('venturi-systems/.github/.github/actions/repository-governance@')
     expect(ci).toContain('Check fork portability contract')
