@@ -39,6 +39,16 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - name: Enforce repository governance
+        run: >-
+          docker run --rm --read-only --network none
+          --volume "$GITHUB_WORKSPACE:/github/workspace:ro"
+          --workdir /github/workspace
+          ghcr.io/venturi-systems/repository-governance-validator@sha256:9687a75b75ec9d653a3ede789a6baa05bdc1dd1c2711aac476f7990b15eb1fc7
+          --manifest .venturi/repository-governance.json
+          --repository "$GITHUB_REPOSITORY"
+          --root /github/workspace
+
       - name: Check fork portability contract
         run: |
           set -euo pipefail

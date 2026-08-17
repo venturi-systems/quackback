@@ -7,22 +7,49 @@ on:
     inputs:
       tag:
         description: 'Release tag to attach openapi.json to (e.g. v0.3.6)'
+        required: false
+      dry_run:
+        description: 'Generate and validate without uploading a release asset'
         required: true
+        default: true
+        type: boolean
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-openapi-${{ inputs.tag || github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish-openapi:
+    if: github.repository == 'venturi-systems/quackback'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          ref: ${{ inputs.tag || github.event.release.tag_name || github.sha }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2 (v2.2.0)
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Validate release identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "venturi-systems/quackback"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "true" ] && [ -z "$RELEASE_TAG" ]; then
+            echo "An existing release tag is required for upload." >&2
+            exit 1
+          fi
+          if [ -n "$RELEASE_TAG" ] && [[ "$RELEASE_TAG" != v* ]]; then
+            echo "OpenAPI release identity must be a v* tag." >&2
+            exit 1
+          fi
 
       - name: Generate OpenAPI spec
         run: |
@@ -37,6 +64,29 @@ jobs:
           EOF
           bun run generate-openapi.ts
 
+      - name: Validate generated OpenAPI artifact
+        run: bun -e "const spec = await Bun.file('openapi.json').json(); if (!spec.openapi || !spec.info) process.exit(1)"
+
+      - name: Stage generated OpenAPI artifact
+        if: github.event_name == 'release' || inputs.dry_run == false
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openapi-release-candidate
+          path: openapi.json
+          if-no-files-found: error
+          retention-days: 1
+
+  upload-release:
+    if: github.event_name == 'release' || inputs.dry_run == false
+    needs: publish-openapi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: openapi-release-candidate
       - name: Upload Release Asset
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2 (v2.6.2)
         with:

@@ -3,21 +3,57 @@ on:
   push:
     tags: ['widget-v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing widget-v* tag to validate or publish'
+        required: false
+        type: string
+      dry_run:
+        description: 'Build and pack without publishing'
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: publish-widget-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  validate:
+    if: github.repository == 'venturi-systems/quackback'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write # Required for npm trusted publishing (OIDC)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2 (v2.2.0)
-      - run: bun install
+      - name: Validate release identity
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "venturi-systems/quackback"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "true" ] && [ -z "$RELEASE_TAG" ]; then
+            echo "A widget-v* tag is required for a publishing dispatch." >&2
+            exit 1
+          fi
+          if [[ "$RELEASE_TAG" == widget-v* ]]; then
+            tag_version="${RELEASE_TAG#widget-v}"
+            package_version="$(bun -e "console.log(require('./packages/widget/package.json').version)")"
+            test "$tag_version" = "$package_version"
+          elif [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$DRY_RUN" != "true" ]; then
+            echo "Release identity must be a widget-v* tag." >&2
+            exit 1
+          fi
+      - run: bun install --frozen-lockfile
       - run: bun run --filter @quackback/widget test
       - run: bun run --filter @quackback/widget typecheck
       - run: bun run --filter @quackback/widget build
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
@@ -27,4 +63,37 @@ jobs:
       - run: npm install -g npm@11.5.1
       # No NODE_AUTH_TOKEN — OIDC replaces the token; npmjs.com must have a
       # trusted publisher configured for this repo + workflow.
-      - run: cd packages/widget && npm publish --provenance --access public
+      - name: Validate package dry-run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: cd packages/widget && npm pack --dry-run
+      - name: Package release candidate
+        if: github.event_name == 'push' || inputs.dry_run == false
+        run: mkdir -p dist-release && cd packages/widget && npm pack --pack-destination ../../dist-release
+      - name: Upload release candidate
+        if: github.event_name == 'push' || inputs.dry_run == false
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: widget-release-candidate
+          path: dist-release/*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: github.repository == 'venturi-systems/quackback' && (github.event_name == 'push' || inputs.dry_run == false)
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # Required for npm trusted publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: widget-release-candidate
+          path: dist-release
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm install -g npm@11.5.1
+      - run: npm publish dist-release/*.tgz --provenance --access public
