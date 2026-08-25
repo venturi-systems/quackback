@@ -122,9 +122,26 @@ describe('QB-GOV-001 repository governance contract', () => {
     const widget = readFileSync(join(workflowDir, 'publish-widget.yml'), 'utf8')
     const openapi = readFileSync(join(workflowDir, 'release-openapi.yml'), 'utf8')
 
-    expect(widget).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262')
-    expect(widget).toContain('actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020')
-    expect(openapi).toContain('actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803')
+    // Every action in a dormant release workflow must be pinned to an immutable
+    // 40-hex commit SHA; a floating tag can be re-pointed under us. Assert the
+    // pin on every `uses:` rather than on three frozen SHA literals -- those
+    // literals covered only 3 of the 11 actions in these two files, and turned
+    // every legitimate action bump into a CI failure (PR #35).
+    const unpinned: string[] = []
+    let auditedActions = 0
+    for (const [name, workflow] of [
+      ['publish-widget.yml', widget],
+      ['release-openapi.yml', openapi],
+    ] as const) {
+      for (const line of workflow.split('\n')) {
+        if (!/^\s*(-\s*)?uses:/.test(line)) continue
+        auditedActions += 1
+        const ref = line.split('uses:')[1].split('#')[0].trim().split('@')[1] ?? ''
+        if (!/^[0-9a-f]{40}$/.test(ref)) unpinned.push(`${name}: ${line.trim()}`)
+      }
+    }
+    expect(unpinned).toEqual([])
+    expect(auditedActions).toBeGreaterThanOrEqual(11)
     for (const workflow of [widget, openapi]) {
       expect(workflow).toContain('dry_run:')
       expect(workflow).toContain('default: true')
