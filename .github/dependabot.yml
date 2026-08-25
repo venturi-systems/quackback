@@ -24,6 +24,20 @@ updates:
           - "*"
     commit-message:
       prefix: "fix(deps)"
+    ignore:
+      # @typescript-eslint 8.x cannot parse TypeScript 7. Its published peer
+      # range is `typescript: ">=4.8.4 <6.1.0"` as of 8.68.0, and on TS 7
+      # `bun run lint` does not report findings -- it CRASHES:
+      #   TypeError: Cannot read properties of undefined (reading 'Cjs')
+      #     at @typescript-eslint/typescript-estree@8.58.2/create-program/shared.js:59
+      # That took the whole workspace-npm group down in #36 (22 updates) even
+      # after the lockfile was regenerated, because one member poisons the group.
+      #
+      # Minor and patch TypeScript updates still flow. LIFT THIS when
+      # `npm view typescript-eslint peerDependencies` shows a range admitting
+      # >=7 -- then let the group carry both in one PR.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/"
