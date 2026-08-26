@@ -56,20 +56,6 @@ updates:
   # weekly run fail with `dependency_file_not_found: No Dockerfiles nor Kubernetes
   # YAML found in /`, so the two base images below were never scanned for updates
   # at all. List the directories that actually hold a Dockerfile.
-  - package-ecosystem: "docker"
-    directories:
-      - "/apps/web"
-      - "/docker/postgres"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 2
-    groups:
-      docker-images:
-        patterns:
-          - "*"
-    commit-message:
-      prefix: "fix(deps)"
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -81,3 +67,18 @@ updates:
           - "*"
     commit-message:
       prefix: "ci(deps)"
+
+  # 2026-08-26: one globbed entry per ecosystem replaces the previous narrow
+  # per-directory entries. Dependabot rejects overlapping (ecosystem, directory)
+  # pairs, and a glob also covers module dirs added later without maintenance.
+  - package-ecosystem: "docker"
+    directories: ["/**"]
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    groups:
+      docker-all:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "fix(deps)"
