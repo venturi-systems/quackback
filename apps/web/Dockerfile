@@ -14,7 +14,7 @@
 
 # Base image with Bun. Pin the multi-architecture manifest so rebuilds use the
 # exact reviewed image rather than a mutable registry tag.
-FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS base
+FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS base
 WORKDIR /app
 
 # ============================================================================
@@ -77,7 +77,7 @@ RUN bun build packages/db/src/migrate.ts \
 # ============================================================================
 # Production runner
 # ============================================================================
-FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS runner
+FROM oven/bun:1.4.0-alpine@sha256:07235578f79ef8c6f97d94aee7938e76f5cdba5f21ae5dbfdd3d3d38058437eb AS runner
 
 # Pin the patched OpenSSL package set so the immutable production artifact is
 # both reproducible and free of the vulnerabilities present in 3.5.6-r0.
