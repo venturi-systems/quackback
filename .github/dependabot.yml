@@ -5,16 +5,20 @@
 
 version: 2
 updates:
+  # 2026-08-26: one globbed entry, the same shape #50 gave docker. The previous
+  # list paired "/" with each workspace member, and in a bun workspace the root
+  # manifest RESOLVES its members -- so every workspace dependency was scanned
+  # twice and dependabot opened two identical pull requests for it. Measured on
+  # the run right after #50 merged: #51/#52/#53 (from "/") and #54/#55/#56 (from
+  # "/apps/web") are three exact duplicate pairs, each editing the same single
+  # line of apps/web/package.json. That is 6 pull requests and 6 CI runs for 3
+  # updates, and it recurs every week.
+  #
+  # "/**" keeps the coverage #50 was protecting -- it matches the root and every
+  # module directory, including ones added later -- while collapsing each update
+  # to one pull request, because a single entry cannot overlap itself.
   - package-ecosystem: "npm"
-    directories:
-      - "/"
-      - "/apps/web"
-      - "/packages/db"
-      - "/packages/email"
-      - "/packages/ids"
-      - "/packages/logger"
-      - "/packages/widget"
-      - "/scripts/import"
+    directories: ["/**"]
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
