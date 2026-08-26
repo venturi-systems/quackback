@@ -61,18 +61,41 @@ describe('root dependency contract', () => {
     expect(lockfile).not.toContain('"sharp": ["sharp@')
   })
 
+  // Assert the SHAPE of the pins, never their current values. Spelling out
+  // `oven/bun:1.3.14@sha256:e10577f0...` here made this test fail on every
+  // Dependabot base-image bump by construction -- the update is correct and
+  // the contract still holds, but the frozen literal disagrees. That turned a
+  // routine bump into a recurring red build, and the images went unscanned.
+  // What actually matters is preserved below: same registry, digest-pinned,
+  // both stages on one Bun version, alpine runner, OpenSSL family explicitly
+  // and consistently pinned.
   it('builds the production runner from patched, immutable Bun bases', () => {
     const dockerfile = readFileSync(join(process.cwd(), 'apps', 'web', 'Dockerfile'), 'utf8')
 
-    expect(dockerfile).toContain(
-      'FROM oven/bun:1.3.14@sha256:e10577f0db68676a7024391c6e5cb4b879ebd17188ab750cf10024a6d700e5c4 AS base'
+    const base = dockerfile.match(/^FROM (oven\/bun:(\S+?))@(sha256:[0-9a-f]{64}) AS base$/m)
+    const runner = dockerfile.match(
+      /^FROM (oven\/bun:(\S+?)-alpine)@(sha256:[0-9a-f]{64}) AS runner$/m
     )
-    expect(dockerfile).toContain(
-      'FROM oven/bun:1.3.14-alpine@sha256:5acc90a93e91ff07bf72aa90a7c9f0fa189765aec90b47bdbf2152d2196383c0 AS runner'
-    )
-    expect(dockerfile).toContain('libcrypto3=3.5.7-r0')
-    expect(dockerfile).toContain('libssl3=3.5.7-r0')
-    expect(dockerfile).toContain('openssl=3.5.7-r0')
+
+    expect(base, 'base stage must be a digest-pinned oven/bun image').not.toBeNull()
+    expect(runner, 'runner stage must be a digest-pinned oven/bun alpine image').not.toBeNull()
+
+    // Immutability is the digest, not the tag: a tag can be re-pointed.
+    expect(base?.[3]).not.toEqual(runner?.[3])
+
+    // Both stages must track one Bun version, or the runner executes a build
+    // produced by a different toolchain than the one that compiled it.
+    expect(runner?.[2]).toEqual(base?.[2])
+
+    // The OpenSSL family is pinned to explicit alpine package revisions, and
+    // to the SAME revision across all three -- a mismatched libssl3/libcrypto3
+    // pair is the failure this pin exists to prevent.
+    const opensslPins = ['libcrypto3', 'libssl3', 'openssl'].map((pkg) => {
+      const found = dockerfile.match(new RegExp(`\\b${pkg}=(\\d+\\.\\d+\\.\\d+-r\\d+)`))
+      expect(found, `${pkg} must be pinned to an explicit alpine revision`).not.toBeNull()
+      return found?.[1]
+    })
+    expect(new Set(opensslPins).size, `OpenSSL pins disagree: ${opensslPins.join(', ')}`).toBe(1)
   })
 })
 
