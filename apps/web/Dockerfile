@@ -81,10 +81,18 @@ FROM oven/bun:1.4.0-alpine@sha256:07235578f79ef8c6f97d94aee7938e76f5cdba5f21ae5d
 
 # Pin the patched OpenSSL package set so the immutable production artifact is
 # both reproducible and free of the vulnerabilities present in 3.5.6-r0.
+#
+# These revisions must exist in the base image's apk index, which moves when the
+# base moves. Alpine keeps only the current revision, so a pin that has aged out
+# fails the build outright with `unable to select packages` rather than silently
+# installing something else. The bun 1.4.0-alpine base is Alpine 3.22.5, whose
+# index carries 3.5.8-r0; 3.5.7-r0 is preinstalled there but is no longer
+# fetchable. Re-check with:
+#   docker run --rm oven/bun:<tag>-alpine apk policy libcrypto3 libssl3 openssl
 RUN apk add --no-cache --upgrade \
-    libcrypto3=3.5.7-r0 \
-    libssl3=3.5.7-r0 \
-    openssl=3.5.7-r0
+    libcrypto3=3.5.8-r0 \
+    libssl3=3.5.8-r0 \
+    openssl=3.5.8-r0
 
 WORKDIR /app
 
