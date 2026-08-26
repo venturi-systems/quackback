@@ -19,9 +19,22 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 3
     groups:
+      # Minor and patch only. A grouped PR is all-or-nothing, so ONE breaking
+      # major takes down every other update riding with it -- #36 lost 22
+      # updates to a single typescript major, and the 2026-08-26 group lost 4
+      # to `@tanstack/react-table` 8 -> 9 (removed the `useReactTable` export)
+      # and `bullmq` 5 -> 6 arriving together.
+      #
+      # Majors still flow, as their own individual PRs, where the migration
+      # they need can be written and reviewed on its own. That is the whole
+      # difference: a major is a code change, and a group is for updates that
+      # are not.
       workspace-npm:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "fix(deps)"
     ignore:
