@@ -49,6 +49,25 @@ updates:
       workspace-bun:
         patterns:
           - "*"
+        # 2026-08-27: a MINOR can be a code change too, so "major" was the wrong
+        # line to draw. `better-auth` 1.6 -> 1.7 removed `genericOAuthClient`
+        # from the published client surface -- verified against the 1.7.1
+        # tarball, where the string does not appear anywhere under `dist/`
+        # (the SERVER `genericOAuth` plugin survives at
+        # `better-auth/plugins/generic-oauth`; only the client export went).
+        # `apps/web/src/lib/server/auth/client.ts:5` imports it, so
+        # `bun run build` dies with
+        #   [MISSING_EXPORT] "genericOAuthClient" is not exported by
+        #   "better-auth/dist/client/plugins/index.mjs"
+        # and, because the group is all-or-nothing, took every other member of
+        # #63 down with it (runs 33039904766, 33046481463).
+        #
+        # Excluding it applies this block's own stated rule -- a migration
+        # belongs in its own reviewable pull request -- to the case where the
+        # migration arrives in a minor. The remaining members now land.
+        exclude-patterns:
+          - "better-auth"
+          - "@better-auth/*"
         update-types:
           - "minor"
           - "patch"
@@ -68,6 +87,42 @@ updates:
       # >=7 -- then let the group carry both in one PR.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+
+      # `@tanstack/react-table` 9 removed `getCoreRowModel`,
+      # `getFilteredRowModel` and `useReactTable` from its published surface;
+      # `apps/web/src/routes/admin/settings.team.tsx:2` imports all three, so
+      # `bun run build` fails with three [MISSING_EXPORT] errors (#60, runs
+      # 33039911356 and 33046176941). Dependabot reopened that pull request on
+      # every weekly cycle and it failed every time, so the recurrence -- not
+      # the bump -- is what this entry stops.
+      #
+      # LIFT THIS together with the v8 -> v9 table migration in
+      # `settings.team.tsx`; minor and patch updates on the 8.x line still flow.
+      - dependency-name: "@tanstack/react-table"
+        update-types: ["version-update:semver-major"]
+
+      # `ioredis` 6 fails `bun run --filter @quackback/web typecheck`, the step
+      # after the build in `portability-gate` (#61, run 33039927464). Same
+      # recurrence shape as above: a major that needs a typed migration, retried
+      # weekly forever.
+      #
+      # LIFT THIS when the ioredis 6 typings are adopted; 5.x minors and patches
+      # (including security patches) still flow.
+      - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
+
+      # ⚠ SECURITY-RELEVANT HOLD, deliberately narrow. `better-auth` minors are
+      # held ONLY because 1.7 dropped the `genericOAuthClient` export the app
+      # imports (see the group exclusion above). PATCH updates on the pinned
+      # 1.6.x line are NOT ignored, so security fixes for the line in use still
+      # arrive. Without this, the group exclusion alone would just move the same
+      # failing update into its own weekly pull request.
+      #
+      # LIFT THIS as part of the `apps/web/src/lib/server/auth/client.ts`
+      # migration off `genericOAuthClient` -- this is the one entry here that
+      # should not be left standing.
+      - dependency-name: "better-auth"
+        update-types: ["version-update:semver-minor"]
 
   # There is no Dockerfile at the repo root. Pointing this entry at "/" made every
   # weekly run fail with `dependency_file_not_found: No Dockerfiles nor Kubernetes
