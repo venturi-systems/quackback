@@ -65,9 +65,28 @@ updates:
         # Excluding it applies this block's own stated rule -- a migration
         # belongs in its own reviewable pull request -- to the case where the
         # migration arrives in a minor. The remaining members now land.
+        #
+        # 2026-08-27, the very next cycle: with better-auth out, the group grew
+        # to 60 updates, built and typechecked cleanly, and reached
+        # `bun run test --run` -- where exactly 2 of 5114 tests failed
+        # (run 33050508738), both `expected null not to be null` in DOM
+        # sanitization:
+        #   apps/web/src/components/public/__tests__/comment-content.test.tsx
+        #   apps/web/src/components/ui/__tests__/rich-text-editor.test.tsx
+        # The group carried `happy-dom` 20.9.0 -> 20.11.6 and `vitest`
+        # 4.1.4 -> 4.1.11 together, i.e. the TEST ENVIRONMENT itself.
+        #
+        # ⛔ WHICH OF THE TWO CAUSES IT IS NOT PROVEN HERE, and that is exactly
+        # the argument for splitting them out rather than guessing: a bump that
+        # changes how tests are EXECUTED re-decides the result for all 58 other
+        # members, so it can never be evaluated while riding with them. In its
+        # own pull request the two failures are the whole diff's evidence
+        # instead of noise attributed to 60 packages.
         exclude-patterns:
           - "better-auth"
           - "@better-auth/*"
+          - "happy-dom"
+          - "vitest"
         update-types:
           - "minor"
           - "patch"
@@ -109,6 +128,20 @@ updates:
       # LIFT THIS when the ioredis 6 typings are adopted; 5.x minors and patches
       # (including security patches) still flow.
       - dependency-name: "ioredis"
+        update-types: ["version-update:semver-major"]
+
+      # `bullmq` 6 removed the repeatable-job API the queue layer is written
+      # against. Measured on #66, run 33050659069, `bun run --filter
+      # @quackback/web typecheck`:
+      #   TS2339 Property 'getRepeatableJobs' does not exist on type 'Queue<...>'
+      #   TS2339 Property 'removeRepeatableByKey' does not exist on type 'Queue<...>'
+      #   TS2353 'repeat' does not exist in type 'JobsOptions'
+      # The 2026-08-26 group had already lost updates to this same major; it now
+      # arrives as its own pull request and fails there instead, weekly.
+      #
+      # LIFT THIS with the repeatable-job migration to bullmq 6's Job Scheduler
+      # API; 5.x minors and patches still flow.
+      - dependency-name: "bullmq"
         update-types: ["version-update:semver-major"]
 
       # ⚠ SECURITY-RELEVANT HOLD, deliberately narrow. `better-auth` minors are
