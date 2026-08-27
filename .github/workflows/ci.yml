@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # No labeled/unlabeled: a label change carries no new commit, so the run it
+    # starts tests the same tree the previous one did and is immediately killed
+    # by cancel-in-progress below. Dependabot labels every PR it opens, which
+    # made that the normal path -- measured 4 cancelled CI runs on every one of
+    # the last 7 dependabot PRs. Use workflow_dispatch to re-run on demand.
+    types: [opened, synchronize, reopened]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
