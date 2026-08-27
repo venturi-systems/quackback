@@ -172,6 +172,39 @@ updates:
       - dependency-name: "better-auth"
         update-types: ["version-update:semver-minor"]
 
+      # The other half of the same migration, and the reason the entry above did
+      # not finish the job. `@better-auth/oauth-provider` is in the group's
+      # `exclude-patterns` (as `@better-auth/*`) but was NOT ignored, so it did
+      # exactly what the comment above predicted for `better-auth` -- moved into
+      # its own weekly pull request and failed there instead. That is #68.
+      #
+      # 1.7.1 is built against `better-auth` 1.7.x and imports 23 symbols that
+      # the pinned 1.6.30 does not export. Measured on #68, run 33059952581,
+      # step `Run bun run build`:
+      #   Build failed with 23 errors:
+      #   [MISSING_EXPORT] "redeemDeviceCode" is not exported by
+      #     "better-auth@1.6.30/.../dist/index.mjs"
+      #   [MISSING_EXPORT] "createDpopReplayStore" ... "enforceDpopBinding" ...
+      #   "getConfirmationJkt" ... "getDpopJktFromPayload" ...
+      # `portability-gate` is the only required context, so the pull request can
+      # never go green on its own: taking 1.7.1 REQUIRES `better-auth` 1.7.x,
+      # which is held above pending the `genericOAuthClient` migration.
+      #
+      # ⛔ Do not "fix" this by bumping `better-auth` alone. `genericOAuthClient()`
+      # supplies `authClient.signIn.oauth2(...)`, which has four live call sites
+      # in the portal sign-in path --
+      #   apps/web/src/components/auth/oauth-buttons.tsx:20
+      #   apps/web/src/components/auth/portal-auth-form-inline.tsx:292, :845
+      #   apps/web/src/components/public/portal-header.tsx:156
+      # -- so dropping the plugin breaks Custom OIDC/SSO sign-in on the live
+      # portal. Patch updates on the 1.6.x line still arrive.
+      #
+      # LIFT THIS AND THE ENTRY ABOVE TOGETHER, in the same pull request as the
+      # `apps/web/src/lib/server/auth/client.ts` migration. They are one unit of
+      # work; lifting either alone reproduces this failure.
+      - dependency-name: "@better-auth/oauth-provider"
+        update-types: ["version-update:semver-minor"]
+
   # There is no Dockerfile at the repo root. Pointing this entry at "/" made every
   # weekly run fail with `dependency_file_not_found: No Dockerfiles nor Kubernetes
   # YAML found in /`, so the two base images below were never scanned for updates
