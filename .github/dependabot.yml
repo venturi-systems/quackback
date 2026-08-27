@@ -83,25 +83,39 @@ updates:
         # The hypothesis was refuted, so the exclusion is reverted with it:
         # keeping it on a rationale the evidence killed would be rationalising.
         #
-        # ⭐ THE REAL CAUSE IS `dompurify` 3.4.0 -> 3.4.14, and the reason it was
-        # missed is worth keeping: dependabot's pull-request body lists DIRECT
-        # dependency lines, and dompurify appeared in NONE of them. It is only
-        # visible in the diff itself --
-        #   -    "dompurify": "^3.4.0",
-        #   +    "dompurify": "^3.4.14",
-        # ⛔ So never conclude a group's culprit from the "Updates X from A to B"
-        # summary; read the `package.json`/`bun.lock` diff.
+        # ⛔⛔ CORRECTED 2026-08-27. An earlier revision of this block concluded
+        # that `dompurify` 3.4.0 -> 3.4.14 "strips the editor's custom embed
+        # attributes" and that fixing it meant "updating the sanitiser's
+        # allowed-attribute config, an application change with its own review".
+        # Both halves are WRONG, and acting on them held an XSS sanitiser back
+        # from security updates on a false rationale.
         #
-        # 3.4.14 strips the editor's custom embed attributes, which is exactly
-        # what the surviving assertion checks:
-        #   container.querySelector('[data-quackback-embed]')  ->  null
-        # Fixing it means updating the sanitiser's allowed-attribute config, an
-        # application change with its own review -- so dompurify leaves the
-        # group and the other members land.
+        # 3.4.14 does not strip those attributes. Under `happy-dom` it strips
+        # EVERY ELEMENT, with no config at all -- measured directly:
+        #   dompurify 3.4.0  + happy-dom -> '<div class="c">hi</div>'   (ok)
+        #   dompurify 3.4.0  + jsdom     -> '<div class="c">hi</div>'   (ok)
+        #   dompurify 3.4.14 + jsdom     -> '<div class="c">hi</div>'   (ok)
+        #   dompurify 3.4.14 + happy-dom -> 'hi'                        (element gone)
+        # `<p>hi</p>` degrades to `hi` the same way, and `DOMPurify.removed`
+        # reports 2 -- so it is an active removal decision, not a fallback.
+        # `isSupported` stays TRUE throughout, which is why it fails silently.
+        # Changing ALLOWED_ATTR / ALLOW_DATA_ATTR / ADD_ATTR does not move it:
+        # every variant still returns ''. The app's allow-list was never at
+        # fault -- it already lists `data-quackback-embed`, `data-kind`, `data-id`.
+        #
+        # ⭐ So this was a TEST-ENVIRONMENT incompatibility, not an application
+        # defect. Production sanitises in a real browser
+        # (`typeof window !== 'undefined' ? DOMPurify.sanitize(...)` in
+        # `rich-text-editor.tsx`), where 3.4.14 behaves correctly.
+        #
+        # Fixed at root by running the two DOM-sanitisation suites under `jsdom`
+        # instead of `happy-dom` -- both files already carried an explicit
+        # `// @vitest-environment` docblock, so it is one line each. 28/28 tests
+        # pass on 3.4.14 under jsdom. dompurify therefore rejoins the group and
+        # its security patches flow again.
         exclude-patterns:
           - 'better-auth'
           - '@better-auth/*'
-          - 'dompurify'
         update-types:
           - 'minor'
           - 'patch'
@@ -209,6 +223,23 @@ updates:
       # flow, so security fixes for the line in use are not held.
       - dependency-name: '@better-auth/oauth-provider'
         update-types: ['version-update:semver-minor']
+
+      # `react-day-picker` 10 changed `DayPickerProps`: the `initialFocus` prop
+      # the datetime picker passes no longer exists on it. Measured on #79, run
+      # 33067617377, step `Run bun run --filter @quackback/web typecheck`:
+      #   src/components/ui/datetime-picker.tsx(88,11): error TS2322: Type
+      #   '{ mode: "single"; selected: Date | undefined; onSelect: ...;
+      #     disabled: ...; initialFocus: true; }' is not assignable to type
+      #   'IntrinsicAttributes & DayPickerProps'.
+      # Same recurrence shape as the three majors above: a migration retried
+      # weekly forever. Majors are meant to arrive as their own pull request so
+      # the migration can be written -- but an unignored one that nobody has
+      # time to migrate is just a permanent red check.
+      #
+      # LIFT THIS with the `datetime-picker.tsx` v9 -> v10 migration; 9.x minors
+      # and patches still flow.
+      - dependency-name: 'react-day-picker'
+        update-types: ['version-update:semver-major']
 
   # There is no Dockerfile at the repo root. Pointing this entry at "/" made every
   # weekly run fail with `dependency_file_not_found: No Dockerfiles nor Kubernetes

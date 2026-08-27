@@ -1,4 +1,4 @@
-// @vitest-environment happy-dom
+// @vitest-environment jsdom
 /**
  * Tests for mention rendering in generateContentHTML and RichTextContent.
  *
