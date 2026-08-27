@@ -194,6 +194,16 @@ updates:
       # independently landable; it is the second half of the better-auth 1.7
       # migration and belongs in that pull request, not in a weekly retry.
       #
+      # ⛔ Do not "fix" this by bumping `better-auth` alone. `genericOAuthClient()`
+      # supplies `authClient.signIn.oauth2(...)`, which has four live call sites
+      # in the portal sign-in path --
+      #   apps/web/src/components/auth/oauth-buttons.tsx:20
+      #   apps/web/src/components/auth/portal-auth-form-inline.tsx:292, :845
+      #   apps/web/src/components/public/portal-header.tsx:156
+      # -- so dropping the plugin breaks Custom OIDC/SSO sign-in on the live
+      # portal. That is why the two entries lift together, in the same pull
+      # request as the `apps/web/src/lib/server/auth/client.ts` migration.
+      #
       # LIFT THIS with the `better-auth` entry above, in the same migration --
       # they must move together or not at all. PATCH updates on 1.6.x still
       # flow, so security fixes for the line in use are not held.
