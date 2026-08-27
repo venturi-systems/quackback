@@ -85,7 +85,7 @@ export function DateTimePicker({
           selected={value}
           onSelect={handleDateSelect}
           disabled={(date) => (minDate ? date < minDate : false)}
-          initialFocus
+          autoFocus
         />
         <div className="border-t border-border/50 px-3 py-2">
           <div className="flex items-center gap-2">
