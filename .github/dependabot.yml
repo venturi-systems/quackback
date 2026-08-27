@@ -73,20 +73,35 @@ updates:
         # sanitization:
         #   apps/web/src/components/public/__tests__/comment-content.test.tsx
         #   apps/web/src/components/ui/__tests__/rich-text-editor.test.tsx
-        # The group carried `happy-dom` 20.9.0 -> 20.11.6 and `vitest`
-        # 4.1.4 -> 4.1.11 together, i.e. the TEST ENVIRONMENT itself.
         #
-        # ⛔ WHICH OF THE TWO CAUSES IT IS NOT PROVEN HERE, and that is exactly
-        # the argument for splitting them out rather than guessing: a bump that
-        # changes how tests are EXECUTED re-decides the result for all 58 other
-        # members, so it can never be evaluated while riding with them. In its
-        # own pull request the two failures are the whole diff's evidence
-        # instead of noise attributed to 60 packages.
+        # ⛔⛔ THAT WAS FIRST BLAMED ON THE TEST ENVIRONMENT, AND THAT WAS WRONG.
+        # The group also carried `happy-dom` 20.9.0 -> 20.11.6 and `vitest`
+        # 4.1.4 -> 4.1.11, so both were excluded on the theory that a bump
+        # changing how tests EXECUTE re-decides the result for every other
+        # member. Dependabot then rebuilt the group as #71 WITHOUT either of
+        # them -- and the same two tests failed identically (run 33052008593).
+        # The hypothesis was refuted, so the exclusion is reverted with it:
+        # keeping it on a rationale the evidence killed would be rationalising.
+        #
+        # ⭐ THE REAL CAUSE IS `dompurify` 3.4.0 -> 3.4.14, and the reason it was
+        # missed is worth keeping: dependabot's pull-request body lists DIRECT
+        # dependency lines, and dompurify appeared in NONE of them. It is only
+        # visible in the diff itself --
+        #   -    "dompurify": "^3.4.0",
+        #   +    "dompurify": "^3.4.14",
+        # ⛔ So never conclude a group's culprit from the "Updates X from A to B"
+        # summary; read the `package.json`/`bun.lock` diff.
+        #
+        # 3.4.14 strips the editor's custom embed attributes, which is exactly
+        # what the surviving assertion checks:
+        #   container.querySelector('[data-quackback-embed]')  ->  null
+        # Fixing it means updating the sanitiser's allowed-attribute config, an
+        # application change with its own review -- so dompurify leaves the
+        # group and the other members land.
         exclude-patterns:
           - "better-auth"
           - "@better-auth/*"
-          - "happy-dom"
-          - "vitest"
+          - "dompurify"
         update-types:
           - "minor"
           - "patch"
