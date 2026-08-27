@@ -30,10 +30,10 @@ updates:
   # covers every workspace package. That is the same resolution fact #57 relied
   # on to collapse the duplicate npm pull requests, applied to the one lockfile
   # that actually exists.
-  - package-ecosystem: "bun"
-    directory: "/"
+  - package-ecosystem: 'bun'
+    directory: '/'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
     open-pull-requests-limit: 3
     groups:
       # Minor and patch only. A grouped PR is all-or-nothing, so ONE breaking
@@ -48,7 +48,7 @@ updates:
       # are not.
       workspace-bun:
         patterns:
-          - "*"
+          - '*'
         # 2026-08-27: a MINOR can be a code change too, so "major" was the wrong
         # line to draw. `better-auth` 1.6 -> 1.7 removed `genericOAuthClient`
         # from the published client surface -- verified against the 1.7.1
@@ -99,14 +99,14 @@ updates:
         # application change with its own review -- so dompurify leaves the
         # group and the other members land.
         exclude-patterns:
-          - "better-auth"
-          - "@better-auth/*"
-          - "dompurify"
+          - 'better-auth'
+          - '@better-auth/*'
+          - 'dompurify'
         update-types:
-          - "minor"
-          - "patch"
+          - 'minor'
+          - 'patch'
     commit-message:
-      prefix: "fix(deps)"
+      prefix: 'fix(deps)'
     ignore:
       # @typescript-eslint 8.x cannot parse TypeScript 7. Its published peer
       # range is `typescript: ">=4.8.4 <6.1.0"` as of 8.68.0, and on TS 7
@@ -119,8 +119,8 @@ updates:
       # Minor and patch TypeScript updates still flow. LIFT THIS when
       # `npm view typescript-eslint peerDependencies` shows a range admitting
       # >=7 -- then let the group carry both in one PR.
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
 
       # `@tanstack/react-table` 9 removed `getCoreRowModel`,
       # `getFilteredRowModel` and `useReactTable` from its published surface;
@@ -132,8 +132,8 @@ updates:
       #
       # LIFT THIS together with the v8 -> v9 table migration in
       # `settings.team.tsx`; minor and patch updates on the 8.x line still flow.
-      - dependency-name: "@tanstack/react-table"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '@tanstack/react-table'
+        update-types: ['version-update:semver-major']
 
       # `ioredis` 6 fails `bun run --filter @quackback/web typecheck`, the step
       # after the build in `portability-gate` (#61, run 33039927464). Same
@@ -142,8 +142,8 @@ updates:
       #
       # LIFT THIS when the ioredis 6 typings are adopted; 5.x minors and patches
       # (including security patches) still flow.
-      - dependency-name: "ioredis"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: 'ioredis'
+        update-types: ['version-update:semver-major']
 
       # `bullmq` 6 removed the repeatable-job API the queue layer is written
       # against. Measured on #66, run 33050659069, `bun run --filter
@@ -156,8 +156,8 @@ updates:
       #
       # LIFT THIS with the repeatable-job migration to bullmq 6's Job Scheduler
       # API; 5.x minors and patches still flow.
-      - dependency-name: "bullmq"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: 'bullmq'
+        update-types: ['version-update:semver-major']
 
       # ⚠ SECURITY-RELEVANT HOLD, deliberately narrow. `better-auth` minors are
       # held ONLY because 1.7 dropped the `genericOAuthClient` export the app
@@ -169,24 +169,52 @@ updates:
       # LIFT THIS as part of the `apps/web/src/lib/server/auth/client.ts`
       # migration off `genericOAuthClient` -- this is the one entry here that
       # should not be left standing.
-      - dependency-name: "better-auth"
-        update-types: ["version-update:semver-minor"]
+      - dependency-name: 'better-auth'
+        update-types: ['version-update:semver-minor']
+
+      # The SAME hold, for the package that carries the same migration. The
+      # group exclusion above covers `@better-auth/*`, but an excluded member
+      # is not an ignored one: it simply arrives as its own pull request. #68
+      # (`@better-auth/oauth-provider` 1.6.16 -> 1.7.1) is that pull request,
+      # and it cannot pass while `better-auth` is held on 1.6.x, because 1.7.1
+      # declares `better-auth: "^1.7.1"` as a PEER dependency:
+      #   npm view @better-auth/oauth-provider@1.7.1 peerDependencies
+      #   { 'better-auth': '^1.7.1', 'better-call': '1.4.0',
+      #     '@better-auth/core': '^1.7.1', '@better-auth/utils': '0.4.2',
+      #     '@better-fetch/fetch': '1.3.1' }
+      # `^1.6.30` does not satisfy `^1.7.1`, so the provider resolves against
+      # the held 1.6.30 and `bun run build` dies with 23 [MISSING_EXPORT]
+      # errors -- `redeemDeviceCode`, `createDpopReplayStore`,
+      # `enforceDpopBinding`, `getConfirmationJkt`, `getDpopJktFromPayload`
+      # and more, none of which exist in 1.6.30 (run 33059952581).
+      #
+      # ⭐ Measured 2026-08-27 by bumping BOTH in lockstep locally: all 23
+      # errors clear and exactly ONE remains -- the `genericOAuthClient` import
+      # at `apps/web/src/lib/server/auth/client.ts:5`. So this bump is not
+      # independently landable; it is the second half of the better-auth 1.7
+      # migration and belongs in that pull request, not in a weekly retry.
+      #
+      # LIFT THIS with the `better-auth` entry above, in the same migration --
+      # they must move together or not at all. PATCH updates on 1.6.x still
+      # flow, so security fixes for the line in use are not held.
+      - dependency-name: '@better-auth/oauth-provider'
+        update-types: ['version-update:semver-minor']
 
   # There is no Dockerfile at the repo root. Pointing this entry at "/" made every
   # weekly run fail with `dependency_file_not_found: No Dockerfiles nor Kubernetes
   # YAML found in /`, so the two base images below were never scanned for updates
   # at all. List the directories that actually hold a Dockerfile.
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
     open-pull-requests-limit: 2
     groups:
       workflow-actions:
         patterns:
-          - "*"
+          - '*'
     commit-message:
-      prefix: "ci(deps)"
+      prefix: 'ci(deps)'
 
   # 2026-08-26: one globbed entry per ecosystem replaced the previous narrow
   # per-directory entries. Dependabot rejects overlapping (ecosystem, directory)
@@ -208,16 +236,16 @@ updates:
   # exactly two: apps/web/Dockerfile and docker/postgres/Dockerfile. A directory
   # added later needs a line here -- that maintenance cost is real, and it is
   # still cheaper than an ecosystem that silently scans nothing.
-  - package-ecosystem: "docker"
+  - package-ecosystem: 'docker'
     directories:
-      - "/apps/web"
-      - "/docker/postgres"
+      - '/apps/web'
+      - '/docker/postgres'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
     open-pull-requests-limit: 2
     groups:
       docker-all:
         patterns:
-          - "*"
+          - '*'
     commit-message:
-      prefix: "fix(deps)"
+      prefix: 'fix(deps)'
