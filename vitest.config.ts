@@ -21,6 +21,11 @@ export default defineConfig({
       // Isolated git worktrees live here; they are separate checkouts with
       // their own deps and must not be run by the parent repo's suite.
       '**/.claude/**',
+      // `<repo>/.worktrees/<name>` is the fleet-standard location for an agent
+      // worktree (/tmp is unusable: sandboxed agents get a private /tmp, so a
+      // `git worktree prune` there destroys live registrations). Same reason as
+      // `.claude/**` — a nested checkout carries its own copy of every test.
+      '**/.worktrees/**',
       '**/*-integration.test.ts',
       // Widget package has its own vitest.config.ts with happy-dom — run via
       // `bun run --cwd packages/widget test`. Don't double-run from the root.
