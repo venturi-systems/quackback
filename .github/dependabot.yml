@@ -173,11 +173,30 @@ updates:
     commit-message:
       prefix: "ci(deps)"
 
-  # 2026-08-26: one globbed entry per ecosystem replaces the previous narrow
+  # 2026-08-26: one globbed entry per ecosystem replaced the previous narrow
   # per-directory entries. Dependabot rejects overlapping (ecosystem, directory)
-  # pairs, and a glob also covers module dirs added later without maintenance.
+  # pairs, and a glob was also meant to cover module dirs added later without
+  # maintenance.
+  #
+  # ⛔ 2026-08-27: THE GLOB NEVER EXPANDED. Every docker run since aborted before
+  # fetching a single file:
+  #   ERROR <job_...> Error during file fetching; aborting: /** not found
+  #   dependency_file_not_found | {"message": "/** not found"}
+  # measured on runs 33051577009 and 33050033... -- so the two base images have
+  # NOT been scanned for updates at all since the glob landed. That is the exact
+  # outcome the comment above was written to fix, reintroduced in a new form: the
+  # first version failed on `directory: "/"` because no Dockerfile sits at the
+  # repo root, and this one fails on a pattern that matches nothing.
+  #
+  # ⭐ Back to the two directories that actually hold a Dockerfile, which is what
+  # that earlier fix concluded. `git ls-tree -r --name-only origin/main` shows
+  # exactly two: apps/web/Dockerfile and docker/postgres/Dockerfile. A directory
+  # added later needs a line here -- that maintenance cost is real, and it is
+  # still cheaper than an ecosystem that silently scans nothing.
   - package-ecosystem: "docker"
-    directories: ["/**"]
+    directories:
+      - "/apps/web"
+      - "/docker/postgres"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 2
