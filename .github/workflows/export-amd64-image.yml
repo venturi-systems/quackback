@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Commit SHA or ref to build."
+        description: 'Commit SHA or ref to build.'
         required: true
       image_tag:
-        description: "Local image tag embedded in the exported archive."
+        description: 'Local image tag embedded in the exported archive.'
         required: false
-        default: "deploy"
+        default: 'deploy'
 
 permissions:
   contents: read
@@ -29,9 +29,11 @@ jobs:
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
       - name: Build amd64 image archive
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
         run: |
           set -euo pipefail
-          tag="venturi-feedback-quackback:${{ github.event.inputs.image_tag }}"
+          tag="venturi-feedback-quackback:${IMAGE_TAG}"
           docker buildx build \
             --platform linux/amd64 \
             --file apps/web/Dockerfile \
