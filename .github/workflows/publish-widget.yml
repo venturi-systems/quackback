@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   validate:
-    if: github.repository == 'venturi-systems/quackback'
+    if: >-
+      github.repository == 'venturi-systems/quackback' &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -28,25 +30,59 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2 (v2.2.0)
-      - name: Validate release identity
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve immutable release source
+        id: source
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
           DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
           set -euo pipefail
           test "$GITHUB_REPOSITORY" = "venturi-systems/quackback"
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$DRY_RUN" != "true" ] && [ -z "$RELEASE_TAG" ]; then
-            echo "A widget-v* tag is required for a publishing dispatch." >&2
-            exit 1
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            test "$GITHUB_REF" = "refs/heads/main"
           fi
-          if [[ "$RELEASE_TAG" == widget-v* ]]; then
+          if [ -z "$RELEASE_TAG" ]; then
+            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$DRY_RUN" != "true" ]; then
+              echo "A widget-v* tag is required for publishing" >&2
+              exit 1
+            fi
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [[ "$RELEASE_TAG" =~ ^widget-v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Release identity must be a SemVer widget-v* tag" >&2
+            exit 1
+          }
+          release_ref="refs/tags/$RELEASE_TAG"
+          git show-ref --verify --quiet "$release_ref" || { echo "$release_ref does not exist" >&2; exit 1; }
+          source_sha="$(git rev-parse "$release_ref^{commit}")"
+          git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main || {
+            echo "$release_ref is not reachable from protected main" >&2
+            exit 1
+          }
+          git checkout --detach "$source_sha"
+          test "$(git rev-parse HEAD)" = "$source_sha"
+          {
+            echo "release_tag=$RELEASE_TAG"
+            echo "source_sha=$source_sha"
+          } >> "$GITHUB_OUTPUT"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2 (v2.2.0)
+      - name: Validate release identity
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.release_tag }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          set -euo pipefail
+          if [ -n "$RELEASE_TAG" ]; then
             tag_version="${RELEASE_TAG#widget-v}"
             package_version="$(bun -e "console.log(require('./packages/widget/package.json').version)")"
             test "$tag_version" = "$package_version"
-          elif [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$DRY_RUN" != "true" ]; then
-            echo "Release identity must be a widget-v* tag." >&2
+          elif [ "$DRY_RUN" != "true" ]; then
+            echo "An untagged run must remain a dry run" >&2
             exit 1
           fi
       - run: bun install --frozen-lockfile
@@ -83,6 +119,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: npm-publish
     permissions:
       contents: read
       id-token: write # Required for npm trusted publishing (OIDC)
