@@ -102,7 +102,7 @@ export async function findMergeCandidates(
         sql`1 - (${posts.embedding} <=> ${vectorStr}::vector) >= ${VECTOR_THRESHOLD}`
       )
     )
-    .orderBy(desc(sql`1 - (${posts.embedding} <=> ${vectorStr}::vector)`))
+    .orderBy(sql`${posts.embedding} <=> ${vectorStr}::vector`)
     .limit(fetchLimit)
 
   const [ftsMatches, vectorMatches] = await Promise.all([ftsPromise, vectorPromise])
