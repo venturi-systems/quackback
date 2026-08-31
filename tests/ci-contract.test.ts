@@ -30,7 +30,9 @@ describe('QB-CI-001 consolidated validation contract', () => {
     const ci = contents.get('ci.yml') ?? ''
     const jobs = ci.split('\njobs:\n', 2)[1]?.match(/^ {2}[a-z0-9-]+:/gm) ?? []
     expect(jobs).toEqual(['  portability-gate:'])
-    expect(ci).toContain('name: portability-gate')
+    expect(ci).toContain("github.event_name == 'workflow_dispatch'")
+    expect(ci).toContain("'portability-gate (manual diagnostic)'")
+    expect(ci).toContain("|| 'portability-gate'")
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
     expect(ci).toContain('docker run --rm --read-only --network none')
