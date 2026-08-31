@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Commit SHA or ref to build (e.g. a release tag's commit). Lets you re-release a signed image from an exact source commit without moving the git tag."
+        description: "Full 40-character commit SHA reachable from protected main."
         required: true
       image_tag:
-        description: 'Image tag to publish as (e.g. 0.10.5). Leave blank to tag sha-<short>.'
+        description: 'Existing v* tag version (for example 0.10.5) bound to sha. Leave blank for sha-<short>.'
         required: false
         default: ''
 
@@ -18,13 +18,98 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-${{ github.event.inputs.sha || github.sha }}-${{ github.event.inputs.image_tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  resolve-source:
+    if: >-
+      github.repository == 'venturi-systems/quackback' &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      source_tag: ${{ steps.source.outputs.source_tag }}
+      requested_tag: ${{ steps.source.outputs.requested_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind event, source commit, and requested image tag
+        id: source
+        env:
+          INPUT_SHA: ${{ github.event.inputs.sha }}
+          INPUT_IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "venturi-systems/quackback"
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            test "$GITHUB_REF" = "refs/heads/main"
+            [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "sha must be a full lowercase 40-character commit SHA" >&2
+              exit 1
+            }
+            git cat-file -e "$INPUT_SHA^{commit}"
+            source_sha="$(git rev-parse "$INPUT_SHA^{commit}")"
+          else
+            source_sha="$(git rev-parse "$EVENT_SHA^{commit}")"
+          fi
+
+          git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main || {
+            echo "source $source_sha is not reachable from protected main" >&2
+            exit 1
+          }
+
+          requested_tag=""
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ -n "$INPUT_IMAGE_TAG" ]; then
+            [[ "$INPUT_IMAGE_TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+              echo "image_tag must be a SemVer value backed by an existing v* tag" >&2
+              exit 1
+            }
+            release_ref="refs/tags/v${INPUT_IMAGE_TAG}"
+            git show-ref --verify --quiet "$release_ref" || {
+              echo "release tag $release_ref does not exist" >&2
+              exit 1
+            }
+            tag_sha="$(git rev-parse "$release_ref^{commit}")"
+            test "$tag_sha" = "$source_sha" || {
+              echo "$release_ref points to $tag_sha, not requested source $source_sha" >&2
+              exit 1
+            }
+            requested_tag="$INPUT_IMAGE_TAG"
+          fi
+
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+              echo "release ref must be a SemVer v* tag" >&2
+              exit 1
+            }
+            test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$source_sha"
+          fi
+
+          {
+            echo "source_sha=$source_sha"
+            echo "source_tag=sha-${source_sha:0:7}"
+            echo "requested_tag=$requested_tag"
+          } >> "$GITHUB_OUTPUT"
+
   # Build each architecture on its OWN native runner — free arm64 hosted
   # runners (ubuntu-24.04-arm) are GA for public repos — in parallel, pushing
   # each as an untagged per-arch image BY DIGEST. Native beats QEMU here: the
   # image runs `bun install` plus two Vite/TanStack production builds, which are
   # far too slow under arm64 emulation (and risk job timeouts).
   build:
+    needs: resolve-source
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +119,8 @@ jobs:
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    environment: container-publish
     permissions:
       contents: read
       packages: write
@@ -45,9 +132,8 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          # On workflow_dispatch, build the requested sha/ref (re-release of an
-          # exact source commit); otherwise build the pushed ref as usual.
-          ref: ${{ github.event.inputs.sha || github.ref }}
+          ref: ${{ needs.resolve-source.outputs.source_sha }}
+          persist-credentials: false
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
@@ -92,7 +178,9 @@ jobs:
   # digests, apply the real tags, then keyless-sign the index digest.
   merge:
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [resolve-source, build]
+    timeout-minutes: 20
+    environment: container-publish
     permissions:
       contents: read
       packages: write
@@ -120,18 +208,26 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=ref,event=branch,enable=${{ github.event_name != 'workflow_dispatch' }}
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=${{ github.event.inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.image_tag != '' }}
-            type=sha
+            type=ref,event=branch,priority=600,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+            type=semver,pattern={{version}},priority=900,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,priority=700,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=${{ needs.resolve-source.outputs.requested_tag }},priority=900,enable=${{ github.event_name == 'workflow_dispatch' && needs.resolve-source.outputs.requested_tag != '' }}
+            type=raw,value=${{ needs.resolve-source.outputs.source_tag }},priority=100
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create \
-            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "${IMAGE}@sha256:%s " *)
+          set -euo pipefail
+          tag_args=()
+          while IFS= read -r tag; do tag_args+=(-t "$tag"); done \
+            < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid digest artifact: $digest" >&2; exit 1; }
+            sources+=("${IMAGE}@sha256:${digest}")
+          done
+          (( ${#tag_args[@]} > 0 && ${#sources[@]} > 0 ))
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
 
       - name: Capture image index digest
         id: index
