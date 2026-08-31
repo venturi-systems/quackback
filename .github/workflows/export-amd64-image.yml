@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: 'Commit SHA or ref to build.'
+        description: 'Full 40-character commit SHA reachable from protected main.'
         required: true
       image_tag:
         description: 'Local image tag embedded in the exported archive.'
@@ -20,11 +20,29 @@ concurrency:
 
 jobs:
   export:
+    if: github.repository == 'venturi-systems/quackback' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           ref: ${{ github.event.inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate immutable source
+        env:
+          INPUT_SHA: ${{ github.event.inputs.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "venturi-systems/quackback"
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$INPUT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "sha must be a full lowercase commit SHA" >&2; exit 1; }
+          test "$(git rev-parse HEAD)" = "$INPUT_SHA"
+          git merge-base --is-ancestor "$INPUT_SHA" refs/remotes/origin/main || {
+            echo "source $INPUT_SHA is not reachable from protected main" >&2
+            exit 1
+          }
 
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
