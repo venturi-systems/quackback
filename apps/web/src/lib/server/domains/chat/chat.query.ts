@@ -557,8 +557,67 @@ export async function listConversationsForVisitor(
     .where(eq(conversations.visitorPrincipalId, visitorPrincipalId))
     .orderBy(desc(conversations.lastMessageAt))
     .limit(limit)
-  // Small N per user, so per-row DTO building is fine.
-  return Promise.all(rows.map((c) => conversationToDTO(c, side)))
+  if (rows.length === 0) return []
+
+  // Batch every relation used by the DTO. The previous per-row mapper issued
+  // two or three queries per conversation (authors, unread count, and labels),
+  // producing 101-151 queries for the default 50-row page.
+  const ids = rows.map((conversation) => conversation.id)
+  const [authors, unreadRows, tagMap] = await Promise.all([
+    loadAuthors(
+      rows.flatMap((conversation) => [
+        conversation.visitorPrincipalId,
+        conversation.assignedAgentPrincipalId,
+      ])
+    ),
+    db
+      .select({
+        conversationId: chatMessages.conversationId,
+        c: sql<number>`count(*)::int`,
+      })
+      .from(chatMessages)
+      .innerJoin(conversations, eq(conversations.id, chatMessages.conversationId))
+      .where(
+        and(
+          inArray(chatMessages.conversationId, ids),
+          eq(chatMessages.senderType, side === 'agent' ? 'visitor' : 'agent'),
+          isNull(chatMessages.deletedAt),
+          eq(chatMessages.isInternal, false),
+          side === 'agent'
+            ? or(
+                isNull(conversations.agentLastReadAt),
+                sql`${chatMessages.createdAt} > ${conversations.agentLastReadAt}`
+              )
+            : or(
+                isNull(conversations.visitorLastReadAt),
+                sql`${chatMessages.createdAt} > ${conversations.visitorLastReadAt}`
+              )
+        )
+      )
+      .groupBy(chatMessages.conversationId),
+    side === 'agent'
+      ? loadChatTagsForConversations(ids)
+      : Promise.resolve(new Map<ConversationId, ChatTagDTO[]>()),
+  ])
+  const unreadMap = new Map<ConversationId, number>(
+    unreadRows.map((row) => [row.conversationId, row.c])
+  )
+
+  return rows.map((conversation) =>
+    toConversationDTO(
+      conversation,
+      authors.get(conversation.visitorPrincipalId) ??
+        fallbackAuthor(conversation.visitorPrincipalId),
+      conversation.assignedAgentPrincipalId
+        ? (authors.get(conversation.assignedAgentPrincipalId) ??
+            fallbackAuthor(conversation.assignedAgentPrincipalId))
+        : null,
+      unreadMap.get(conversation.id) ?? 0,
+      side === 'agent' ? (conversation.visitorEmail ?? null) : null,
+      tagMap.get(conversation.id) ?? [],
+      side === 'agent' ? (conversation.endNote ?? null) : null
+    )
+  )
 }
 
 export interface MessagePage {
