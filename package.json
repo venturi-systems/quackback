@@ -61,7 +61,8 @@
     "ai:backfill": "bun apps/web/scripts/backfill-ai.ts",
     "merge:backfill": "bun apps/web/scripts/backfill-merge-suggestions.ts",
     "typecheck": "tsc --noEmit -p apps/web/tsconfig.json",
-    "prepare": "husky"
+    "prepare": "husky",
+    "db:indexes": "bun packages/db/src/apply-performance-indexes.ts"
   },
   "type": "module",
   "workspaces": [

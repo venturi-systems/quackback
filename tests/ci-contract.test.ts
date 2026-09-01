@@ -12,7 +12,7 @@ function workflowFiles(): string[] {
 }
 
 describe('QB-CI-001 consolidated validation contract', () => {
-  it('uses one hosted pull-request and merge-queue job', () => {
+  it('splits independent lanes behind one pull-request and merge-queue context', () => {
     const workflows = workflowFiles()
     const contents = new Map(
       workflows.map((name) => [name, readFileSync(join(workflowDir, name), 'utf8')])
@@ -28,11 +28,19 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(mergeGroupProducers).toEqual(['ci.yml'])
 
     const ci = contents.get('ci.yml') ?? ''
-    const jobs = ci.split('\njobs:\n', 2)[1]?.match(/^ {2}[a-z0-9-]+:/gm) ?? []
-    expect(jobs).toEqual(['  portability-gate:'])
+    const jobs = ci.split('\njobs:\n', 2)[1]?.match(/^ {2}[a-z0-9_-]+:/gm) ?? []
+    expect(jobs).toEqual(['  static_analysis:', '  database_tests:', '  portability_gate:'])
+    expect(ci).toContain('name: Static analysis')
+    expect(ci).toContain('name: Database migrations and tests')
+    // main made the required gate's name a conditional expression so a
+    // workflow_dispatch run publishes a DIFFERENT check name and cannot post a
+    // verdict for the required `portability-gate` context. Assert that
+    // expression rather than a literal `name: portability-gate`, which the
+    // conditional no longer contains.
     expect(ci).toContain("github.event_name == 'workflow_dispatch'")
     expect(ci).toContain("'portability-gate (manual diagnostic)'")
     expect(ci).toContain("|| 'portability-gate'")
+    expect(ci).toContain('needs: [static_analysis, database_tests]')
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
     expect(ci).toContain('docker run --rm --read-only --network none')
