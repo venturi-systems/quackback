@@ -17,13 +17,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { PostId, PrincipalId, SegmentId } from '@quackback/ids'
 import type { Actor } from '@/lib/server/policy'
 
-const mockPostFindFirst = vi.fn()
-const mockSelectChain = {
-  from: vi.fn().mockReturnThis(),
-  innerJoin: vi.fn().mockReturnThis(),
-  where: vi.fn().mockReturnThis(),
-  limit: vi.fn(),
-}
+// vi.hoisted so the vi.mock factory below can reference these during the
+// hoisted static-import phase; the module under test then loads statically
+// during file collection instead of inside a test body's timeout budget.
+const { mockPostFindFirst, mockSelectChain } = vi.hoisted(() => ({
+  mockPostFindFirst: vi.fn(),
+  mockSelectChain: {
+    from: vi.fn().mockReturnThis(),
+    innerJoin: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    limit: vi.fn(),
+  },
+}))
 
 vi.mock('@/lib/server/db', () => ({
   db: {
@@ -52,6 +57,8 @@ vi.mock('@/lib/server/db', () => ({
   and: vi.fn((...parts) => ({ and: parts })),
   isNull: vi.fn((col) => ({ isNull: col })),
 }))
+
+import { getPostMergeInfo } from '../post.merge'
 
 function actor(overrides: Partial<Actor> = {}): Actor {
   return {
@@ -93,7 +100,6 @@ describe('getPostMergeInfo — audience guard', () => {
         principalId: 'prn_author',
       },
     ])
-    const { getPostMergeInfo } = await import('../post.merge')
     const result = await getPostMergeInfo(DUP_ID)
     expect(result).toBeNull()
   })
@@ -121,7 +127,6 @@ describe('getPostMergeInfo — audience guard', () => {
         principalId: 'prn_author',
       },
     ])
-    const { getPostMergeInfo } = await import('../post.merge')
     const result = await getPostMergeInfo(DUP_ID, actor({ role: 'user' }))
     expect(result).toBeNull()
   })
@@ -144,7 +149,6 @@ describe('getPostMergeInfo — audience guard', () => {
         principalId: 'prn_author',
       },
     ])
-    const { getPostMergeInfo } = await import('../post.merge')
     const result = await getPostMergeInfo(DUP_ID, actor({ role: 'admin' }))
     expect(result).toMatchObject({
       canonicalPostId: CANON_ID,
@@ -176,7 +180,6 @@ describe('getPostMergeInfo — audience guard', () => {
         principalId: 'prn_author',
       },
     ])
-    const { getPostMergeInfo } = await import('../post.merge')
     const result = await getPostMergeInfo(
       DUP_ID,
       actor({ role: 'user', segmentIds: new Set(['seg_pro' as SegmentId]) })
@@ -202,7 +205,6 @@ describe('getPostMergeInfo — audience guard', () => {
         principalId: 'prn_author',
       },
     ])
-    const { getPostMergeInfo } = await import('../post.merge')
     // anonymous (no actor passed) — the helper defaults to ANONYMOUS_ACTOR.
     const result = await getPostMergeInfo(DUP_ID)
     expect(result?.canonicalPostId).toBe(CANON_ID)
@@ -210,7 +212,6 @@ describe('getPostMergeInfo — audience guard', () => {
 
   it('returns null when the duplicate has no canonical', async () => {
     mockPostFindFirst.mockResolvedValueOnce({ canonicalPostId: null, mergedAt: null })
-    const { getPostMergeInfo } = await import('../post.merge')
     const result = await getPostMergeInfo(DUP_ID)
     expect(result).toBeNull()
   })
@@ -237,7 +238,6 @@ describe('getPostMergeInfo — audience guard', () => {
         principalId: 'prn_other_author',
       },
     ])
-    const { getPostMergeInfo } = await import('../post.merge')
     const result = await getPostMergeInfo(
       DUP_ID,
       actor({ principalId: 'prn_random_viewer' as PrincipalId })

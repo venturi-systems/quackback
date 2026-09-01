@@ -20,10 +20,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ChangelogId, PostId } from '@quackback/ids'
 
-const mockEntryFindFirst = vi.fn()
-const mockEntryFindMany = vi.fn()
-const mockStatusesFindMany = vi.fn()
-const mockSelect = vi.fn()
+// vi.hoisted so the vi.mock factory below can reference these during the
+// hoisted static-import phase; the module under test then loads statically
+// during file collection instead of inside a test body's timeout budget.
+const { mockEntryFindFirst, mockEntryFindMany, mockStatusesFindMany, mockSelect } = vi.hoisted(
+  () => ({
+    mockEntryFindFirst: vi.fn(),
+    mockEntryFindMany: vi.fn(),
+    mockStatusesFindMany: vi.fn(),
+    mockSelect: vi.fn(),
+  })
+)
 
 vi.mock('@/lib/server/db', () => ({
   db: {
@@ -80,6 +87,8 @@ vi.mock('@/lib/server/db', () => ({
     { raw: vi.fn() }
   ),
 }))
+
+import { getPublicChangelogById, listPublicChangelogs } from '../changelog.public'
 
 type LinkedPostAudience =
   | { kind: 'public' }
@@ -173,7 +182,6 @@ beforeEach(() => {
 
 describe('getPublicChangelogById — moderation state filter', () => {
   it('returns only published linked posts; pending/spam/archived/closed are hidden', async () => {
-    const { getPublicChangelogById } = await import('../changelog.public')
     mockEntryFindFirst.mockResolvedValueOnce({
       id: 'cl_1' as ChangelogId,
       title: 'Release Notes',
@@ -197,7 +205,6 @@ describe('getPublicChangelogById — moderation state filter', () => {
   })
 
   it('hides linked posts that are deleted even if their moderationState is published', async () => {
-    const { getPublicChangelogById } = await import('../changelog.public')
     mockEntryFindFirst.mockResolvedValueOnce({
       id: 'cl_1' as ChangelogId,
       title: 'Release Notes',
@@ -222,7 +229,6 @@ describe('getPublicChangelogById — moderation state filter', () => {
 
 describe('listPublicChangelogs — moderation state filter', () => {
   it('returns only published linked posts across all entries', async () => {
-    const { listPublicChangelogs } = await import('../changelog.public')
     mockEntryFindMany.mockResolvedValueOnce([
       {
         id: 'cl_1' as ChangelogId,
@@ -263,7 +269,6 @@ describe('public changelog — board audience filter', () => {
   // audience axis.
 
   it('getPublicChangelogById: hides linked posts whose board audience is not public', async () => {
-    const { getPublicChangelogById } = await import('../changelog.public')
     mockEntryFindFirst.mockResolvedValueOnce({
       id: 'cl_1' as ChangelogId,
       title: 'Release Notes',
@@ -296,7 +301,6 @@ describe('public changelog — board audience filter', () => {
   })
 
   it('listPublicChangelogs: hides non-public-audience linked posts across entries', async () => {
-    const { listPublicChangelogs } = await import('../changelog.public')
     mockEntryFindMany.mockResolvedValueOnce([
       {
         id: 'cl_1' as ChangelogId,

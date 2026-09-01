@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { TierLimitError } from '@/lib/server/errors/tier-limit-error'
 
 const hoisted = vi.hoisted(() => ({
@@ -36,6 +36,16 @@ import { savePlatformCredentialsFn } from '../platform-credentials'
 const validCreds = { clientId: 'cid', clientSecret: 'secret' }
 
 describe('savePlatformCredentialsFn — integrations gate', () => {
+  // The handler body lazy-imports its tier gate and integration registry
+  // (`await import('.../tier-enforce')`, `await import('.../integrations')`).
+  // The first in-test invocation would otherwise be charged that whole
+  // module-graph load, which on a saturated box has been measured above the
+  // 20s per-test timeout. Warm those graphs once, outside any test budget.
+  beforeAll(async () => {
+    await import('@/lib/server/domains/settings/tier-enforce')
+    await import('@/lib/server/integrations')
+  }, 120_000)
+
   beforeEach(() => vi.clearAllMocks())
 
   it('refuses save when integrations feature is off', async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import type { PrincipalId } from '@quackback/ids'
 
 // --- Mock: capture handlers registered via createServerFn ---
@@ -190,22 +190,25 @@ let toggleVoteHandler: AnyHandler
 let createPublicPostHandler: AnyHandler
 let createCommentHandler: AnyHandler
 
-beforeEach(async () => {
-  vi.clearAllMocks()
-  mockCheckAnonVoteRateLimit.mockResolvedValue(true)
-
-  if (publicPostsHandlers.length === 0) {
-    currentHandlerTarget = publicPostsHandlers
-    await import('../public-posts')
-  }
-  if (commentsHandlers.length === 0) {
-    currentHandlerTarget = commentsHandlers
-    await import('../comments')
-  }
+// One-time handler capture. These imports pull the whole module graph of
+// the functions under test through the transform pipeline; charged to a
+// beforeEach they must fit the 10s hook timeout on every saturated-box run.
+// Do them once in beforeAll with an explicit generous budget instead — the
+// capture arrays are module-level and survive across tests.
+beforeAll(async () => {
+  currentHandlerTarget = publicPostsHandlers
+  await import('../public-posts')
+  currentHandlerTarget = commentsHandlers
+  await import('../comments')
 
   toggleVoteHandler = publicPostsHandlers[TOGGLE_VOTE]
   createPublicPostHandler = publicPostsHandlers[CREATE_PUBLIC_POST]
   createCommentHandler = commentsHandlers[CREATE_COMMENT]
+}, 120_000)
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockCheckAnonVoteRateLimit.mockResolvedValue(true)
 })
 
 // --- Shared fixtures ---

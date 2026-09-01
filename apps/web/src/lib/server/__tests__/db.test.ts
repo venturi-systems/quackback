@@ -3,7 +3,7 @@
  *
  * Tests self-hosted mode with DATABASE_URL singleton connection.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
 
 // Store original env
 const originalEnv = { ...process.env }
@@ -30,6 +30,18 @@ vi.mock('@quackback/db/client', () => ({
 }))
 
 describe('db module', () => {
+  // Each test re-imports '../db' after vi.resetModules() — required for the
+  // singleton contract under test. The FIRST fetch of that module graph is
+  // the expensive part (transform + evaluation of the whole dependency
+  // chain); pay it once here, outside any per-test timeout budget, so the
+  // per-test re-imports are cheap re-executions of already-fetched modules.
+  // Generous explicit timeout: on a saturated box the one-time load has been
+  // measured above the 20s default that used to fail the first test instead.
+  beforeAll(async () => {
+    await import('../config')
+    await import('../db')
+  }, 120_000)
+
   beforeEach(async () => {
     mockCreateDb.mockClear()
     vi.resetModules()

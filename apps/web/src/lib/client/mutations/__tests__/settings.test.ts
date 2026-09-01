@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const invalidateQueries = vi.fn()
+// vi.hoisted so the vi.mock factory below can reference it during the
+// hoisted static-import phase; the hooks under test then load statically
+// during file collection instead of inside a test body's timeout budget.
+const { invalidateQueries } = vi.hoisted(() => ({ invalidateQueries: vi.fn() }))
 
 vi.mock('@tanstack/react-query', async () => {
   const actual =
@@ -12,6 +15,15 @@ vi.mock('@tanstack/react-query', async () => {
   }
 })
 
+import {
+  useUpdatePortalConfig,
+  useUpdateModerationDefault,
+  useUpdateWidgetConfig,
+  useRegenerateWidgetSecret,
+  useUpdateHelpCenterConfig,
+  useSaveBrandingTheme,
+} from '../settings'
+
 describe('settings config mutations cache invalidation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -22,7 +34,6 @@ describe('settings config mutations cache invalidation', () => {
   })
 
   it('useUpdatePortalConfig.onSuccess awaits invalidation of the portalConfig query', async () => {
-    const { useUpdatePortalConfig } = await import('../settings')
     const mutation = useUpdatePortalConfig() as { onSuccess?: () => unknown }
 
     const result = mutation.onSuccess?.()
@@ -32,7 +43,6 @@ describe('settings config mutations cache invalidation', () => {
   })
 
   it('useUpdateModerationDefault.onSuccess awaits invalidation of the portalConfig query', async () => {
-    const { useUpdateModerationDefault } = await import('../settings')
     const mutation = useUpdateModerationDefault() as { onSuccess?: () => unknown }
 
     const result = mutation.onSuccess?.()
@@ -42,7 +52,6 @@ describe('settings config mutations cache invalidation', () => {
   })
 
   it('useUpdateWidgetConfig.onSuccess awaits invalidation of the widgetConfig query', async () => {
-    const { useUpdateWidgetConfig } = await import('../settings')
     const mutation = useUpdateWidgetConfig() as { onSuccess?: () => unknown }
 
     const result = mutation.onSuccess?.()
@@ -52,7 +61,6 @@ describe('settings config mutations cache invalidation', () => {
   })
 
   it('useRegenerateWidgetSecret.onSuccess awaits invalidation of the widgetSecret query', async () => {
-    const { useRegenerateWidgetSecret } = await import('../settings')
     const mutation = useRegenerateWidgetSecret() as { onSuccess?: () => unknown }
 
     const result = mutation.onSuccess?.()
@@ -62,7 +70,6 @@ describe('settings config mutations cache invalidation', () => {
   })
 
   it('useUpdateHelpCenterConfig.onSuccess awaits invalidation of the helpCenterConfig query', async () => {
-    const { useUpdateHelpCenterConfig } = await import('../settings')
     const mutation = useUpdateHelpCenterConfig() as { onSuccess?: () => unknown }
 
     const result = mutation.onSuccess?.()
@@ -72,7 +79,6 @@ describe('settings config mutations cache invalidation', () => {
   })
 
   it('useSaveBrandingTheme.onSuccess awaits invalidation of branding and customCss queries', async () => {
-    const { useSaveBrandingTheme } = await import('../settings')
     const mutation = useSaveBrandingTheme() as { onSuccess?: () => unknown }
 
     const result = mutation.onSuccess?.()
