@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { TierLimitError } from '@/lib/server/errors/tier-limit-error'
 
 const hoisted = vi.hoisted(() => ({
@@ -33,6 +33,16 @@ const validOidcCreds = {
 }
 
 describe('saveAuthProviderCredentialsFn — customOidcProvider gate', () => {
+  // The handler body lazy-imports the auth-provider registry and tier gate
+  // (`await import('.../auth-providers')`, `await import('.../tier-enforce')`).
+  // The first in-test invocation would otherwise be charged that whole
+  // module-graph load, which on a saturated box has been measured above the
+  // 20s per-test timeout. Warm those graphs once, outside any test budget.
+  beforeAll(async () => {
+    await import('@/lib/server/auth/auth-providers')
+    await import('@/lib/server/domains/settings/tier-enforce')
+  }, 120_000)
+
   beforeEach(() => {
     vi.clearAllMocks()
   })

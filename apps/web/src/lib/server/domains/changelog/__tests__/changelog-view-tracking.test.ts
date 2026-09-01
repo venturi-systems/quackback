@@ -7,11 +7,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ChangelogId } from '@quackback/ids'
 
-const mockFindFirst = vi.fn()
-const mockSelect = vi.fn()
-const mockUpdate = vi.fn()
-const mockSet = vi.fn()
-const mockWhere = vi.fn()
+// vi.hoisted so the vi.mock factory below can reference these during the
+// hoisted static-import phase; the module under test then loads statically
+// during file collection instead of inside a test body's timeout budget.
+const { mockFindFirst, mockSelect, mockUpdate, mockSet, mockWhere } = vi.hoisted(() => ({
+  mockFindFirst: vi.fn(),
+  mockSelect: vi.fn(),
+  mockUpdate: vi.fn(),
+  mockSet: vi.fn(),
+  mockWhere: vi.fn(),
+}))
 
 vi.mock('@/lib/server/db', () => ({
   db: {
@@ -60,6 +65,8 @@ vi.mock('@/lib/server/db', () => ({
   ),
 }))
 
+import { getPublicChangelogById } from '../changelog.public'
+
 beforeEach(() => {
   vi.clearAllMocks()
   // db.update(...).set(...).where(...).catch(...)
@@ -83,7 +90,6 @@ describe('getPublicChangelogById — view tracking', () => {
       contentJson: null,
       publishedAt: new Date('2026-01-01'),
     })
-    const { getPublicChangelogById } = await import('../changelog.public')
 
     await getPublicChangelogById('cl_1' as ChangelogId)
 
@@ -93,7 +99,6 @@ describe('getPublicChangelogById — view tracking', () => {
 
   it('does not increment when the entry is not found', async () => {
     mockFindFirst.mockResolvedValue(undefined)
-    const { getPublicChangelogById } = await import('../changelog.public')
 
     await expect(getPublicChangelogById('cl_missing' as ChangelogId)).rejects.toBeDefined()
 

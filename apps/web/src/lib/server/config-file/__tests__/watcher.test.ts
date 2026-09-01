@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -23,6 +23,12 @@ spec:
     name: Acme
 `
 
+// Wall-clock sleeps make these tests scheduling-sensitive: under a saturated
+// box the initial tick or a 30ms poll can land far later than the sleep, so
+// fixed waits raced the watcher and flaked. Wait for the observable condition
+// with a deadline instead, then make the same assertions as before.
+const WAITFOR = { timeout: 8000, interval: 10 }
+
 describe('watchConfigFile', () => {
   it('fires onChange with the parsed config on first tick when the file exists', async () => {
     writeFileSync(path, validYaml)
@@ -30,8 +36,11 @@ describe('watchConfigFile', () => {
     const stop = watchConfigFile(path, (r) => {
       events.push(r)
     })
-    await wait(60)
-    stop()
+    try {
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(1), WAITFOR)
+    } finally {
+      stop()
+    }
     expect(events.length).toBeGreaterThanOrEqual(1)
     const last = events[events.length - 1] as { kind: string }
     expect(last.kind).toBe('ok')
@@ -42,8 +51,11 @@ describe('watchConfigFile', () => {
     const stop = watchConfigFile(path, (r) => {
       events.push(r)
     })
-    await wait(60)
-    stop()
+    try {
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(1), WAITFOR)
+    } finally {
+      stop()
+    }
     const last = events[events.length - 1] as { kind: string }
     expect(last.kind).toBe('absent')
   })
@@ -58,9 +70,15 @@ describe('watchConfigFile', () => {
       },
       { pollIntervalMs: 30 }
     )
-    await wait(150)
-    stop()
-    // First load + maybe a few polls; all identical content → only one onChange.
+    try {
+      // Deterministic anchor: the initial load has fired.
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(1), WAITFOR)
+      // Let poll ticks re-read the identical content; deduped ticks must not
+      // fire onChange again.
+      await wait(150)
+    } finally {
+      stop()
+    }
     expect(events.length).toBe(1)
   })
 
@@ -74,13 +92,18 @@ describe('watchConfigFile', () => {
       },
       { pollIntervalMs: 30 }
     )
-    await wait(50)
-    writeFileSync(
-      path,
-      `apiVersion: quackback.io/v1\nkind: QuackbackConfig\nspec: { workspace: { name: Different } }\n`
-    )
-    await wait(80)
-    stop()
+    try {
+      // Wait until the FIRST content was observed before changing it —
+      // writing earlier would collapse both versions into one observation.
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(1), WAITFOR)
+      writeFileSync(
+        path,
+        `apiVersion: quackback.io/v1\nkind: QuackbackConfig\nspec: { workspace: { name: Different } }\n`
+      )
+      await vi.waitFor(() => expect(events.length).toBeGreaterThanOrEqual(2), WAITFOR)
+    } finally {
+      stop()
+    }
     expect(events.length).toBe(2)
   })
 

@@ -7,7 +7,10 @@ import type { PostId } from '@quackback/ids'
 import type { MergeCandidate } from '../merge-search.service'
 
 // --- Mock OpenAI ---
-const mockCreate = vi.fn()
+// vi.hoisted so the vi.mock factory below can reference it during the
+// hoisted static-import phase; the module under test then loads statically
+// during file collection instead of inside a test body's timeout budget.
+const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }))
 vi.mock('@/lib/server/domains/ai/config', () => ({
   getOpenAI: vi.fn(() => ({
     chat: {
@@ -44,6 +47,8 @@ vi.mock('@/lib/server/domains/settings/tier-limits.service', () => ({
     },
   })),
 }))
+
+import { assessMergeCandidates, determineDirection } from '../merge-assessment.service'
 
 describe('merge-assessment.service', () => {
   beforeEach(() => {
@@ -106,7 +111,6 @@ describe('merge-assessment.service', () => {
         ],
       })
 
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, candidates, 'test-model')
 
       expect(results).toHaveLength(1)
@@ -135,7 +139,6 @@ describe('merge-assessment.service', () => {
         ],
       })
 
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, candidates, 'test-model')
 
       expect(results).toHaveLength(1)
@@ -160,7 +163,6 @@ describe('merge-assessment.service', () => {
         ],
       })
 
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, candidates, 'test-model')
 
       expect(results).toHaveLength(0)
@@ -184,14 +186,12 @@ describe('merge-assessment.service', () => {
         ],
       })
 
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, candidates, 'test-model')
 
       expect(results).toHaveLength(0)
     })
 
     it('should return empty for empty candidates', async () => {
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, [], 'test-model')
 
       expect(results).toHaveLength(0)
@@ -203,7 +203,6 @@ describe('merge-assessment.service', () => {
         choices: [{ message: { content: 'not json at all' } }],
       })
 
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, candidates, 'test-model')
 
       expect(results).toHaveLength(0)
@@ -214,7 +213,6 @@ describe('merge-assessment.service', () => {
         choices: [{ message: { content: null } }],
       })
 
-      const { assessMergeCandidates } = await import('../merge-assessment.service')
       const results = await assessMergeCandidates(sourcePost, candidates, 'test-model')
 
       expect(results).toHaveLength(0)
@@ -223,7 +221,6 @@ describe('merge-assessment.service', () => {
 
   describe('determineDirection', () => {
     it('should pick higher voteCount as target', async () => {
-      const { determineDirection } = await import('../merge-assessment.service')
       const result = determineDirection(
         {
           id: 'post_a' as PostId,
@@ -244,7 +241,6 @@ describe('merge-assessment.service', () => {
     })
 
     it('should tiebreak by commentCount', async () => {
-      const { determineDirection } = await import('../merge-assessment.service')
       const result = determineDirection(
         {
           id: 'post_a' as PostId,
@@ -260,7 +256,6 @@ describe('merge-assessment.service', () => {
     })
 
     it('should tiebreak by older createdAt', async () => {
-      const { determineDirection } = await import('../merge-assessment.service')
       const result = determineDirection(
         {
           id: 'post_a' as PostId,
