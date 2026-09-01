@@ -241,9 +241,8 @@ export function PostContentSection({
         className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-foreground/90"
       />
 
-      {!isEditing && (
-        <SimilarPostsSection postTitle={post.title} currentPostId={post.id as PostId} />
-      )}
+      {/* The editing branch returned above, so this always renders here */}
+      <SimilarPostsSection postTitle={post.title} currentPostId={post.id as PostId} />
     </div>
   )
 }
