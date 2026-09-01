@@ -1,7 +1,6 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test'
 import { getOtpCode } from '../../utils/db-helpers'
 
-const TEST_HOST = 'acme.localhost:3000'
 const TEST_EMAIL = 'demo@example.com'
 
 // Configure test to run serially (no parallelization)
@@ -12,10 +11,10 @@ test.describe.configure({ mode: 'serial' })
  * Helper function to get OTP code with retries
  * Database writes may not be immediately visible
  */
-async function getOtpCodeWithRetry(email: string, host: string, maxRetries = 3): Promise<string> {
+async function getOtpCodeWithRetry(email: string, maxRetries = 3): Promise<string> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      return getOtpCode(email, host)
+      return getOtpCode(email)
     } catch {
       if (i === maxRetries - 1) throw new Error(`Failed to get OTP after ${maxRetries} retries`)
       // Wait 100ms before retrying
@@ -46,7 +45,7 @@ async function loginWithOTP(page: Page) {
   }
 
   // Step 2: Get OTP code directly from database (with retry for timing issues)
-  const code = await getOtpCodeWithRetry(TEST_EMAIL, TEST_HOST)
+  const code = await getOtpCodeWithRetry(TEST_EMAIL)
   expect(code).toMatch(/^\d{6}$/) // 6-digit code
 
   // Step 3: Verify OTP code via Better-auth

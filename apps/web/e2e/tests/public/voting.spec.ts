@@ -2,7 +2,6 @@ import { test, expect, Page, BrowserContext } from '@playwright/test'
 import { getOtpCode } from '../../utils/db-helpers'
 
 const TEST_EMAIL = 'demo@example.com'
-const TEST_HOST = 'acme.localhost:3000'
 
 /**
  * Helper to authenticate a user via OTP flow
@@ -37,7 +36,7 @@ async function authenticateViaOTP(page: Page, maxRetries = 8) {
       }
 
       // Get OTP code from database
-      const otpCode = getOtpCode(TEST_EMAIL, TEST_HOST)
+      const otpCode = getOtpCode(TEST_EMAIL)
 
       // Verify OTP code - Better-auth sets session cookie automatically
       const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
@@ -433,7 +432,6 @@ test.describe('Voting — independence and persistence', () => {
     const { getOtpCode } = await import('../../utils/db-helpers')
 
     const TEST_EMAIL = 'demo@example.com'
-    const TEST_HOST = 'acme.localhost:3000'
 
     const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
       headers: { 'Content-Type': 'application/json' },
@@ -441,7 +439,7 @@ test.describe('Voting — independence and persistence', () => {
     })
     if (!sendResponse.ok()) throw new Error('Failed to send OTP for persistence tests')
 
-    const otpCode = getOtpCode(TEST_EMAIL, TEST_HOST)
+    const otpCode = getOtpCode(TEST_EMAIL)
     const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
       headers: { 'Content-Type': 'application/json' },
       data: { email: TEST_EMAIL, otp: otpCode },
@@ -518,7 +516,9 @@ test.describe('Voting — independence and persistence', () => {
       await expect(voteButton).toBeVisible({ timeout: 10000 })
 
       // Normalise to unvoted state
-      const isVoted = await voteButton.evaluate((el) => el.classList.contains('post-card__vote--voted'))
+      const isVoted = await voteButton.evaluate((el) =>
+        el.classList.contains('post-card__vote--voted')
+      )
       if (isVoted) {
         await voteButton.click()
         await expect(voteButton).not.toHaveClass(/post-card__vote--voted/, { timeout: 5000 })
@@ -593,7 +593,9 @@ test.describe('Voting — debounce / rapid clicks', () => {
     const countSpan = voteButton.getByTestId('vote-count')
 
     // Normalise to unvoted
-    const isVoted = await voteButton.evaluate((el) => el.classList.contains('post-card__vote--voted'))
+    const isVoted = await voteButton.evaluate((el) =>
+      el.classList.contains('post-card__vote--voted')
+    )
     if (isVoted) {
       await voteButton.click()
       await expect(voteButton).not.toHaveClass(/post-card__vote--voted/, { timeout: 10000 })
@@ -652,7 +654,9 @@ test.describe('Voting — filtered board context', () => {
     const countSpan = voteButton.getByTestId('vote-count')
 
     // Normalise to unvoted
-    const isVoted = await voteButton.evaluate((el) => el.classList.contains('post-card__vote--voted'))
+    const isVoted = await voteButton.evaluate((el) =>
+      el.classList.contains('post-card__vote--voted')
+    )
     if (isVoted) {
       await voteButton.click()
       await expect(voteButton).not.toHaveClass(/post-card__vote--voted/, { timeout: 10000 })

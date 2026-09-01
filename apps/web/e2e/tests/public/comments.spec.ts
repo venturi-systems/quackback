@@ -2,7 +2,6 @@ import { test, expect, type Page, type BrowserContext, type Locator } from '@pla
 import { getOtpCode } from '../../utils/db-helpers'
 
 const TEST_EMAIL = 'demo@example.com'
-const TEST_HOST = 'acme.localhost:3000'
 
 // Run serially to avoid OTP rate-limiting conflicts with other spec files
 test.describe.configure({ mode: 'serial' })
@@ -29,7 +28,7 @@ async function authenticateViaOTP(page: Page, maxRetries = 8) {
         throw new Error(`OTP send failed: ${await sendResponse.text()}`)
       }
 
-      const otpCode = getOtpCode(TEST_EMAIL, TEST_HOST)
+      const otpCode = getOtpCode(TEST_EMAIL)
 
       const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
         headers: { 'Content-Type': 'application/json' },

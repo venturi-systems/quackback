@@ -36,6 +36,29 @@ export function getMagicLinkToken(email: string): string {
 }
 
 /**
+ * Get the most recent live email-OTP sign-in code for an email from the
+ * verification table. Used by e2e tests to complete the OTP sign-in flow
+ * without going through real email delivery.
+ */
+export function getOtpCode(email: string): string {
+  const scriptPath = resolve(__dirname, '../scripts/get-otp-code.ts')
+
+  try {
+    const result = execSync(`dotenv -e ../../.env -- bun "${scriptPath}" "${email}"`, {
+      encoding: 'utf-8',
+      cwd: resolve(__dirname, '../..'), // apps/web directory
+    })
+
+    return result.trim()
+  } catch (error) {
+    const err = error as { stderr?: string; message: string }
+    throw new Error(`Failed to get OTP code: ${err.stderr || err.message}`, {
+      cause: error,
+    })
+  }
+}
+
+/**
  * Ensure a test user has the required role for E2E testing
  *
  * This is a test utility that ensures the demo user has the 'admin' role

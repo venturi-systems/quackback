@@ -148,7 +148,8 @@ export function PostCard({
       authPopover?.openAuthPopover({ mode: 'login' })
       return
     }
-    if (!isAuthenticated && canVote) {
+    // Past the guard above, canVote is always true.
+    if (!isAuthenticated) {
       // Anonymous voting: sign in silently, then vote
       e.preventDefault()
       if (isAnonSigningIn) return
