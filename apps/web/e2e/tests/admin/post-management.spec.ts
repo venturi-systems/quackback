@@ -385,7 +385,7 @@ test.describe('Admin Post Management', () => {
     const commentComposer = modal.getByTestId('comment-form-editor').first()
     await expect(commentComposer).toBeVisible({ timeout: 5000 })
 
-    const commentEditor = commentComposer.locator('[contenteditable="true"]')
+    const commentEditor = commentComposer.locator('.ProseMirror[contenteditable="true"]')
     await commentEditor.click()
     await commentEditor.pressSequentially('E2E test comment via keyboard')
     await expect(commentEditor).toContainText('E2E test comment via keyboard')

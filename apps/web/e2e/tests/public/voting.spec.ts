@@ -7,7 +7,7 @@ test.describe('Public Voting', () => {
   let sharedContext: BrowserContext
   let isAuthenticated = false
 
-  // Increase timeout to 90 seconds to handle rate limiting
+  // Generous budget: these tests drive real vote round trips over a shared context.
   test.setTimeout(90000)
 
   test.beforeAll(async ({ browser }) => {
