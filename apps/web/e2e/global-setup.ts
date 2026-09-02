@@ -1,5 +1,6 @@
 import { test as setup, expect } from '@playwright/test'
 import { getMagicLinkToken, ensureTestUserHasRole } from './utils/db-helpers'
+import { enableMagicLinkSignIn } from './utils/access-helpers'
 
 const ADMIN_EMAIL = 'demo@example.com'
 const AUTH_FILE = 'e2e/.auth/admin.json'
@@ -7,6 +8,7 @@ const AUTH_FILE = 'e2e/.auth/admin.json'
 /**
  * Global setup: Authenticate as admin via Better-auth's magic-link plugin.
  *
+ * 0. Enable the magic-link sign-in method (opt-in, and the seed leaves it off)
  * 1. POST /api/auth/sign-in/magic-link to provision a verification row
  *    (in dev with no email configured the callback warns but the token
  *    still lands in the verification table)
@@ -19,6 +21,20 @@ const AUTH_FILE = 'e2e/.auth/admin.json'
 setup('authenticate as admin', async ({ page }) => {
   const request = page.request
 
+  // Step 0: Open the magic-link method BEFORE the first send.
+  //
+  // `isSignInMethodEnabled` treats magicLink as opt-in, DEFAULT_AUTH_CONFIG
+  // ships it off and `db:seed` leaves settings.auth_config NULL, so out of the
+  // box `isAuthMethodAllowed` answers `magic_link_method_not_allowed`: the POST
+  // below is redirected away and no verification row is ever written.
+  //
+  // Ordering matters beyond correctness. `checkMagicLinkSendRateLimit` allows
+  // 3 sends per 15 min per (ip, email) and this project retries twice, so a
+  // first attempt that could never have passed the gate would burn a third of
+  // the budget that the retries need. Enabling first makes attempt 1 the one
+  // that succeeds. The call is idempotent, so the retries re-assert it cheaply.
+  enableMagicLinkSignIn()
+
   // Step 1: Trigger magic-link verification token creation
   const sendResponse = await request.post('/api/auth/sign-in/magic-link', {
     data: {
@@ -27,6 +43,13 @@ setup('authenticate as admin', async ({ page }) => {
     },
   })
   expect(sendResponse.ok()).toBeTruthy()
+  // `.ok()` alone does not prove the send landed: a policy block is a 302 to
+  // `/?auth=signin&…&error=<code>`, which the request context follows to a 200
+  // portal page. Assert on the final URL so a blocked method reports itself
+  // here instead of as a mystifying "no token in the verification table" below.
+  expect(sendResponse.url(), 'magic-link send was redirected to an auth error').not.toMatch(
+    /[?&]error=/
+  )
 
   // Step 2: Pull the token directly from the verification table
   const token = getMagicLinkToken(ADMIN_EMAIL)

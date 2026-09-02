@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Admin Webhooks Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin/settings/webhooks')
+    await page.goto('/admin/settings/developers?tab=webhooks')
     await page.waitForLoadState('networkidle')
   })
 
@@ -13,7 +13,7 @@ test.describe('Admin Webhooks Settings', () => {
 
   test('shows page description', async ({ page }) => {
     await expect(
-      page.getByText('Send real-time notifications to external services when events occur')
+      page.getByText('Webhooks receive HTTP POST requests when events happen in your workspace.')
     ).toBeVisible({ timeout: 10000 })
   })
 
@@ -24,8 +24,7 @@ test.describe('Admin Webhooks Settings', () => {
     const emptyStateButton = page.getByRole('button', { name: 'Create your first webhook' })
 
     // One or the other should be visible depending on whether webhooks exist
-    const hasCreateButton =
-      (await createButton.count()) > 0 || (await emptyStateButton.count()) > 0
+    const hasCreateButton = (await createButton.count()) > 0 || (await emptyStateButton.count()) > 0
     expect(hasCreateButton).toBe(true)
   })
 
@@ -76,9 +75,7 @@ test.describe('Admin Webhooks Settings', () => {
 
     // Should have endpoint URL label and input
     await expect(dialog.getByLabel('Endpoint URL')).toBeVisible()
-    await expect(
-      dialog.getByPlaceholder('https://example.com/webhook')
-    ).toBeVisible()
+    await expect(dialog.getByPlaceholder('https://example.com/webhook')).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
@@ -340,7 +337,7 @@ test.describe('Admin Webhooks - Create Webhook Flow', () => {
   test.describe.configure({ mode: 'serial' })
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin/settings/webhooks')
+    await page.goto('/admin/settings/developers?tab=webhooks')
     await page.waitForLoadState('networkidle')
   })
 

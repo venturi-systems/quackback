@@ -1,5 +1,23 @@
 import { test, expect } from '@playwright/test'
 
+/**
+ * The widget secret, the backend-framework selector and the server-side-only
+ * warning all live inside the `{verifiedIdentityOnly && ...}` branch of
+ * settings.widget.tsx. db:seed leaves that config off, so on a fresh database
+ * none of them are in the DOM. Turn the toggle on first -- the same thing
+ * settings-portal-widget.spec.ts does for the identical page.
+ */
+async function enableVerifiedIdentity(page: import('@playwright/test').Page): Promise<void> {
+  const verifiedSwitch = page.getByRole('switch', {
+    name: 'Require verified widget identity',
+  })
+  await expect(verifiedSwitch).toBeVisible({ timeout: 10000 })
+  if (!(await verifiedSwitch.isChecked())) {
+    await verifiedSwitch.click()
+    await expect(verifiedSwitch).toBeChecked({ timeout: 5000 })
+  }
+}
+
 test.describe('Admin Widget Settings', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/admin/settings/widget')
@@ -9,14 +27,18 @@ test.describe('Admin Widget Settings', () => {
   test('page loads and shows Feedback Widget heading', async ({ page }) => {
     await expect(page.getByText('Feedback Widget').first()).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Embed a feedback widget directly in your product to collect feedback from users')
+      page.getByText(
+        'Embed a feedback widget directly in your product to collect feedback from users'
+      )
     ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows Widget enable/disable card', async ({ page }) => {
     await expect(page.getByText('Enable Feedback Widget')).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('When enabled, you can embed a feedback widget on any website using a script tag')
+      page.getByText(
+        'When enabled, you can embed a feedback widget on any website using a script tag'
+      )
     ).toBeVisible()
   })
 
@@ -35,9 +57,9 @@ test.describe('Admin Widget Settings', () => {
     await expect(page.getByText('Button Position')).toBeVisible()
 
     // Position select trigger
-    const positionSelect = page.locator('#widget-position').or(
-      page.getByRole('combobox').filter({ hasText: /Bottom/i })
-    )
+    const positionSelect = page
+      .locator('#widget-position')
+      .or(page.getByRole('combobox').filter({ hasText: /Bottom/i }))
     if ((await positionSelect.count()) > 0) {
       await expect(positionSelect.first()).toBeVisible()
     }
@@ -46,7 +68,8 @@ test.describe('Admin Widget Settings', () => {
   test('position selector shows Bottom Right and Bottom Left options', async ({ page }) => {
     await page.waitForLoadState('networkidle')
 
-    const positionTrigger = page.locator('[id="widget-position"]')
+    const positionTrigger = page
+      .locator('[id="widget-position"]')
       .or(page.getByRole('combobox').filter({ hasText: /Bottom/i }))
 
     if ((await positionTrigger.count()) > 0) {
@@ -63,9 +86,7 @@ test.describe('Admin Widget Settings', () => {
 
   test('shows Tabs section with Feedback and Changelog toggles', async ({ page }) => {
     await expect(page.getByText('Tabs')).toBeVisible({ timeout: 10000 })
-    await expect(
-      page.getByText('Choose which sections to show in the widget.')
-    ).toBeVisible()
+    await expect(page.getByText('Choose which sections to show in the widget.')).toBeVisible()
 
     const feedbackSwitch = page.locator('#tab-feedback')
     const changelogSwitch = page.locator('#tab-changelog')
@@ -85,21 +106,29 @@ test.describe('Admin Widget Settings', () => {
   })
 
   test('shows Default Board section', async ({ page }) => {
-    await expect(page.getByText('Default Board')).toBeVisible({ timeout: 10000 })
+    // Scoped to the heading: the select below it renders "No default board",
+    // which also matches an unanchored getByText('Default Board').
+    await expect(page.getByRole('heading', { name: 'Default Board' })).toBeVisible({
+      timeout: 10000,
+    })
     await expect(
-      page.getByText('Which board new posts from the widget are submitted to')
+      page.getByText('Which board is selected by default when creating new posts from the widget')
     ).toBeVisible()
   })
 
   test('shows Content card with image uploads toggle', async ({ page }) => {
     await expect(page.getByText('Content').first()).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Control what rich content types users can include in their feedback submissions.')
+      page.getByText(
+        'Control what rich content types users can include in their feedback submissions.'
+      )
     ).toBeVisible()
 
     await expect(page.getByText('Image Uploads')).toBeVisible()
     await expect(
-      page.getByText('Allow signed-in users to attach images when submitting feedback through the widget.')
+      page.getByText(
+        'Allow signed-in users to attach images when submitting feedback through the widget.'
+      )
     ).toBeVisible()
 
     const imageUploadsSwitch = page.locator('#image-uploads-in-widget')
@@ -118,7 +147,7 @@ test.describe('Admin Widget Settings', () => {
 
   test('shows installation step 2 (Identify users)', async ({ page }) => {
     await expect(page.getByText('Identify users')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText(/Generate a signed/)).toBeVisible()
+    await expect(page.getByText('Required to display the widget')).toBeVisible()
   })
 
   test('shows "Verified identity only" toggle', async ({ page }) => {
@@ -134,6 +163,7 @@ test.describe('Admin Widget Settings', () => {
   })
 
   test('shows widget secret section', async ({ page }) => {
+    await enableVerifiedIdentity(page)
     await expect(page.getByText('Widget secret')).toBeVisible({ timeout: 10000 })
 
     // Either a masked secret code element or the "Click regenerate" placeholder
@@ -146,12 +176,14 @@ test.describe('Admin Widget Settings', () => {
   })
 
   test('shows Regenerate button for widget secret', async ({ page }) => {
+    await enableVerifiedIdentity(page)
     const regenerateButton = page.getByRole('button', { name: 'Regenerate' })
     await expect(regenerateButton).toBeVisible({ timeout: 10000 })
     await expect(regenerateButton).toBeEnabled()
   })
 
   test('shows security warning about keeping secret server-side', async ({ page }) => {
+    await enableVerifiedIdentity(page)
     await expect(page.getByText('Keep this secret server-side only')).toBeVisible({
       timeout: 10000,
     })
@@ -201,10 +233,13 @@ test.describe('Admin Widget Settings', () => {
   })
 
   test('shows backend framework selector', async ({ page }) => {
+    await enableVerifiedIdentity(page)
     await expect(page.getByText('Backend framework')).toBeVisible({ timeout: 10000 })
 
     // Framework select — defaults to Next.js
-    const frameworkSelect = page.getByRole('combobox').filter({ hasText: /Next\.js|Express|Django|Rails|Laravel/i })
+    const frameworkSelect = page
+      .getByRole('combobox')
+      .filter({ hasText: /Next\.js|Express|Django|Rails|Laravel/i })
     if ((await frameworkSelect.count()) > 0) {
       await expect(frameworkSelect.first()).toBeVisible()
     }

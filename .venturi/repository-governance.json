@@ -30,9 +30,11 @@
     "local_commands": [
       "bun run lint",
       "bun run --filter @quackback/widget build",
+      "bun run --filter @quackback/widget test",
       "SKIP_ENV_VALIDATION=true bun run build",
       "bun run --filter @quackback/web typecheck",
-      "bun run test --run"
+      "bun run test --run",
+      "bun run test:e2e"
     ]
   },
   "runners": {
@@ -48,7 +50,26 @@
     "aws_oidc_roles": []
   },
   "environments": ["npm", "github-release", "ghcr"],
-  "schedules": [],
+  "schedules": [
+    {
+      "name": "ci-nightly-full-run",
+      "workflow": "ci.yml",
+      "classification": "scheduled-full-validation",
+      "cadence": "17 5 * * *",
+      "execution_plane": "github",
+      "maximum_runtime_minutes": 60,
+      "retry_limit": 0,
+      "event_age_seconds": 86400,
+      "concurrency_limit": 1,
+      "idempotency_key": "quackback-ci-nightly-full-run",
+      "cost_tags": {
+        "repository": "quackback",
+        "workload": "ci-nightly-full-run"
+      },
+      "dlq": "none-github-native",
+      "rollback": "remove the schedule trigger from ci.yml"
+    }
+  ],
   "deployment": {
     "owner": "repository release workflows",
     "method": "tagged npm package, signed multi-architecture GHCR image, and release asset",
@@ -70,7 +91,7 @@
   "cost": {
     "cache_limit_gb": null,
     "budget_increase_allowed": false,
-    "circuit_breaker": "workflow timeouts, concurrency cancellation, and no scheduled workflows",
+    "circuit_breaker": "workflow timeouts, concurrency cancellation, a changed-path filter on the end-to-end lane, and exactly one nightly schedule",
     "cache_policy": "per-architecture-gha"
   }
 }

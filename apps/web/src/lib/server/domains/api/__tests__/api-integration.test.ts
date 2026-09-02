@@ -13,40 +13,37 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   SKIP_INTEGRATION,
+  API_KEY,
   api,
   createTestState,
-  checkServerAndSetup,
+  setUpIntegrationSuite,
+  requireBoardId,
+  requirePostId,
   cleanupCreatedResources,
 } from './api-integration.helpers'
 
 const state = createTestState()
 
-function skipIfNoServer() {
-  return !state.serverAvailable
-}
-
-describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
+describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests', () => {
+  // Throws on an unreachable server, a rejected key, or a fixture it could not
+  // establish. There is deliberately no `serverAvailable` flag to consult: a
+  // per-test `if (...) return` reports an unrun case as a passing one.
   beforeAll(async () => {
-    state.serverAvailable = await checkServerAndSetup(state)
+    await setUpIntegrationSuite(state)
   })
 
   afterAll(async () => {
-    if (!state.serverAvailable) return
     await cleanupCreatedResources(state.createdIds)
   })
 
   describe('Authentication', () => {
     it('should reject requests without API key', async () => {
-      if (skipIfNoServer()) return
-
       const { BASE_URL } = await import('./api-integration.helpers')
       const res = await fetch(`${BASE_URL}/boards`)
       expect(res.status).toBe(401)
     })
 
     it('should reject invalid API key', async () => {
-      if (skipIfNoServer()) return
-
       const { BASE_URL } = await import('./api-integration.helpers')
       const res = await fetch(`${BASE_URL}/boards`, {
         headers: { Authorization: 'Bearer invalid_key' },
@@ -55,8 +52,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('should accept valid API key', async () => {
-      if (skipIfNoServer()) return
-
       const { status } = await api('GET', '/boards')
       expect(status).toBe(200)
     })
@@ -64,16 +59,12 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('Boards CRUD', () => {
     it('GET /boards returns list', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('GET', '/boards')
       expect(status).toBe(200)
       expect((data as { data: unknown[] }).data).toBeInstanceOf(Array)
     })
 
     it('POST /boards creates board', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('POST', '/boards', {
         name: `Test Board ${Date.now()}`,
         slug: `test-board-${Date.now()}`,
@@ -85,8 +76,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('POST /boards with invalid slug returns 400', async () => {
-      if (skipIfNoServer()) return
-
       const { status } = await api('POST', '/boards', {
         name: 'Test Board',
         slug: 'invalid_slug_with_underscores',
@@ -95,16 +84,13 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('GET /boards/:id returns board', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
-      const { status, data } = await api('GET', `/boards/${state.testBoardId}`)
+      const boardId = requireBoardId(state)
+      const { status, data } = await api('GET', `/boards/${boardId}`)
       expect(status).toBe(200)
-      expect((data as { data: { id: string } }).data.id).toBe(state.testBoardId)
+      expect((data as { data: { id: string } }).data.id).toBe(boardId)
     })
 
     it('GET /boards/:id with invalid ID returns 400', async () => {
-      if (skipIfNoServer()) return
-
       const { status } = await api('GET', '/boards/invalid-id')
       expect(status).toBe(400)
     })
@@ -112,8 +98,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('Posts CRUD', () => {
     it('GET /posts returns paginated list', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('GET', '/posts')
       expect(status).toBe(200)
       expect((data as { data: unknown[] }).data).toBeInstanceOf(Array)
@@ -121,10 +105,8 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('POST /posts creates post', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
       const { status, data } = await api('POST', '/posts', {
-        boardId: state.testBoardId,
+        boardId: requireBoardId(state),
         title: `Test Post ${Date.now()}`,
         content: 'Test content for integration test',
       })
@@ -135,10 +117,8 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('POST /posts creates post with empty content', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
       const { status, data } = await api('POST', '/posts', {
-        boardId: state.testBoardId,
+        boardId: requireBoardId(state),
         title: `Title Only Post ${Date.now()}`,
         content: '',
       })
@@ -149,8 +129,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('POST /posts validation error returns 400', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('POST', '/posts', {
         title: '', // Empty title
         content: 'Test',
@@ -160,16 +138,13 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('GET /posts/:id returns post', async () => {
-      if (skipIfNoServer() || !state.testPostId) return
-
-      const { status, data } = await api('GET', `/posts/${state.testPostId}`)
+      const postId = requirePostId(state)
+      const { status, data } = await api('GET', `/posts/${postId}`)
       expect(status).toBe(200)
-      expect((data as { data: { id: string } }).data.id).toBe(state.testPostId)
+      expect((data as { data: { id: string } }).data.id).toBe(postId)
     })
 
     it('GET /posts/:id with invalid ID returns 400', async () => {
-      if (skipIfNoServer()) return
-
       const { status } = await api('GET', '/posts/invalid-id')
       expect(status).toBe(400)
     })
@@ -177,23 +152,17 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('TypeID Validation', () => {
     it('rejects malformed TypeID in path', async () => {
-      if (skipIfNoServer()) return
-
       const { status } = await api('GET', '/posts/post_invalid123')
       expect(status).toBe(400)
     })
 
     it('rejects wrong prefix in TypeID', async () => {
-      if (skipIfNoServer()) return
-
       // Using a board ID format where post ID is expected
       const { status } = await api('GET', '/posts/board_01kg7a1p2desk9rjpgfjkmxkaa')
       expect(status).toBe(400)
     })
 
     it('handles invalid filter parameters gracefully', async () => {
-      if (skipIfNoServer()) return
-
       // Invalid boardId in filter should return results (ignoring invalid filter)
       const { status } = await api('GET', '/posts?boardId=invalid')
       expect(status).toBe(200)
@@ -202,24 +171,18 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('Pagination', () => {
     it('respects limit parameter', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('GET', '/posts?limit=5')
       expect(status).toBe(200)
       expect((data as { data: unknown[] }).data.length).toBeLessThanOrEqual(5)
     })
 
     it('enforces max limit', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('GET', '/posts?limit=500')
       expect(status).toBe(200)
       expect((data as { data: unknown[] }).data.length).toBeLessThanOrEqual(100)
     })
 
     it('cursor pagination works', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('GET', '/posts?limit=1')
       expect(status).toBe(200)
       const pagination = (data as { meta: { pagination: { cursor: string | null } } }).meta
@@ -236,8 +199,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('Error Handling', () => {
     it('returns 404 for non-existent resource', async () => {
-      if (skipIfNoServer()) return
-
       const { createId } = await import('@quackback/ids')
       const fakePostId = createId('post')
       const { status, data } = await api('GET', `/posts/${fakePostId}`)
@@ -246,8 +207,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('returns proper error structure', async () => {
-      if (skipIfNoServer()) return
-
       const { status, data } = await api('POST', '/posts', {})
       expect(status).toBe(400)
       expect((data as { error: { code: string; message: string } }).error).toMatchObject({
@@ -259,24 +218,18 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('Response Format', () => {
     it('list response has data array', async () => {
-      if (skipIfNoServer()) return
-
       const { data } = await api('GET', '/boards')
       expect((data as { data: unknown[] }).data).toBeInstanceOf(Array)
     })
 
     it('single resource has data object', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
-      const { data } = await api('GET', `/boards/${state.testBoardId}`)
+      const { data } = await api('GET', `/boards/${requireBoardId(state)}`)
       expect((data as { data: Record<string, unknown> }).data).toBeInstanceOf(Object)
       expect(Array.isArray((data as { data: unknown }).data)).toBe(false)
     })
 
     it('dates are ISO 8601 format', async () => {
-      if (skipIfNoServer() || !state.testPostId) return
-
-      const { data } = await api('GET', `/posts/${state.testPostId}`)
+      const { data } = await api('GET', `/posts/${requirePostId(state)}`)
       const post = (data as { data: { createdAt: string } }).data
       expect(post.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)
     })
@@ -284,8 +237,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
 
   describe('Referential Integrity', () => {
     it('cannot create post with non-existent boardId', async () => {
-      if (skipIfNoServer()) return
-
       const { createId } = await import('@quackback/ids')
       const fakeBoardId = createId('board')
       const { status } = await api('POST', '/posts', {
@@ -297,12 +248,10 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('cannot create post with non-existent statusId', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
       const { createId } = await import('@quackback/ids')
       const fakeStatusId = createId('status')
       const { status } = await api('POST', '/posts', {
-        boardId: state.testBoardId,
+        boardId: requireBoardId(state),
         title: 'Test',
         content: 'Test',
         statusId: fakeStatusId,
@@ -311,8 +260,6 @@ describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
     })
 
     it('cannot create comment on non-existent post', async () => {
-      if (skipIfNoServer()) return
-
       const { createId } = await import('@quackback/ids')
       const fakePostId = createId('post')
       const { status } = await api('POST', `/posts/${fakePostId}/comments`, {

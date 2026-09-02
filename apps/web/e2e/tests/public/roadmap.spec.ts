@@ -158,10 +158,7 @@ test.describe('Public Roadmap', () => {
     const firstCard = roadmapCards.first()
     const href = await firstCard.getAttribute('href')
 
-    await Promise.all([
-      page.waitForURL(/\/posts\//, { timeout: 10000 }),
-      firstCard.click(),
-    ])
+    await Promise.all([page.waitForURL(/\/posts\//, { timeout: 10000 }), firstCard.click()])
 
     if (href) {
       await expect(page).toHaveURL(new RegExp(href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
@@ -210,9 +207,12 @@ test.describe('Public Roadmap', () => {
     await tabs.nth(1).click()
     await page.waitForLoadState('networkidle')
 
-    // The second tab should now be selected
-    await expect(tabs.nth(1)).toHaveAttribute('data-state', 'active')
-    await expect(tabs.nth(0)).not.toHaveAttribute('data-state', 'active')
+    // The second tab should now be selected. RoadmapTabs is a hand-rolled
+    // tablist (components/public/roadmap-tabs.tsx) that tracks selection with
+    // aria-selected; it never emits Radix's data-state, so the old assertion
+    // could not pass even when the tab did switch.
+    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
+    await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'false')
   })
 
   test('URL search param ?roadmap= selects the corresponding roadmap', async ({ page }) => {
@@ -248,11 +248,18 @@ test.describe('Public Roadmap', () => {
       return
     }
 
-    // RoadmapFiltersBar renders a Search button + sort buttons + "Add filter" button.
-    // There is no form or [class*="filters"] element visible — the form is inside a popover.
-    // Check for the "Add filter" button which is always rendered.
-    const addFilterButton = page.getByRole('button', { name: 'Add filter' })
-    await expect(addFilterButton).toBeVisible({ timeout: 5000 })
+    // The always-rendered filter control is the toolbar's Filter button
+    // (PublicRoadmapToolbarFilterButton, variant="toolbar", aria-label "Filter"),
+    // which RoadmapBoard passes to PublicRoadmapToolbar unconditionally.
+    //
+    // "Add filter" is NOT always rendered, despite what this test used to claim:
+    // PublicRoadmapFiltersBar short-circuits with `if (activeChips.length === 0)
+    // return null`, so the pill only exists once a filter is already applied —
+    // never on a fresh /roadmap.
+    // exact: getByRole's `name` is a substring match by default, so a bare
+    // 'Filter' would also match the "Add filter" pill once a chip is active.
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true })
+    await expect(filterButton).toBeVisible({ timeout: 5000 })
     // Page should not show an error state
     await expect(page.locator('body')).not.toContainText(/something went wrong/i)
   })

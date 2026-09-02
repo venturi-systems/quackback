@@ -20,8 +20,16 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
 
   /* Reporter to use - blob for CI (enables sharding/merging), html for local */
+  // In CI the `json` reporter is what the known-failure ratchet reads
+  // (e2e/scripts/check-known-failures.ts). It is the gate, not Playwright's
+  // exit code -- a failure already on e2e/known-failures.json must not redden
+  // the shard, and anything else must.
   reporter: process.env.CI
-    ? [['blob', { outputDir: 'blob-report' }], ['list']]
+    ? [
+        ['blob', { outputDir: 'blob-report' }],
+        ['json', { outputFile: 'e2e-results.json' }],
+        ['list'],
+      ]
     : [['html', { outputFolder: 'playwright-report' }], ['list']],
 
   /* Shared settings for all the projects below */
@@ -71,6 +79,16 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         /* No stored auth state - tests manage their own auth */
       },
+      /* `setup` is a dependency even though these tests sign themselves in.
+         Under --shard Playwright splits the test list, and a dependency is the
+         only thing that pulls `setup` into a shard: a shard holding only
+         chromium-auth / chromium-public tests would otherwise run none of it.
+         Two concrete consequences when it does not run — both silent, both
+         shard-dependent: unified-login.spec.ts reads e2e/.auth/admin.json,
+         which only setup writes, and every loginViaMagicLink call needs the
+         magic-link method setup turns on (db:seed leaves settings.auth_config
+         NULL and magicLink is opt-in). */
+      dependencies: ['setup'],
       testMatch: /tests\/auth\/.+\.spec\.ts/,
     },
 
@@ -80,6 +98,14 @@ export default defineConfig({
       use: {
         ...devices['Desktop Chrome'],
       },
+      /* Same reason as chromium-auth. board-access-matrix.spec.ts signs several
+         identities in through magic link, and voting/comments specs sign in
+         through email-OTP — which the gate resolves to the SAME magicLink key
+         (normalizeMethodKey maps 'email' to 'magicLink'), so without setup the
+         send is answered `error=magic_link_method_not_allowed` and their
+         beforeAll retry loop burns its 30s hook budget. Shard 4 of 4 is 195
+         chromium-public tests and nothing else, so this is the whole shard. */
+      dependencies: ['setup'],
       testMatch: /tests\/public\/.+\.spec\.ts/,
     },
   ],

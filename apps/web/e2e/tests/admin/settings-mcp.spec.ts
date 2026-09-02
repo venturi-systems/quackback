@@ -2,21 +2,26 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Admin MCP Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin/settings/mcp')
+    await page.goto('/admin/settings/developers?tab=mcp')
     await page.waitForLoadState('networkidle')
   })
 
   test('page loads and shows MCP Server heading', async ({ page }) => {
     await expect(page.getByText('MCP Server').first()).toBeVisible({ timeout: 10000 })
+    // The MCP card's own description, verbatim from
+    // routes/admin/settings.developers.tsx. The previous string is not in the
+    // tree; the closest live copy is the toggle's, which the next test asserts.
     await expect(
-      page.getByText('Allow AI tools to interact with your feedback data via the Model Context Protocol')
+      page.getByText('Enable or disable the MCP endpoint for AI integrations.')
     ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows Enable MCP Server toggle', async ({ page }) => {
     await expect(page.getByText('Enable MCP Server').first()).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Allow AI tools like Claude Code to interact with your feedback data via the MCP protocol')
+      page.getByText(
+        'Allow AI tools like Claude Code to interact with your feedback data via the MCP protocol'
+      )
     ).toBeVisible()
   })
 
@@ -95,8 +100,11 @@ test.describe('Admin MCP Settings', () => {
     const apiKeyLink = page.getByRole('link', { name: 'API key', exact: true })
     await expect(apiKeyLink).toBeVisible({ timeout: 10000 })
 
+    // API keys are the `keys` tab of the Developers page, and that is exactly
+    // where mcp-setup-guide.tsx points this link (`to="/admin/settings/developers"`
+    // with `search={{ tab: 'keys' }}`). /api-keys/ was the pre-consolidation route.
     const href = await apiKeyLink.getAttribute('href')
-    expect(href).toMatch(/api-keys/)
+    expect(href).toMatch(/\/admin\/settings\/developers\?tab=keys/)
   })
 
   test('shows Choose your client step with client selector buttons', async ({ page }) => {

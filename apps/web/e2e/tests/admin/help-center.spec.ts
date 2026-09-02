@@ -17,17 +17,33 @@ import { test, expect } from '@playwright/test'
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Enable the help center feature flag via the settings UI. */
+/**
+ * Enable the `helpCenter` feature flag, which is what actually gates the admin
+ * Help Center: admin-sidebar.tsx and settings-nav.tsx both read
+ * `settings.featureFlags.helpCenter`.
+ *
+ * That flag lives in the `settings.feature_flags` column and is toggled on the
+ * Labs page. It is NOT the switch on /admin/settings/help-center: that one
+ * writes the separate `settings.help_center_config` column
+ * (updateHelpCenterConfig), which controls the PUBLIC help center and leaves
+ * every admin surface hidden. Toggling it here left the nav gated off and the
+ * routes unreachable for the whole suite.
+ *
+ * ExperimentalSettings calls window.location.reload() once the mutation
+ * resolves, so the flag is live in the router context on the next navigation.
+ */
 async function enableHelpCenter(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('/admin/settings/help-center')
+  await page.goto('/admin/settings/labs')
   await page.waitForLoadState('networkidle')
 
-  const toggle = page.getByRole('switch').first()
-  const isChecked = await toggle.isChecked().catch(() => false)
-  if (!isChecked) {
+  const toggle = page.locator('#flag-helpCenter')
+  await expect(toggle).toBeVisible({ timeout: 10000 })
+  if (!(await toggle.isChecked())) {
     await toggle.click()
-    await expect(toggle).toBeChecked({ timeout: 5000 })
+    // The success handler reloads the page; wait for the reloaded document to
+    // settle before asserting, or the assertion races the navigation.
     await page.waitForLoadState('networkidle')
+    await expect(page.locator('#flag-helpCenter')).toBeChecked({ timeout: 10000 })
   }
 }
 
@@ -104,12 +120,13 @@ test.describe('Help Center admin navigation', () => {
     await page.goto('/admin/help-center')
     await page.waitForLoadState('networkidle')
 
-    const content = page
-      .getByText('No articles yet')
-      .or(page.getByText('Recent articles'))
-      .or(page.getByText(/article/i).first())
-
-    await expect(content).toBeVisible({ timeout: 10000 })
+    // The list card header is rendered unconditionally on the index
+    // (help-center-finder.tsx: `articleListTitle` is 'Recent articles' when no
+    // category is selected). The previous `.or()` union also matched the
+    // empty-state heading "No articles yet", which the index renders at the
+    // same time when the tenant has no articles -- two matches, so the union
+    // was a strict-mode violation rather than a fallback.
+    await expect(page.getByText('Recent articles')).toBeVisible({ timeout: 10000 })
   })
 })
 
@@ -328,10 +345,7 @@ test.describe('Help Center article author', () => {
     await expect(articleCards.first()).toBeVisible()
   })
 
-  test('article editor remains stable after setting author via API', async ({
-    page,
-    request,
-  }) => {
+  test('article editor remains stable after setting author via API', async ({ page, request }) => {
     const url = await createAndOpenArticle(page)
     if (!url) return
 
@@ -373,21 +387,26 @@ test.describe('Help Center article filtering', () => {
     await expect(searchInput.first()).toBeVisible({ timeout: 10000 })
   })
 
+  // The sort control is not a combobox: AdminListHeader renders `sortOptions`
+  // as a pair of pill <button>s ("Newest" / "Oldest"), and help-center-finder
+  // passes SORT_OPTIONS = [newest, oldest]. The old combobox locator matched
+  // nothing, which also made 'can change sort order' return before asserting.
   test('sort dropdown is present', async ({ page }) => {
-    const sortTrigger = page.getByRole('combobox').filter({ hasText: /newest|oldest/i })
-    await expect(sortTrigger.first()).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: 'Newest' })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: 'Oldest' })).toBeVisible({ timeout: 10000 })
   })
 
   test('can change sort order', async ({ page }) => {
-    const sortTrigger = page.getByRole('combobox').filter({ hasText: /newest|oldest/i })
-    if ((await sortTrigger.count()) === 0) return
+    await page.getByRole('button', { name: 'Oldest' }).click()
+    await page.waitForLoadState('networkidle')
 
-    await sortTrigger.first().click()
-    const oldestOption = page.getByRole('option', { name: /oldest/i })
-    if ((await oldestOption.count()) > 0) {
-      await oldestOption.click()
-      await page.waitForLoadState('networkidle')
-    }
+    // useHelpCenterFilters writes the non-default sort into the URL and omits
+    // it again for 'newest', so the search param is the observable result.
+    await expect(page).toHaveURL(/[?&]sort=oldest/, { timeout: 10000 })
+
+    await page.getByRole('button', { name: 'Newest' }).click()
+    await page.waitForLoadState('networkidle')
+    await expect(page).not.toHaveURL(/[?&]sort=oldest/, { timeout: 10000 })
   })
 })
 
@@ -498,9 +517,13 @@ test.describe('Help Center article SEO description', () => {
     await page.getByRole('button', { name: /save changes/i }).click()
     // Wait for save
     await expect(
-      page.getByRole('button', { name: /saving/i }).or(page.getByRole('button', { name: /save changes/i }))
+      page
+        .getByRole('button', { name: /saving/i })
+        .or(page.getByRole('button', { name: /save changes/i }))
     ).toBeVisible({ timeout: 5000 })
-    await expect(page.getByRole('button', { name: /save changes/i })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: /save changes/i })).toBeVisible({
+      timeout: 10000,
+    })
 
     // Reload and verify the description was persisted
     await page.reload()
@@ -550,8 +573,12 @@ test.describe('Help Center article list filtering - status', () => {
 
     await addFilterButton.click()
 
-    // Popover should list Status and Category
-    await expect(page.getByText('Status')).toBeVisible({ timeout: 3000 })
+    // Popover should list Status and Category. Scope to the popover: the list's
+    // own sidebar renders a "Status" section header button too, so an unscoped
+    // getByText('Status') is a strict-mode violation.
+    const popover = page.locator('[data-radix-popper-content-wrapper]')
+    await expect(popover.getByRole('button', { name: 'Status' })).toBeVisible({ timeout: 3000 })
+    await expect(popover.getByRole('button', { name: 'Category' })).toBeVisible({ timeout: 3000 })
   })
 
   test('can apply Draft status filter', async ({ page }) => {
@@ -559,15 +586,23 @@ test.describe('Help Center article list filtering - status', () => {
     if ((await addFilterButton.count()) === 0) return
 
     await addFilterButton.click()
-    await page.getByText('Status').click()
+    await page
+      .locator('[data-radix-popper-content-wrapper]')
+      .getByRole('button', { name: 'Status' })
+      .click()
 
     // Status sub-menu shows Draft and Published
     await expect(page.getByRole('button', { name: 'Draft' })).toBeVisible({ timeout: 3000 })
     await page.getByRole('button', { name: 'Draft' }).click()
     await page.waitForLoadState('networkidle')
 
-    // A filter chip for Status: Draft should now be visible
-    await expect(page.getByText('Draft')).toBeVisible({ timeout: 5000 })
+    // A filter chip for Status: Draft should now be visible. Assert the chip
+    // itself, via the accessible name FilterChip gives its remove button
+    // (`Remove ${label} ${value} filter`): a bare getByText('Draft') also
+    // matched the popover option and every Draft badge in the list.
+    await expect(page.getByRole('button', { name: 'Remove Status Draft filter' })).toBeVisible({
+      timeout: 5000,
+    })
   })
 
   test('can apply Published status filter', async ({ page }) => {
@@ -575,13 +610,18 @@ test.describe('Help Center article list filtering - status', () => {
     if ((await addFilterButton.count()) === 0) return
 
     await addFilterButton.click()
-    await page.getByText('Status').click()
+    await page
+      .locator('[data-radix-popper-content-wrapper]')
+      .getByRole('button', { name: 'Status' })
+      .click()
 
     await expect(page.getByRole('button', { name: 'Published' })).toBeVisible({ timeout: 3000 })
     await page.getByRole('button', { name: 'Published' }).click()
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('Published')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('button', { name: 'Remove Status Published filter' })).toBeVisible({
+      timeout: 5000,
+    })
   })
 
   test('status filter chip can be removed', async ({ page }) => {
@@ -590,7 +630,10 @@ test.describe('Help Center article list filtering - status', () => {
     if ((await addFilterButton.count()) === 0) return
 
     await addFilterButton.click()
-    await page.getByText('Status').click()
+    await page
+      .locator('[data-radix-popper-content-wrapper]')
+      .getByRole('button', { name: 'Status' })
+      .click()
     await page.getByRole('button', { name: 'Draft' }).click()
     await page.waitForLoadState('networkidle')
 
@@ -650,7 +693,9 @@ test.describe('Help Center article list filtering - status', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(
-      page.getByText('No articles match your search').or(page.getByText('No articles match your filters'))
+      page
+        .getByText('No articles match your search')
+        .or(page.getByText('No articles match your filters'))
     ).toBeVisible({ timeout: 10000 })
   })
 })
@@ -720,29 +765,34 @@ test.describe('Help Center article list item actions', () => {
   test('article row shows ellipsis menu with Edit and Delete options on hover', async ({
     page,
   }) => {
-    // Need at least one article in the list
-    const articleRows = page.locator('h3')
-    if ((await articleRows.count()) === 0) return
+    // This case used to locate the trigger as "the last button in `div.group`
+    // that contains an svg", behind three guards that each returned silently.
+    // Two of them could never fire as written -- `.first()` resolves to 0 or 1
+    // elements, so `count() === 0` on it was a test for "the page is empty" --
+    // and the third, `if (count > 0)`, let the case PASS having asserted
+    // nothing whenever the guess found no button.
+    //
+    // `div.group` is a Tailwind utility used across the admin shell, so
+    // `.first()` was not reliably an article row, and the "last button with an
+    // svg" was not reliably the menu trigger. That is why this was flaky on two
+    // CI runs and then failed all three attempts on a third.
+    //
+    // The trigger now carries `aria-label="Article actions"` (matching
+    // help-center-article-editor.tsx), so it can be addressed by role and name.
+    const trigger = page.getByRole('button', { name: 'Article actions' })
 
-    const firstRow = page.locator('div.group').first()
-    if ((await firstRow.count()) === 0) return
-
-    // Hover to reveal the ellipsis button
-    await firstRow.hover()
-
-    const ellipsisButton = firstRow.locator('button').filter({
-      has: page.locator('svg'),
-    })
-
-    if ((await ellipsisButton.count()) > 0) {
-      await ellipsisButton.last().click()
-
-      await expect(page.getByRole('menuitem', { name: /edit/i })).toBeVisible({ timeout: 3000 })
-      await expect(
-        page.getByRole('menuitem', { name: /delete/i })
-      ).toBeVisible()
-
-      await page.keyboard.press('Escape')
+    if ((await trigger.count()) === 0) {
+      // A genuinely empty list is the one legitimate reason to stop. Skip
+      // loudly rather than return green having tested nothing.
+      test.skip(true, 'no help-center articles in the seed to open a row menu on')
+      return
     }
+
+    await trigger.first().click()
+
+    await expect(page.getByRole('menuitem', { name: /edit/i })).toBeVisible({ timeout: 3000 })
+    await expect(page.getByRole('menuitem', { name: /delete/i })).toBeVisible()
+
+    await page.keyboard.press('Escape')
   })
 })

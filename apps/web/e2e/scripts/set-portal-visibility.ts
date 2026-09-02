@@ -10,9 +10,18 @@
  * Always restore to 'public' in a `finally` block so subsequent tests and
  * dev sessions are not left with a locked portal.
  *
+ * The write is raw SQL, so it also drops the tenant-settings cache — the
+ * portal-access decision is served from `CACHE_KEYS.TENANT_SETTINGS` for an
+ * hour and only the app's own write paths invalidate it, so without this the
+ * running server keeps serving the previous visibility. Same primitive
+ * `invalidateSettingsCache()` uses, and the same Redis client the app itself
+ * connects with (REDIS_URL), so this behaves identically against the
+ * docker-compose Dragonfly and against a CI service container.
+ *
  * Usage: bun set-portal-visibility.ts <private|authenticated|public>
  */
 import postgres from 'postgres'
+import { cacheDel, getRedis, CACHE_KEYS } from '@/lib/server/redis'
 
 const arg = (process.argv[2] || '').toLowerCase()
 if (arg !== 'private' && arg !== 'authenticated' && arg !== 'public') {
@@ -45,8 +54,10 @@ try {
   config.access = { ...existingAccess, visibility: arg }
 
   await sql`UPDATE settings SET portal_config = ${JSON.stringify(config)} WHERE id = ${id}`
+  await cacheDel(CACHE_KEYS.TENANT_SETTINGS)
   console.log(JSON.stringify({ action: 'set-portal-visibility', visibility: arg }))
   await sql.end()
+  await getRedis().quit()
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   await sql.end()

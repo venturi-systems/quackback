@@ -1,55 +1,8 @@
 import { test, expect, type Page, type BrowserContext, type Locator } from '@playwright/test'
-import { getOtpCode } from '../../utils/db-helpers'
+import { portalStorageState } from '../../utils/portal-auth'
 
-const TEST_EMAIL = 'demo@example.com'
-
-// Run serially to avoid OTP rate-limiting conflicts with other spec files
+// Run serially to avoid contending for the shared demo account's session
 test.describe.configure({ mode: 'serial' })
-
-// ---------------------------------------------------------------------------
-// Auth helper (mirrors voting.spec.ts pattern with exponential backoff)
-// ---------------------------------------------------------------------------
-async function authenticateViaOTP(page: Page, maxRetries = 8) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: { email: TEST_EMAIL, type: 'sign-in' },
-      })
-
-      if (sendResponse.status() === 429) {
-        const wait = Math.min(2000 * Math.pow(2, attempt), 20000)
-        console.log(`[comments] Rate limited, waiting ${wait}ms (attempt ${attempt + 1})`)
-        await page.waitForTimeout(wait)
-        continue
-      }
-
-      if (!sendResponse.ok()) {
-        throw new Error(`OTP send failed: ${await sendResponse.text()}`)
-      }
-
-      const otpCode = getOtpCode(TEST_EMAIL)
-
-      const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: { email: TEST_EMAIL, otp: otpCode },
-      })
-
-      if (!verifyResponse.ok()) {
-        throw new Error(`OTP verify failed: ${await verifyResponse.text()}`)
-      }
-
-      await page.goto('/')
-      await page.waitForLoadState('networkidle')
-      console.log('[comments] Authentication successful')
-      return
-    } catch (err) {
-      if (attempt === maxRetries - 1) throw err
-      console.log(`[comments] Auth attempt ${attempt + 1} failed, retrying...`)
-      await page.waitForTimeout(3000)
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Helper: navigate to the first available post detail page
@@ -275,10 +228,15 @@ test.describe('Authenticated user — comment form and submission', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
-    sharedContext = await browser.newContext()
-    const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
-    await page.close()
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget, and building the context can still
+    // wait on the one shared sign-in.
+    test.setTimeout(90000)
+
+    // Reuse the run's single portal sign-in. Each of these four groups used to
+    // send its own OTP for the same address, which alone is more than the
+    // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
+    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
   })
 
   test.afterAll(async () => {
@@ -500,10 +458,15 @@ test.describe('Edge cases — comment content', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
-    sharedContext = await browser.newContext()
-    const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
-    await page.close()
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget, and building the context can still
+    // wait on the one shared sign-in.
+    test.setTimeout(90000)
+
+    // Reuse the run's single portal sign-in. Each of these four groups used to
+    // send its own OTP for the same address, which alone is more than the
+    // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
+    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
   })
 
   test.afterAll(async () => {
@@ -671,10 +634,15 @@ test.describe('Comment editing', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
-    sharedContext = await browser.newContext()
-    const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
-    await page.close()
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget, and building the context can still
+    // wait on the one shared sign-in.
+    test.setTimeout(90000)
+
+    // Reuse the run's single portal sign-in. Each of these four groups used to
+    // send its own OTP for the same address, which alone is more than the
+    // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
+    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
   })
 
   test.afterAll(async () => {
@@ -872,10 +840,15 @@ test.describe('Markdown comment rendering', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
-    sharedContext = await browser.newContext()
-    const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
-    await page.close()
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget, and building the context can still
+    // wait on the one shared sign-in.
+    test.setTimeout(90000)
+
+    // Reuse the run's single portal sign-in. Each of these four groups used to
+    // send its own OTP for the same address, which alone is more than the
+    // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
+    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
   })
 
   test.afterAll(async () => {

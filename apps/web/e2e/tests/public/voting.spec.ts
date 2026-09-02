@@ -1,74 +1,5 @@
-import { test, expect, Page, BrowserContext } from '@playwright/test'
-import { getOtpCode } from '../../utils/db-helpers'
-
-const TEST_EMAIL = 'demo@example.com'
-
-/**
- * Helper to authenticate a user via OTP flow
- * This function attempts to handle rate limiting gracefully
- */
-async function authenticateViaOTP(page: Page, maxRetries = 8) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      // Request OTP code
-      const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: {
-          email: TEST_EMAIL,
-          type: 'sign-in',
-        },
-      })
-
-      // If rate limited, wait and retry with exponential backoff
-      if (sendResponse.status() === 429) {
-        const waitTime = Math.min(2000 * Math.pow(2, attempt), 20000) // Max 20 seconds per attempt
-        console.log(
-          `Rate limited on attempt ${attempt + 1}/${maxRetries}, waiting ${waitTime}ms...`
-        )
-        await page.waitForTimeout(waitTime)
-        continue
-      }
-
-      if (!sendResponse.ok()) {
-        const errorData = await sendResponse.json()
-        console.error('Failed to send OTP:', errorData)
-        throw new Error(`Failed to send OTP: ${JSON.stringify(errorData)}`)
-      }
-
-      // Get OTP code from database
-      const otpCode = getOtpCode(TEST_EMAIL)
-
-      // Verify OTP code - Better-auth sets session cookie automatically
-      const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
-        headers: { 'Content-Type': 'application/json' },
-        data: {
-          email: TEST_EMAIL,
-          otp: otpCode,
-        },
-      })
-
-      if (!verifyResponse.ok()) {
-        const errorData = await verifyResponse.json()
-        console.error('Failed to verify OTP:', errorData)
-        throw new Error(`Failed to verify OTP: ${JSON.stringify(errorData)}`)
-      }
-
-      // Session cookie is now set by Better-auth
-      // Navigate to any page to verify authentication
-      await page.goto('/')
-      await page.waitForLoadState('networkidle')
-      console.log('Authentication successful!')
-      return // Success!
-    } catch (error) {
-      if (attempt === maxRetries - 1) {
-        console.error(`All ${maxRetries} authentication attempts failed.`)
-        throw error // Last attempt failed, re-throw
-      }
-      console.log(`Auth attempt ${attempt + 1} failed, retrying...`)
-      await page.waitForTimeout(3000)
-    }
-  }
-}
+import { test, expect, BrowserContext } from '@playwright/test'
+import { portalStorageState } from '../../utils/portal-auth'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -76,17 +7,19 @@ test.describe('Public Voting', () => {
   let sharedContext: BrowserContext
   let isAuthenticated = false
 
-  // Increase timeout to 90 seconds to handle rate limiting
+  // Generous budget: these tests drive real vote round trips over a shared context.
   test.setTimeout(90000)
 
   test.beforeAll(async ({ browser }) => {
-    // Create a shared context and authenticate once for all tests
-    // Note: This may take longer if rate limits are active
-    sharedContext = await browser.newContext()
-    const page = await sharedContext.newPage()
-    await authenticateViaOTP(page)
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget, and building the context can still
+    // wait on the one shared sign-in.
+    test.setTimeout(90000)
+
+    // Reuse the run's single portal sign-in. Sending another OTP here is what
+    // pushed the suite past the product's 3-per-15-min cap; see portal-auth.ts.
+    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
     isAuthenticated = true
-    await page.close()
   })
 
   test.afterAll(async () => {
@@ -425,30 +358,10 @@ test.describe('Voting — independence and persistence', () => {
   let sharedContext: import('@playwright/test').BrowserContext
 
   test.beforeAll(async ({ browser }) => {
-    sharedContext = await browser.newContext()
-    const page = await sharedContext.newPage()
-    // Use the OTP auth helper already tested in the Public Voting suite
-    // (relies on the same demo@example.com account and db-helpers)
-    const { getOtpCode } = await import('../../utils/db-helpers')
+    test.setTimeout(90000)
 
-    const TEST_EMAIL = 'demo@example.com'
-
-    const sendResponse = await page.request.post('/api/auth/email-otp/send-verification-otp', {
-      headers: { 'Content-Type': 'application/json' },
-      data: { email: TEST_EMAIL, type: 'sign-in' },
-    })
-    if (!sendResponse.ok()) throw new Error('Failed to send OTP for persistence tests')
-
-    const otpCode = getOtpCode(TEST_EMAIL)
-    const verifyResponse = await page.request.post('/api/auth/sign-in/email-otp', {
-      headers: { 'Content-Type': 'application/json' },
-      data: { email: TEST_EMAIL, otp: otpCode },
-    })
-    if (!verifyResponse.ok()) throw new Error('Failed to verify OTP for persistence tests')
-
-    await page.goto('/')
-    await page.waitForLoadState('networkidle')
-    await page.close()
+    // Same single sign-in as every other authenticated portal group.
+    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
   })
 
   test.afterAll(async () => {

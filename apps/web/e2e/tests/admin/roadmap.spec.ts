@@ -610,9 +610,12 @@ test.describe('Admin Roadmap - Cross-View Verification', () => {
       return
     }
 
-    const statusPicker = detailModal
-      .locator('[data-testid="status-selector"]')
-      .or(detailModal.locator('button').filter({ hasText: /open|under review|planned|in progress|complete|closed/i }).first())
+    const statusPicker = detailModal.locator('[data-testid="status-selector"]').or(
+      detailModal
+        .locator('button')
+        .filter({ hasText: /open|under review|planned|in progress|complete|closed/i })
+        .first()
+    )
 
     if ((await statusPicker.count()) === 0) {
       test.skip()
@@ -622,7 +625,8 @@ test.describe('Admin Roadmap - Cross-View Verification', () => {
     await statusPicker.first().click()
 
     // Select "Planned" (showOnRoadmap = true in seed defaults)
-    const plannedOption = page.getByRole('option', { name: /^planned$/i })
+    const plannedOption = page
+      .getByRole('option', { name: /^planned$/i })
       .or(page.locator('[role="menuitem"]').filter({ hasText: /^planned$/i }))
       .or(page.getByText(/^planned$/i).first())
 
@@ -687,8 +691,14 @@ test.describe('Admin Roadmap - Public Roadmap Column Accuracy', () => {
     const noRoadmapsMsg = page.getByText('No roadmaps available')
     if ((await noRoadmapsMsg.count()) > 0) return
 
-    // Public columns are shadcn Cards with min-w-[300px]
-    const columns = page.locator('[class*="min-w-\\[300px\\]"]')
+    // Public columns are shadcn Cards whose header carries the status title and
+    // a count Badge (public/roadmap-column.tsx). The old selector pinned a
+    // Tailwind width class -- the column is min-w-[280px], not [300px], with a
+    // comment in the component explaining the change -- so it matched nothing.
+    // Anchor on the shadcn data-slots instead, which are structural.
+    const columns = page
+      .locator('[data-slot="card"]')
+      .filter({ has: page.locator('[data-slot="card-header"] [data-slot="card-title"]') })
     await expect(columns.first()).toBeVisible({ timeout: 10000 })
 
     const columnCount = await columns.count()
@@ -697,8 +707,10 @@ test.describe('Admin Roadmap - Public Roadmap Column Accuracy', () => {
     for (let i = 0; i < columnCount; i++) {
       const col = columns.nth(i)
 
-      // Badge is a shadcn Badge (secondary) in the CardHeader next to the title
-      const badge = col.locator('[class*="badge"]').first()
+      // Badge is a shadcn Badge (secondary) in the CardHeader next to the title.
+      // shadcn v4 marks it with data-slot, not a "badge" class, so the old
+      // selector matched nothing and the loop body never ran.
+      const badge = col.locator('[data-slot="badge"]').first()
       if ((await badge.count()) === 0) continue
 
       const badgeText = (await badge.textContent())?.trim() ?? ''

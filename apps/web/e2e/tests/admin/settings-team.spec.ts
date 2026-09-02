@@ -47,8 +47,12 @@ test.describe('Admin Team Settings', () => {
 
     await page.waitForTimeout(300)
 
-    // Should show "No results found" when nothing matches
-    const noResults = page.getByText(/no results found|no team members/i)
+    // Should show "No results found" when nothing matches.
+    // settings.team.tsx renders BOTH responsive variants into the DOM — a
+    // `hidden md:block` table and an `md:hidden` stacked list — so the empty
+    // string exists twice and an unscoped locator is a strict-mode violation.
+    // The config runs at 1920x1080, so the table is the variant on screen.
+    const noResults = page.getByRole('table').getByText(/no results found|no team members/i)
     await expect(noResults).toBeVisible({ timeout: 5000 })
 
     // Clear search
@@ -131,8 +135,13 @@ test.describe('Admin Team Settings', () => {
   })
 
   test('shows "you" label next to the current user', async ({ page }) => {
-    // The current admin user row renders "(you)" next to their name
-    const youLabel = page.locator('span').filter({ hasText: /\(you\)/ })
+    // The current admin user row renders "(you)" next to their name.
+    // Scoped to the desktop table for the same reason as the search test above:
+    // the mobile card list renders its own "(you)" into the DOM.
+    const youLabel = page
+      .getByRole('table')
+      .locator('span')
+      .filter({ hasText: /\(you\)/ })
     await expect(youLabel).toBeVisible({ timeout: 10000 })
   })
 

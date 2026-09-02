@@ -112,12 +112,31 @@ test.describe('Post @-mention happy path', () => {
       throw err
     }
 
-    // The picker must include our target. Use a regex to allow other matches
-    // before/after — we just need to confirm the target shows up.
-    const targetRow = picker.locator('.mention-picker__row').filter({ hasText: target.displayName })
+    // The picker must include our target.
+    //
+    // Match the name EXACTLY. `hasText` is a substring test, and seed display
+    // names are randomised per `bun run db:seed`, so a run that happens to
+    // produce "Ana Smith" alongside "Ana Smithson" made this filter match two
+    // rows -- and `.first()` then clicked whichever the server returned first.
+    // That inserts a chip for the wrong principal, so the run failed three
+    // attempts later at the `data-id` assertion below while passing entirely on
+    // the previous run's seed. The failure landing on the chip rather than on
+    // this visibility check is what identifies it: a row WAS found and clicked.
+    const targetRow = picker
+      .locator('.mention-picker__row')
+      .filter({ has: page.getByText(target.displayName, { exact: true }) })
     await expect(targetRow.first()).toBeVisible({ timeout: 5000 })
 
-    // ---- Select the target via Enter --------------------------------------
+    // Two people genuinely sharing a display name would still be ambiguous, and
+    // silently picking one would resurrect the same wrong-chip failure wearing a
+    // different mask. Say so instead.
+    await expect(
+      targetRow,
+      `seed produced more than one person named exactly "${target.displayName}"; ` +
+        'the mention target is ambiguous and this run cannot assert which chip is correct'
+    ).toHaveCount(1)
+
+    // ---- Select the target -------------------------------------------------
     // The picker has roving selection starting at index 0. For determinism,
     // click the target row directly (avoids ordering surprises if the
     // alphabetical first match isn't our target).

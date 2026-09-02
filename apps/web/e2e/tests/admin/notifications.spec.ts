@@ -12,22 +12,37 @@ test.describe('Admin Notifications Page', () => {
   })
 
   test('shows Notifications heading', async ({ page }) => {
-    await expect(page.getByRole('heading', { name: 'Notifications' })).toBeVisible({
+    // `exact` is required: the empty-state h3 "No notifications yet" also
+    // satisfies a substring accessible-name match, so the unanchored form is a
+    // strict-mode violation whenever the list is empty.
+    await expect(page.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible({
       timeout: 10000,
     })
   })
 
   test('shows notification bell icon in header', async ({ page }) => {
-    // The page header wraps the h1 with a bell icon badge
-    const header = page.locator('div').filter({ hasText: /^Notifications$/ }).first()
-    await expect(header).toBeVisible({ timeout: 10000 })
+    // The header row holds the bell icon badge next to the h1. No element has
+    // the exact text "Notifications" -- the h1's own parent also wraps the
+    // summary line -- so match the row by the heading it contains and assert
+    // the badge icon is rendered alongside it.
+    const heading = page.getByRole('heading', { name: 'Notifications', exact: true })
+    await expect(heading).toBeVisible({ timeout: 10000 })
+
+    // The header row is the h1's grandparent: h1 sits in a div with the summary
+    // line, and that div is the sibling of the bell badge inside the row.
+    //
+    // Do NOT reach for the badge with an XPath node test like `.//svg`: XPath
+    // name tests only match the null namespace, and an <svg> element is in the
+    // SVG namespace, so `ancestor::div[.//svg]` matches nothing and the whole
+    // locator resolves empty. Navigate with XPath, then select the icon with
+    // CSS, which is namespace-agnostic.
+    const headerRow = heading.locator('xpath=../..')
+    await expect(headerRow.locator('svg').first()).toBeVisible({ timeout: 10000 })
   })
 
   test('shows summary line below heading', async ({ page }) => {
     // Shows one of: "No notifications", "X unread of Y", or "X notifications — all caught up"
-    const summary = page.getByText(
-      /no notifications|unread of|notifications — all caught up/i
-    )
+    const summary = page.getByText(/no notifications|unread of|notifications — all caught up/i)
     await expect(summary.first()).toBeVisible({ timeout: 10000 })
   })
 })
@@ -53,9 +68,7 @@ test.describe('Admin Notifications — Empty State', () => {
   test('empty state includes description text', async ({ page }) => {
     await expect(page.locator('[class*="animate-spin"]')).toBeHidden({ timeout: 10000 })
 
-    const description = page.getByText(
-      /you'll see notifications here|status changes|subscribed/i
-    )
+    const description = page.getByText(/you'll see notifications here|status changes|subscribed/i)
     if ((await description.count()) > 0) {
       await expect(description.first()).toBeVisible()
     }
