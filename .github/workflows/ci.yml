@@ -172,23 +172,33 @@ jobs:
           fi
 
   e2e_tests:
-    name: End-to-end tests (shard ${{ matrix.shard }} of 4)
+    name: End-to-end tests (shard ${{ matrix.shard }} of 8)
     needs: [changed_paths]
     if: needs.changed_paths.outputs.e2e == 'true'
     runs-on: ubuntu-latest
-    # 45 was too tight and truncated the signal rather than bounding a hang: on
-    # the first run shard 2 was CANCELLED at 44m55s with no reporter output at
-    # all, while shards 1/3/4 finished in 26.7m/25.7m/35.5m. One worker per
-    # shard plus `retries: 2` means every failing test costs three attempts, so
-    # a red shard is the slow one -- exactly the shard whose result is needed.
-    # Raised to bound a genuine hang while letting a fully red shard report.
+    # A cancelled shard reports NOTHING -- no counts, no failure list -- so the
+    # cap has to be comfortably above the slowest honest run, and the run has to
+    # be short enough that it is.
+    #
+    # Run 33659964879 (4 shards, 45 min): shard 2 cancelled at 44m55s, ~197
+    # tests unmeasured. Raising to 90 fixed that shard -- it reported in 20.7m.
+    # Run 33665960056 (4 shards, 90 min): shard 3 then cancelled at 90m, having
+    # reached test 129 of 209. It was not hanging. It got SLOWER because it got
+    # more honest: fixing the beforeAll budgets means the 70 tests it previously
+    # reported as "did not run" now actually execute, and `retries: 2` makes
+    # every failing one cost three attempts.
+    #
+    # So raising the cap a third time is chasing the symptom. Splitting 8 ways
+    # instead halves each shard's wall time without touching `retries`,
+    # `workers: 1` (which this suite needs -- one seeded tenant, one demo
+    # account, no cross-test isolation), or a single assertion.
     timeout-minutes: 90
     strategy:
-      # One shard's failure must not hide the other three: this suite has never
-      # run on a runner, so the first signal has to be the complete one.
+      # One shard's failure must not hide the others: the first complete signal
+      # for this suite is still being assembled.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
@@ -264,7 +274,7 @@ jobs:
         # playwright.config.ts starts the dev server itself (webServer) and,
         # because CI is set, forbids test.only, retries twice and uses one
         # worker per shard.
-        run: bun run test:e2e -- --shard=${{ matrix.shard }}/4
+        run: bun run test:e2e -- --shard=${{ matrix.shard }}/8
 
       - name: Upload the Playwright artifacts
         if: failure()
