@@ -67,9 +67,7 @@ test.describe('Changelog admin navigation', () => {
 
   test('page shows entry list or empty state', async ({ page }) => {
     // Either an h3 (entry title) or an empty-state message should be visible
-    const content = page
-      .getByText('No changelog entries yet')
-      .or(page.locator('h3').first())
+    const content = page.getByText('No changelog entries yet').or(page.locator('h3').first())
 
     await expect(content.first()).toBeVisible({ timeout: 10000 })
   })
@@ -182,6 +180,15 @@ test.describe('Changelog create entry', () => {
     if (!dialog) return
 
     await dialog.getByPlaceholder("What's new?").fill(`Close Test ${Date.now()}`)
+
+    // Content is required for the form to submit -- the same step createEntry()
+    // above performs and documents. Without it the mutation never fires, so the
+    // dialog correctly stays open and this test never exercised "successful
+    // creation" at all.
+    const editor = dialog.locator('.ProseMirror[contenteditable="true"]')
+    await editor.click()
+    await page.keyboard.type('Test content for the close-on-success check.')
+
     await dialog.getByRole('button', { name: /save draft/i }).click()
 
     await expect(dialog).toBeHidden({ timeout: 15000 })
@@ -415,8 +422,11 @@ test.describe('Changelog delete entry', () => {
 
     await page.waitForLoadState('networkidle')
 
-    const row = page.locator('h3').filter({ hasText: title })
-      .locator('xpath=ancestor::div[contains(@class,"group")]').first()
+    const row = page
+      .locator('h3')
+      .filter({ hasText: title })
+      .locator('xpath=ancestor::div[contains(@class,"group")]')
+      .first()
 
     await row.hover()
 
@@ -429,7 +439,9 @@ test.describe('Changelog delete entry', () => {
     await deleteItem.click()
 
     // Confirmation dialog should appear
-    const confirmDialog = page.getByRole('alertdialog').or(page.getByRole('dialog').filter({ hasText: /delete/i }))
+    const confirmDialog = page
+      .getByRole('alertdialog')
+      .or(page.getByRole('dialog').filter({ hasText: /delete/i }))
     await expect(confirmDialog).toBeVisible({ timeout: 5000 })
 
     // Cancel — don't actually delete
@@ -442,8 +454,11 @@ test.describe('Changelog delete entry', () => {
 
     await page.waitForLoadState('networkidle')
 
-    const row = page.locator('h3').filter({ hasText: title })
-      .locator('xpath=ancestor::div[contains(@class,"group")]').first()
+    const row = page
+      .locator('h3')
+      .filter({ hasText: title })
+      .locator('xpath=ancestor::div[contains(@class,"group")]')
+      .first()
 
     await row.hover()
     const menuBtn = row.locator('button').last()
@@ -453,9 +468,9 @@ test.describe('Changelog delete entry', () => {
     if ((await deleteItem.count()) === 0) return
     await deleteItem.click()
 
-    const confirmDialog = page.getByRole('alertdialog').or(
-      page.getByRole('dialog').filter({ hasText: /delete/i })
-    )
+    const confirmDialog = page
+      .getByRole('alertdialog')
+      .or(page.getByRole('dialog').filter({ hasText: /delete/i }))
     await expect(confirmDialog).toBeVisible({ timeout: 5000 })
 
     // Click Cancel
@@ -473,8 +488,11 @@ test.describe('Changelog delete entry', () => {
 
     await page.waitForLoadState('networkidle')
 
-    const row = page.locator('h3').filter({ hasText: title })
-      .locator('xpath=ancestor::div[contains(@class,"group")]').first()
+    const row = page
+      .locator('h3')
+      .filter({ hasText: title })
+      .locator('xpath=ancestor::div[contains(@class,"group")]')
+      .first()
 
     await row.hover()
     const menuBtn = row.locator('button').last()
@@ -484,9 +502,9 @@ test.describe('Changelog delete entry', () => {
     if ((await deleteItem.count()) === 0) return
     await deleteItem.click()
 
-    const confirmDialog = page.getByRole('alertdialog').or(
-      page.getByRole('dialog').filter({ hasText: /delete/i })
-    )
+    const confirmDialog = page
+      .getByRole('alertdialog')
+      .or(page.getByRole('dialog').filter({ hasText: /delete/i }))
     await expect(confirmDialog).toBeVisible({ timeout: 5000 })
 
     // Confirm deletion
@@ -542,10 +560,7 @@ async function createAndPublishEntry(
  * Helper: revert a published entry back to draft via the edit modal.
  * Expects to be called from /admin/changelog with the entry visible.
  */
-async function unpublishEntry(
-  page: import('@playwright/test').Page,
-  title: string
-): Promise<void> {
+async function unpublishEntry(page: import('@playwright/test').Page, title: string): Promise<void> {
   const card = entryCard(page, title)
   await card.click()
 
