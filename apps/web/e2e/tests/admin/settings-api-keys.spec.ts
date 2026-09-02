@@ -120,7 +120,14 @@ test.describe('Admin API Keys Settings', () => {
     const copyButton = revealDialog.getByRole('button', {
       name: /copy your api key to clipboard/i,
     })
-    const secretRow = revealDialog.locator('div').filter({ has: copyButton }).last()
+    // `has:` re-applies the inner locator's whole selector chain relative to
+    // each candidate div, so a `copyButton` rooted at `revealDialog` asks for a
+    // nested dialog and matches nothing. Root the inner locator at the page --
+    // the outer `revealDialog.locator('div')` already scopes the candidates.
+    const secretRow = revealDialog
+      .locator('div')
+      .filter({ has: page.getByRole('button', { name: /copy your api key to clipboard/i }) })
+      .last()
     await expect(secretRow.locator('code')).toBeVisible()
 
     // Copy button should be present (aria-label contains "copy")

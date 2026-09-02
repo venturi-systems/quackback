@@ -430,9 +430,14 @@ function statusTrigger(modal: import('@playwright/test').Locator) {
 // elements. The body editor is the one in the same `p-6` block as the title
 // input, which carries the product's own placeholder.
 function postBodyEditor(modal: import('@playwright/test').Locator) {
+  // `has:` re-applies the INNER locator's whole selector chain relative to each
+  // candidate div. Rooting it at `modal` therefore asks for a nested modal
+  // inside the div and matches nothing at all -- so this filter silently
+  // returned zero divs rather than the row we want. Root it at the page; the
+  // outer `modal.locator('div')` already constrains the candidates to the modal.
   return modal
     .locator('div')
-    .filter({ has: modal.getByPlaceholder("What's the feedback about?") })
+    .filter({ has: modal.page().getByPlaceholder("What's the feedback about?") })
     .last()
     .locator('.tiptap')
 }
@@ -514,8 +519,17 @@ test.describe('Admin Post Management - Status Transitions', () => {
     const popover = page.locator('[data-radix-popper-content-wrapper]')
     await expect(popover).toBeVisible({ timeout: 5000 })
 
-    // Pick a status that is different from the current one
-    const statusOptions = popover.locator('button').filter({ hasNot: popover.locator('svg') })
+    // Pick a status that is different from the current one.
+    //
+    // This used to pre-filter with `hasNot: popover.locator('svg')` to drop the
+    // already-selected option (only it renders a CheckIcon). That filter was
+    // dead: `hasNot` re-applies the inner locator's full chain relative to each
+    // candidate button, so rooting it at `popover` demanded a popper wrapper
+    // nested inside a button and excluded nothing. The text comparison below is
+    // what actually skips the current status -- and it is the robust mechanism,
+    // so the filter is not reinstated: a repaired one would silently `test.skip()`
+    // the whole case the day a status option gains an icon of its own.
+    const statusOptions = popover.locator('button')
     const count = await statusOptions.count()
     if (count === 0) {
       await page.keyboard.press('Escape')
@@ -668,15 +682,31 @@ test.describe('Admin Post Management - Status Transitions', () => {
       return
     }
 
-    // Sonner toast should appear (success or any notification) — non-fatal check
+    // Confirm the change landed, by the toast OR by the badge -- whichever
+    // shows up first.
+    //
+    // This used to branch on a single synchronous `toast.count()` sampled right
+    // after the click. Sonner had not mounted yet, so the sample was always 0
+    // and every run took the else branch, which then read the badge before
+    // React had re-rendered it. The status change itself was fine: across the
+    // three attempts of one CI job the initial status read "Under Review",
+    // then "Open", then "Under Review" -- attempt N+1 started from what
+    // attempt N had successfully written. Only the read was too early, and
+    // because the sample was deterministic the case failed all three times
+    // rather than flaking.
+    //
+    // Polling for either signal keeps the assertion real: it fails only if the
+    // status change produces NEITHER a toast nor an updated badge.
     const toast = page.locator('[data-sonner-toast]')
-    if ((await toast.count()) > 0) {
-      await expect(toast.first()).toBeVisible({ timeout: 5000 })
-    } else {
-      // Toast may have already dismissed; verify the status badge changed instead
-      const updatedStatusText = (await statusBadgeButton.textContent()) ?? ''
-      expect(updatedStatusText.trim()).not.toBe(initialStatusText.trim())
-    }
+    await expect
+      .poll(
+        async () => {
+          if ((await toast.count()) > 0) return true
+          return ((await statusBadgeButton.textContent()) ?? '').trim() !== initialStatusText.trim()
+        },
+        { timeout: 10000 }
+      )
+      .toBe(true)
 
     await page.keyboard.press('Escape')
   })
@@ -1154,10 +1184,16 @@ test.describe('Admin Post Management - Edit Flow', () => {
     const boardPopover = page.locator('[data-radix-popper-content-wrapper]')
     await expect(boardPopover).toBeVisible({ timeout: 5000 })
 
-    // Pick a different board
-    const boardChoices = boardPopover
-      .locator('button')
-      .filter({ hasNot: boardPopover.locator('svg.lucide-check') })
+    // Pick a different board.
+    //
+    // This used to pre-filter with `hasNot: boardPopover.locator('svg.lucide-check')`,
+    // which was doubly dead: `hasNot` rooted at `boardPopover` can never match
+    // (the chain is re-applied inside each button), and this app renders
+    // heroicons, so `svg.lucide-check` matches nothing anywhere. It cannot be
+    // repaired cleanly either -- every board button carries a FolderIcon, so the
+    // check is only distinguishable by a Tailwind class. The text comparison
+    // below is the real selection mechanism.
+    const boardChoices = boardPopover.locator('button')
     let newBoardName = ''
     for (let i = 0; i < (await boardChoices.count()); i++) {
       const choiceText = ((await boardChoices.nth(i).textContent()) ?? '').trim()
