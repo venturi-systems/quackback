@@ -376,11 +376,19 @@ test.describe('Admin Post Management', () => {
     const modal = page.getByRole('dialog')
     await expect(modal).toBeVisible({ timeout: 10000 })
 
-    // Find the comment textarea and type into it
-    const commentTextarea = modal.locator('textarea[placeholder*="comment" i]').first()
-    await expect(commentTextarea).toBeVisible({ timeout: 5000 })
-    await commentTextarea.click()
-    await commentTextarea.fill('E2E test comment via keyboard')
+    // Find the comment composer and type into it.
+    //
+    // The composer is not a <textarea>: CommentForm renders a TipTap
+    // RichTextEditor (placeholder "Write a comment...") wrapped in the div that
+    // owns the Cmd/Ctrl+Enter handler, and that wrapper carries the product's
+    // own data-testid. `textarea[placeholder*="comment"]` matched nothing.
+    const commentComposer = modal.getByTestId('comment-form-editor').first()
+    await expect(commentComposer).toBeVisible({ timeout: 5000 })
+
+    const commentEditor = commentComposer.locator('[contenteditable="true"]')
+    await commentEditor.click()
+    await commentEditor.pressSequentially('E2E test comment via keyboard')
+    await expect(commentEditor).toContainText('E2E test comment via keyboard')
 
     // Cmd+Enter should submit the comment, NOT save/close the post
     await page.keyboard.press('Meta+Enter')
@@ -388,10 +396,46 @@ test.describe('Admin Post Management', () => {
     // Modal must still be open (post was not saved/closed)
     await expect(modal).toBeVisible()
 
-    // Comment textarea should be cleared (comment was submitted successfully)
-    await expect(commentTextarea).toHaveValue('')
+    // The composer resets on a successful submit (CommentForm remounts the
+    // editor via editorResetKey), so an empty editor is the success signal.
+    await expect(commentEditor).toHaveText('', { timeout: 10000 })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Helper: the StatusDropdown trigger in the post modal's metadata sidebar.
+//
+// MetadataSidebar renders each sidebar field as a `flex items-center
+// justify-between` row: a <span> label on the left and the control on the
+// right. The Status row's control is the StatusDropdown (badge variant), whose
+// trigger is the row's only <button>.
+//
+// The previous `sidebar.locator('button[class*="inline-flex"]').first()` picked
+// the FIRST inline-flex button in the aside, which in the admin modal is the
+// "Add voter" control inside VotersAvatarStack (canEdit renders the Upvotes row
+// above Status). CI proved it: the status assertion reported an "initial status"
+// of "Add voter".
+function statusRow(modal: import('@playwright/test').Locator) {
+  return modal.locator('aside').getByText('Status', { exact: true }).locator('xpath=..')
+}
+
+function statusTrigger(modal: import('@playwright/test').Locator) {
+  return statusRow(modal).getByRole('button')
+}
+
+// Helper: the post body TipTap editor inside the post modal.
+//
+// `modal.locator('.tiptap')` is ambiguous -- the modal also mounts the comment
+// composer's editor (and a reply composer once opened), so it resolves to 3-4
+// elements. The body editor is the one in the same `p-6` block as the title
+// input, which carries the product's own placeholder.
+function postBodyEditor(modal: import('@playwright/test').Locator) {
+  return modal
+    .locator('div')
+    .filter({ has: modal.locator('input[placeholder="What\'s the feedback about?"]') })
+    .last()
+    .locator('.tiptap')
+}
 
 // ---------------------------------------------------------------------------
 // Helper: open the first available post modal and return the modal locator.
@@ -421,13 +465,17 @@ test.describe('Admin Post Management - Status Transitions', () => {
 
     // The metadata sidebar renders a StatusDropdown (badge variant) next to the "Status" label.
     // The StatusBadge renders the status name as text.
-    const statusRow = modal.locator('aside').filter({ hasText: /^Status/ })
-    // Sidebar may be hidden on narrow viewports but the config uses 1920x1080 so it is visible.
-    // The status name text must be non-empty — anything other than "None" is the actual value.
-    const statusText = statusRow.locator('span').filter({ hasNot: statusRow.locator('svg') })
-    // At minimum the row itself should be visible
-    await expect(modal.getByText('Status')).toBeVisible()
-    await expect(statusText.first()).toBeVisible()
+    //
+    // The old `modal.locator('aside').filter({ hasText: /^Status/ })` required
+    // the ENTIRE aside's text to start with "Status". It does not: in the admin
+    // modal the aside opens with the manage-post actions and the Upvotes row, so
+    // the filter matched zero elements and every locator derived from it was
+    // empty. Anchor on the Status label's own row instead.
+    const trigger = statusTrigger(modal)
+    await expect(modal.locator('aside').getByText('Status', { exact: true })).toBeVisible()
+    await expect(trigger).toBeVisible()
+    // The badge must carry a real status name, not an empty control.
+    expect(((await trigger.textContent()) ?? '').trim().length).toBeGreaterThan(0)
 
     // Close modal
     await page.keyboard.press('Escape')
@@ -442,19 +490,15 @@ test.describe('Admin Post Management - Status Transitions', () => {
       return
     }
 
-    // Locate the status trigger button inside the metadata sidebar (aside element)
-    // It's rendered as a <button> wrapping a <StatusBadge> inside the sidebar
+    // Locate the status trigger button inside the metadata sidebar (aside element).
+    // statusTrigger() anchors on the Status row so it cannot pick up the
+    // "Add voter" control from the Upvotes row above it.
     const sidebar = modal.locator('aside')
     await expect(sidebar).toBeVisible({ timeout: 5000 })
 
-    // The StatusDropdown trigger sits next to the "Status" label row.
-    // Scope to the row that contains the word "Status".
-    const statusLabel = sidebar.getByText('Status')
-    await expect(statusLabel).toBeVisible()
+    await expect(sidebar.getByText('Status', { exact: true })).toBeVisible()
 
-    // The trigger is a sibling button in the same flex row
-    // Use the popover approach: click the status badge button to open dropdown
-    const statusBadgeButton = sidebar.locator('button[class*="inline-flex"]').first()
+    const statusBadgeButton = statusTrigger(modal)
 
     if ((await statusBadgeButton.count()) === 0) {
       // Sidebar status trigger not found — skip rather than fail
@@ -529,7 +573,7 @@ test.describe('Admin Post Management - Status Transitions', () => {
     const sidebar = modal.locator('aside')
     await expect(sidebar).toBeVisible({ timeout: 5000 })
 
-    const statusBadgeButton = sidebar.locator('button[class*="inline-flex"]').first()
+    const statusBadgeButton = statusTrigger(modal)
     if ((await statusBadgeButton.count()) === 0) {
       await page.keyboard.press('Escape')
       test.skip()
@@ -577,7 +621,7 @@ test.describe('Admin Post Management - Status Transitions', () => {
     // Status badge should now show the new status
     const reopenedSidebar = reopenedModal.locator('aside')
     await expect(reopenedSidebar).toBeVisible({ timeout: 5000 })
-    const updatedBadge = reopenedSidebar.locator('button[class*="inline-flex"]').first()
+    const updatedBadge = statusTrigger(reopenedModal)
     const persistedText = (await updatedBadge.textContent()) ?? ''
     expect(persistedText.trim()).toBe(newStatusText)
 
@@ -594,7 +638,7 @@ test.describe('Admin Post Management - Status Transitions', () => {
     const sidebar = modal.locator('aside')
     await expect(sidebar).toBeVisible({ timeout: 5000 })
 
-    const statusBadgeButton = sidebar.locator('button[class*="inline-flex"]').first()
+    const statusBadgeButton = statusTrigger(modal)
     if ((await statusBadgeButton.count()) === 0) {
       await page.keyboard.press('Escape')
       test.skip()
@@ -683,7 +727,10 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
 
     // Vote count is rendered as a tabular-nums span next to the "Upvotes" label
     // MetadataSidebar admin mode: <span className="text-sm font-semibold tabular-nums">{voteCount}</span>
-    const upvotesRow = sidebar.locator('div').filter({ hasText: /Upvotes/ }).first()
+    const upvotesRow = sidebar
+      .locator('div')
+      .filter({ hasText: /Upvotes/ })
+      .first()
     await expect(upvotesRow).toBeVisible()
 
     // The vote count is a number — find a span that contains only digits
@@ -744,7 +791,10 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
 
     // Board name appears as a button (editable in admin mode) or plain span
     // Either way there must be some non-empty text next to the Board label
-    const boardRow = sidebar.locator('div').filter({ hasText: /^Board/ }).first()
+    const boardRow = sidebar
+      .locator('div')
+      .filter({ hasText: /^Board/ })
+      .first()
     await expect(boardRow).toBeVisible()
 
     // The board name text must be non-empty
@@ -782,7 +832,7 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     // The TipTap editor is always present even if empty; for posts with content it has text
-    const editor = modal.locator('.tiptap')
+    const editor = postBodyEditor(modal)
     await expect(editor).toBeVisible({ timeout: 5000 })
 
     // The editor content should not be completely empty (posts from seed data have bodies)
@@ -808,7 +858,10 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
     await expect(sidebar.getByText('Author')).toBeVisible()
 
     // Author name is rendered as a span with text-sm font-medium next to an Avatar
-    const authorRow = sidebar.locator('div').filter({ hasText: /^Author/ }).first()
+    const authorRow = sidebar
+      .locator('div')
+      .filter({ hasText: /^Author/ })
+      .first()
     await expect(authorRow).toBeVisible()
 
     // There should be a non-empty name or "Anonymous" fallback
@@ -852,12 +905,14 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
     const emptyState = page.locator('text=/no posts|no results/i')
 
     // Either posts exist (filtered) or empty state appears — both are valid results
-    const hasContent =
-      (await postCards.count()) > 0 || (await emptyState.count()) > 0
+    const hasContent = (await postCards.count()) > 0 || (await emptyState.count()) > 0
     expect(hasContent).toBe(true)
 
-    // The active filters bar should show the selected board name as a chip
-    const activeFiltersBar = page.locator('[class*="ActiveFilters"], [data-testid="active-filters"]')
+    // The active filters bar should show the selected board name as a chip.
+    // Neither an "ActiveFilters" class nor a data-testid exists: the bar is a
+    // labelled landmark (`role="region" aria-label="Active filters"` in
+    // admin/feedback/active-filters-bar.tsx), which is the stable anchor.
+    const activeFiltersBar = page.getByRole('region', { name: 'Active filters' })
     // Board filter chip: text contains the board name (trimmed)
     const boardChip = activeFiltersBar.first().getByText(boardName.trim(), { exact: false })
     await expect(activeFiltersBar.first()).toBeVisible()
@@ -1029,7 +1084,7 @@ test.describe('Admin Post Management - Edit Flow', () => {
     await page.waitForLoadState('networkidle')
 
     // Clear then type new body content into the TipTap editor
-    const editor = modal.locator('.tiptap')
+    const editor = postBodyEditor(modal)
     await expect(editor).toBeVisible({ timeout: 5000 })
     await editor.click()
 
@@ -1052,7 +1107,7 @@ test.describe('Admin Post Management - Edit Flow', () => {
     await expect(reopenedModal).toBeVisible({ timeout: 10000 })
     await page.waitForLoadState('networkidle')
 
-    const reopenedEditor = reopenedModal.locator('.tiptap')
+    const reopenedEditor = postBodyEditor(reopenedModal)
     await expect(reopenedEditor).toBeVisible({ timeout: 5000 })
     await expect(reopenedEditor).toContainText(newBody, { timeout: 5000 })
 
@@ -1079,7 +1134,10 @@ test.describe('Admin Post Management - Edit Flow', () => {
     await expect(sidebar.getByText('Board')).toBeVisible()
 
     // Board name is a clickable button in admin mode
-    const boardRow = sidebar.locator('div').filter({ hasText: /^Board/ }).first()
+    const boardRow = sidebar
+      .locator('div')
+      .filter({ hasText: /^Board/ })
+      .first()
     const boardButton = boardRow.locator('button').first()
 
     if ((await boardButton.count()) === 0) {
@@ -1097,7 +1155,9 @@ test.describe('Admin Post Management - Edit Flow', () => {
     await expect(boardPopover).toBeVisible({ timeout: 5000 })
 
     // Pick a different board
-    const boardChoices = boardPopover.locator('button').filter({ hasNot: boardPopover.locator('svg.lucide-check') })
+    const boardChoices = boardPopover
+      .locator('button')
+      .filter({ hasNot: boardPopover.locator('svg.lucide-check') })
     let newBoardName = ''
     for (let i = 0; i < (await boardChoices.count()); i++) {
       const choiceText = ((await boardChoices.nth(i).textContent()) ?? '').trim()
@@ -1137,7 +1197,10 @@ test.describe('Admin Post Management - Edit Flow', () => {
 
     const reopenedSidebar = reopenedModal.locator('aside')
     await expect(reopenedSidebar).toBeVisible({ timeout: 5000 })
-    const persistedBoardRow = reopenedSidebar.locator('div').filter({ hasText: /^Board/ }).first()
+    const persistedBoardRow = reopenedSidebar
+      .locator('div')
+      .filter({ hasText: /^Board/ })
+      .first()
     const persistedBoardText = ((await persistedBoardRow.textContent()) ?? '')
       .replace(/^Board/, '')
       .trim()

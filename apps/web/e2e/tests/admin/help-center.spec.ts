@@ -120,12 +120,13 @@ test.describe('Help Center admin navigation', () => {
     await page.goto('/admin/help-center')
     await page.waitForLoadState('networkidle')
 
-    const content = page
-      .getByText('No articles yet')
-      .or(page.getByText('Recent articles'))
-      .or(page.getByText(/article/i).first())
-
-    await expect(content).toBeVisible({ timeout: 10000 })
+    // The list card header is rendered unconditionally on the index
+    // (help-center-finder.tsx: `articleListTitle` is 'Recent articles' when no
+    // category is selected). The previous `.or()` union also matched the
+    // empty-state heading "No articles yet", which the index renders at the
+    // same time when the tenant has no articles -- two matches, so the union
+    // was a strict-mode violation rather than a fallback.
+    await expect(page.getByText('Recent articles')).toBeVisible({ timeout: 10000 })
   })
 })
 
@@ -386,21 +387,26 @@ test.describe('Help Center article filtering', () => {
     await expect(searchInput.first()).toBeVisible({ timeout: 10000 })
   })
 
+  // The sort control is not a combobox: AdminListHeader renders `sortOptions`
+  // as a pair of pill <button>s ("Newest" / "Oldest"), and help-center-finder
+  // passes SORT_OPTIONS = [newest, oldest]. The old combobox locator matched
+  // nothing, which also made 'can change sort order' return before asserting.
   test('sort dropdown is present', async ({ page }) => {
-    const sortTrigger = page.getByRole('combobox').filter({ hasText: /newest|oldest/i })
-    await expect(sortTrigger.first()).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: 'Newest' })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: 'Oldest' })).toBeVisible({ timeout: 10000 })
   })
 
   test('can change sort order', async ({ page }) => {
-    const sortTrigger = page.getByRole('combobox').filter({ hasText: /newest|oldest/i })
-    if ((await sortTrigger.count()) === 0) return
+    await page.getByRole('button', { name: 'Oldest' }).click()
+    await page.waitForLoadState('networkidle')
 
-    await sortTrigger.first().click()
-    const oldestOption = page.getByRole('option', { name: /oldest/i })
-    if ((await oldestOption.count()) > 0) {
-      await oldestOption.click()
-      await page.waitForLoadState('networkidle')
-    }
+    // useHelpCenterFilters writes the non-default sort into the URL and omits
+    // it again for 'newest', so the search param is the observable result.
+    await expect(page).toHaveURL(/[?&]sort=oldest/, { timeout: 10000 })
+
+    await page.getByRole('button', { name: 'Newest' }).click()
+    await page.waitForLoadState('networkidle')
+    await expect(page).not.toHaveURL(/[?&]sort=oldest/, { timeout: 10000 })
   })
 })
 
@@ -590,8 +596,13 @@ test.describe('Help Center article list filtering - status', () => {
     await page.getByRole('button', { name: 'Draft' }).click()
     await page.waitForLoadState('networkidle')
 
-    // A filter chip for Status: Draft should now be visible
-    await expect(page.getByText('Draft')).toBeVisible({ timeout: 5000 })
+    // A filter chip for Status: Draft should now be visible. Assert the chip
+    // itself, via the accessible name FilterChip gives its remove button
+    // (`Remove ${label} ${value} filter`): a bare getByText('Draft') also
+    // matched the popover option and every Draft badge in the list.
+    await expect(page.getByRole('button', { name: 'Remove Status Draft filter' })).toBeVisible({
+      timeout: 5000,
+    })
   })
 
   test('can apply Published status filter', async ({ page }) => {
@@ -608,7 +619,9 @@ test.describe('Help Center article list filtering - status', () => {
     await page.getByRole('button', { name: 'Published' }).click()
     await page.waitForLoadState('networkidle')
 
-    await expect(page.getByText('Published')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('button', { name: 'Remove Status Published filter' })).toBeVisible({
+      timeout: 5000,
+    })
   })
 
   test('status filter chip can be removed', async ({ page }) => {

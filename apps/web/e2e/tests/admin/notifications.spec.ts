@@ -28,9 +28,15 @@ test.describe('Admin Notifications Page', () => {
     const heading = page.getByRole('heading', { name: 'Notifications', exact: true })
     await expect(heading).toBeVisible({ timeout: 10000 })
 
-    // Nearest ancestor div that actually contains an icon: the h1's own parent
-    // wraps only the heading and the summary line, the icon badge is its sibling.
-    const headerRow = heading.locator('xpath=ancestor::div[.//svg][1]')
+    // The header row is the h1's grandparent: h1 sits in a div with the summary
+    // line, and that div is the sibling of the bell badge inside the row.
+    //
+    // Do NOT reach for the badge with an XPath node test like `.//svg`: XPath
+    // name tests only match the null namespace, and an <svg> element is in the
+    // SVG namespace, so `ancestor::div[.//svg]` matches nothing and the whole
+    // locator resolves empty. Navigate with XPath, then select the icon with
+    // CSS, which is namespace-agnostic.
+    const headerRow = heading.locator('xpath=../..')
     await expect(headerRow.locator('svg').first()).toBeVisible({ timeout: 10000 })
   })
 

@@ -7,7 +7,10 @@ test.describe('Admin User Attributes Settings', () => {
   })
 
   test('page loads and shows heading', async ({ page }) => {
-    await expect(page.getByText('User Attributes').first()).toBeVisible({ timeout: 10000 })
+    // The card title, verbatim from settings/user-attributes/user-attributes-list.tsx.
+    // The surface was renamed with the page ("People"): the card is "Person
+    // attributes" and "User Attributes" is not in the tree.
+    await expect(page.getByText('Person attributes').first()).toBeVisible({ timeout: 10000 })
   })
 
   test('shows page description', async ({ page }) => {
@@ -74,7 +77,8 @@ test.describe('Admin User Attributes Settings', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
-    await expect(dialog.getByText(/new user attribute/i)).toBeVisible()
+    // Same rename: AttributeFormDialog's title is "New person attribute".
+    await expect(dialog.getByText(/new person attribute/i)).toBeVisible()
   })
 
   test('create dialog has key, label, type, and description fields', async ({ page }) => {

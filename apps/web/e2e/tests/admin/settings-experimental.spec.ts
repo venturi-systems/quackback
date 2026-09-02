@@ -12,12 +12,21 @@ test.describe('Admin Experimental Settings', () => {
 
   test('shows disclaimer about experimental features', async ({ page }) => {
     await expect(
-      page.getByText('These features are in development and may change or be removed.')
+      // Verbatim from admin/settings/experimental-settings.tsx. The previous
+      // wording ("These features are in development and may change or be
+      // removed.") is not in the tree; this paragraph is the same disclaimer,
+      // under the "Labs" heading.
+      page.getByText(
+        'Turn experimental features on or off. They are still in development, so they may change or be removed.'
+      )
     ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows Help Center feature flag card', async ({ page }) => {
-    await expect(page.getByText('Help Center')).toBeVisible({ timeout: 10000 })
+    // Exact: the Support section's own description ("...a self-serve help
+    // center.") and the flag description both contain the words, so the
+    // substring form resolved to three elements. The flag's <label> is the card.
+    await expect(page.getByText('Help Center', { exact: true })).toBeVisible({ timeout: 10000 })
     await expect(
       page.getByText('Publish a searchable help center so customers can find answers on their own.')
     ).toBeVisible()
@@ -101,10 +110,19 @@ test.describe('Admin Experimental Settings', () => {
     }
   })
 
-  test('page shows three feature flag cards', async ({ page }) => {
+  test('page shows a switch for every registered feature flag', async ({ page }) => {
     // The three labs flags: helpCenter, aiFeedbackExtraction, supportInbox.
     // (Analytics graduated to GA and is no longer a flag.)
+    //
+    // FEATURE_FLAG_REGISTRY currently holds four flags, and LAB_SECTIONS places
+    // every one of them on this page (a unit test pins that every flag belongs
+    // to exactly one section). The pinned count of 3 predates linkPreviews.
+    // Assert the identities as well as the total, so a flag that is added but
+    // never surfaced still fails here.
+    for (const id of ['supportInbox', 'helpCenter', 'linkPreviews', 'aiFeedbackExtraction']) {
+      await expect(page.locator(`#flag-${id}`)).toBeVisible({ timeout: 10000 })
+    }
     const switches = page.locator('button[role="switch"]')
-    await expect(switches).toHaveCount(3, { timeout: 10000 })
+    await expect(switches).toHaveCount(4, { timeout: 10000 })
   })
 })

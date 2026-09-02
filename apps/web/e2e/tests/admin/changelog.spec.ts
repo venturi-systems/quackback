@@ -842,8 +842,16 @@ test.describe('Changelog search and filter', () => {
     await draftFilter.click()
     await page.waitForLoadState('networkidle')
 
-    // If entries are visible, none should have a "Published" badge
-    const publishedBadges = page.getByText(/^Published$/)
+    // If entries are visible, none should have a "Published" badge.
+    //
+    // Scope to the entry list. The left-hand Status filter pane is always in
+    // the DOM and always renders a "Published" option (ChangelogFiltersPanel's
+    // CHANGELOG_STATUSES), so a page-wide count can never reach 0 and this
+    // assertion could not pass regardless of whether the filter worked.
+    // AdminFilterLayout puts the list in an inner <main>; the route wraps the
+    // whole page in an outer one.
+    const entryList = page.locator('main main')
+    const publishedBadges = entryList.getByText(/^Published$/)
     const count = await publishedBadges.count()
     expect(count).toBe(0)
   })

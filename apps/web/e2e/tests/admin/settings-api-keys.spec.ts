@@ -13,9 +13,13 @@ test.describe('Admin API Keys Settings', () => {
   })
 
   test('shows page header description', async ({ page }) => {
-    await expect(page.getByText(/manage api keys for programmatic access/i)).toBeVisible({
-      timeout: 10000,
-    })
+    // The Developers page header description, verbatim from
+    // routes/admin/settings.developers.tsx. API keys no longer have a page of
+    // their own -- they are the `keys` tab here -- and the old string
+    // ("manage api keys for programmatic access") exists nowhere in the tree.
+    await expect(
+      page.getByText('API keys, webhooks, and the MCP server for programmatic integrations.')
+    ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows create API key button or empty state action', async ({ page }) => {
@@ -91,7 +95,11 @@ test.describe('Admin API Keys Settings', () => {
 
     await createButton.first().click()
 
-    const createDialog = page.getByRole('dialog')
+    // Name the two dialogs by their titles. Both were `page.getByRole('dialog')`,
+    // so once the reveal dialog opened the "create dialog" locator resolved to
+    // IT and `toBeHidden` could never pass -- the assertion was self-defeating,
+    // not a product failure.
+    const createDialog = page.getByRole('dialog', { name: 'Create API Key' })
     await expect(createDialog).toBeVisible({ timeout: 5000 })
 
     await createDialog.getByRole('textbox', { name: /^name$/i }).fill(keyName)
@@ -100,17 +108,22 @@ test.describe('Admin API Keys Settings', () => {
     // Create dialog closes and reveal dialog opens
     await expect(createDialog).toBeHidden({ timeout: 10000 })
 
-    const revealDialog = page.getByRole('dialog')
+    const revealDialog = page.getByRole('dialog', { name: 'API Key Created' })
     await expect(revealDialog).toBeVisible({ timeout: 10000 })
 
     // Should show "API Key Created" title
-    await expect(revealDialog.getByText(/api key created/i)).toBeVisible()
+    await expect(revealDialog.getByRole('heading', { name: 'API Key Created' })).toBeVisible()
 
-    // The key value should be visible in a code element
-    await expect(revealDialog.locator('code')).toBeVisible()
+    // The key value should be visible in a code element. Scope to the secret
+    // row: SecretRevealDialog also renders a second <code> for the curl usage
+    // example, so an unscoped `code` is a strict-mode violation.
+    const copyButton = revealDialog.getByRole('button', {
+      name: /copy your api key to clipboard/i,
+    })
+    const secretRow = revealDialog.locator('div').filter({ has: copyButton }).last()
+    await expect(secretRow.locator('code')).toBeVisible()
 
     // Copy button should be present (aria-label contains "copy")
-    const copyButton = revealDialog.getByRole('button', { name: /copy/i })
     await expect(copyButton).toBeVisible()
 
     // Dismiss the reveal dialog

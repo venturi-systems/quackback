@@ -11,7 +11,15 @@ test.describe('Admin Segments Settings', () => {
   })
 
   test('shows page description', async ({ page }) => {
-    await expect(page.getByText(/organize users into groups/i)).toBeVisible({ timeout: 10000 })
+    // The card description, verbatim from admin/segments/segment-list.tsx. The
+    // page was renamed "People" and the description says "people"; the older
+    // "users" wording survives only in the empty-state copy, which is not
+    // rendered once the tenant has segments.
+    await expect(
+      page.getByText(
+        'Organize people into groups for filtering and analysis. Manual segments are assigned by hand; dynamic segments update automatically based on rules.'
+      )
+    ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows "New segment" button', async ({ page }) => {
@@ -74,7 +82,9 @@ test.describe('Admin Segments Settings', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
-    await expect(dialog.getByText(/create segment/i)).toBeVisible()
+    // The dialog title. The submit button is also "Create segment", so the
+    // unanchored form matched both.
+    await expect(dialog.getByRole('heading', { name: 'Create Segment' })).toBeVisible()
   })
 
   test('create dialog has manual and dynamic type selectors', async ({ page }) => {
@@ -83,9 +93,11 @@ test.describe('Admin Segments Settings', () => {
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
 
-    // Type selector buttons (manual / dynamic) — text is lowercase in the DOM (CSS capitalize)
-    await expect(dialog.getByText('manual')).toBeVisible()
-    await expect(dialog.getByText('dynamic')).toBeVisible()
+    // Type selector buttons (manual / dynamic) — text is lowercase in the DOM (CSS capitalize).
+    // Exact: the button's own helper line is "Manually assign users to this
+    // segment", which the substring form also matched.
+    await expect(dialog.getByText('manual', { exact: true })).toBeVisible()
+    await expect(dialog.getByText('dynamic', { exact: true })).toBeVisible()
   })
 
   test('create dialog has name and description fields', async ({ page }) => {
@@ -153,7 +165,9 @@ test.describe('Admin Segments Settings', () => {
     await dialog.getByText('dynamic').click()
 
     // Rule builder should appear
-    await expect(dialog.getByText('Rules')).toBeVisible({ timeout: 3000 })
+    // Exact: the section also renders "Auto-populate based on rules" and a
+    // "...only include people..." note, both of which matched the substring form.
+    await expect(dialog.getByText('Rules', { exact: true })).toBeVisible({ timeout: 3000 })
     await expect(dialog.getByText(/add condition/i)).toBeVisible()
   })
 
@@ -313,8 +327,16 @@ test.describe('Admin Segments Settings', () => {
     await expect(createDialog).toBeHidden({ timeout: 10000 })
     await expect(page.getByText(segmentName)).toBeVisible({ timeout: 10000 })
 
-    // Click the delete (trash) button for that segment
-    const segRow = page.locator('div').filter({ hasText: segmentName }).first()
+    // Click the delete (trash) button for that segment.
+    // `.first()` on a div filtered by text picks the OUTERMOST match — the page
+    // container — which holds every row's delete button. Narrow to divs that
+    // hold both the name and a delete button, then take the innermost (`.last()`,
+    // since ancestors precede descendants in document order): the SegmentRow.
+    const segRow = page
+      .locator('div')
+      .filter({ hasText: segmentName })
+      .filter({ has: page.getByRole('button', { name: 'Delete segment' }) })
+      .last()
     const deleteButton = segRow.getByRole('button', { name: /delete segment/i })
 
     if ((await deleteButton.count()) > 0) {
@@ -346,7 +368,13 @@ test.describe('Admin Segments Settings', () => {
     await expect(createDialog).toBeHidden({ timeout: 10000 })
     await expect(page.getByText(segmentName)).toBeVisible({ timeout: 10000 })
 
-    const segRow = page.locator('div').filter({ hasText: segmentName }).first()
+    // Innermost row holding both the name and a delete button — see the
+    // deletion test above for why `.first()` cannot work here.
+    const segRow = page
+      .locator('div')
+      .filter({ hasText: segmentName })
+      .filter({ has: page.getByRole('button', { name: 'Delete segment' }) })
+      .last()
     const deleteButton = segRow.getByRole('button', { name: /delete segment/i })
 
     if ((await deleteButton.count()) > 0) {
