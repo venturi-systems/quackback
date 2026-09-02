@@ -248,11 +248,16 @@ test.describe('Public Roadmap', () => {
       return
     }
 
-    // RoadmapFiltersBar renders a Search button + sort buttons + "Add filter" button.
-    // There is no form or [class*="filters"] element visible — the form is inside a popover.
-    // Check for the "Add filter" button which is always rendered.
-    const addFilterButton = page.getByRole('button', { name: 'Add filter' })
-    await expect(addFilterButton).toBeVisible({ timeout: 5000 })
+    // The always-rendered filter control is the toolbar's Filter button
+    // (PublicRoadmapToolbarFilterButton, variant="toolbar", aria-label "Filter"),
+    // which RoadmapBoard passes to PublicRoadmapToolbar unconditionally.
+    //
+    // "Add filter" is NOT always rendered, despite what this test used to claim:
+    // PublicRoadmapFiltersBar short-circuits with `if (activeChips.length === 0)
+    // return null`, so the pill only exists once a filter is already applied —
+    // never on a fresh /roadmap.
+    const filterButton = page.getByRole('button', { name: 'Filter' })
+    await expect(filterButton).toBeVisible({ timeout: 5000 })
     // Page should not show an error state
     await expect(page.locator('body')).not.toContainText(/something went wrong/i)
   })
