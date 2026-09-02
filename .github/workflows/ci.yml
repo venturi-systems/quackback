@@ -274,7 +274,18 @@ jobs:
         # playwright.config.ts starts the dev server itself (webServer) and,
         # because CI is set, forbids test.only, retries twice and uses one
         # worker per shard.
-        run: bun run test:e2e -- --shard=${{ matrix.shard }}/8
+        #
+        # `|| true` on purpose: the NEXT step is the gate. Playwright exits
+        # non-zero for a failure that is already on e2e/known-failures.json,
+        # and that must not redden the shard while the entry stands. Everything
+        # a swallowed exit code could hide -- a missing or truncated report, a
+        # web server that never came up, a failure not on the list, a listed
+        # test that started passing -- is checked explicitly there, fail-closed.
+        run: bun run test:e2e -- --shard=${{ matrix.shard }}/8 || true
+
+      - name: Check the shard against the known-failure ratchet
+        working-directory: apps/web
+        run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json
 
       - name: Upload the Playwright artifacts
         if: failure()
@@ -284,6 +295,7 @@ jobs:
           path: |
             apps/web/blob-report
             apps/web/test-results
+            apps/web/e2e-results.json
           retention-days: 7
           if-no-files-found: ignore
 

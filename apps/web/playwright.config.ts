@@ -20,8 +20,16 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
 
   /* Reporter to use - blob for CI (enables sharding/merging), html for local */
+  // In CI the `json` reporter is what the known-failure ratchet reads
+  // (e2e/scripts/check-known-failures.ts). It is the gate, not Playwright's
+  // exit code -- a failure already on e2e/known-failures.json must not redden
+  // the shard, and anything else must.
   reporter: process.env.CI
-    ? [['blob', { outputDir: 'blob-report' }], ['list']]
+    ? [
+        ['blob', { outputDir: 'blob-report' }],
+        ['json', { outputFile: 'e2e-results.json' }],
+        ['list'],
+      ]
     : [['html', { outputFolder: 'playwright-report' }], ['list']],
 
   /* Shared settings for all the projects below */
