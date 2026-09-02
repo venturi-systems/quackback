@@ -158,10 +158,7 @@ test.describe('Public Roadmap', () => {
     const firstCard = roadmapCards.first()
     const href = await firstCard.getAttribute('href')
 
-    await Promise.all([
-      page.waitForURL(/\/posts\//, { timeout: 10000 }),
-      firstCard.click(),
-    ])
+    await Promise.all([page.waitForURL(/\/posts\//, { timeout: 10000 }), firstCard.click()])
 
     if (href) {
       await expect(page).toHaveURL(new RegExp(href.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
@@ -210,9 +207,12 @@ test.describe('Public Roadmap', () => {
     await tabs.nth(1).click()
     await page.waitForLoadState('networkidle')
 
-    // The second tab should now be selected
-    await expect(tabs.nth(1)).toHaveAttribute('data-state', 'active')
-    await expect(tabs.nth(0)).not.toHaveAttribute('data-state', 'active')
+    // The second tab should now be selected. RoadmapTabs is a hand-rolled
+    // tablist (components/public/roadmap-tabs.tsx) that tracks selection with
+    // aria-selected; it never emits Radix's data-state, so the old assertion
+    // could not pass even when the tab did switch.
+    await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
+    await expect(tabs.nth(0)).toHaveAttribute('aria-selected', 'false')
   })
 
   test('URL search param ?roadmap= selects the corresponding roadmap', async ({ page }) => {

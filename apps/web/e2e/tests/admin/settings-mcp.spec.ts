@@ -2,21 +2,25 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Admin MCP Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin/settings/mcp')
+    await page.goto('/admin/settings/developers?tab=mcp')
     await page.waitForLoadState('networkidle')
   })
 
   test('page loads and shows MCP Server heading', async ({ page }) => {
     await expect(page.getByText('MCP Server').first()).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Allow AI tools to interact with your feedback data via the Model Context Protocol')
+      page.getByText(
+        'Allow AI tools to interact with your feedback data via the Model Context Protocol'
+      )
     ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows Enable MCP Server toggle', async ({ page }) => {
     await expect(page.getByText('Enable MCP Server').first()).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Allow AI tools like Claude Code to interact with your feedback data via the MCP protocol')
+      page.getByText(
+        'Allow AI tools like Claude Code to interact with your feedback data via the MCP protocol'
+      )
     ).toBeVisible()
   })
 

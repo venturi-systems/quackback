@@ -17,17 +17,33 @@ import { test, expect } from '@playwright/test'
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Enable the help center feature flag via the settings UI. */
+/**
+ * Enable the `helpCenter` feature flag, which is what actually gates the admin
+ * Help Center: admin-sidebar.tsx and settings-nav.tsx both read
+ * `settings.featureFlags.helpCenter`.
+ *
+ * That flag lives in the `settings.feature_flags` column and is toggled on the
+ * Labs page. It is NOT the switch on /admin/settings/help-center: that one
+ * writes the separate `settings.help_center_config` column
+ * (updateHelpCenterConfig), which controls the PUBLIC help center and leaves
+ * every admin surface hidden. Toggling it here left the nav gated off and the
+ * routes unreachable for the whole suite.
+ *
+ * ExperimentalSettings calls window.location.reload() once the mutation
+ * resolves, so the flag is live in the router context on the next navigation.
+ */
 async function enableHelpCenter(page: import('@playwright/test').Page): Promise<void> {
-  await page.goto('/admin/settings/help-center')
+  await page.goto('/admin/settings/labs')
   await page.waitForLoadState('networkidle')
 
-  const toggle = page.getByRole('switch').first()
-  const isChecked = await toggle.isChecked().catch(() => false)
-  if (!isChecked) {
+  const toggle = page.locator('#flag-helpCenter')
+  await expect(toggle).toBeVisible({ timeout: 10000 })
+  if (!(await toggle.isChecked())) {
     await toggle.click()
-    await expect(toggle).toBeChecked({ timeout: 5000 })
+    // The success handler reloads the page; wait for the reloaded document to
+    // settle before asserting, or the assertion races the navigation.
     await page.waitForLoadState('networkidle')
+    await expect(page.locator('#flag-helpCenter')).toBeChecked({ timeout: 10000 })
   }
 }
 
@@ -328,10 +344,7 @@ test.describe('Help Center article author', () => {
     await expect(articleCards.first()).toBeVisible()
   })
 
-  test('article editor remains stable after setting author via API', async ({
-    page,
-    request,
-  }) => {
+  test('article editor remains stable after setting author via API', async ({ page, request }) => {
     const url = await createAndOpenArticle(page)
     if (!url) return
 
@@ -498,9 +511,13 @@ test.describe('Help Center article SEO description', () => {
     await page.getByRole('button', { name: /save changes/i }).click()
     // Wait for save
     await expect(
-      page.getByRole('button', { name: /saving/i }).or(page.getByRole('button', { name: /save changes/i }))
+      page
+        .getByRole('button', { name: /saving/i })
+        .or(page.getByRole('button', { name: /save changes/i }))
     ).toBeVisible({ timeout: 5000 })
-    await expect(page.getByRole('button', { name: /save changes/i })).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: /save changes/i })).toBeVisible({
+      timeout: 10000,
+    })
 
     // Reload and verify the description was persisted
     await page.reload()
@@ -550,8 +567,12 @@ test.describe('Help Center article list filtering - status', () => {
 
     await addFilterButton.click()
 
-    // Popover should list Status and Category
-    await expect(page.getByText('Status')).toBeVisible({ timeout: 3000 })
+    // Popover should list Status and Category. Scope to the popover: the list's
+    // own sidebar renders a "Status" section header button too, so an unscoped
+    // getByText('Status') is a strict-mode violation.
+    const popover = page.locator('[data-radix-popper-content-wrapper]')
+    await expect(popover.getByRole('button', { name: 'Status' })).toBeVisible({ timeout: 3000 })
+    await expect(popover.getByRole('button', { name: 'Category' })).toBeVisible({ timeout: 3000 })
   })
 
   test('can apply Draft status filter', async ({ page }) => {
@@ -559,7 +580,10 @@ test.describe('Help Center article list filtering - status', () => {
     if ((await addFilterButton.count()) === 0) return
 
     await addFilterButton.click()
-    await page.getByText('Status').click()
+    await page
+      .locator('[data-radix-popper-content-wrapper]')
+      .getByRole('button', { name: 'Status' })
+      .click()
 
     // Status sub-menu shows Draft and Published
     await expect(page.getByRole('button', { name: 'Draft' })).toBeVisible({ timeout: 3000 })
@@ -575,7 +599,10 @@ test.describe('Help Center article list filtering - status', () => {
     if ((await addFilterButton.count()) === 0) return
 
     await addFilterButton.click()
-    await page.getByText('Status').click()
+    await page
+      .locator('[data-radix-popper-content-wrapper]')
+      .getByRole('button', { name: 'Status' })
+      .click()
 
     await expect(page.getByRole('button', { name: 'Published' })).toBeVisible({ timeout: 3000 })
     await page.getByRole('button', { name: 'Published' }).click()
@@ -590,7 +617,10 @@ test.describe('Help Center article list filtering - status', () => {
     if ((await addFilterButton.count()) === 0) return
 
     await addFilterButton.click()
-    await page.getByText('Status').click()
+    await page
+      .locator('[data-radix-popper-content-wrapper]')
+      .getByRole('button', { name: 'Status' })
+      .click()
     await page.getByRole('button', { name: 'Draft' }).click()
     await page.waitForLoadState('networkidle')
 
@@ -650,7 +680,9 @@ test.describe('Help Center article list filtering - status', () => {
     await page.waitForLoadState('networkidle')
 
     await expect(
-      page.getByText('No articles match your search').or(page.getByText('No articles match your filters'))
+      page
+        .getByText('No articles match your search')
+        .or(page.getByText('No articles match your filters'))
     ).toBeVisible({ timeout: 10000 })
   })
 })
@@ -738,9 +770,7 @@ test.describe('Help Center article list item actions', () => {
       await ellipsisButton.last().click()
 
       await expect(page.getByRole('menuitem', { name: /edit/i })).toBeVisible({ timeout: 3000 })
-      await expect(
-        page.getByRole('menuitem', { name: /delete/i })
-      ).toBeVisible()
+      await expect(page.getByRole('menuitem', { name: /delete/i })).toBeVisible()
 
       await page.keyboard.press('Escape')
     }

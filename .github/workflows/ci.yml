@@ -176,7 +176,13 @@ jobs:
     needs: [changed_paths]
     if: needs.changed_paths.outputs.e2e == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 45 was too tight and truncated the signal rather than bounding a hang: on
+    # the first run shard 2 was CANCELLED at 44m55s with no reporter output at
+    # all, while shards 1/3/4 finished in 26.7m/25.7m/35.5m. One worker per
+    # shard plus `retries: 2` means every failing test costs three attempts, so
+    # a red shard is the slow one -- exactly the shard whose result is needed.
+    # Raised to bound a genuine hang while letting a fully red shard report.
+    timeout-minutes: 90
     strategy:
       # One shard's failure must not hide the other three: this suite has never
       # run on a runner, so the first signal has to be the complete one.

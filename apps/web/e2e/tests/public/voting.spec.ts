@@ -80,6 +80,13 @@ test.describe('Public Voting', () => {
   test.setTimeout(90000)
 
   test.beforeAll(async ({ browser }) => {
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget. This hook signs in over the full
+    // OTP/magic-link round trip, so it needs the budget set on itself --
+    // without this it dies at 30s and every test in the group is reported
+    // as "did not run".
+    test.setTimeout(90000)
+
     // Create a shared context and authenticate once for all tests
     // Note: This may take longer if rate limits are active
     sharedContext = await browser.newContext()
@@ -425,6 +432,13 @@ test.describe('Voting — independence and persistence', () => {
   let sharedContext: import('@playwright/test').BrowserContext
 
   test.beforeAll(async ({ browser }) => {
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget. This hook signs in over the full
+    // OTP/magic-link round trip, so it needs the budget set on itself --
+    // without this it dies at 30s and every test in the group is reported
+    // as "did not run".
+    test.setTimeout(90000)
+
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
     // Use the OTP auth helper already tested in the Public Voting suite

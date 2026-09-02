@@ -2,21 +2,25 @@ import { test, expect } from '@playwright/test'
 
 test.describe('Admin Portal Widget Settings', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/admin/settings/portal-widget')
+    await page.goto('/admin/settings/widget')
     await page.waitForLoadState('networkidle')
   })
 
   test('page loads and shows Feedback Widget heading', async ({ page }) => {
     await expect(page.getByText('Feedback Widget').first()).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('Embed a feedback widget directly in your product to collect feedback from users')
+      page.getByText(
+        'Embed a feedback widget directly in your product to collect feedback from users'
+      )
     ).toBeVisible({ timeout: 10000 })
   })
 
   test('shows Widget enable/disable card', async ({ page }) => {
     await expect(page.getByText('Enable Feedback Widget')).toBeVisible({ timeout: 10000 })
     await expect(
-      page.getByText('When enabled, you can embed a feedback widget on any website using a script tag')
+      page.getByText(
+        'When enabled, you can embed a feedback widget on any website using a script tag'
+      )
     ).toBeVisible()
   })
 
@@ -56,7 +60,9 @@ test.describe('Admin Portal Widget Settings', () => {
     }
   })
 
-  test('"Verified identity only" toggle can be switched off after being turned on', async ({ page }) => {
+  test('"Verified identity only" toggle can be switched off after being turned on', async ({
+    page,
+  }) => {
     const verifiedSwitch = page.getByRole('switch', {
       name: 'Require verified widget identity',
     })
@@ -81,7 +87,9 @@ test.describe('Admin Portal Widget Settings', () => {
     }
   })
 
-  test('when "Verified identity only" is on, backend framework selector appears', async ({ page }) => {
+  test('when "Verified identity only" is on, backend framework selector appears', async ({
+    page,
+  }) => {
     const verifiedSwitch = page.getByRole('switch', {
       name: 'Require verified widget identity',
     })

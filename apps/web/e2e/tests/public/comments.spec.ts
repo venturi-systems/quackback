@@ -275,6 +275,13 @@ test.describe('Authenticated user — comment form and submission', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget. This hook signs in over the full
+    // OTP/magic-link round trip, so it needs the budget set on itself --
+    // without this it dies at 30s and every test in the group is reported
+    // as "did not run".
+    test.setTimeout(90000)
+
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
     await authenticateViaOTP(page)
@@ -500,6 +507,13 @@ test.describe('Edge cases — comment content', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget. This hook signs in over the full
+    // OTP/magic-link round trip, so it needs the budget set on itself --
+    // without this it dies at 30s and every test in the group is reported
+    // as "did not run".
+    test.setTimeout(90000)
+
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
     await authenticateViaOTP(page)
@@ -671,6 +685,13 @@ test.describe('Comment editing', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget. This hook signs in over the full
+    // OTP/magic-link round trip, so it needs the budget set on itself --
+    // without this it dies at 30s and every test in the group is reported
+    // as "did not run".
+    test.setTimeout(90000)
+
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
     await authenticateViaOTP(page)
@@ -872,6 +893,13 @@ test.describe('Markdown comment rendering', () => {
   let sharedContext: BrowserContext
 
   test.beforeAll(async ({ browser }) => {
+    // Playwright applies a describe-level test.setTimeout() to TESTS only;
+    // hooks keep the default 30s budget. This hook signs in over the full
+    // OTP/magic-link round trip, so it needs the budget set on itself --
+    // without this it dies at 30s and every test in the group is reported
+    // as "did not run".
+    test.setTimeout(90000)
+
     sharedContext = await browser.newContext()
     const page = await sharedContext.newPage()
     await authenticateViaOTP(page)
