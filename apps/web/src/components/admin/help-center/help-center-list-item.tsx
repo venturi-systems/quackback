@@ -101,7 +101,17 @@ export function HelpCenterListItem({
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-muted/50">
+            {/* aria-label matches the identical control in
+                help-center-article-editor.tsx. Without it this icon-only button
+                has no accessible name at all, which is both an a11y gap and the
+                reason the e2e test had to guess at "the last button in the row
+                containing an svg". */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 hover:bg-muted/50"
+              aria-label="Article actions"
+            >
               <EllipsisHorizontalIcon className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>

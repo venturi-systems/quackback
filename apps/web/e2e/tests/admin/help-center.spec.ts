@@ -765,27 +765,34 @@ test.describe('Help Center article list item actions', () => {
   test('article row shows ellipsis menu with Edit and Delete options on hover', async ({
     page,
   }) => {
-    // Need at least one article in the list
-    const articleRows = page.locator('h3')
-    if ((await articleRows.count()) === 0) return
+    // This case used to locate the trigger as "the last button in `div.group`
+    // that contains an svg", behind three guards that each returned silently.
+    // Two of them could never fire as written -- `.first()` resolves to 0 or 1
+    // elements, so `count() === 0` on it was a test for "the page is empty" --
+    // and the third, `if (count > 0)`, let the case PASS having asserted
+    // nothing whenever the guess found no button.
+    //
+    // `div.group` is a Tailwind utility used across the admin shell, so
+    // `.first()` was not reliably an article row, and the "last button with an
+    // svg" was not reliably the menu trigger. That is why this was flaky on two
+    // CI runs and then failed all three attempts on a third.
+    //
+    // The trigger now carries `aria-label="Article actions"` (matching
+    // help-center-article-editor.tsx), so it can be addressed by role and name.
+    const trigger = page.getByRole('button', { name: 'Article actions' })
 
-    const firstRow = page.locator('div.group').first()
-    if ((await firstRow.count()) === 0) return
-
-    // Hover to reveal the ellipsis button
-    await firstRow.hover()
-
-    const ellipsisButton = firstRow.locator('button').filter({
-      has: page.locator('svg'),
-    })
-
-    if ((await ellipsisButton.count()) > 0) {
-      await ellipsisButton.last().click()
-
-      await expect(page.getByRole('menuitem', { name: /edit/i })).toBeVisible({ timeout: 3000 })
-      await expect(page.getByRole('menuitem', { name: /delete/i })).toBeVisible()
-
-      await page.keyboard.press('Escape')
+    if ((await trigger.count()) === 0) {
+      // A genuinely empty list is the one legitimate reason to stop. Skip
+      // loudly rather than return green having tested nothing.
+      test.skip(true, 'no help-center articles in the seed to open a row menu on')
+      return
     }
+
+    await trigger.first().click()
+
+    await expect(page.getByRole('menuitem', { name: /edit/i })).toBeVisible({ timeout: 3000 })
+    await expect(page.getByRole('menuitem', { name: /delete/i })).toBeVisible()
+
+    await page.keyboard.press('Escape')
   })
 })
