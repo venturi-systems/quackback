@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   SKIP_INTEGRATION,
+  API_KEY,
   MEMBER_API_KEY,
   api,
   apiWith,
@@ -42,21 +43,20 @@ function skipIfNoServer() {
   return !state.serverAvailable
 }
 
-describe.skipIf(SKIP_INTEGRATION)('Help Center Articles API', () => {
+describe.skipIf(SKIP_INTEGRATION || !API_KEY)('Help Center Articles API', () => {
   beforeAll(async () => {
     state.serverAvailable = await checkServerAndSetup(baseState)
     if (!state.serverAvailable) return
 
     // Create a test category — requires admin role; fail loudly if key lacks it
-    const { status: catStatus, data: catData } = await api(
-      'POST',
-      '/help-center/categories',
-      { name: `Test Category ${Date.now()}`, slug: `test-cat-${Date.now()}` }
-    )
+    const { status: catStatus, data: catData } = await api('POST', '/help-center/categories', {
+      name: `Test Category ${Date.now()}`,
+      slug: `test-cat-${Date.now()}`,
+    })
     if (catStatus !== 201) {
       throw new Error(
         `Help Center test setup failed: POST /help-center/categories returned ${catStatus}. ` +
-        `API_KEY must have admin role to run these tests.`
+          `API_KEY must have admin role to run these tests.`
       )
     }
     state.testCategoryId = (catData as { data: { id: string } }).data.id
@@ -95,11 +95,16 @@ describe.skipIf(SKIP_INTEGRATION)('Help Center Articles API', () => {
     it.skipIf(!MEMBER_API_KEY)('is accessible by team members (not admin-only)', async () => {
       if (skipIfNoServer() || !state.testCategoryId) return
 
-      const { status, data } = await apiWith('POST', '/help-center/articles', {
-        categoryId: state.testCategoryId,
-        title: `Team Member Article ${Date.now()}`,
-        content: 'Created by team member',
-      }, MEMBER_API_KEY)
+      const { status, data } = await apiWith(
+        'POST',
+        '/help-center/articles',
+        {
+          categoryId: state.testCategoryId,
+          title: `Team Member Article ${Date.now()}`,
+          content: 'Created by team member',
+        },
+        MEMBER_API_KEY
+      )
       expect(status).toBe(201)
       const id = (data as { data: { id: string } }).data.id
       state.createdIds.articles.push(id)
@@ -150,20 +155,23 @@ describe.skipIf(SKIP_INTEGRATION)('Help Center Articles API', () => {
     it.skipIf(!MEMBER_API_KEY)('is accessible by team members (not admin-only)', async () => {
       if (skipIfNoServer() || !state.testArticleId) return
 
-      const { status } = await apiWith('PATCH', `/help-center/articles/${state.testArticleId}`, {
-        title: 'Updated by Team Member',
-      }, MEMBER_API_KEY)
+      const { status } = await apiWith(
+        'PATCH',
+        `/help-center/articles/${state.testArticleId}`,
+        {
+          title: 'Updated by Team Member',
+        },
+        MEMBER_API_KEY
+      )
       expect(status).toBe(200)
     })
 
     it('reassigns author when authorId is provided', async () => {
       if (skipIfNoServer() || !state.testArticleId || !state.testPrincipalId) return
 
-      const { status, data } = await api(
-        'PATCH',
-        `/help-center/articles/${state.testArticleId}`,
-        { authorId: state.testPrincipalId }
-      )
+      const { status, data } = await api('PATCH', `/help-center/articles/${state.testArticleId}`, {
+        authorId: state.testPrincipalId,
+      })
       expect(status).toBe(200)
       const article = (data as { data: { author: { id: string } | null } }).data
       expect(article.author?.id).toBe(state.testPrincipalId)

@@ -9,6 +9,15 @@
  *   deterministic DB setup via CLI scripts (same pattern as db-helpers.ts).
  * - `flushMagicLinkRateLimit` clears the per-email rate-limit keys in Redis so
  *   repeated e2e runs don't hit the sign-in rate limiter.
+ *
+ * Every helper here shells out to a script under `../scripts`, and each script
+ * that has to invalidate a Redis-cached read does it itself, through the
+ * application's own client (`@/lib/server/redis`, pointed at REDIS_URL). None
+ * of this reaches for `docker exec` against a named container: the compose
+ * stack's `quackback-dragonfly` exists on a developer's machine and nowhere
+ * else, and the CI lane runs Redis as a service container with no docker CLI
+ * available to the job at all. REDIS_URL is the one address both environments
+ * agree on.
  */
 import { execFileSync } from 'child_process'
 import { dirname, resolve } from 'path'
@@ -61,38 +70,41 @@ export function setWorkspaceAnon(enabled: boolean): void {
 }
 
 /**
- * Disable or restore portal public auth methods (password, magicLink, OAuth
- * providers) in `settings.portal_config.oauth`. Used by tests that need to
- * verify the team break-glass form is still served when the portal offers no
- * public sign-in methods. Always call `setPortalAuthMethods('restore')` in a
- * `finally` block so subsequent tests/dev aren't left with a broken portal.
+ * Flip sign-in methods and drop the tenant-settings cache (the script does
+ * both). `disable` / `restore` patch `settings.portal_config.oauth` — used by
+ * tests that need to verify the team break-glass form is still served when the
+ * portal offers no public sign-in methods; always call
+ * `setPortalAuthMethods('restore')` in a `finally` block so subsequent
+ * tests/dev aren't left with a broken portal. `enable-magic-link` patches
+ * `settings.auth_config.oauth` instead, because that is the map the
+ * request-time gate reads — see {@link enableMagicLinkSignIn}.
  */
 export function setPortalAuthMethods(action: 'disable' | 'restore' | 'enable-magic-link'): void {
   runScript('../scripts/set-portal-auth-methods.ts', [action])
 }
 
 /**
- * Flush the magic-link per-email rate-limit keys from Redis/Dragonfly so that
- * repeated e2e runs on the same email addresses don't hit the sign-in limiter.
- * No-op when no keys exist.
+ * Turn the magic-link sign-in method ON in `settings.auth_config.oauth` — the
+ * map `isAuthMethodAllowed` gates on — and drop the tenant-settings cache.
+ *
+ * The suite authenticates through magic link, but magicLink is opt-in
+ * (`isSignInMethodEnabled` requires a literal `true`), `DEFAULT_AUTH_CONFIG`
+ * ships it off, and `bun run db:seed` leaves `settings.auth_config` NULL. So
+ * the test infrastructure enables it for itself; the shipped default stays off.
+ *
+ * Idempotent — safe on every setup path and on every retry.
+ */
+export function enableMagicLinkSignIn(): void {
+  setPortalAuthMethods('enable-magic-link')
+}
+
+/**
+ * Flush the magic-link per-email rate-limit keys from Redis so that repeated
+ * e2e runs on the same email addresses don't hit the sign-in limiter. No-op
+ * when no keys exist; throws if Redis is unreachable.
  */
 export function flushMagicLinkRateLimit(): void {
-  // Scan for all rate-limit keys, then delete each one. Two separate execFileSync
-  // calls avoid a shell pipeline (no shell-interpolation risk).
-  const scan = execFileSync(
-    'docker',
-    ['exec', 'quackback-dragonfly', 'redis-cli', '--scan', '--pattern', 'signin:magiclink:*'],
-    { encoding: 'utf-8' }
-  )
-  const keys = scan
-    .split('\n')
-    .map((k) => k.trim())
-    .filter(Boolean)
-  for (const key of keys) {
-    execFileSync('docker', ['exec', 'quackback-dragonfly', 'redis-cli', 'del', key], {
-      stdio: 'pipe',
-    })
-  }
+  runScript('../scripts/flush-signin-rate-limit.ts', [])
 }
 
 /** Config for {@link seedIdentityProvider} (mirrors the seed script's input). */
@@ -108,49 +120,32 @@ export interface SeedIdpConfig {
 }
 
 /**
- * Drop the tenant-settings + configured-integration-types Redis caches so the
- * running dev server immediately reflects a raw-SQL provider mutation (these
- * caches normally only invalidate via the app's own write paths).
- */
-function invalidateAuthCaches(): void {
-  for (const key of ['settings:tenant', 'platform-cred:configured-types']) {
-    execFileSync('docker', ['exec', 'quackback-dragonfly', 'redis-cli', 'del', key], {
-      stdio: 'pipe',
-    })
-  }
-}
-
-/**
  * Seed an identity_provider row (+ encrypted credential + optional verified
- * domain) and bust the auth caches. Idempotent on `registrationId`. Pair with
+ * domain). The script busts the tenant-settings + configured-integration-types
+ * caches itself, so the running dev server reflects the raw-SQL mutation on its
+ * next request. Idempotent on `registrationId`. Pair with
  * {@link removeIdentityProvider} in an `afterAll`/`finally` so the workspace is
  * left clean.
  */
 export function seedIdentityProvider(cfg: SeedIdpConfig): void {
   runScript('../scripts/seed-identity-provider.ts', ['seed', JSON.stringify(cfg)])
-  invalidateAuthCaches()
 }
 
 /** Remove a seeded identity provider (cascades its domains, drops its credential). */
 export function removeIdentityProvider(registrationId: string): void {
   runScript('../scripts/seed-identity-provider.ts', ['remove', registrationId])
-  invalidateAuthCaches()
 }
 
 /**
- * Set the portal visibility and bust the tenant-settings
- * cache so the running dev server sees the change immediately.
+ * Set the portal visibility. The script also drops the tenant-settings cache —
+ * the portal-access decision is served from it — so the dev server evaluates
+ * the new visibility on its next request.
  *
  * Always restore to 'public' in a `finally` block so subsequent tests and dev
  * sessions are not left behind a locked gate.
  */
 export function setPortalVisibility(visibility: 'private' | 'authenticated' | 'public'): void {
   runScript('../scripts/set-portal-visibility.ts', [visibility])
-  // The portal-access decision is cached under 'settings:tenant'. Drop it so
-  // the dev server evaluates the new visibility on the next request.
-  execFileSync('docker', ['exec', 'quackback-dragonfly', 'redis-cli', 'del', 'settings:tenant'], {
-    stdio: 'pipe',
-  })
 }
 
 /**

@@ -96,7 +96,7 @@ function skipIfNoServer() {
   return !serverAvailable
 }
 
-describe.skipIf(SKIP_INTEGRATION)('Webhook API Integration Tests', () => {
+describe.skipIf(SKIP_INTEGRATION || !API_KEY)('Webhook API Integration Tests', () => {
   beforeAll(async () => {
     serverAvailable = await checkServerAndSetup()
   })

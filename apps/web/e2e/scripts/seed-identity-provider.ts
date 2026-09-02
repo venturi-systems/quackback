@@ -26,12 +26,19 @@
  *   domain?: { name, verified?=true, enforced?=false }
  * }
  *
- * After mutating, the caller (access-helpers) drops the tenant-settings +
- * configured-types Redis caches so the running dev server sees the change.
+ * After mutating, this script drops the tenant-settings + configured-types
+ * Redis caches so the running dev server sees the change: `getTenantSettings`
+ * caches the whole settings row (including the derived provider list) for an
+ * hour and `getConfiguredAuthTypes` caches the credential inventory, and only
+ * the app's own write paths invalidate either — a raw-SQL mutation stays
+ * invisible until the keys are dropped. It uses the app's own Redis client
+ * (REDIS_URL) rather than a container-specific `redis-cli`, so it behaves
+ * identically against the docker-compose Dragonfly and a CI service container.
  */
 import postgres from 'postgres'
 import { hkdfSync, randomBytes, createCipheriv, randomUUID } from 'crypto'
 import { generateId, toUuid } from '@quackback/ids'
+import { cacheDel, getRedis, CACHE_KEYS } from '@/lib/server/redis'
 
 const action = (process.argv[2] || '').toLowerCase()
 if (action !== 'seed' && action !== 'remove') {
@@ -125,7 +132,9 @@ try {
     await seed(cfg)
     console.log(JSON.stringify({ action: 'seed', registrationId: cfg.registrationId }))
   }
+  await cacheDel(CACHE_KEYS.TENANT_SETTINGS, CACHE_KEYS.PLATFORM_INTEGRATION_TYPES)
   await sql.end()
+  await getRedis().quit()
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   await sql.end()

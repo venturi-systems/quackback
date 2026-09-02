@@ -29,7 +29,13 @@ describe('QB-CI-001 consolidated validation contract', () => {
 
     const ci = contents.get('ci.yml') ?? ''
     const jobs = ci.split('\njobs:\n', 2)[1]?.match(/^ {2}[a-z0-9_-]+:/gm) ?? []
-    expect(jobs).toEqual(['  static_analysis:', '  database_tests:', '  portability_gate:'])
+    expect(jobs).toEqual([
+      '  static_analysis:',
+      '  database_tests:',
+      '  changed_paths:',
+      '  e2e_tests:',
+      '  portability_gate:',
+    ])
     expect(ci).toContain('name: Static analysis')
     expect(ci).toContain('name: Database migrations and tests')
     // main made the required gate's name a conditional expression so a
@@ -40,7 +46,7 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain("github.event_name == 'workflow_dispatch'")
     expect(ci).toContain("'portability-gate (manual diagnostic)'")
     expect(ci).toContain("|| 'portability-gate'")
-    expect(ci).toContain('needs: [static_analysis, database_tests]')
+    expect(ci).toContain('needs: [static_analysis, database_tests, changed_paths, e2e_tests]')
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
     expect(ci).toContain('docker run --rm --read-only --network none')
@@ -58,6 +64,18 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain('bun run build')
     expect(ci).toContain('bun run db:migrate')
     expect(ci).toContain('bun run test --run')
+    // The widget suite used to run only on a `widget-v*` tag, and the Playwright
+    // suite ran nowhere at all. Both are pull-request lanes now; pin the command
+    // so neither can be dropped back out silently.
+    expect(ci).toContain('bun run --filter @quackback/widget test')
+    expect(ci).toContain('bun run test:e2e')
+    expect(ci).toContain('name: End-to-end tests')
+    // The end-to-end lane is changed-path gated, so the required gate has to
+    // tolerate `skipped` -- but ONLY alongside a successful filter job, and
+    // never with `continue-on-error` or a swallowed failure.
+    expect(ci).toContain('test "$CHANGED_PATHS_RESULT" = success')
+    expect(ci).toContain('test "$E2E_RESULT" = success || test "$E2E_RESULT" = skipped')
+    expect(ci).not.toContain('continue-on-error')
     expect(ci.toLowerCase()).not.toContain('codebuild-')
   })
 })
@@ -140,7 +158,17 @@ describe('QB-GOV-001 repository governance contract', () => {
     })
     expect(contract.authority.upstream.mode).toBe('manual-reviewed-intake')
     expect(contract.validation.authoritative_contexts).toEqual(['portability-gate'])
-    expect(contract.schedules).toEqual([])
+    // Was `toEqual([])`. The nightly full run is the one schedule this
+    // repository declares; enumerate it exactly so a second one cannot be added
+    // without also being declared here.
+    expect(contract.schedules).toEqual([
+      expect.objectContaining({
+        name: 'ci-nightly-full-run',
+        workflow: 'ci.yml',
+        cadence: '17 5 * * *',
+        execution_plane: 'github',
+      }),
+    ])
     const scheduledWorkflows = readdirSync(workflowDir)
       .filter((name) => name.endsWith('.yml') || name.endsWith('.yaml'))
       .filter((name) => /^ {2}schedule:\s*$/m.test(readFileSync(join(workflowDir, name), 'utf8')))

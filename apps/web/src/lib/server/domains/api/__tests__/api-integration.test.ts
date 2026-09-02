@@ -13,6 +13,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   SKIP_INTEGRATION,
+  API_KEY,
   api,
   createTestState,
   checkServerAndSetup,
@@ -25,7 +26,7 @@ function skipIfNoServer() {
   return !state.serverAvailable
 }
 
-describe.skipIf(SKIP_INTEGRATION)('API Integration Tests', () => {
+describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests', () => {
   beforeAll(async () => {
     state.serverAvailable = await checkServerAndSetup(state)
   })

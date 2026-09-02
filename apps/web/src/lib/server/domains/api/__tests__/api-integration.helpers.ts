@@ -62,7 +62,14 @@ export function createTestState(): TestState {
   }
 }
 
-// Check if server is running and populate test state
+// Check if server is running and populate test state.
+//
+// No API_KEY is the honest "integration tests were not requested" path: it
+// returns false, and the suites' `describe.skipIf(SKIP_INTEGRATION || !API_KEY)`
+// already reports them as skipped. Every other outcome means the caller DID ask
+// for integration tests and they cannot run, so throw: a beforeAll failure is
+// loud, where returning false would let the per-test guards report green
+// against a dead server.
 export async function checkServerAndSetup(state: TestState): Promise<boolean> {
   if (!API_KEY) {
     console.warn('⚠️ No API_KEY provided - skipping API integration tests')
@@ -70,38 +77,40 @@ export async function checkServerAndSetup(state: TestState): Promise<boolean> {
     return false
   }
 
+  let res: Response
   try {
-    const res = await fetch(`${BASE_URL}/boards`, {
+    res = await fetch(`${BASE_URL}/boards`, {
       headers: { Authorization: `Bearer ${API_KEY}` },
     })
-    if (res.status === 401) {
-      console.warn('⚠️ Invalid API key - skipping API integration tests')
-      return false
-    }
-    if (res.status !== 200) {
-      console.warn('⚠️ Server not responding correctly - skipping API integration tests')
-      return false
-    }
-
-    // Get test data
-    const boardsData = await res.json()
-    const boards = (boardsData as { data: Array<{ id: string }> })?.data || []
-    if (boards.length > 0) {
-      state.testBoardId = boards[0].id
-    }
-
-    const { data: postsData } = await api('GET', '/posts')
-    const posts = (postsData as { data: Array<{ id: string }> })?.data || []
-    if (posts.length > 0) {
-      state.testPostId = posts[0].id
-    }
-
-    return true
-  } catch {
-    console.warn('⚠️ Server not running - skipping API integration tests')
-    console.warn('   Start server with: bun run dev')
-    return false
+  } catch (error) {
+    throw new Error(`Server not running at ${BASE_URL} - start it with: bun run dev`, {
+      cause: error,
+    })
   }
+
+  if (res.status === 401) {
+    throw new Error('Invalid API key - API integration tests cannot run')
+  }
+  if (res.status !== 200) {
+    throw new Error(
+      `Server not responding correctly - GET ${BASE_URL}/boards returned ${res.status}`
+    )
+  }
+
+  // Get test data
+  const boardsData = await res.json()
+  const boards = (boardsData as { data: Array<{ id: string }> })?.data || []
+  if (boards.length > 0) {
+    state.testBoardId = boards[0].id
+  }
+
+  const { data: postsData } = await api('GET', '/posts')
+  const posts = (postsData as { data: Array<{ id: string }> })?.data || []
+  if (posts.length > 0) {
+    state.testPostId = posts[0].id
+  }
+
+  return true
 }
 
 // Cleanup all created resources
