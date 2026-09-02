@@ -848,9 +848,10 @@ test.describe('Changelog search and filter', () => {
     // the DOM and always renders a "Published" option (ChangelogFiltersPanel's
     // CHANGELOG_STATUSES), so a page-wide count can never reach 0 and this
     // assertion could not pass regardless of whether the filter worked.
-    // AdminFilterLayout puts the list in an inner <main>; the route wraps the
-    // whole page in an outer one.
-    const entryList = page.locator('main main')
+    // AdminFilterLayout puts the list in a <main> that is the sibling of the
+    // filter <aside>. Three <main>s nest on this page (admin shell > route >
+    // layout), so select the innermost one rather than counting levels.
+    const entryList = page.locator('main:not(:has(main))')
     const publishedBadges = entryList.getByText(/^Published$/)
     const count = await publishedBadges.count()
     expect(count).toBe(0)
