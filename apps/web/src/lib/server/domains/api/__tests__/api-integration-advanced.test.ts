@@ -16,32 +16,30 @@ import {
   API_KEY,
   api,
   createTestState,
-  checkServerAndSetup,
+  setUpIntegrationSuite,
+  requireBoardId,
+  requirePostId,
   cleanupCreatedResources,
 } from './api-integration.helpers'
 
 const state = createTestState()
 
-function skipIfNoServer() {
-  return !state.serverAvailable
-}
-
 describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced', () => {
+  // Throws on an unreachable server, a rejected key, or a fixture it could not
+  // establish. There is deliberately no `serverAvailable` flag to consult: a
+  // per-test `if (...) return` reports an unrun case as a passing one.
   beforeAll(async () => {
-    state.serverAvailable = await checkServerAndSetup(state)
+    await setUpIntegrationSuite(state)
   })
 
   afterAll(async () => {
-    if (!state.serverAvailable) return
     await cleanupCreatedResources(state.createdIds)
   })
 
   describe('Boundary Conditions', () => {
     it('accepts max length title (200 chars)', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
       const { status, data } = await api('POST', '/posts', {
-        boardId: state.testBoardId,
+        boardId: requireBoardId(state),
         title: 'A'.repeat(200),
         content: 'Test content',
       })
@@ -50,10 +48,8 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
     })
 
     it('rejects title exceeding max length', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
       const { status } = await api('POST', '/posts', {
-        boardId: state.testBoardId,
+        boardId: requireBoardId(state),
         title: 'A'.repeat(201),
         content: 'Test content',
       })
@@ -61,10 +57,8 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
     })
 
     it('handles unicode in post title', async () => {
-      if (skipIfNoServer() || !state.testBoardId) return
-
       const { status, data } = await api('POST', '/posts', {
-        boardId: state.testBoardId,
+        boardId: requireBoardId(state),
         title: '🎉 Unicode Test 日本語 Ñoño',
         content: 'Testing unicode support',
       })
@@ -74,18 +68,35 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
   })
 
   describe('Proxy Voting', () => {
-    let voterPrincipalId: string | null = null
+    let voterPrincipalId: string
+
+    // The voter is a prerequisite of five cases below, so it is established
+    // once here and fails the whole group loudly when it cannot be. It used to
+    // be created inside the first case behind `if (!voterPrincipalId) return`,
+    // which turned "identify did not return a principal" into four green tests.
+    beforeAll(async () => {
+      const stamp = Date.now()
+      const { status, data } = await api('POST', '/users/identify', {
+        externalId: `proxy-vote-test-${stamp}`,
+        name: 'Proxy Vote Test User',
+        email: `proxy-test-${stamp}@example.com`,
+      })
+      if (status !== 200 && status !== 201) {
+        throw new Error(`Proxy-voting setup failed: POST /users/identify returned ${status}.`)
+      }
+      const id = (data as { data?: { principalId?: string } } | null)?.data?.principalId
+      if (!id) {
+        throw new Error('Proxy-voting setup failed: POST /users/identify returned no principalId.')
+      }
+      voterPrincipalId = id
+    })
 
     it('POST /posts/:postId/vote/proxy requires voterPrincipalId', async () => {
-      if (skipIfNoServer() || !state.testPostId) return
-
-      const { status } = await api('POST', `/posts/${state.testPostId}/vote/proxy`, {})
+      const { status } = await api('POST', `/posts/${requirePostId(state)}/vote/proxy`, {})
       expect(status).toBe(400)
     })
 
     it('POST /posts/:postId/vote/proxy rejects invalid post ID', async () => {
-      if (skipIfNoServer()) return
-
       const { status } = await api('POST', '/posts/invalid_id/vote/proxy', {
         voterPrincipalId: 'principal_01h455vb4pex5vsknk084sn02q',
       })
@@ -93,19 +104,7 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
     })
 
     it('POST /posts/:postId/vote/proxy adds a proxy vote', async () => {
-      if (skipIfNoServer() || !state.testPostId) return
-
-      // Create a voter via identify endpoint
-      const { data: identifyData } = await api('POST', '/users/identify', {
-        externalId: `proxy-vote-test-${Date.now()}`,
-        name: 'Proxy Vote Test User',
-        email: `proxy-test-${Date.now()}@example.com`,
-      })
-      voterPrincipalId =
-        (identifyData as { data: { principalId: string } })?.data?.principalId ?? null
-      if (!voterPrincipalId) return
-
-      const { status, data } = await api('POST', `/posts/${state.testPostId}/vote/proxy`, {
+      const { status, data } = await api('POST', `/posts/${requirePostId(state)}/vote/proxy`, {
         voterPrincipalId,
       })
       expect(status).toBe(200)
@@ -116,9 +115,7 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
     })
 
     it('POST /posts/:postId/vote/proxy is idempotent', async () => {
-      if (skipIfNoServer() || !state.testPostId || !voterPrincipalId) return
-
-      const { status, data } = await api('POST', `/posts/${state.testPostId}/vote/proxy`, {
+      const { status, data } = await api('POST', `/posts/${requirePostId(state)}/vote/proxy`, {
         voterPrincipalId,
       })
       expect(status).toBe(200)
@@ -127,28 +124,22 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
     })
 
     it('DELETE /posts/:postId/vote/proxy removes the proxy vote', async () => {
-      if (skipIfNoServer() || !state.testPostId || !voterPrincipalId) return
-
-      const { status } = await api('DELETE', `/posts/${state.testPostId}/vote/proxy`, {
+      const { status } = await api('DELETE', `/posts/${requirePostId(state)}/vote/proxy`, {
         voterPrincipalId,
       })
       expect(status).toBe(204)
     })
 
     it('DELETE /posts/:postId/vote/proxy is safe when no vote exists', async () => {
-      if (skipIfNoServer() || !state.testPostId || !voterPrincipalId) return
-
       // Deleting again after already removed
-      const { status } = await api('DELETE', `/posts/${state.testPostId}/vote/proxy`, {
+      const { status } = await api('DELETE', `/posts/${requirePostId(state)}/vote/proxy`, {
         voterPrincipalId,
       })
       expect(status).toBe(204)
     })
 
     it('DELETE /posts/:postId/vote/proxy requires voterPrincipalId', async () => {
-      if (skipIfNoServer() || !state.testPostId) return
-
-      const { status } = await api('DELETE', `/posts/${state.testPostId}/vote/proxy`, {})
+      const { status } = await api('DELETE', `/posts/${requirePostId(state)}/vote/proxy`, {})
       expect(status).toBe(400)
     })
   })

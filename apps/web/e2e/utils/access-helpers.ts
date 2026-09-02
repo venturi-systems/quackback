@@ -71,13 +71,20 @@ export function setWorkspaceAnon(enabled: boolean): void {
 
 /**
  * Flip sign-in methods and drop the tenant-settings cache (the script does
- * both). `disable` / `restore` patch `settings.portal_config.oauth` — used by
- * tests that need to verify the team break-glass form is still served when the
- * portal offers no public sign-in methods; always call
- * `setPortalAuthMethods('restore')` in a `finally` block so subsequent
- * tests/dev aren't left with a broken portal. `enable-magic-link` patches
- * `settings.auth_config.oauth` instead, because that is the map the
- * request-time gate reads — see {@link enableMagicLinkSignIn}.
+ * both). All three actions write `settings.auth_config.oauth`, the one map the
+ * request-time gate (`isAuthMethodAllowed`) and the sign-in dialog both read.
+ *
+ * `disable` is used by tests that need the team break-glass form to be the only
+ * way in; always pair it with `setPortalAuthMethods('restore')` in a `finally`
+ * block so subsequent tests/dev are not left with a broken portal.
+ *
+ * `restore` puts back the exact snapshot `disable` took — NOT the shipped
+ * defaults. DEFAULT_AUTH_CONFIG.oauth carries no `magicLink` key and
+ * `isSignInMethodEnabled` reads a missing key as off, so a reset-to-defaults
+ * would silently switch magic link back off and break every later
+ * `loginViaMagicLink`. `restore` with no snapshot is a no-op, which also makes
+ * it safe to call defensively at the start of a suite to clear a snapshot a
+ * crashed run left behind.
  */
 export function setPortalAuthMethods(action: 'disable' | 'restore' | 'enable-magic-link'): void {
   runScript('../scripts/set-portal-auth-methods.ts', [action])

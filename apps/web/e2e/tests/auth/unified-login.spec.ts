@@ -53,6 +53,11 @@ test.beforeAll(() => {
   // Ensure portal starts public regardless of any leftover state from a prior
   // run (test (3) sets private inside a try/finally, but belt-and-suspenders).
   setPortalVisibility('public')
+  // Same belt-and-suspenders for sign-in methods: a run that crashed between
+  // test (4)'s `disable` and its `finally` leaves both the disabled auth_config
+  // and the snapshot behind. `restore` consumes the snapshot and puts the
+  // methods back; with no snapshot it does nothing.
+  setPortalAuthMethods('restore')
 })
 
 test.beforeEach(async ({ page }) => {
