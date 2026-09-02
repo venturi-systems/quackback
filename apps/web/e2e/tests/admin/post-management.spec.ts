@@ -432,7 +432,7 @@ function statusTrigger(modal: import('@playwright/test').Locator) {
 function postBodyEditor(modal: import('@playwright/test').Locator) {
   return modal
     .locator('div')
-    .filter({ has: modal.locator('input[placeholder="What\'s the feedback about?"]') })
+    .filter({ has: modal.getByPlaceholder("What's the feedback about?") })
     .last()
     .locator('.tiptap')
 }

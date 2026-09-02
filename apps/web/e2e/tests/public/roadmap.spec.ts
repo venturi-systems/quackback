@@ -256,7 +256,9 @@ test.describe('Public Roadmap', () => {
     // PublicRoadmapFiltersBar short-circuits with `if (activeChips.length === 0)
     // return null`, so the pill only exists once a filter is already applied —
     // never on a fresh /roadmap.
-    const filterButton = page.getByRole('button', { name: 'Filter' })
+    // exact: getByRole's `name` is a substring match by default, so a bare
+    // 'Filter' would also match the "Add filter" pill once a chip is active.
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true })
     await expect(filterButton).toBeVisible({ timeout: 5000 })
     // Page should not show an error state
     await expect(page.locator('body')).not.toContainText(/something went wrong/i)
