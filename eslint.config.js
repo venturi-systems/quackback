@@ -24,6 +24,7 @@ export default tseslint.config(
       "**/build/**",
       "**/.agents/**",
       "**/.claude/**",
+      "**/.worktrees/**",
       "**/*.config.js",
       "**/*.config.mjs",
       "**/next-env.d.ts",
