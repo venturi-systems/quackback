@@ -18,6 +18,8 @@ concurrency:
   group: publish-widget-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   validate:
     if: >-
