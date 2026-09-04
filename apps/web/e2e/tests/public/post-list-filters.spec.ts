@@ -1,6 +1,17 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Public Post List — chip filters', () => {
+  // No retries here. 5 of this describe's tests are on e2e/known-failures.json,
+  // and for a listed test a retry is dead weight: the ratchet
+  // (e2e/scripts/known-failures.ts) treats `failed` and `flaky` identically for
+  // a listed entry -- neither blocks, neither retires it -- so two extra
+  // attempts can only downgrade the same verdict. Measured before this change
+  // those retries were ~24s each and put shard 8 at 20.7m against a 6.9m
+  // fastest shard. The global `retries: 2` in playwright.config.ts still
+  // covers every other test. A test here that is NOT listed and fails now
+  // fails loudly as NEW rather than being retried past -- that is the
+  // intended trade.
+  test.describe.configure({ retries: 0 })
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')

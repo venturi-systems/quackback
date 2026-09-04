@@ -42,6 +42,14 @@ coverage
 # Playwright
 playwright-report/
 test-results/
+# Playwright CI artifacts. The workflow uploads these from the runner; they are
+# never source. Without these entries a local `playwright test` leaves them in
+# the tree and `git add -A` commits them -- which is exactly how a 1.3k-line
+# e2e-results.json and a blob-report zip were nearly landed alongside a
+# two-line test change.
+blob-report/
+e2e-results.json
+e2e-plan.json
 apps/web/e2e/.auth/
 
 # Turbo
