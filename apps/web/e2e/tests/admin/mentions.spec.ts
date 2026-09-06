@@ -41,9 +41,10 @@ test.describe('Post @-mention happy path', () => {
     // attrs all use this form, never the raw UUID.
     expect(target.principalId).toMatch(/^principal_[0-9a-z]+$/)
     expect(target.displayName.length).toBeGreaterThan(2)
-    // Prefix LIKE on lower(displayName) — first three chars is the minimum
-    // useful query (debounced fetch, server side limit 10).
-    const queryPrefix = target.displayName.slice(0, 3)
+    // Query the full name so unrelated names sharing a short prefix do not
+    // crowd the target out of the server's ten-result page. The extension
+    // allows spaces, and distinct principals may still share this full name.
+    const query = target.displayName
 
     // ---- Open the portal post form ----------------------------------------
     await page.goto('/')
@@ -87,7 +88,26 @@ test.describe('Post @-mention happy path', () => {
     // keystroke would clearTimeout the previous timer, leaving the awaited
     // promise un-resolved, and the picker would never render. Typing slower
     // gives each promise time to resolve cleanly.
-    await page.keyboard.type(`@${queryPrefix}`, { delay: 260 })
+    const [suggestResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return (
+          url.pathname === '/api/v1/mentions/suggest' &&
+          url.searchParams.get('q') === query.toLowerCase()
+        )
+      }),
+      page.keyboard.type(`@${query}`, { delay: 260 }),
+    ])
+    expect(suggestResponse.status()).toBe(200)
+    const suggestions = (await suggestResponse.json()) as Array<{
+      principalId: string
+      displayName: string
+    }>
+    expect(
+      suggestions.filter((item) => item.principalId === target.principalId),
+      'the final suggestion response must contain the intended principal exactly once'
+    ).toHaveLength(1)
+    const targetIndex = suggestions.findIndex((item) => item.principalId === target.principalId)
 
     // Tippy renders the picker into document.body inside a `.tippy-box`.
     // Wait for the inner `.mention-picker` to settle: the suggestion is
@@ -112,35 +132,20 @@ test.describe('Post @-mention happy path', () => {
       throw err
     }
 
-    // The picker must include our target.
-    //
-    // Match the name EXACTLY. `hasText` is a substring test, and seed display
-    // names are randomised per `bun run db:seed`, so a run that happens to
-    // produce "Ana Smith" alongside "Ana Smithson" made this filter match two
-    // rows -- and `.first()` then clicked whichever the server returned first.
-    // That inserts a chip for the wrong principal, so the run failed three
-    // attempts later at the `data-id` assertion below while passing entirely on
-    // the previous run's seed. The failure landing on the chip rather than on
-    // this visibility check is what identifies it: a row WAS found and clicked.
-    const targetRow = picker
-      .locator('.mention-picker__row')
-      .filter({ has: page.getByText(target.displayName, { exact: true }) })
-    await expect(targetRow.first()).toBeVisible({ timeout: 5000 })
-
-    // Two people genuinely sharing a display name would still be ambiguous, and
-    // silently picking one would resurrect the same wrong-chip failure wearing a
-    // different mask. Say so instead.
-    await expect(
-      targetRow,
-      `seed produced more than one person named exactly "${target.displayName}"; ` +
-        'the mention target is ambiguous and this run cannot assert which chip is correct'
-    ).toHaveCount(1)
+    // Wait for the final response to reach the rendered list before using its
+    // index. Names are labels, not identities: two seeded users may both be
+    // called "Jordan Johnson". The extension preserves response order, and the
+    // picker exposes that order through data-mention-idx.
+    await expect(picker.locator('.mention-picker__name')).toHaveText(
+      suggestions.map((item) => item.displayName)
+    )
+    const targetRow = picker.locator(`.mention-picker__row[data-mention-idx="${targetIndex}"]`)
+    await expect(targetRow).toBeVisible({ timeout: 5000 })
 
     // ---- Select the target -------------------------------------------------
-    // The picker has roving selection starting at index 0. For determinism,
-    // click the target row directly (avoids ordering surprises if the
-    // alphabetical first match isn't our target).
-    await targetRow.first().click()
+    // The chip assertion below verifies the selected principal ID, including
+    // when another row has exactly the same visible name.
+    await targetRow.click()
 
     // ---- Verify the in-editor chip ----------------------------------------
     // TipTap renders the mention as <span class="mention" data-id="<uuid>"

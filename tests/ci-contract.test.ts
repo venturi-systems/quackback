@@ -69,6 +69,11 @@ describe('QB-CI-001 consolidated validation contract', () => {
     // so neither can be dropped back out silently.
     expect(ci).toContain('bun run --filter @quackback/widget test')
     expect(ci).toContain('bun run test:e2e')
+    expect(ci).toContain('bunx playwright test --list --reporter=json --shard=${{ matrix.shard }}/8 > e2e-plan.json')
+    expect(ci).toContain('check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json')
+    expect(ci.indexOf('name: Collect the expected tests for this shard')).toBeLessThan(
+      ci.indexOf('name: Run the Playwright suite')
+    )
     expect(ci).toContain('name: End-to-end tests')
     // The end-to-end lane is changed-path gated, so the required gate has to
     // tolerate `skipped` -- but ONLY alongside a successful filter job, and

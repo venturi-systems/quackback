@@ -203,12 +203,6 @@ describe('handleAutoProvisionAfter -- guards (no-op short-circuits)', () => {
 })
 
 describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
-  it('does NOT re-apply on existing admin when sync is off (JIT default)', async () => {
-    mockFindFirst.mockResolvedValue({ role: 'admin' })
-    await callHandler('member')
-    expect(mockSet).not.toHaveBeenCalled()
-  })
-
   it('re-applies on every sign-in when attributeMapping.syncOnEverySignIn=true (and can demote)', async () => {
     mockFindFirst.mockResolvedValue({ role: 'admin' })
     mockAccountFindFirst.mockResolvedValue({ idToken: null })

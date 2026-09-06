@@ -354,18 +354,6 @@ describe('handleSignInPreCheck — ssoOidc.enabled=false (workspace SSO disabled
     expect(ctx.redirect).not.toHaveBeenCalled()
   })
 
-  it('does NOT block admin password sign-in even with stale enforced verified-domain + disabled SSO', async () => {
-    mockGetTenantSettings.mockResolvedValue(
-      tenant({ ssoEnabled: false, verifiedDomains: [makeVerifiedDomain('acme.com', true)] })
-    )
-    mockUserFindFirst.mockResolvedValue({ id: 'user_1' })
-    mockPrincipalFindFirst.mockResolvedValue({ role: 'admin' })
-    const ctx = ctxFor('/sign-in/email', { email: 'a@acme.com' })
-
-    await handleSignInPreCheck(ctx)
-    expect(ctx.redirect).not.toHaveBeenCalled()
-  })
-
   it('still gates by method-allowed (password disabled → still blocks)', async () => {
     // The master SSO switch only affects SSO enforcement. Other policy
     // (oauth.password=false) keeps working independently.

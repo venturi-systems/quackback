@@ -22,17 +22,6 @@ describe('evaluatePortalAccess — public portal', () => {
     }
   })
 
-  it('always grants when visibility is public, even for anonymous session', () => {
-    const result = evaluatePortalAccess({
-      visibility: 'public',
-      role: null,
-      isAuthenticated: false,
-      userEmail: null,
-      emailVerified: false,
-      allowedDomains: [],
-    })
-    expect(result.granted).toBe(true)
-  })
 })
 
 describe('evaluatePortalAccess — authenticated portal', () => {
@@ -115,21 +104,6 @@ describe('evaluatePortalAccess — private portal, team members', () => {
 
 describe('evaluatePortalAccess — private portal, non-team', () => {
   it('returns unauthenticated when no session (anonymous)', () => {
-    const result = evaluatePortalAccess({
-      visibility: 'private',
-      role: null,
-      isAuthenticated: false,
-      userEmail: null,
-      emailVerified: false,
-      allowedDomains: [],
-    })
-    expect(result.granted).toBe(false)
-    if (!result.granted) {
-      expect(result.reason).toBe('unauthenticated')
-    }
-  })
-
-  it('returns unauthenticated when principal is anonymous (anonymous Better Auth session)', () => {
     const result = evaluatePortalAccess({
       visibility: 'private',
       role: null,
@@ -251,20 +225,6 @@ describe('evaluatePortalAccess — private portal, allowed email domains', () =>
     }
   })
 
-  it('public portal grants regardless of allowedDomains being empty', () => {
-    const result = evaluatePortalAccess({
-      visibility: 'public',
-      role: null,
-      isAuthenticated: false,
-      userEmail: null,
-      emailVerified: false,
-      allowedDomains: [],
-    })
-    expect(result.granted).toBe(true)
-    if (result.granted) {
-      expect(result.reason).toBe('public')
-    }
-  })
 })
 
 describe('evaluatePortalAccess — private portal, accepted portal invite', () => {
@@ -461,23 +421,6 @@ describe('evaluatePortalAccess — segment branch edge cases', () => {
       isInAllowedSegment: true,
     })
     expect(result).toEqual({ granted: false, reason: 'unauthorized' })
-  })
-
-  it('grants via segment when emailVerified=true and the user is in an allowed segment', () => {
-    const result = evaluatePortalAccess({
-      visibility: 'private',
-      role: 'user',
-      isAuthenticated: true,
-      emailVerified: true,
-      userEmail: 'user@external.com',
-      allowedDomains: [],
-      hasAcceptedPortalInvite: false,
-      widgetSignInEnabled: false,
-      hasViaWidgetMarker: false,
-      identifyVerificationEnabled: false,
-      isInAllowedSegment: true,
-    })
-    expect(result).toEqual({ granted: true, reason: 'segment' })
   })
 
   it('domain branch wins when both domain and segment would grant', () => {

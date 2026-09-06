@@ -130,7 +130,7 @@ export const MIN_TESTS_PER_SHARD = 10
 export function ratchet(
   records: TestRecord[],
   baseline: readonly string[],
-  options: { globalErrors?: number; minTests?: number } = {}
+  options: { globalErrors?: number; minTests?: number; expectedIds?: readonly string[] } = {}
 ): RatchetResult {
   const known = new Set(baseline)
   const minTests = options.minTests ?? MIN_TESTS_PER_SHARD
@@ -144,12 +144,33 @@ export function ratchet(
       'The shard reported zero tests. That is a crashed web server or a bad shard index, ' +
         'not a clean run -- failing closed.'
     )
-  } else if (records.length < minTests) {
+  } else if (options.expectedIds === undefined && records.length < minTests) {
     fatal.push(
       `The shard reported only ${records.length} tests (floor ${minTests}). A run that dies ` +
         'partway writes a report where the remaining tests are absent rather than failed, ' +
         'which would otherwise look like a clean shard.'
     )
+  }
+
+  // CI supplies the independently collected --list result for this exact
+  // shard. A count floor alone accepts any truncated report of ten tests.
+  // Compare identities so duplicates cannot stand in for absent tests.
+  if (options.expectedIds !== undefined) {
+    const expected = new Set(options.expectedIds)
+    const actual = new Set(records.map(({ id }) => id))
+    if (expected.size === 0) fatal.push('The shard plan contains zero tests.')
+    if (expected.size !== options.expectedIds.length) {
+      fatal.push('The shard plan contains duplicate test identities.')
+    }
+    if (actual.size !== records.length) {
+      fatal.push('The shard report contains duplicate test identities.')
+    }
+    for (const id of expected) {
+      if (!actual.has(id)) fatal.push(`The shard report is missing planned test: ${id}`)
+    }
+    for (const id of actual) {
+      if (!expected.has(id)) fatal.push(`The shard report contains an unplanned test: ${id}`)
+    }
   }
 
   if (options.globalErrors) {

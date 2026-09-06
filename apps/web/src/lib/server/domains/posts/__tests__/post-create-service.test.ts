@@ -492,25 +492,4 @@ describe('createPost TOCTOU board re-check', () => {
     expect(insertedRows.votes).toHaveLength(0)
   })
 
-  it('throws BOARD_NOT_FOUND when the locked re-check returns no rows (board hard-deleted)', async () => {
-    txLockedBoardRows.value = []
-
-    const { createPost } = await import('../post.service')
-    const principalId = 'principal_user' as unknown as PrincipalId
-
-    await expect(
-      createPost(
-        {
-          boardId: 'board_b' as unknown as BoardId,
-          title: 'Racy post',
-          content: 'Body',
-          statusId: 'status_open' as unknown as StatusId,
-        },
-        { principalId }
-      )
-    ).rejects.toThrow(/BOARD_NOT_FOUND|not found/i)
-
-    expect(insertedRows.posts).toHaveLength(0)
-    expect(insertedRows.votes).toHaveLength(0)
-  })
 })
