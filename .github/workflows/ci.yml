@@ -165,7 +165,7 @@ jobs:
           fi
           echo "Changed files:"
           echo "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(apps/web/|packages/|package\.json$|bun\.lock$|\.github/workflows/ci\.yml$)'; then
+          if printf '%s\n' "$changed" | grep -E '^(apps/web/|packages/|package\.json$|bun\.lock$|\.github/workflows/ci\.yml$)' >/dev/null; then
             echo "e2e=true" >> "$GITHUB_OUTPUT"
           else
             echo "e2e=false" >> "$GITHUB_OUTPUT"
@@ -269,6 +269,12 @@ jobs:
         working-directory: apps/web
         run: bunx playwright install --with-deps chromium
 
+      - name: Collect the expected tests for this shard
+        working-directory: apps/web
+        # Collect independently before execution: a partial JSON report must
+        # not be able to certify its own completeness from a minimum count.
+        run: bunx playwright test --list --reporter=json --shard=${{ matrix.shard }}/8 > e2e-plan.json
+
       - name: Run the Playwright suite
         working-directory: apps/web
         # playwright.config.ts starts the dev server itself (webServer) and,
@@ -285,7 +291,7 @@ jobs:
 
       - name: Check the shard against the known-failure ratchet
         working-directory: apps/web
-        run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json
+        run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json
 
       - name: Upload the Playwright artifacts
         if: failure()
@@ -296,6 +302,7 @@ jobs:
             apps/web/blob-report
             apps/web/test-results
             apps/web/e2e-results.json
+            apps/web/e2e-plan.json
           retention-days: 7
           if-no-files-found: ignore
 

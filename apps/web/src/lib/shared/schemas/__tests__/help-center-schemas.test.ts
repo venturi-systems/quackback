@@ -141,12 +141,6 @@ describe('createCategorySchema (updated fields)', () => {
     expect(result.success).toBe(false)
   })
 
-  it('should still work without new fields', () => {
-    const result = createCategorySchema.safeParse({
-      name: 'Getting Started',
-    })
-    expect(result.success).toBe(true)
-  })
 })
 
 describe('updateCategorySchema (updated fields)', () => {

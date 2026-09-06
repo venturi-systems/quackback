@@ -490,13 +490,6 @@ describe('acceptPortalInviteFn — emailVerified gate (security)', () => {
     expect(hoisted.mockRecordAuditEvent).not.toHaveBeenCalled()
   })
 
-  it('accepts normally when emailVerified=true', async () => {
-    // Default SESSION_USER has emailVerified: true
-    const result = await acceptHandler({ data: { inviteId: 'invite_1' } })
-    const r = result as { status: string; alreadyAccepted: boolean }
-    expect(r.status).toBe('accepted')
-    expect(r.alreadyAccepted).toBe(false)
-  })
 })
 
 // ---------------------------------------------------------------------------

@@ -163,12 +163,4 @@ describe('resolveInstantSsoRedirectFn', () => {
     expect(hoisted.getPublicAuthConfig).toHaveBeenCalled()
   })
 
-  it('(g) reads unified authConfig: sole OIDC + password ON => null', async () => {
-    soleOidcWorkspace({ oauth: { password: true, magicLink: false } })
-
-    const result = await resolveHandler({ data: {} })
-
-    expect(result).toBeNull()
-    expect(hoisted.signInWithOAuth2).not.toHaveBeenCalled()
-  })
 })

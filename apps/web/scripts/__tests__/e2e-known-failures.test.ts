@@ -176,6 +176,52 @@ describe('e2e known-failure ratchet', () => {
     expect(result.fatal.join(' ')).toContain('global error')
   })
 
+  it('rejects a truncated report above the old floor against the independently collected plan', () => {
+    const records = collectOutcomes(report(passing))
+    const missing = 'chromium | tests/a.spec.ts | absent after a crash'
+    const result = ratchet(records, [], { expectedIds: [...records.map(({ id }) => id), missing] })
+    expect(result.ok).toBe(false)
+    expect(result.fatal).toContain(`The shard report is missing planned test: ${missing}`)
+  })
+
+  it('compares identities rather than counts and rejects duplicate evidence', () => {
+    const records = collectOutcomes(report(passing))
+    const expectedIds = records.map(({ id }) => id)
+    const replaced = [...records.slice(1), { ...records[0], id: 'unplanned' }]
+    const mismatch = ratchet(replaced, [], { expectedIds })
+    expect(mismatch.ok).toBe(false)
+    expect(mismatch.fatal).toHaveLength(2)
+    expect(ratchet([...records, records[0]], [], { expectedIds }).ok).toBe(false)
+    expect(ratchet(records, [], { expectedIds: [...expectedIds, expectedIds[0]] }).ok).toBe(false)
+    expect(ratchet(records, [], { expectedIds: [] }).ok).toBe(false)
+  })
+
+  it('accepts a complete small shard while preserving known failures, skipped and flaky outcomes', () => {
+    const records = [
+      { id: 'known', outcome: 'failed' as const },
+      { id: 'skipped', outcome: 'skipped' as const },
+      { id: 'flaky', outcome: 'flaky' as const },
+    ]
+    const expectedIds = records.map(({ id }) => id)
+    const result = ratchet(records, ['known'], { expectedIds })
+    expect(result.ok).toBe(true)
+    expect(result.stillFailing).toEqual(['known'])
+    expect(ratchet(records, [], { expectedIds }).ok).toBe(false)
+    expect(ratchet([{ id: 'known', outcome: 'passed' }], ['known'], { expectedIds: ['known'] }).ok).toBe(false)
+  })
+
+  it('collects planned identities without needing execution statuses', () => {
+    const planned: JsonReport = {
+      suites: [{
+        title: 'tests/a.spec.ts', file: 'tests/a.spec.ts',
+        specs: [{ title: 'planned', tests: [{ projectName: 'chromium' }] }],
+      }],
+    }
+    expect(collectOutcomes(planned).map(({ id }) => id)).toEqual([
+      'chromium | tests/a.spec.ts | planned',
+    ])
+  })
+
   // --- the committed baseline ------------------------------------------------
 
   it('ships a baseline that is well formed, sorted and free of duplicates', () => {

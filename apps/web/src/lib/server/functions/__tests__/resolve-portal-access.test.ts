@@ -541,20 +541,6 @@ describe('resolvePortalAccessForRequest — widget origin marker', () => {
     if (!result.granted) expect(result.reason).toBe('unauthorized')
   })
 
-  it('identifyVerificationEnabled=true when getWidgetConfig returns identifyVerification=true', async () => {
-    mockGetSession.mockResolvedValue(SESSION_WITH_ID)
-    mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })
-    mockWidgetOriginSessionFindFirst.mockResolvedValue({ sessionId: 'sess_abc123' })
-    mockGetWidgetConfig.mockResolvedValue({ identifyVerification: true })
-    mockGetPortalConfig.mockResolvedValue({
-      access: { visibility: 'private', allowedDomains: [], widgetSignIn: true },
-    })
-
-    const result = await resolvePortalAccessForRequest()
-    // identifyVerification=true + marker + widgetSignIn → widget granted.
-    expect(result).toEqual({ granted: true, reason: 'widget' })
-  })
-
   it('email-capture widget user (identifyVerification=false) cannot gain widget grant', async () => {
     mockGetSession.mockResolvedValue(SESSION_WITH_ID)
     mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'user' })

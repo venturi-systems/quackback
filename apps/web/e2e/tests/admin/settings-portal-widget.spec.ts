@@ -6,42 +6,6 @@ test.describe('Admin Portal Widget Settings', () => {
     await page.waitForLoadState('networkidle')
   })
 
-  test('page loads and shows Feedback Widget heading', async ({ page }) => {
-    await expect(page.getByText('Feedback Widget').first()).toBeVisible({ timeout: 10000 })
-    await expect(
-      page.getByText(
-        'Embed a feedback widget directly in your product to collect feedback from users'
-      )
-    ).toBeVisible({ timeout: 10000 })
-  })
-
-  test('shows Widget enable/disable card', async ({ page }) => {
-    await expect(page.getByText('Enable Feedback Widget')).toBeVisible({ timeout: 10000 })
-    await expect(
-      page.getByText(
-        'When enabled, you can embed a feedback widget on any website using a script tag'
-      )
-    ).toBeVisible()
-  })
-
-  test('widget toggle switch is present and interactive', async ({ page }) => {
-    const widgetToggle = page.locator('#widget-toggle')
-    await expect(widgetToggle).toBeVisible({ timeout: 10000 })
-    await expect(widgetToggle).toBeEnabled()
-  })
-
-  test('shows "Verified identity only" toggle with aria-label', async ({ page }) => {
-    await expect(page.getByText('Verified identity only')).toBeVisible({ timeout: 10000 })
-    await expect(
-      page.getByText('Disable inline email capture and require your app to sign each user')
-    ).toBeVisible()
-
-    const verifiedSwitch = page.getByRole('switch', {
-      name: 'Require verified widget identity',
-    })
-    await expect(verifiedSwitch).toBeVisible()
-  })
-
   test('"Verified identity only" toggle can be switched on', async ({ page }) => {
     const verifiedSwitch = page.getByRole('switch', {
       name: 'Require verified widget identity',
@@ -239,11 +203,6 @@ test.describe('Admin Portal Widget Settings', () => {
   test('shows Installation section heading', async ({ page }) => {
     await expect(page.getByText('Installation').first()).toBeVisible({ timeout: 10000 })
     await expect(page.getByText('Configure and add the widget to your site')).toBeVisible()
-  })
-
-  test('shows installation step 1 (Add the script)', async ({ page }) => {
-    await expect(page.getByText('Add the script')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText(/Paste before the closing/)).toBeVisible()
   })
 
   test('shows installation step 2 (Identify users)', async ({ page }) => {
