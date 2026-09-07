@@ -133,7 +133,7 @@ jobs:
             exit 1
           fi
       - name: Upload Release Asset
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2 (v2.6.2)
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.publish-openapi.outputs.release_tag }}
           files: openapi.json
