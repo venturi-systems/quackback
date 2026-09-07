@@ -87,6 +87,15 @@ ssh_pid="$(cat "$PID_FILE")"
 ! kill -0 "$ssh_pid" 2>/dev/null
 rm -f "$PID_FILE" "$ARGS_FILE"
 
+# The backgrounded command retains the caller's stdin (including Vitest's watch TTY).
+printf 'stdin-sentinel\n' | env QUACKBACK_TEST_DB_TUNNEL_HOST=test-host \
+    PATH="$TMP_DIR/bin:$PATH" NC_OPEN_FILE="$OPEN_FILE" SSH_PID_FILE="$PID_FILE" SSH_ARGS_FILE="$ARGS_FILE" \
+    "$SUT" bash -c 'IFS= read -r line; [[ "$line" == stdin-sentinel ]]'
+[[ ! -e "$OPEN_FILE" ]]
+ssh_pid="$(cat "$PID_FILE")"
+! kill -0 "$ssh_pid" 2>/dev/null
+rm -f "$PID_FILE" "$ARGS_FILE"
+
 # A mismatched local port is rejected rather than launching tests against Vitest's fixed 5432 URL.
 run_status env QUACKBACK_TEST_DB_LOCAL_PORT=6543 QUACKBACK_TEST_DB_TUNNEL_HOST=test-host \
     PATH="$TMP_DIR/bin:$PATH" NC_OPEN_FILE="$OPEN_FILE" SSH_PID_FILE="$PID_FILE" SSH_ARGS_FILE="$ARGS_FILE" RUN_FILE="$RUN_FILE" \
@@ -117,4 +126,4 @@ run_status wait "$wrapper_pid"
 ! kill -0 "$command_pid" 2>/dev/null
 ! kill -0 "$ssh_pid" 2>/dev/null
 
-echo "ensure-db-tunnel: 7 cases passed"
+echo "ensure-db-tunnel: 8 cases passed"

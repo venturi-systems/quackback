@@ -115,7 +115,9 @@ if [[ "$opened" != true ]]; then
 fi
 
 set +e
-"$@" &
+# An asynchronous command in a non-interactive shell otherwise inherits
+# /dev/null as stdin. Preserve the caller's pipe/TTY for Vitest watch mode.
+"$@" <&0 &
 COMMAND_PID=$!
 wait "$COMMAND_PID"
 status=$?
