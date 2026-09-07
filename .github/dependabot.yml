@@ -113,9 +113,36 @@ updates:
         # `// @vitest-environment` docblock, so it is one line each. 28/28 tests
         # pass on 3.4.14 under jsdom. dompurify therefore rejoins the group and
         # its security patches flow again.
+        #
+        # 2026-09-07: `zod` joins for the same reason, and the lockfile proves
+        # it rather than the error message. On `main` there is exactly ONE zod
+        # -- `"zod": ["zod@4.4.3", ...]` -- and no nested copy under the MCP
+        # SDK (`grep -c 'modelcontextprotocol/sdk/zod' bun.lock` returns 0).
+        # #101 bumped the root to 4.5.4 and bun.lock GAINED a second instance:
+        #   "@modelcontextprotocol/sdk/zod": ["zod@4.4.3", ...]   (line 2417)
+        # So the app builds schemas with zod 4.5.4 while
+        # `@modelcontextprotocol/sdk` stays typed against 4.4.3, and every
+        # `server.tool(...)` registration in
+        # apps/web/src/lib/server/mcp/tools.ts fails to typecheck:
+        #   error TS2345: Argument of type '{ ... z.ZodString ... }' is not
+        #   assignable to parameter of type 'ZodRawShapeCompat'.
+        # ~30 call sites, one cause: two structurally distinct zod declarations.
+        #
+        # This is not "zod 4.5 is broken". `@modelcontextprotocol/sdk@1.30.0` is
+        # already the latest release and its declared range is
+        # `zod: ^3.25 || ^4.0`, which admits 4.5.4 -- there is no newer SDK to
+        # bump to, and the dedupe still did not happen. Re-uniting the two
+        # instances is a resolution/override change with its own blast radius,
+        # which is precisely the "migration belongs in its own reviewable pull
+        # request" rule this block already applies to better-auth.
+        #
+        # LIFT THIS once a group PR's bun.lock shows no
+        # `@modelcontextprotocol/sdk/zod` entry -- that single line is the whole
+        # acceptance test.
         exclude-patterns:
           - 'better-auth'
           - '@better-auth/*'
+          - 'zod'
         update-types:
           - 'minor'
           - 'patch'
@@ -134,6 +161,31 @@ updates:
       # `npm view typescript-eslint peerDependencies` shows a range admitting
       # >=7 -- then let the group carry both in one PR.
       - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+
+      # `vitest` 5 has no jest-dom matcher types to pair with, so every DOM
+      # assertion in the suite stops typechecking. #99 (4.1.11 -> 5.0.0) failed
+      # `Static analysis` with hundreds of:
+      #   error TS2339: Property 'toBeInTheDocument' does not exist on type
+      #   'Assertion<void, HTMLElement>'
+      # across the component test suites. The matchers still RUN -- this is a
+      # types-only break -- but `portability-gate`, the repository's only
+      # required context, fans in from that lane, so the PR can never merge.
+      #
+      # There is nothing to bump to. `@testing-library/jest-dom` publishes
+      # exactly 7.0.0 and 7.0.1 in its 7.x line, 7.0.1 is `latest`, and 7.0.1 is
+      # already what this repo installs. Its vitest entry point
+      # (`node_modules/@testing-library/jest-dom/types/vitest.d.ts`) augments
+      # `declare module 'vitest' { interface Assertion<T = any> ... }`, written
+      # against vitest 4's single-parameter interface; vitest 5 reports
+      # `Assertion<void, HTMLElement>`, so the augmentation no longer lands on
+      # the interface the assertions actually use.
+      #
+      # Minor and patch vitest updates still flow -- 4.1.x keeps arriving.
+      # LIFT THIS when `npm view @testing-library/jest-dom versions` shows a
+      # release advertising vitest 5 support, then let the major land in its own
+      # PR with the setup migration it needs.
+      - dependency-name: 'vitest'
         update-types: ['version-update:semver-major']
 
       # `@tanstack/react-table` 9 removed `getCoreRowModel`,
