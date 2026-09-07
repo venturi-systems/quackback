@@ -7,7 +7,7 @@ if (( $# == 0 )); then
     exit 64
 fi
 
-LOCAL_PORT="${QUACKBACK_TEST_DB_LOCAL_PORT:-5432}"
+LOCAL_PORT=5432
 REMOTE_PORT="${QUACKBACK_TEST_DB_REMOTE_PORT:-5432}"
 REMOTE_HOST="${QUACKBACK_TEST_DB_TUNNEL_HOST:-}"
 
@@ -15,7 +15,12 @@ valid_port() {
     [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
 }
 
-if ! valid_port "$LOCAL_PORT" || ! valid_port "$REMOTE_PORT"; then
+if [[ -n "${QUACKBACK_TEST_DB_LOCAL_PORT:-}" && "${QUACKBACK_TEST_DB_LOCAL_PORT}" != "$LOCAL_PORT" ]]; then
+    echo "QUACKBACK_TEST_DB_LOCAL_PORT must remain 5432 because Vitest binds DATABASE_URL to that port" >&2
+    exit 64
+fi
+
+if ! valid_port "$REMOTE_PORT"; then
     echo "database tunnel ports must be integers from 1 through 65535" >&2
     exit 64
 fi
@@ -50,17 +55,37 @@ ssh -N \
     -L "${LOCAL_PORT}:localhost:${REMOTE_PORT}" \
     -- "$REMOTE_HOST" &
 SSH_PID=$!
+COMMAND_PID=""
 
 cleanup() {
-    if kill -0 "$SSH_PID" 2>/dev/null; then
+    if [[ -n "$SSH_PID" ]] && kill -0 "$SSH_PID" 2>/dev/null; then
         kill "$SSH_PID" 2>/dev/null || true
     fi
-    wait "$SSH_PID" 2>/dev/null || true
+    if [[ -n "$SSH_PID" ]]; then
+        wait "$SSH_PID" 2>/dev/null || true
+        SSH_PID=""
+    fi
 }
+
+forward_signal() {
+    local signal="$1"
+    local status="$2"
+    trap - HUP INT TERM
+    if [[ -n "$COMMAND_PID" ]] && kill -0 "$COMMAND_PID" 2>/dev/null; then
+        kill "-$signal" "$COMMAND_PID" 2>/dev/null || true
+    fi
+    # Tear down the tunnel even if the wrapped command does not cooperate.
+    cleanup
+    if [[ -n "$COMMAND_PID" ]]; then
+        wait "$COMMAND_PID" 2>/dev/null || true
+    fi
+    exit "$status"
+}
+
 trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'forward_signal HUP 129' HUP
+trap 'forward_signal INT 130' INT
+trap 'forward_signal TERM 143' TERM
 
 opened=false
 for _ in {1..50}; do
@@ -85,7 +110,10 @@ if [[ "$opened" != true ]]; then
 fi
 
 set +e
-"$@"
+"$@" &
+COMMAND_PID=$!
+wait "$COMMAND_PID"
 status=$?
+COMMAND_PID=""
 set -e
 exit "$status"
