@@ -45,6 +45,7 @@
     "dev": "bun run --filter @quackback/web dev",
     "build": "bun run --filter @quackback/web build",
     "lint": "eslint . --ext .ts,.tsx",
+    "pretest": "./scripts/ensure-db-tunnel.sh",
     "test": "vitest",
     "test:api": "vitest apps/web/src/lib/api/__tests__/api-integration.test.ts",
     "test:e2e": "bun run --filter @quackback/web test:e2e",
