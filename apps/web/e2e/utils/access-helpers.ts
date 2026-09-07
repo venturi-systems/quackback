@@ -23,7 +23,12 @@ import { execFileSync } from 'child_process'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { expect, type BrowserContext } from '@playwright/test'
-import { getMagicLinkToken, ensureTestUserHasRole } from './db-helpers'
+import {
+  getMagicLinkToken,
+  ensureTestUserHasRole,
+  E2E_SCRIPT_TIMEOUT_MS,
+  E2E_SCRIPT_KILL_SIGNAL,
+} from './db-helpers'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -33,6 +38,11 @@ function runScript(scriptRelPath: string, args: string[]): string {
   return execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, ...args], {
     encoding: 'utf-8',
     cwd: resolve(__dirname, '../..'), // apps/web
+    // `seedIdentityProvider` reaches here from a serial-mode `beforeAll`, which
+    // Playwright re-runs on every retry. This is the exact call that wedged
+    // shard 6 of main run 34102576840 for 87.5 minutes on its third attempt.
+    timeout: E2E_SCRIPT_TIMEOUT_MS,
+    killSignal: E2E_SCRIPT_KILL_SIGNAL,
   }).trim()
 }
 

@@ -121,6 +121,22 @@ export default defineConfig({
   /* Timeout for each test */
   timeout: 30 * 1000,
 
+  /* Ceiling for the whole shard, so the runner is never the thing that stops us.
+   *
+   * Per-test `timeout` cannot fire while the event loop is blocked, and the
+   * `json` reporter above is what `e2e/scripts/check-known-failures.ts` reads
+   * to decide the shard. When GitHub kills the job at its 1h30m cap no reporter
+   * runs, so `e2e-results.json` is never written and the shard reports nothing
+   * at all -- which is how `End-to-end tests (shard 6 of 8)` on main run
+   * 34102576840 produced a `cancelled` run with no verdict, and how the pending
+   * run behind it (34104820470) was evicted with zero jobs.
+   *
+   * Playwright aborts itself here and still calls its reporters, so the ratchet
+   * gets a real answer. 45 minutes is more than double the slowest shard
+   * measured on a green run (shard 8 of 8 at 21m52s, run 34107228346) and half
+   * the GitHub job cap, so it can only bite a genuine wedge. */
+  globalTimeout: 45 * 60 * 1000,
+
   /* Timeout for each assertion */
   expect: {
     timeout: 5 * 1000,
