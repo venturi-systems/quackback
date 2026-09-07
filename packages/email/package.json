@@ -14,7 +14,7 @@
   "dependencies": {
     "@quackback/logger": "workspace:*",
     "@react-email/components": "^1.0.11",
-    "nodemailer": "^9.0.6",
+    "nodemailer": "^10.0.0",
     "react": "^19.2.8",
     "resend": "^6.24.0"
   },
