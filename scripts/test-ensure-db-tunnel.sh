@@ -34,7 +34,13 @@ trap 'printf "QUIT\n" >"$COMMAND_SIGNAL_FILE"; exit 0' QUIT
 trap 'printf "TERM\n" >"$COMMAND_SIGNAL_FILE"; exit 0' TERM
 while :; do sleep 1; done
 EOF
-chmod +x "$TMP_DIR/bin/nc" "$TMP_DIR/bin/ssh" "$TMP_DIR/bin/long-command"
+
+cat >"$TMP_DIR/bin/foreground-wrapper" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$$" >"$WRAPPER_PID_FILE"
+exec "$@"
+EOF
+chmod +x "$TMP_DIR/bin/nc" "$TMP_DIR/bin/ssh" "$TMP_DIR/bin/long-command" "$TMP_DIR/bin/foreground-wrapper"
 
 run_status() {
     set +e
@@ -114,26 +120,29 @@ run_signal_case() {
     local expected_status="$2"
     local command_pid_file="$TMP_DIR/command-${signal}.pid"
     local command_signal_file="$TMP_DIR/command-${signal}.signal"
+    local wrapper_pid_file="$TMP_DIR/wrapper-${signal}.pid"
 
     set +e
     (
-        local wrapper_pid="$BASHPID"
-        (
-            for _ in {1..50}; do
-                [[ -s "$command_pid_file" && -s "$PID_FILE" && -e "$OPEN_FILE" ]] && break
-                sleep 0.1
-            done
-            [[ -s "$command_pid_file" && -s "$PID_FILE" && -e "$OPEN_FILE" ]]
-            kill "-$signal" "$wrapper_pid"
-        ) &
-        exec env QUACKBACK_TEST_DB_TUNNEL_HOST=test-host \
-            PATH="$TMP_DIR/bin:$PATH" NC_OPEN_FILE="$OPEN_FILE" SSH_PID_FILE="$PID_FILE" SSH_ARGS_FILE="$ARGS_FILE" \
-            COMMAND_PID_FILE="$command_pid_file" COMMAND_SIGNAL_FILE="$command_signal_file" \
-            "$SUT" "$TMP_DIR/bin/long-command"
-    )
+        for _ in {1..50}; do
+            [[ -s "$wrapper_pid_file" && -s "$command_pid_file" && -s "$PID_FILE" && -e "$OPEN_FILE" ]] && break
+            sleep 0.1
+        done
+        [[ -s "$wrapper_pid_file" && -s "$command_pid_file" && -s "$PID_FILE" && -e "$OPEN_FILE" ]]
+        kill "-$signal" "$(cat "$wrapper_pid_file")"
+    ) &
+    local killer_pid=$!
+    WRAPPER_PID_FILE="$wrapper_pid_file" "$TMP_DIR/bin/foreground-wrapper" \
+        env QUACKBACK_TEST_DB_TUNNEL_HOST=test-host \
+        PATH="$TMP_DIR/bin:$PATH" NC_OPEN_FILE="$OPEN_FILE" SSH_PID_FILE="$PID_FILE" SSH_ARGS_FILE="$ARGS_FILE" \
+        COMMAND_PID_FILE="$command_pid_file" COMMAND_SIGNAL_FILE="$command_signal_file" \
+        "$SUT" "$TMP_DIR/bin/long-command"
     local wrapper_status=$?
+    wait "$killer_pid"
+    local killer_status=$?
     set -e
 
+    [[ "$killer_status" == 0 ]]
     [[ "$wrapper_status" == "$expected_status" ]]
     [[ "$(cat "$command_signal_file")" == "$signal" ]]
     [[ ! -e "$OPEN_FILE" ]]
@@ -142,7 +151,7 @@ run_signal_case() {
     ssh_pid="$(cat "$PID_FILE")"
     ! kill -0 "$command_pid" 2>/dev/null
     ! kill -0 "$ssh_pid" 2>/dev/null
-    rm -f "$command_pid_file" "$command_signal_file" "$PID_FILE" "$ARGS_FILE"
+    rm -f "$wrapper_pid_file" "$command_pid_file" "$command_signal_file" "$PID_FILE" "$ARGS_FILE"
 }
 
 run_signal_case TERM 143
