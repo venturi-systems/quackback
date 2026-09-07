@@ -28,7 +28,10 @@ EOF
 cat >"$TMP_DIR/bin/long-command" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$$" >"$COMMAND_PID_FILE"
-trap 'touch "$COMMAND_TERM_FILE"; exit 0' TERM
+trap 'printf "HUP\n" >"$COMMAND_SIGNAL_FILE"; exit 0' HUP
+trap 'printf "INT\n" >"$COMMAND_SIGNAL_FILE"; exit 0' INT
+trap 'printf "QUIT\n" >"$COMMAND_SIGNAL_FILE"; exit 0' QUIT
+trap 'printf "TERM\n" >"$COMMAND_SIGNAL_FILE"; exit 0' TERM
 while :; do sleep 1; done
 EOF
 chmod +x "$TMP_DIR/bin/nc" "$TMP_DIR/bin/ssh" "$TMP_DIR/bin/long-command"
@@ -103,27 +106,47 @@ run_status env QUACKBACK_TEST_DB_LOCAL_PORT=6543 QUACKBACK_TEST_DB_TUNNEL_HOST=t
 [[ "$RUN_STATUS" == 64 ]]
 [[ ! -e "$RUN_FILE" ]]
 
-# Signaling only the wrapper is forwarded to the command and always tears down the tunnel.
-COMMAND_PID_FILE="$TMP_DIR/command.pid"
-COMMAND_TERM_FILE="$TMP_DIR/command.term"
-env QUACKBACK_TEST_DB_TUNNEL_HOST=test-host \
-    PATH="$TMP_DIR/bin:$PATH" NC_OPEN_FILE="$OPEN_FILE" SSH_PID_FILE="$PID_FILE" SSH_ARGS_FILE="$ARGS_FILE" \
-    COMMAND_PID_FILE="$COMMAND_PID_FILE" COMMAND_TERM_FILE="$COMMAND_TERM_FILE" \
-    "$SUT" "$TMP_DIR/bin/long-command" &
-wrapper_pid=$!
-for _ in {1..50}; do
-    [[ -s "$COMMAND_PID_FILE" && -s "$PID_FILE" && -e "$OPEN_FILE" ]] && break
-    sleep 0.1
-done
-[[ -s "$COMMAND_PID_FILE" && -s "$PID_FILE" && -e "$OPEN_FILE" ]]
-command_pid="$(cat "$COMMAND_PID_FILE")"
-ssh_pid="$(cat "$PID_FILE")"
-kill -TERM "$wrapper_pid"
-run_status wait "$wrapper_pid"
-[[ "$RUN_STATUS" == 143 ]]
-[[ -e "$COMMAND_TERM_FILE" ]]
-[[ ! -e "$OPEN_FILE" ]]
-! kill -0 "$command_pid" 2>/dev/null
-! kill -0 "$ssh_pid" 2>/dev/null
+# Signals sent only to a foreground wrapper are forwarded to the command and
+# always tear down the tunnel. Foreground execution matters here: Bash itself
+# gives asynchronously launched scripts ignored INT/QUIT dispositions.
+run_signal_case() {
+    local signal="$1"
+    local expected_status="$2"
+    local command_pid_file="$TMP_DIR/command-${signal}.pid"
+    local command_signal_file="$TMP_DIR/command-${signal}.signal"
 
-echo "ensure-db-tunnel: 8 cases passed"
+    set +e
+    (
+        local wrapper_pid="$BASHPID"
+        (
+            for _ in {1..50}; do
+                [[ -s "$command_pid_file" && -s "$PID_FILE" && -e "$OPEN_FILE" ]] && break
+                sleep 0.1
+            done
+            [[ -s "$command_pid_file" && -s "$PID_FILE" && -e "$OPEN_FILE" ]]
+            kill "-$signal" "$wrapper_pid"
+        ) &
+        exec env QUACKBACK_TEST_DB_TUNNEL_HOST=test-host \
+            PATH="$TMP_DIR/bin:$PATH" NC_OPEN_FILE="$OPEN_FILE" SSH_PID_FILE="$PID_FILE" SSH_ARGS_FILE="$ARGS_FILE" \
+            COMMAND_PID_FILE="$command_pid_file" COMMAND_SIGNAL_FILE="$command_signal_file" \
+            "$SUT" "$TMP_DIR/bin/long-command"
+    )
+    local wrapper_status=$?
+    set -e
+
+    [[ "$wrapper_status" == "$expected_status" ]]
+    [[ "$(cat "$command_signal_file")" == "$signal" ]]
+    [[ ! -e "$OPEN_FILE" ]]
+    local command_pid ssh_pid
+    command_pid="$(cat "$command_pid_file")"
+    ssh_pid="$(cat "$PID_FILE")"
+    ! kill -0 "$command_pid" 2>/dev/null
+    ! kill -0 "$ssh_pid" 2>/dev/null
+    rm -f "$command_pid_file" "$command_signal_file" "$PID_FILE" "$ARGS_FILE"
+}
+
+run_signal_case TERM 143
+run_signal_case INT 130
+run_signal_case QUIT 131
+
+echo "ensure-db-tunnel: 10 cases passed"

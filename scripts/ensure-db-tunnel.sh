@@ -75,7 +75,7 @@ cleanup() {
 forward_signal() {
     local signal="$1"
     local status="$2"
-    trap - HUP INT TERM
+    trap - HUP INT QUIT TERM
     if [[ -n "$COMMAND_PID" ]] && kill -0 "$COMMAND_PID" 2>/dev/null; then
         kill "-$signal" "$COMMAND_PID" 2>/dev/null || true
     fi
@@ -90,6 +90,7 @@ forward_signal() {
 trap cleanup EXIT
 trap 'forward_signal HUP 129' HUP
 trap 'forward_signal INT 130' INT
+trap 'forward_signal QUIT 131' QUIT
 trap 'forward_signal TERM 143' TERM
 
 opened=false
@@ -115,9 +116,13 @@ if [[ "$opened" != true ]]; then
 fi
 
 set +e
-# An asynchronous command in a non-interactive shell otherwise inherits
-# /dev/null as stdin. Preserve the caller's pipe/TTY for Vitest watch mode.
-"$@" <&0 &
+# Bash gives asynchronous commands ignored INT/QUIT dispositions and /dev/null
+# stdin when job control is off. Restore the signals before exec and preserve
+# the caller's pipe/TTY for Vitest watch mode.
+(
+    trap - HUP INT QUIT TERM
+    exec "$@"
+) <&0 &
 COMMAND_PID=$!
 wait "$COMMAND_PID"
 status=$?
