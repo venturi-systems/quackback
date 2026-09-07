@@ -25,12 +25,17 @@ if ! valid_port "$REMOTE_PORT"; then
     exit 64
 fi
 
-if ! command -v nc >/dev/null 2>&1; then
-    echo "nc is required to verify the PostgreSQL listener" >&2
-    exit 127
-fi
+port_is_open() {
+    if command -v nc >/dev/null 2>&1; then
+        nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null
+        return
+    fi
+    # Bash is already required by this wrapper. Its TCP redirection keeps
+    # minimal Bun + Docker development environments from needing netcat.
+    (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") 2>/dev/null
+}
 
-if nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null; then
+if port_is_open; then
     exec "$@"
 fi
 
@@ -89,7 +94,7 @@ trap 'forward_signal TERM 143' TERM
 
 opened=false
 for _ in {1..50}; do
-    if nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null; then
+    if port_is_open; then
         opened=true
         break
     fi
