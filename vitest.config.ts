@@ -36,7 +36,8 @@ export default defineConfig({
       enabled: false,
     },
     env: {
-      DATABASE_URL: 'postgresql://postgres:password@localhost:5432/quackback_test',
+      DATABASE_URL:
+        process.env.DATABASE_URL ?? 'postgresql://postgres:password@localhost:5432/quackback_test',
     },
   },
   esbuild: {
