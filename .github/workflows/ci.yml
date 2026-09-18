@@ -130,8 +130,21 @@ jobs:
     name: Changed-path filter
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # The reuse probe below reads workflow runs and jobs, the PR, and commit
+    # trees. Read-only, and scoped to this job so the heavy lanes inherit
+    # nothing extra.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       e2e: ${{ steps.filter.outputs.e2e }}
+      # true ONLY when the probe proved this merge-queue entry's git tree is
+      # byte-identical to a PR head on which all 8 e2e shards already
+      # succeeded. Every other outcome -- not a merge_group event, multi-PR
+      # group, no successful PR run, any shard not `success`, tree mismatch,
+      # any API error -- is false, and the e2e lane runs in full.
+      queue_reuse: ${{ steps.reuse.outputs.reuse }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -171,10 +184,106 @@ jobs:
             echo "e2e=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Reuse exact-tree PR evidence for a merge-queue entry
+        id: reuse
+        # Every merge-queue entry re-runs all 8 Playwright shards. For a
+        # single-PR entry on an unmoved base that is ~22 minutes on the PR and
+        # then the same ~22 minutes again in the queue, on a git tree that is
+        # byte-identical. It roughly doubles PR -> main latency and produces no
+        # new information. It also doubles the exposure to the wedge that
+        # cancelled shard 6 at the 90-minute job cap on run 34102576840 and
+        # evicted the queued run behind it.
+        #
+        # Reuse fires ONLY on positive proof, and every branch that cannot
+        # prove equivalence leaves reuse=false so the lane runs in full:
+        #   - not a merge_group event (the step does not even run);
+        #   - no PR number in the queue ref (multi-PR groups differ by tree
+        #     anyway, but this is checked explicitly rather than assumed);
+        #   - no successful `pull_request` run of THIS workflow at the PR's
+        #     head sha;
+        #   - that run's e2e shards are not ALL `success` -- a PR whose
+        #     path filter skipped e2e has no e2e evidence to reuse, so its
+        #     queue entry still gets the full lane, exactly as today;
+        #   - the queue head's git tree differs from the PR head's tree
+        #     (base advanced under it);
+        #   - any thrown error, including API failures.
+        #
+        # The equivalence argument: an identical tree with an identical
+        # workflow yields an identical seed, identical shard partition and
+        # identical assertions. A second run adds no information. Ported
+        # from the platform repo's pack-validate.yml exact-tree probe, with
+        # the per-shard success requirement added on top.
+        if: github.event_name == 'merge_group'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            core.setOutput('reuse', 'false');
+            core.setOutput('reason', 'no exact-tree evidence');
+            try {
+              const ref = process.env.GITHUB_WORKFLOW_REF || '';
+              const file = ref.split('@')[0].split('/').pop();
+              if (!file) throw new Error(`cannot derive workflow file from ${ref}`);
+              const mg = context.payload.merge_group;
+              const headSha = (mg && mg.head_sha) || context.sha;
+              const headRef = (mg && mg.head_ref) || context.ref || '';
+              const match = headRef.match(/\/pr-(\d+)-/);
+              if (!match) throw new Error(`no pull request number in queue ref ${headRef}`);
+              const prNumber = Number(match[1]);
+              const { owner, repo } = context.repo;
+              const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+              const prHeadSha = pr.data.head.sha;
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRuns,
+                { owner, repo, workflow_id: file, event: 'pull_request',
+                  head_sha: prHeadSha, status: 'success', per_page: 100 }
+              );
+              const successful = runs.find(r =>
+                r.head_sha === prHeadSha && r.conclusion === 'success');
+              if (!successful) {
+                core.setOutput('reason', `PR #${prNumber} head ${prHeadSha} has no successful ${file} run`);
+                core.info('full run required: no successful PR-lane run');
+                return;
+              }
+              // Positive proof that the e2e lane itself ran and passed on
+              // that head. A green run whose e2e was path-filtered off has
+              // nothing to reuse.
+              const jobs = await github.paginate(
+                github.rest.actions.listJobsForWorkflowRun,
+                { owner, repo, run_id: successful.id, per_page: 100 }
+              );
+              const shards = jobs.filter(j => /^End-to-end tests \(shard \d+ of 8\)$/.test(j.name));
+              const green = shards.filter(j => j.conclusion === 'success');
+              if (shards.length !== 8 || green.length !== 8) {
+                core.setOutput('reason', `PR run ${successful.id} has ${green.length}/${shards.length} successful e2e shards (need 8/8)`);
+                core.info('full run required: e2e evidence incomplete on the PR lane');
+                return;
+              }
+              const [queueCommit, prCommit] = await Promise.all([
+                github.rest.repos.getCommit({ owner, repo, ref: headSha }),
+                github.rest.repos.getCommit({ owner, repo, ref: prHeadSha }),
+              ]);
+              if (queueCommit.data.commit.tree.sha !== prCommit.data.commit.tree.sha) {
+                core.setOutput('reason', 'queue tree differs from tested PR tree (multi-PR group or base advanced)');
+                core.info('full run required: tree mismatch');
+                return;
+              }
+              core.setOutput('reuse', 'true');
+              core.setOutput('reason', `queue tree ${queueCommit.data.commit.tree.sha} equals PR #${prNumber} head tree; 8/8 e2e shards succeeded in run ${successful.id}`);
+              core.info('reusing exact-tree PR e2e evidence');
+            } catch (error) {
+              core.setOutput('reason', `evidence lookup failed: ${error.message}`);
+              core.info(`full run required (fail-closed): ${error.message}`);
+            }
+
   e2e_tests:
     name: End-to-end tests (shard ${{ matrix.shard }} of 8)
     needs: [changed_paths]
-    if: needs.changed_paths.outputs.e2e == 'true'
+    # Runs unless the path filter says nothing e2e-relevant moved, OR the
+    # merge-queue probe proved this exact tree already passed all 8 shards
+    # on its PR. Both are positive decisions by changed_paths; a failed or
+    # skipped changed_paths leaves e2e unset and this job does not run --
+    # which portability_gate then treats as a failure, never a pass.
+    if: needs.changed_paths.outputs.e2e == 'true' && needs.changed_paths.outputs.queue_reuse != 'true'
     runs-on: ubuntu-latest
     # A cancelled shard reports NOTHING -- no counts, no failure list -- so the
     # cap has to be comfortably above the slowest honest run, and the run has to
@@ -319,12 +428,35 @@ jobs:
           DATABASE_RESULT: ${{ needs.database_tests.result }}
           CHANGED_PATHS_RESULT: ${{ needs.changed_paths.result }}
           E2E_RESULT: ${{ needs.e2e_tests.result }}
+          E2E_FILTER: ${{ needs.changed_paths.outputs.e2e }}
+          QUEUE_REUSE: ${{ needs.changed_paths.outputs.queue_reuse }}
         run: |
           test "$STATIC_RESULT" = success
           test "$DATABASE_RESULT" = success
           test "$CHANGED_PATHS_RESULT" = success
-          # `skipped` is reachable for one reason only: changed_paths -- which
-          # the line above requires to have SUCCEEDED -- reported that nothing
-          # under the end-to-end surface moved. Failure, cancellation and a
-          # skip caused by an upstream failure all still red the gate.
-          test "$E2E_RESULT" = success || test "$E2E_RESULT" = skipped
+          # Static analysis and the database lane run on EVERY event, merge
+          # queue included -- they are cheap and act as belt-and-braces on
+          # the exact tree even when e2e evidence is reused.
+          #
+          # An e2e `skipped` is accepted for exactly two reasons, each a
+          # positive decision recorded by changed_paths (required to have
+          # SUCCEEDED above):
+          #   1. the path filter reported nothing under the e2e surface moved;
+          #   2. the merge-queue probe proved this tree already passed all 8
+          #      shards on its PR.
+          # A skip for any other reason -- an upstream failure, a cancelled
+          # changed_paths, an unset output -- still reds the gate. Failure
+          # and cancellation always do.
+          if [ "$E2E_RESULT" = success ]; then
+            exit 0
+          fi
+          if [ "$E2E_RESULT" = skipped ] && [ "$E2E_FILTER" = false ]; then
+            echo "e2e skipped: path filter found no e2e-relevant change."
+            exit 0
+          fi
+          if [ "$E2E_RESULT" = skipped ] && [ "$QUEUE_REUSE" = true ]; then
+            echo "e2e skipped: exact-tree PR evidence reused for this merge-queue entry."
+            exit 0
+          fi
+          echo "e2e result '$E2E_RESULT' is not acceptable (filter=$E2E_FILTER reuse=$QUEUE_REUSE)." >&2
+          exit 1

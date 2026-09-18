@@ -69,17 +69,43 @@ describe('QB-CI-001 consolidated validation contract', () => {
     // so neither can be dropped back out silently.
     expect(ci).toContain('bun run --filter @quackback/widget test')
     expect(ci).toContain('bun run test:e2e')
-    expect(ci).toContain('bunx playwright test --list --reporter=json --shard=${{ matrix.shard }}/8 > e2e-plan.json')
-    expect(ci).toContain('check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json')
+    expect(ci).toContain(
+      'bunx playwright test --list --reporter=json --shard=${{ matrix.shard }}/8 > e2e-plan.json'
+    )
+    expect(ci).toContain(
+      'check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json'
+    )
     expect(ci.indexOf('name: Collect the expected tests for this shard')).toBeLessThan(
       ci.indexOf('name: Run the Playwright suite')
     )
     expect(ci).toContain('name: End-to-end tests')
-    // The end-to-end lane is changed-path gated, so the required gate has to
-    // tolerate `skipped` -- but ONLY alongside a successful filter job, and
-    // never with `continue-on-error` or a swallowed failure.
+    // The end-to-end lane is changed-path gated AND merge-queue reusable, so
+    // the required gate has to tolerate `skipped` -- but ONLY for one of the
+    // two positive reasons changed_paths records, only alongside a successful
+    // filter job, and never with `continue-on-error` or a swallowed failure.
     expect(ci).toContain('test "$CHANGED_PATHS_RESULT" = success')
-    expect(ci).toContain('test "$E2E_RESULT" = success || test "$E2E_RESULT" = skipped')
+    expect(ci).toContain('[ "$E2E_RESULT" = skipped ] && [ "$E2E_FILTER" = false ]')
+    expect(ci).toContain('[ "$E2E_RESULT" = skipped ] && [ "$QUEUE_REUSE" = true ]')
+    // Any e2e result that is neither `success` nor one of those two skips must
+    // fall through to a hard failure -- there is no bare `= skipped`
+    // acceptance any more.
+    expect(ci).not.toContain('test "$E2E_RESULT" = success || test "$E2E_RESULT" = skipped')
+    expect(ci).toContain(`e2e result '$E2E_RESULT' is not acceptable`)
+    expect(ci).toMatch(/is not acceptable[^\n]*\n\s+exit 1/)
+    // The merge-queue reuse probe is fail-closed in shape: it defaults to
+    // false, only runs on merge_group, demands ALL 8 e2e shards succeeded on
+    // the PR head (a path-filtered PR has nothing to reuse), and compares git
+    // TREE shas, not commit shas.
+    expect(ci).toContain("core.setOutput('reuse', 'false');")
+    expect(ci).toContain("if: github.event_name == 'merge_group'")
+    expect(ci).toContain('shards.length !== 8 || green.length !== 8')
+    expect(ci).toContain('queueCommit.data.commit.tree.sha !== prCommit.data.commit.tree.sha')
+    // Only the e2e lane is reuse-gated. Static analysis and the database lane
+    // keep running in the queue as belt-and-braces on the exact tree.
+    expect(ci).toContain(
+      "if: needs.changed_paths.outputs.e2e == 'true' && needs.changed_paths.outputs.queue_reuse != 'true'"
+    )
+    expect(ci.match(/queue_reuse != 'true'/g)).toHaveLength(1)
     expect(ci).not.toContain('continue-on-error')
     expect(ci.toLowerCase()).not.toContain('codebuild-')
   })
