@@ -275,7 +275,8 @@ describe('QB-CI-002 e2e shard balance contract', () => {
   const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
 
   function weights(): number[] {
-    const match = ci.match(/PWTEST_SHARD_WEIGHTS:\s*"([0-9:]+)"/)
+    // Quote style belongs to prettier, so match either rather than fight it.
+    const match = ci.match(/PWTEST_SHARD_WEIGHTS:\s*['"]([0-9:]+)['"]/)
     expect(match, 'ci.yml must declare PWTEST_SHARD_WEIGHTS').not.toBeNull()
     return match![1].split(':').map(Number)
   }
@@ -307,7 +308,7 @@ describe('QB-CI-002 e2e shard balance contract', () => {
     // only one saw the weights, the shard's results would not match its own
     // plan and check-known-failures.ts would fail it. Declaring the value once
     // on the job is what makes that impossible rather than merely unlikely.
-    expect(ci.match(/^\s*PWTEST_SHARD_WEIGHTS:\s*"/gm)).toHaveLength(1)
+    expect(ci.match(/^\s*PWTEST_SHARD_WEIGHTS:\s*['"]/gm)).toHaveLength(1)
 
     const e2eJob = ci.slice(ci.indexOf('\n  e2e_tests:'))
     const jobEnv = e2eJob.slice(e2eJob.indexOf('\n    env:'), e2eJob.indexOf('\n    steps:'))
