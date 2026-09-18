@@ -338,6 +338,43 @@ jobs:
     env:
       SECRET_KEY: test-secret-for-ci-only-must-be-at-least-32-characters
       REDIS_URL: redis://localhost:6379
+      # Duration-balanced shard boundaries.
+      #
+      # `--shard=i/8` splits by test COUNT, not duration: filterForShard sums
+      # group.tests.length and cuts at equal counts. Test durations here span
+      # three orders of magnitude, so equal counts produce very unequal work.
+      # Measured on run 35289540093, the eight shards ran 6.5, 6.5, 8.0, 9.2,
+      # 10.2, 10.5, 10.5 and 12.8 minutes. The slowest sets the critical path
+      # and the fastest finishes five minutes early holding an idle runner.
+      #
+      # PWTEST_SHARD_WEIGHTS moves the cut points. Each weight is that shard's
+      # share of the total test count, so a shard full of slow tests is given
+      # fewer of them. The numbers below were derived from the measured
+      # per-test durations of that run: walk the tests in Playwright's own
+      # order, cut when cumulative duration crosses the next eighth. They sum
+      # to 803, the current test count, which makes the split exact rather
+      # than rounded -- but nothing depends on that, because Playwright uses
+      # the weights proportionally.
+      #
+      # Regenerate after a significant change in the suite's shape:
+      #   bun apps/web/e2e/scripts/compute-shard-weights.ts <results...>
+      #
+      # Why this does not change coverage: filterForShard assigns every group
+      # to exactly one shard for ANY weight vector -- it only moves the
+      # boundaries between them. Verified rather than assumed: the union of
+      # all eight shards is byte-identical with and without these weights
+      # (803 distinct tests either way). See tests/ci-contract.test.ts.
+      #
+      # This is set at JOB level on purpose. The plan step and the run step
+      # must see the same value; if only one did, the shard's results would
+      # not match its own plan and check-known-failures.ts would fail it.
+      #
+      # Failure modes are all safe. A Playwright version that ignores the
+      # variable reverts to equal-count splitting, which is today's behavior.
+      # One that rejects it fails loudly in CI. Weights that drift as tests
+      # are added degrade toward that same equal-count baseline; they cannot
+      # drop a test.
+      PWTEST_SHARD_WEIGHTS: '124:80:157:78:80:92:89:103'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:

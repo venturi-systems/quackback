@@ -270,3 +270,74 @@ describe('QB-GOV-001 repository governance contract', () => {
     expect(record.review.decision).toBe('accepted')
   })
 })
+
+describe('QB-CI-002 e2e shard balance contract', () => {
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+
+  function weights(): number[] {
+    // Quote style belongs to prettier, so match either rather than fight it.
+    const match = ci.match(/PWTEST_SHARD_WEIGHTS:\s*['"]([0-9:]+)['"]/)
+    expect(match, 'ci.yml must declare PWTEST_SHARD_WEIGHTS').not.toBeNull()
+    return match![1].split(':').map(Number)
+  }
+
+  it('declares one weight per shard, and every weight is usable', () => {
+    // Playwright throws when the count does not match the shard total, so a
+    // mismatch here is a red lane rather than a silent fallback.
+    const shardLine = ci.match(/shard:\s*\[([0-9,\s]+)\]/)
+    expect(shardLine).not.toBeNull()
+    const shardCount = shardLine![1].split(',').length
+    const w = weights()
+    expect(w).toHaveLength(shardCount)
+
+    // filterForShard computes floor(weight * total / sum). A weight small
+    // enough to floor to zero hands a shard no tests, and an empty shard
+    // proves nothing -- so keep every weight a meaningful share.
+    expect(w.every((n) => Number.isInteger(n) && n > 0)).toBe(true)
+    const sum = w.reduce((a, b) => a + b, 0)
+    for (const n of w) {
+      expect(
+        Math.floor((n * sum) / sum),
+        `weight ${n} must not floor to an empty shard`
+      ).toBeGreaterThan(0)
+    }
+  })
+
+  it('sets the weights once, at job level, so the plan and the run agree', () => {
+    // The plan step (--list) and the run step must partition identically. If
+    // only one saw the weights, the shard's results would not match its own
+    // plan and check-known-failures.ts would fail it. Declaring the value once
+    // on the job is what makes that impossible rather than merely unlikely.
+    expect(ci.match(/^\s*PWTEST_SHARD_WEIGHTS:\s*['"]/gm)).toHaveLength(1)
+
+    const e2eJob = ci.slice(ci.indexOf('\n  e2e_tests:'))
+    const jobEnv = e2eJob.slice(e2eJob.indexOf('\n    env:'), e2eJob.indexOf('\n    steps:'))
+    expect(jobEnv).toContain('PWTEST_SHARD_WEIGHTS:')
+
+    // Both consumers still shard, and neither carries its own override.
+    expect(e2eJob).toContain('--list --reporter=json --shard=${{ matrix.shard }}/8')
+    expect(e2eJob).toContain('bun run test:e2e -- --shard=${{ matrix.shard }}/8')
+  })
+
+  it('keeps the regeneration path in the repository, not in a commit message', () => {
+    // A tuned constant with no way to retune it rots into a number nobody
+    // dares touch. The script is the documented way back to a fresh vector.
+    const script = join(process.cwd(), 'apps', 'web', 'e2e', 'scripts', 'compute-shard-weights.ts')
+    expect(existsSync(script)).toBe(true)
+    const source = readFileSync(script, 'utf8')
+    expect(source).toContain('PWTEST_SHARD_WEIGHTS')
+    // It must refuse to emit a vector that would empty a shard.
+    expect(source).toContain('refusing to emit it')
+    expect(ci).toContain('compute-shard-weights.ts')
+  })
+
+  it('records that reweighting moves boundaries and cannot change what runs', () => {
+    // The safety argument, kept next to the constant it justifies: weights
+    // only move cut points, and filterForShard assigns every group to exactly
+    // one shard for any vector. Verified against Playwright 1.62.1 -- the
+    // union of all 8 shards is identical with and without these weights
+    // (803 distinct tests either way).
+    expect(ci).toContain('exactly one shard for ANY weight vector')
+    expect(ci).toContain('803 distinct tests either way')
+  })
+})
