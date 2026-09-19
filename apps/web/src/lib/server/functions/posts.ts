@@ -14,7 +14,7 @@ import {
   type PrincipalId,
   type UserId,
 } from '@quackback/ids'
-import { tiptapContentSchema, type TiptapContent } from '@/lib/shared/schemas/posts'
+import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { requireAuth, policyActorFromAuth } from './auth-helpers'
 import { db, eq, posts } from '@/lib/server/db'
@@ -175,36 +175,36 @@ export const fetchInboxPostsForAdmin = createServerFn({ method: 'GET' })
     try {
       await requireAuth({ roles: ['admin', 'member'] })
 
-      const result = await listInboxPosts({
-        boardIds: data.boardIds as BoardId[] | undefined,
-        statusIds: data.statusIds as StatusId[] | undefined,
-        statusSlugs: data.statusSlugs,
-        tagIds: data.tagIds as TagId[] | undefined,
-        segmentIds: data.segmentIds as SegmentId[] | undefined,
-        ownerId: data.ownerId as PrincipalId | null | undefined,
-        search: data.search,
-        dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
-        dateTo: data.dateTo ? new Date(data.dateTo) : undefined,
-        minVotes: data.minVotes,
-        minComments: data.minComments,
-        hasDuplicates: data.hasDuplicates,
-        responded: data.responded,
-        updatedBefore: data.updatedBefore ? new Date(data.updatedBefore) : undefined,
-        sort: data.sort,
-        showDeleted: data.showDeleted,
-        cursor: data.cursor,
-        limit: data.limit,
-      })
+      const result = await listInboxPosts(
+        {
+          boardIds: data.boardIds as BoardId[] | undefined,
+          statusIds: data.statusIds as StatusId[] | undefined,
+          statusSlugs: data.statusSlugs,
+          tagIds: data.tagIds as TagId[] | undefined,
+          segmentIds: data.segmentIds as SegmentId[] | undefined,
+          ownerId: data.ownerId as PrincipalId | null | undefined,
+          search: data.search,
+          dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
+          dateTo: data.dateTo ? new Date(data.dateTo) : undefined,
+          minVotes: data.minVotes,
+          minComments: data.minComments,
+          hasDuplicates: data.hasDuplicates,
+          responded: data.responded,
+          updatedBefore: data.updatedBefore ? new Date(data.updatedBefore) : undefined,
+          sort: data.sort,
+          showDeleted: data.showDeleted,
+          cursor: data.cursor,
+          limit: data.limit,
+        },
+        { preview: true }
+      )
       log.debug(
         { count: result.items.length, cursor: data.cursor ?? 'none' },
         'fetched inbox posts for admin'
       )
       return {
         ...result,
-        items: result.items.map((p) => ({
-          ...serializePostDates(p),
-          contentJson: (p.contentJson ?? {}) as TiptapContent,
-        })),
+        items: result.items.map(serializePostDates),
       }
     } catch (error) {
       log.error({ err: error }, 'fetch inbox posts for admin failed')

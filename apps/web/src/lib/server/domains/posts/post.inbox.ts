@@ -21,7 +21,14 @@ import {
   isNotNull,
 } from '@/lib/server/db'
 import { toUuid, type PostId, type PrincipalId } from '@quackback/ids'
-import type { PostListItem, InboxPostListParams, InboxPostListResult } from './post.types'
+import type {
+  PostListItem,
+  InboxPostListParams,
+  InboxPostListResult,
+  InboxPostPreview,
+  InboxPostPreviewResult,
+} from './post.types'
+import { inboxContentPreview } from '@/lib/shared/utils/inbox-preview'
 
 /**
  * List posts for admin inbox with advanced filtering
@@ -29,7 +36,15 @@ import type { PostListItem, InboxPostListParams, InboxPostListResult } from './p
  * @param params - Query parameters including filters, sort, and pagination
  * @returns Result containing inbox post list or an error
  */
-export async function listInboxPosts(params: InboxPostListParams): Promise<InboxPostListResult> {
+export function listInboxPosts(params: InboxPostListParams): Promise<InboxPostListResult>
+export function listInboxPosts(
+  params: InboxPostListParams,
+  options: { preview: true }
+): Promise<InboxPostPreviewResult>
+export async function listInboxPosts(
+  params: InboxPostListParams,
+  { preview = false }: { preview?: boolean } = {}
+): Promise<InboxPostListResult | InboxPostPreviewResult> {
   const {
     boardIds,
     statusIds,
@@ -211,22 +226,22 @@ export async function listInboxPosts(params: InboxPostListParams): Promise<Inbox
       boardId: true,
       title: true,
       content: true,
-      contentJson: true,
-      principalId: true,
+      contentJson: !preview,
+      principalId: !preview,
       statusId: true,
       ownerPrincipalId: true,
       voteCount: true,
       commentCount: true,
-      pinnedCommentId: true,
+      pinnedCommentId: !preview,
       createdAt: true,
       updatedAt: true,
       deletedAt: true,
-      isCommentsLocked: true,
-      moderationState: true,
-      canonicalPostId: true,
-      mergedAt: true,
-      summaryJson: true,
-      summaryUpdatedAt: true,
+      isCommentsLocked: !preview,
+      moderationState: !preview,
+      canonicalPostId: !preview,
+      mergedAt: !preview,
+      summaryJson: !preview,
+      summaryUpdatedAt: !preview,
     },
     where: whereClause,
     orderBy: orderByMap[sort],
@@ -250,6 +265,26 @@ export async function listInboxPosts(params: InboxPostListParams): Promise<Inbox
 
   const hasMore = rawPosts.length > limit
   const sliced = hasMore ? rawPosts.slice(0, limit) : rawPosts
+
+  if (preview) {
+    const items: InboxPostPreview[] = sliced.map((post) => ({
+      id: post.id,
+      boardId: post.boardId,
+      title: post.title,
+      excerpt: inboxContentPreview(post.content),
+      statusId: post.statusId,
+      ownerPrincipalId: post.ownerPrincipalId,
+      voteCount: post.voteCount,
+      commentCount: post.commentCount,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt,
+      deletedAt: post.deletedAt,
+      board: post.board,
+      tags: post.tags.map((pt) => pt.tag),
+      authorName: post.author?.displayName ?? null,
+    }))
+    return { items, nextCursor: hasMore ? (items.at(-1)?.id ?? null) : null, hasMore }
+  }
 
   // Transform to PostListItem format
   // Use denormalized commentCount field (maintained by comment.service.ts)

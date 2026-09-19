@@ -8,14 +8,15 @@ import { AdminListHeader } from '@/components/admin/admin-list-header'
 import { InboxEmptyState } from '@/components/admin/feedback/inbox-empty-state'
 import { ActiveFiltersBar } from '@/components/admin/feedback/active-filters-bar'
 import { FeedbackRow } from './feedback-row'
-import type { PostListItem, PostStatusEntity, Board, Tag } from '@/lib/shared/db-types'
+import type { PostStatusEntity, Board, Tag } from '@/lib/shared/db-types'
+import type { InboxPostPreview } from '@/lib/shared/types/posts'
 import type { TeamMember } from '@/lib/shared/types'
 import type { SegmentListItem } from '@/lib/client/hooks/use-segments-queries'
 import type { InboxFilters } from '@/components/admin/feedback/use-inbox-filters'
 import type { PostId } from '@quackback/ids'
 
 interface FeedbackTableViewProps {
-  posts: PostListItem[]
+  posts: InboxPostPreview[]
   statuses: PostStatusEntity[]
   boards: Board[]
   tags: Tag[]

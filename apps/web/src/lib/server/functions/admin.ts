@@ -14,7 +14,6 @@ import {
   isOnboardingComplete as checkComplete,
   type BoardSettings,
 } from '@/lib/server/db'
-import type { TiptapContent } from '@/lib/shared/schemas/posts'
 import { requireAuth } from './auth-helpers'
 import { getSettings } from './workspace'
 import { db, invitation, principal, user, eq, and, gt } from '@/lib/server/db'
@@ -136,32 +135,34 @@ export const fetchInboxPosts = createServerFn({ method: 'GET' })
     try {
       await requireAuth({ roles: ['admin', 'member'] })
 
-      const result = await listInboxPosts({
-        boardIds: data.boardIds as BoardId[] | undefined,
-        statusSlugs: data.statusSlugs,
-        tagIds: data.tagIds as TagId[] | undefined,
-        segmentIds: data.segmentIds as SegmentId[] | undefined,
-        ownerId: data.ownerId as PrincipalId | null | undefined,
-        search: data.search,
-        dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
-        dateTo: data.dateTo ? new Date(data.dateTo) : undefined,
-        minVotes: data.minVotes,
-        minComments: data.minComments,
-        hasDuplicates: data.hasDuplicates,
-        responded: data.responded,
-        updatedBefore: data.updatedBefore ? new Date(data.updatedBefore) : undefined,
-        sort: data.sort,
-        showDeleted: data.showDeleted,
-        cursor: data.cursor,
-        limit: data.limit,
-      })
+      const result = await listInboxPosts(
+        {
+          boardIds: data.boardIds as BoardId[] | undefined,
+          statusSlugs: data.statusSlugs,
+          tagIds: data.tagIds as TagId[] | undefined,
+          segmentIds: data.segmentIds as SegmentId[] | undefined,
+          ownerId: data.ownerId as PrincipalId | null | undefined,
+          search: data.search,
+          dateFrom: data.dateFrom ? new Date(data.dateFrom) : undefined,
+          dateTo: data.dateTo ? new Date(data.dateTo) : undefined,
+          minVotes: data.minVotes,
+          minComments: data.minComments,
+          hasDuplicates: data.hasDuplicates,
+          responded: data.responded,
+          updatedBefore: data.updatedBefore ? new Date(data.updatedBefore) : undefined,
+          sort: data.sort,
+          showDeleted: data.showDeleted,
+          cursor: data.cursor,
+          limit: data.limit,
+        },
+        { preview: true }
+      )
       log.debug({ count: result.items.length }, 'fetch inbox posts')
-      // Serialize contentJson field and Date fields
+      // Serialize dates; full documents are loaded by the detail endpoint.
       return {
         ...result,
         items: result.items.map((p) => ({
           ...p,
-          contentJson: (p.contentJson ?? {}) as TiptapContent,
           createdAt: p.createdAt.toISOString(),
           updatedAt: p.updatedAt.toISOString(),
           deletedAt: p.deletedAt?.toISOString() || null,
