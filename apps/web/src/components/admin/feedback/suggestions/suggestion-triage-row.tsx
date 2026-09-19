@@ -48,6 +48,7 @@ export function SuggestionSourceGroup({
     queryClient.invalidateQueries({ queryKey: suggestionsKeys.all })
     queryClient.invalidateQueries({ queryKey: inboxKeys.lists() })
     queryClient.invalidateQueries({ queryKey: feedbackQueries.incomingCount().queryKey })
+    queryClient.invalidateQueries({ queryKey: ['merge-suggestions'] })
   }, [queryClient])
 
   // Timer only controls when the placeholder disappears + queries refetch

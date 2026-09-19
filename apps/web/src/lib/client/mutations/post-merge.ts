@@ -29,6 +29,7 @@ export function useMergePost() {
       queryClient.invalidateQueries({ queryKey: inboxKeys.detail(duplicatePostId) })
       queryClient.invalidateQueries({ queryKey: inboxKeys.detail(canonicalPostId) })
       queryClient.invalidateQueries({ queryKey: inboxKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: ['merge-suggestions'] })
     },
   })
 }
@@ -49,6 +50,7 @@ export function useUnmergePost() {
         queryKey: inboxKeys.detail(data.canonicalPost.id as PostId),
       })
       queryClient.invalidateQueries({ queryKey: inboxKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: ['merge-suggestions'] })
     },
   })
 }

@@ -57,6 +57,7 @@ async function fetchInboxPosts(
       dateTo: filters.dateTo,
       minVotes: filters.minVotes,
       minComments: filters.minComments,
+      hasDuplicates: filters.hasDuplicates,
       responded: filters.responded,
       updatedBefore: filters.updatedBefore,
       sort: filters.sort,

@@ -68,9 +68,9 @@ export const fetchMergeSuggestionCountsForPostsFn = createServerFn({ method: 'PO
   .handler(async ({ data }) => {
     await requireAuth({ roles: ['admin', 'member'] })
     try {
-      return getMergeSuggestionCountsForPosts(data.postIds as PostId[])
+      return await getMergeSuggestionCountsForPosts(data.postIds as PostId[])
     } catch (error) {
       log.error({ err: error }, 'fetch merge suggestion counts for posts failed')
-      return []
+      throw new Error('Unable to load duplicate counts', { cause: error })
     }
   })

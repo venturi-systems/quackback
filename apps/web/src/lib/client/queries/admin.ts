@@ -49,6 +49,7 @@ export interface InboxPostListParams {
   dateTo?: string
   minVotes?: number
   minComments?: number
+  hasDuplicates?: boolean
   responded?: 'all' | 'responded' | 'unresponded'
   updatedBefore?: string
   sort?: 'newest' | 'oldest' | 'votes'
