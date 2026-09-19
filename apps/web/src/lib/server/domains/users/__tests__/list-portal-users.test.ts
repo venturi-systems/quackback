@@ -21,7 +21,11 @@ const { mockIlike, mockEq, mockInArray, mockSql, mockOr, mockAnd, selectCallCoun
     mockIlike: vi.fn(() => 'ilike_result'),
     mockEq: vi.fn(() => 'eq_result'),
     mockInArray: vi.fn(() => 'inArray_result'),
-    mockSql: vi.fn(() => ({ as: vi.fn().mockReturnValue('mock_sql_result') })),
+    mockSql: vi.fn(() => {
+      const expr = { as: vi.fn().mockReturnValue('mock_sql_result'), mapWith: vi.fn() }
+      expr.mapWith.mockReturnValue(expr)
+      return expr
+    }),
     mockOr: vi.fn((...args: unknown[]) => args),
     mockAnd: vi.fn((...args: unknown[]) => args),
     selectCallCount: { count: 0 },
@@ -63,6 +67,7 @@ function createChain(resolveValue: unknown = []) {
   ]) {
     chain[m] = vi.fn().mockReturnValue(chain)
   }
+  chain.getSQL = vi.fn().mockReturnValue('user_page_sql')
   chain.as = vi.fn().mockReturnValue({
     principalId: 'mock_col',
     postCount: 'post_count',
@@ -78,13 +83,15 @@ function createChain(resolveValue: unknown = []) {
 
 vi.mock('@/lib/server/db', () => ({
   db: {
-    select: vi.fn(() => {
+    select: vi.fn((fields: Record<string, unknown>) => {
       selectCallCount.count++
-      const c = selectCallCount.count
-      if (c <= 3) return createChain([]) // subqueries
-      if (c === 4) return createChain(mockUserRows) // main query
-      if (c === 5) return createChain(mockCountResult) // count query
-      return createChain([]) // segment/other queries
+      if ('userId' in fields) return createChain(mockUserRows)
+      if ('count' in fields) return createChain(mockCountResult)
+      return createChain([])
+    }),
+    $with: vi.fn(() => ({ as: vi.fn(() => ({ principalId: 'page_id' })) })),
+    with: vi.fn(function (this: unknown) {
+      return this
     }),
     query: {
       user: { findFirst: vi.fn() },
@@ -172,12 +179,10 @@ describe('listPortalUsers', () => {
 
     // Re-wire db.select after clearAllMocks
     const { db } = await import('@/lib/server/db')
-    vi.mocked(db.select).mockImplementation(() => {
+    vi.mocked(db.select).mockImplementation((fields) => {
       selectCallCount.count++
-      const c = selectCallCount.count
-      if (c <= 3) return createChain([]) as never
-      if (c === 4) return createChain(mockUserRows) as never
-      if (c === 5) return createChain(mockCountResult) as never
+      if (fields && 'userId' in fields) return createChain(mockUserRows) as never
+      if (fields && 'count' in fields) return createChain(mockCountResult) as never
       return createChain([]) as never
     })
   })
