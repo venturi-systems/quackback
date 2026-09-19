@@ -25,6 +25,8 @@ export function useSuggestionActions({
     queryClient.invalidateQueries({ queryKey: suggestionsKeys.all })
     queryClient.invalidateQueries({ queryKey: inboxKeys.lists() })
     queryClient.invalidateQueries({ queryKey: feedbackQueries.incomingCount().queryKey })
+    // Accepting a merge can dismiss other edges touching either post as well.
+    queryClient.invalidateQueries({ queryKey: ['merge-suggestions'] })
   }
 
   const acceptMutation = useMutation({

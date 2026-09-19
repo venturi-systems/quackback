@@ -172,20 +172,6 @@ export function FeedbackTableView({
     </AdminListHeader>
   )
 
-  // Filter posts by duplicates if active
-  const filteredPosts =
-    filters.hasDuplicates && duplicateCountByPostId
-      ? posts.filter((p) => (duplicateCountByPostId.get(p.id) ?? 0) > 0)
-      : posts
-  const isSearchingForDuplicateMatches =
-    !!filters.hasDuplicates && filteredPosts.length === 0 && (hasMore || isLoadingMore)
-
-  useEffect(() => {
-    if (isSearchingForDuplicateMatches && !isLoading && !isLoadingMore) {
-      onLoadMore()
-    }
-  }, [isSearchingForDuplicateMatches, isLoading, isLoadingMore, onLoadMore])
-
   if (isLoading) {
     return (
       <div className="max-w-5xl mx-auto w-full">
@@ -195,7 +181,7 @@ export function FeedbackTableView({
     )
   }
 
-  if (filteredPosts.length === 0 && !isSearchingForDuplicateMatches) {
+  if (posts.length === 0) {
     return (
       <div className="max-w-5xl mx-auto w-full">
         {headerContent}
@@ -207,18 +193,6 @@ export function FeedbackTableView({
     )
   }
 
-  if (isSearchingForDuplicateMatches) {
-    return (
-      <div className="max-w-5xl mx-auto w-full">
-        {headerContent}
-        <div className="px-3 py-12 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-          <Spinner />
-          <p>Searching for posts with duplicate suggestions…</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="max-w-5xl mx-auto w-full">
       {headerContent}
@@ -226,7 +200,7 @@ export function FeedbackTableView({
       {/* Post List */}
       <div className="p-3">
         <div className="rounded-xl overflow-hidden shadow-sm divide-y divide-border/50 bg-card border border-border/50">
-          {filteredPosts.map((post, index) => (
+          {posts.map((post, index) => (
             <div
               key={post.id}
               className="animate-in fade-in slide-in-from-bottom-1 duration-200 fill-mode-backwards"

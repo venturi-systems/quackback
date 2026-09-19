@@ -121,6 +121,8 @@ export interface InboxPostListParams {
   dateTo?: Date
   minVotes?: number
   minComments?: number
+  /** Only posts with a pending merge suggestion, as source or target. */
+  hasDuplicates?: boolean
   /** Filter by team response state */
   responded?: 'all' | 'responded' | 'unresponded'
   updatedBefore?: Date

@@ -42,6 +42,7 @@ export async function listInboxPosts(params: InboxPostListParams): Promise<Inbox
     dateTo,
     minVotes,
     minComments,
+    hasDuplicates,
     responded,
     updatedBefore,
     showDeleted,
@@ -69,6 +70,14 @@ export async function listInboxPosts(params: InboxPostListParams): Promise<Inbox
 
   // Exclude merged/duplicate posts from inbox listing
   conditions.push(isNull(posts.canonicalPostId))
+
+  // Apply duplicate filtering before pagination. Keep inner column names
+  // literal: the relational query builder aliases interpolated columns to posts.
+  if (hasDuplicates) {
+    conditions.push(
+      sql`EXISTS (SELECT 1 FROM merge_suggestions WHERE merge_suggestions.status = 'pending' AND (merge_suggestions.source_post_id = ${posts.id} OR merge_suggestions.target_post_id = ${posts.id}))`
+    )
+  }
 
   // Board filter
   if (boardIds?.length) {

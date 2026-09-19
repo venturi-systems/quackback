@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { ChatBubbleLeftIcon } from '@heroicons/react/24/solid'
 import { Route } from '@/routes/admin/feedback'
 import { InboxLayout } from '@/components/admin/feedback/inbox-layout'
@@ -11,11 +11,10 @@ import { ModerationPendingBanner } from '@/components/admin/feedback/moderation-
 import { useInboxFilters } from '@/components/admin/feedback/use-inbox-filters'
 import { useInboxPosts, flattenInboxPosts, inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import { useSegments } from '@/lib/client/hooks/use-segments-queries'
-import { mergeSuggestionQueries } from '@/lib/client/queries/signals'
+import { useMergeSuggestionCounts } from '@/lib/client/hooks/use-merge-suggestion-counts'
 import type { CurrentUser } from '@/lib/shared/types'
 import type { Board, Tag, InboxPostListResult, PostStatusEntity } from '@/lib/shared/db-types'
 import type { TeamMember } from '@/lib/shared/types'
-import type { PostId } from '@quackback/ids'
 import { saveNavigationContext } from '@/components/admin/feedback/detail/use-navigation-context'
 
 interface InboxContainerProps {
@@ -78,19 +77,7 @@ export function InboxContainer({
 
   const posts = useMemo(() => flattenInboxPosts(postsData), [postsData])
 
-  // Fetch duplicate counts for visible posts
-  const postIds = useMemo(() => posts.map((p) => p.id) as PostId[], [posts])
-  const { data: duplicateCounts } = useQuery(mergeSuggestionQueries.countsForPosts(postIds))
-
-  // Build a Map<postId, count> for efficient lookup
-  const duplicateCountByPostId = useMemo(() => {
-    if (!duplicateCounts || duplicateCounts.length === 0) return undefined
-    const map = new Map<PostId, number>()
-    for (const item of duplicateCounts) {
-      map.set(item.postId, item.count)
-    }
-    return map
-  }, [duplicateCounts])
+  const duplicateCountByPostId = useMergeSuggestionCounts(postsData?.pages)
 
   // Handlers
   const handleLoadMore = useCallback(() => {
