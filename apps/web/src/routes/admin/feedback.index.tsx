@@ -4,7 +4,7 @@ import { adminQueries } from '@/lib/client/queries/admin'
 import { mergeSuggestionQueries } from '@/lib/client/queries/signals'
 import { InboxContainer } from '@/components/admin/feedback/inbox-container'
 import { type BoardId, type TagId, type PrincipalId } from '@quackback/ids'
-import type { InboxPostListResult } from '@/lib/shared/db-types'
+import type { InboxPostPreviewResult } from '@/lib/shared/types/posts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
@@ -139,7 +139,7 @@ function FeedbackIndexPage() {
 
   return (
     <InboxContainer
-      initialPosts={postsQuery.data as InboxPostListResult}
+      initialPosts={postsQuery.data as InboxPostPreviewResult}
       boards={boardsQuery.data}
       tags={tagsQuery.data}
       statuses={statusesQuery.data}

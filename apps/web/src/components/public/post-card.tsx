@@ -34,7 +34,9 @@ import type { PostId, StatusId } from '@quackback/ids'
 interface PostCardProps {
   id: PostId
   title: string
-  content: string | null
+  content?: string | null
+  /** Already normalized plain text supplied by bounded list endpoints. */
+  excerpt?: string
   statusId: StatusId | null
   statuses: PostStatusEntity[]
   voteCount: number
@@ -91,6 +93,7 @@ export function PostCard({
   id,
   title,
   content,
+  excerpt,
   statusId,
   statuses,
   voteCount,
@@ -124,6 +127,7 @@ export function PostCard({
   const isAdminMode = canChangeStatus || !!onClick
   const currentStatus = statuses.find((s) => s.id === statusId)
   const createdAtDate = typeof createdAt === 'string' ? new Date(createdAt) : createdAt
+  const description = excerpt ?? (content ? contentPreview(content) : '')
 
   // Vote handling - only used in portal mode
   const {
@@ -426,10 +430,8 @@ export function PostCard({
         <h3 className="font-semibold text-base text-foreground line-clamp-1">{title}</h3>
 
         {/* Description */}
-        {content && (
-          <p className="text-sm text-muted-foreground/60 line-clamp-1 mt-1">
-            {contentPreview(content)}
-          </p>
+        {(excerpt ?? content) && (
+          <p className="text-sm text-muted-foreground/60 line-clamp-1 mt-1">{description}</p>
         )}
 
         {/* Tags */}

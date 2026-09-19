@@ -22,9 +22,11 @@ import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import { roadmapPostsKeys } from '@/lib/client/hooks/use-roadmap-posts-query'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
 import type { PostDetails } from '@/lib/shared/types'
-import type { PostListItem, InboxPostListResult, Tag } from '@/lib/shared/db-types'
+import type { Tag } from '@/lib/shared/db-types'
+import type { InboxPostPreview, InboxPostPreviewResult } from '@/lib/shared/types/posts'
 import type { PrincipalId, PostId, StatusId, TagId, BoardId } from '@quackback/ids'
 import type { CreatePostInput } from '@/lib/shared/types'
+import { inboxContentPreview } from '@/lib/shared/utils/inbox-preview'
 
 // ============================================================================
 // Types
@@ -71,7 +73,7 @@ function rollbackDetailAndLists<T>(
   postId: PostId,
   context?: {
     previousDetail?: T
-    previousLists?: [readonly unknown[], InfiniteData<InboxPostListResult> | undefined][]
+    previousLists?: [readonly unknown[], InfiniteData<InboxPostPreviewResult> | undefined][]
   }
 ): void {
   if (context?.previousDetail) {
@@ -90,9 +92,9 @@ function rollbackDetailAndLists<T>(
 function updatePostInLists(
   queryClient: ReturnType<typeof useQueryClient>,
   postId: PostId,
-  updater: (post: PostListItem) => PostListItem
+  updater: (post: InboxPostPreview) => InboxPostPreview
 ): void {
-  queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
+  queryClient.setQueriesData<InfiniteData<InboxPostPreviewResult>>(
     { queryKey: inboxKeys.lists() },
     (old) => {
       if (!old) return old
@@ -160,7 +162,7 @@ export function useUpdatePostOwner() {
       await queryClient.cancelQueries({ queryKey: inboxKeys.lists() })
 
       const previousDetail = queryClient.getQueryData<PostDetails>(inboxKeys.detail(postId))
-      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostListResult>>({
+      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostPreviewResult>>({
         queryKey: inboxKeys.lists(),
       })
 
@@ -198,7 +200,7 @@ export function useUpdatePostTags() {
       await queryClient.cancelQueries({ queryKey: inboxKeys.lists() })
 
       const previousDetail = queryClient.getQueryData<PostDetails>(inboxKeys.detail(postId))
-      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostListResult>>({
+      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostPreviewResult>>({
         queryKey: inboxKeys.lists(),
       })
 
@@ -253,7 +255,7 @@ export function useUpdatePost() {
       await queryClient.cancelQueries({ queryKey: inboxKeys.lists() })
 
       const previousDetail = queryClient.getQueryData<PostDetails>(inboxKeys.detail(postId))
-      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostListResult>>({
+      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostPreviewResult>>({
         queryKey: inboxKeys.lists(),
       })
 
@@ -269,7 +271,7 @@ export function useUpdatePost() {
       updatePostInLists(queryClient, postId, (post) => ({
         ...post,
         title,
-        content,
+        excerpt: inboxContentPreview(content),
         statusId: statusId ?? post.statusId,
       }))
 
@@ -311,7 +313,7 @@ export function useVotePost() {
       await queryClient.cancelQueries({ queryKey: inboxKeys.lists() })
 
       const previousDetail = queryClient.getQueryData<PostDetails>(inboxKeys.detail(postId))
-      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostListResult>>({
+      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostPreviewResult>>({
         queryKey: inboxKeys.lists(),
       })
 
@@ -457,7 +459,7 @@ export function useDeletePost() {
       deletePostFn({ data: { id: postId, cascadeChoices } }),
     onSuccess: (_data, { postId }) => {
       // Remove from all list caches
-      queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
+      queryClient.setQueriesData<InfiniteData<InboxPostPreviewResult>>(
         { queryKey: inboxKeys.lists() },
         (old) => {
           if (!old) return old
@@ -490,7 +492,7 @@ export function useRestorePost() {
     mutationFn: (postId: PostId) => restorePostFn({ data: { id: postId } }),
     onSuccess: (_data, postId) => {
       // Remove from current (deleted) list cache
-      queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
+      queryClient.setQueriesData<InfiniteData<InboxPostPreviewResult>>(
         { queryKey: inboxKeys.lists() },
         (old) => {
           if (!old) return old

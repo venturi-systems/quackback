@@ -142,6 +142,32 @@ export interface InboxPostListResult {
   hasMore: boolean
 }
 
+/** Small admin inbox row; full documents belong to the detail query. */
+export interface InboxPostPreview extends Pick<
+  Post,
+  | 'id'
+  | 'boardId'
+  | 'title'
+  | 'statusId'
+  | 'ownerPrincipalId'
+  | 'voteCount'
+  | 'commentCount'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'deletedAt'
+> {
+  excerpt: string
+  board: Pick<Board, 'id' | 'name' | 'slug'>
+  tags: Array<Pick<Tag, 'id' | 'name' | 'color'>>
+  authorName: string | null
+}
+
+export interface InboxPostPreviewResult {
+  items: InboxPostPreview[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
 /**
  * Post list item with board, tags, and comment count
  */

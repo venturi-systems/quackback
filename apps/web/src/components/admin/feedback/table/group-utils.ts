@@ -1,9 +1,10 @@
-import type { PostListItem, PostStatusEntity } from '@/lib/shared/db-types'
+import type { PostStatusEntity } from '@/lib/shared/db-types'
+import type { InboxPostPreview } from '@/lib/shared/types/posts'
 import type { StatusId } from '@quackback/ids'
 
 export interface StatusGroup {
   status: PostStatusEntity
-  posts: PostListItem[]
+  posts: InboxPostPreview[]
 }
 
 /**
@@ -11,7 +12,7 @@ export interface StatusGroup {
  * Posts without a matching status are grouped under a virtual "No Status" group.
  */
 export function groupPostsByStatus(
-  posts: PostListItem[],
+  posts: InboxPostPreview[],
   statuses: PostStatusEntity[]
 ): Map<StatusId | 'none', StatusGroup> {
   const groups = new Map<StatusId | 'none', StatusGroup>()

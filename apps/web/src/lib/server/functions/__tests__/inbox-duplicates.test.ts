@@ -71,7 +71,8 @@ describe.each([
         sort: 'votes',
         cursor: 'post_cursor',
         limit: 2,
-      })
+      }),
+      { preview: true }
     )
   })
 
@@ -84,6 +85,30 @@ describe.each([
       })
     ).rejects.toThrow()
     expect(listInboxPosts).not.toHaveBeenCalled()
+  })
+
+  it('serializes a preview without adding full document fields', async () => {
+    listInboxPosts.mockResolvedValue({
+      items: [
+        {
+          id: 'post_preview',
+          excerpt: 'Already normalized <literal> text',
+          createdAt: new Date('2026-09-19T12:00:00Z'),
+          updatedAt: new Date('2026-09-19T12:00:00Z'),
+          deletedAt: null,
+        },
+      ],
+      nextCursor: null,
+      hasMore: false,
+    })
+    const result = await fetchPosts({ data: {} })
+    expect(result.items[0]).toEqual({
+      id: 'post_preview',
+      excerpt: 'Already normalized <literal> text',
+      createdAt: '2026-09-19T12:00:00.000Z',
+      updatedAt: '2026-09-19T12:00:00.000Z',
+      deletedAt: null,
+    })
   })
 
   it('checks team authorization before querying duplicates', async () => {

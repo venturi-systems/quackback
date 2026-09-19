@@ -13,12 +13,13 @@ import { useInboxPosts, flattenInboxPosts, inboxKeys } from '@/lib/client/hooks/
 import { useSegments } from '@/lib/client/hooks/use-segments-queries'
 import { useMergeSuggestionCounts } from '@/lib/client/hooks/use-merge-suggestion-counts'
 import type { CurrentUser } from '@/lib/shared/types'
-import type { Board, Tag, InboxPostListResult, PostStatusEntity } from '@/lib/shared/db-types'
+import type { Board, Tag, PostStatusEntity } from '@/lib/shared/db-types'
+import type { InboxPostPreviewResult } from '@/lib/shared/types/posts'
 import type { TeamMember } from '@/lib/shared/types'
 import { saveNavigationContext } from '@/components/admin/feedback/detail/use-navigation-context'
 
 interface InboxContainerProps {
-  initialPosts: InboxPostListResult
+  initialPosts: InboxPostPreviewResult
   boards: Board[]
   tags: Tag[]
   statuses: PostStatusEntity[]

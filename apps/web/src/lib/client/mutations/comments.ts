@@ -8,7 +8,7 @@ import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-
 import { createCommentFn, addReactionFn, removeReactionFn } from '@/lib/server/functions/comments'
 import { inboxKeys } from '@/lib/client/hooks/use-inbox-query'
 import type { PostDetails, CommentReaction, CommentWithReplies } from '@/lib/shared/types'
-import type { InboxPostListResult } from '@/lib/shared/db-types'
+import type { InboxPostPreviewResult } from '@/lib/shared/types/posts'
 import type { CommentId, PrincipalId, PostId } from '@quackback/ids'
 import { addReplyToTree, replaceOptimisticInTree } from '@/lib/client/utils/comment-tree-helpers'
 
@@ -48,7 +48,7 @@ function updatePostInLists(
   postId: PostId,
   updater: (post: { commentCount: number }) => { commentCount: number }
 ): void {
-  queryClient.setQueriesData<InfiniteData<InboxPostListResult>>(
+  queryClient.setQueriesData<InfiniteData<InboxPostPreviewResult>>(
     { queryKey: inboxKeys.lists() },
     (old) => {
       if (!old) return old
@@ -195,7 +195,7 @@ export function useAddComment() {
       await queryClient.cancelQueries({ queryKey: inboxKeys.lists() })
 
       const previousDetail = queryClient.getQueryData<PostDetails>(inboxKeys.detail(typedPostId))
-      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostListResult>>({
+      const previousLists = queryClient.getQueriesData<InfiniteData<InboxPostPreviewResult>>({
         queryKey: inboxKeys.lists(),
       })
 

@@ -26,6 +26,8 @@ export type {
   PublicPostListItem,
   InboxPostListParams,
   InboxPostListResult,
+  InboxPostPreview,
+  InboxPostPreviewResult,
   PostListItem,
   PostForExport,
   CreatePostResult,

@@ -8,7 +8,7 @@
 import { useQuery, useInfiniteQuery, type InfiniteData } from '@tanstack/react-query'
 import { fetchInboxPostsForAdmin, fetchPostWithDetails } from '@/lib/server/functions/posts'
 import type { InboxFilters, PostDetails } from '@/lib/shared/types'
-import type { PostListItem, InboxPostListResult } from '@/lib/shared/db-types'
+import type { InboxPostPreview, InboxPostPreviewResult } from '@/lib/shared/types/posts'
 import type { BoardId, PrincipalId, PostId, TagId, SegmentId } from '@quackback/ids'
 
 // ============================================================================
@@ -17,7 +17,7 @@ import type { BoardId, PrincipalId, PostId, TagId, SegmentId } from '@quackback/
 
 interface UseInboxPostsOptions {
   filters: InboxFilters
-  initialData?: InboxPostListResult
+  initialData?: InboxPostPreviewResult
 }
 
 interface UsePostDetailOptions {
@@ -44,7 +44,7 @@ export const inboxKeys = {
 async function fetchInboxPosts(
   filters: InboxFilters,
   cursor?: string
-): Promise<InboxPostListResult> {
+): Promise<InboxPostPreviewResult> {
   return (await fetchInboxPostsForAdmin({
     data: {
       boardIds: filters.board as BoardId[] | undefined,
@@ -65,7 +65,7 @@ async function fetchInboxPosts(
       cursor,
       limit: 20,
     },
-  })) as unknown as InboxPostListResult
+  })) as unknown as InboxPostPreviewResult
 }
 
 async function fetchPostDetail(postId: PostId): Promise<PostDetails> {
@@ -111,8 +111,8 @@ export function usePostDetail({ postId, enabled = true }: UsePostDetailOptions) 
 
 /** Flatten paginated posts into a single array */
 export function flattenInboxPosts(
-  data: InfiniteData<InboxPostListResult> | undefined
-): PostListItem[] {
+  data: InfiniteData<InboxPostPreviewResult> | undefined
+): InboxPostPreview[] {
   if (!data) return []
   return data.pages.flatMap((page) => page.items)
 }

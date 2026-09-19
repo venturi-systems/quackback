@@ -1,9 +1,10 @@
 import { PostCard } from '@/components/public/post-card'
 import { Square2StackIcon } from '@heroicons/react/24/outline'
-import type { PostListItem, PostStatusEntity } from '@/lib/shared/db-types'
+import type { PostStatusEntity } from '@/lib/shared/db-types'
+import type { InboxPostPreview } from '@/lib/shared/types/posts'
 
 interface FeedbackRowProps {
-  post: PostListItem
+  post: InboxPostPreview
   statuses: PostStatusEntity[]
   duplicateCount?: number
   onClick: () => void
@@ -16,7 +17,7 @@ export function FeedbackRow({ post, statuses, duplicateCount, onClick }: Feedbac
         // Core post data
         id={post.id}
         title={post.title}
-        content={post.content}
+        excerpt={post.excerpt}
         statusId={post.statusId}
         statuses={statuses}
         voteCount={post.voteCount}
