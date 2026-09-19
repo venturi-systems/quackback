@@ -30,6 +30,7 @@ import {
   segments,
 } from '@/lib/server/db'
 import type { PrincipalId, SegmentId } from '@quackback/ids'
+import type { SQLWrapper } from 'drizzle-orm'
 import { NotFoundError, InternalError } from '@/lib/shared/errors'
 import { realEmail } from '@/lib/shared/anonymous-email'
 import { logger } from '@/lib/server/logger'
@@ -101,12 +102,49 @@ function buildCountCondition(countExpr: ReturnType<typeof sql>, op: string, valu
   }
 }
 
+/** Activity aggregates are global only when counts affect membership or order. */
+function activityCounts(principalIds?: SQLWrapper) {
+  const postCounts = db
+    .select({
+      principalId: posts.principalId,
+      postCount: sql<number>`count(*)::int`.as('post_count'),
+    })
+    .from(posts)
+    .where(and(isNull(posts.deletedAt), principalIds && inArray(posts.principalId, principalIds)))
+    .groupBy(posts.principalId)
+    .as('post_counts')
+
+  const commentCounts = db
+    .select({
+      principalId: comments.principalId,
+      commentCount: sql<number>`count(*)::int`.as('comment_count'),
+    })
+    .from(comments)
+    .where(
+      and(isNull(comments.deletedAt), principalIds && inArray(comments.principalId, principalIds))
+    )
+    .groupBy(comments.principalId)
+    .as('comment_counts')
+
+  const voteCounts = db
+    .select({
+      principalId: votes.principalId,
+      voteCount: sql<number>`count(*)::int`.as('vote_count'),
+    })
+    .from(votes)
+    .where(principalIds && inArray(votes.principalId, principalIds))
+    .groupBy(votes.principalId)
+    .as('vote_counts')
+
+  return { postCounts, commentCounts, voteCounts }
+}
+
 /**
  * List portal users for an organization with activity counts
  *
  * Queries principal table for role='user'.
- * Activity counts are computed via efficient LEFT JOINs with pre-aggregated subqueries,
- * using the indexed principal_id columns on posts, comments, and votes tables.
+ * Display-only activity counts are restricted to the selected principal page.
+ * Count-based ordering and filtering retain global aggregates before pagination.
  *
  * Supports optional filtering by segment IDs (OR logic — users in ANY selected segment).
  */
@@ -131,37 +169,11 @@ export async function listPortalUsers(
       includeAnonymous = false,
     } = params
 
-    // Pre-aggregate activity counts in subqueries (executed once, not per-row)
-    // These use the indexed principal_id columns for efficient lookups
-    // Each count column has a unique name to avoid ambiguity in the final SELECT
-    const postCounts = db
-      .select({
-        principalId: posts.principalId,
-        postCount: sql<number>`count(*)::int`.as('post_count'),
-      })
-      .from(posts)
-      .where(isNull(posts.deletedAt))
-      .groupBy(posts.principalId)
-      .as('post_counts')
-
-    const commentCounts = db
-      .select({
-        principalId: comments.principalId,
-        commentCount: sql<number>`count(*)::int`.as('comment_count'),
-      })
-      .from(comments)
-      .where(isNull(comments.deletedAt))
-      .groupBy(comments.principalId)
-      .as('comment_counts')
-
-    const voteCounts = db
-      .select({
-        principalId: votes.principalId,
-        voteCount: sql<number>`count(*)::int`.as('vote_count'),
-      })
-      .from(votes)
-      .groupBy(votes.principalId)
-      .as('vote_counts')
+    const { postCounts, commentCounts, voteCounts } = activityCounts()
+    const hasActivityFilters = Boolean(postCountFilter || voteCountFilter || commentCountFilter)
+    const displayCountsOnly =
+      !hasActivityFilters &&
+      !['most_active', 'most_posts', 'most_comments', 'most_votes'].includes(sort)
 
     // Build conditions array - filter for role='user' (portal users only)
     const conditions = [eq(principal.role, 'user')]
@@ -291,33 +303,95 @@ export async function listPortalUsers(
         orderBy = desc(principal.createdAt)
     }
 
-    // Main query with LEFT JOINs to pre-aggregated counts
-    const [usersResult, countResult] = await Promise.all([
-      db
+    const pageBeforeActivity = () => {
+      // Reusing this CTE in the three aggregates keeps their inputs bounded to
+      // the selected page without adding another database round trip/snapshot.
+      const userPage = db.$with('user_page').as(
+        db
+          .select({
+            // Both source tables call their key "id"; explicit aliases avoid
+            // ambiguous CTE columns while preserving the branded principal ID.
+            principalId: sql<PrincipalId>`${principal.id}`
+              .mapWith(principal.id)
+              .as('page_principal_id'),
+            userId: sql<string>`${user.id}`.mapWith(user.id).as('page_user_id'),
+            name: user.name,
+            email: user.email,
+            image: user.image,
+            emailVerified: user.emailVerified,
+            metadata: user.metadata,
+            joinedAt: principal.createdAt,
+          })
+          .from(principal)
+          .innerJoin(user, eq(principal.userId, user.id))
+          .where(whereClause)
+          // Equal names/dates previously had unspecified ordering. Keep page
+          // membership and the final joined result stable with the same key.
+          .orderBy(orderBy, asc(principal.id))
+          .limit(limit)
+          .offset((page - 1) * limit)
+      )
+      const pageIds = db.select({ principalId: userPage.principalId }).from(userPage)
+      const counts = activityCounts(pageIds)
+      const pageOrder =
+        sort === 'name'
+          ? asc(userPage.name)
+          : sort === 'oldest'
+            ? asc(userPage.joinedAt)
+            : desc(userPage.joinedAt)
+
+      return db
+        .with(userPage)
         .select({
-          principalId: principal.id,
-          userId: user.id,
-          name: user.name,
-          email: user.email,
-          image: user.image,
-          emailVerified: user.emailVerified,
-          metadata: user.metadata,
-          joinedAt: principal.createdAt,
-          postCount: sql<number>`COALESCE(${postCounts.postCount}, 0)`,
-          commentCount: sql<number>`COALESCE(${commentCounts.commentCount}, 0)`,
-          voteCount: sql<number>`COALESCE(${voteCounts.voteCount}, 0)`,
+          principalId: userPage.principalId,
+          userId: userPage.userId,
+          name: userPage.name,
+          email: userPage.email,
+          image: userPage.image,
+          emailVerified: userPage.emailVerified,
+          metadata: userPage.metadata,
+          joinedAt: userPage.joinedAt,
+          postCount: sql<number>`COALESCE(${counts.postCounts.postCount}, 0)`,
+          commentCount: sql<number>`COALESCE(${counts.commentCounts.commentCount}, 0)`,
+          voteCount: sql<number>`COALESCE(${counts.voteCounts.voteCount}, 0)`,
         })
-        .from(principal)
-        .innerJoin(user, eq(principal.userId, user.id))
-        .leftJoin(postCounts, eq(postCounts.principalId, principal.id))
-        .leftJoin(commentCounts, eq(commentCounts.principalId, principal.id))
-        .leftJoin(voteCounts, eq(voteCounts.principalId, principal.id))
-        .where(whereClause)
-        .orderBy(orderBy)
-        .limit(limit)
-        .offset((page - 1) * limit),
+        .from(userPage)
+        .leftJoin(counts.postCounts, eq(counts.postCounts.principalId, userPage.principalId))
+        .leftJoin(counts.commentCounts, eq(counts.commentCounts.principalId, userPage.principalId))
+        .leftJoin(counts.voteCounts, eq(counts.voteCounts.principalId, userPage.principalId))
+        .orderBy(pageOrder, asc(userPage.principalId))
+    }
+
+    // Count-based ordering/filtering must aggregate before pagination. Display
+    // counts can be calculated after selecting the page with the same predicates.
+    const [usersResult, countResult] = await Promise.all([
+      displayCountsOnly
+        ? pageBeforeActivity()
+        : db
+            .select({
+              principalId: principal.id,
+              userId: user.id,
+              name: user.name,
+              email: user.email,
+              image: user.image,
+              emailVerified: user.emailVerified,
+              metadata: user.metadata,
+              joinedAt: principal.createdAt,
+              postCount: sql<number>`COALESCE(${postCounts.postCount}, 0)`,
+              commentCount: sql<number>`COALESCE(${commentCounts.commentCount}, 0)`,
+              voteCount: sql<number>`COALESCE(${voteCounts.voteCount}, 0)`,
+            })
+            .from(principal)
+            .innerJoin(user, eq(principal.userId, user.id))
+            .leftJoin(postCounts, eq(postCounts.principalId, principal.id))
+            .leftJoin(commentCounts, eq(commentCounts.principalId, principal.id))
+            .leftJoin(voteCounts, eq(voteCounts.principalId, principal.id))
+            .where(whereClause)
+            .orderBy(orderBy)
+            .limit(limit)
+            .offset((page - 1) * limit),
       // Count query needs the same JOINs when activity count filters are used
-      postCountFilter || voteCountFilter || commentCountFilter
+      hasActivityFilters
         ? db
             .select({ count: sql<number>`count(*)::int` })
             .from(principal)
