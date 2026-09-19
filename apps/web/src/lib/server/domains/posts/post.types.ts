@@ -101,6 +101,8 @@ export interface PublicPostListResult {
   items: PublicPostListItem[]
   total: number
   hasMore: boolean
+  /** Present only for the opt-in newest-first cursor path. */
+  nextCursor?: string | null
 }
 
 /**

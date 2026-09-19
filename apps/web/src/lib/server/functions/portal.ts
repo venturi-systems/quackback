@@ -132,7 +132,12 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
       log.debug('portal access denied, returning empty')
       return {
         boards: [],
-        posts: { items: [], hasMore: false, total: 0 },
+        posts: {
+          items: [],
+          hasMore: false,
+          total: 0,
+          ...(data.sort === 'new' ? { nextCursor: null } : {}),
+        },
         statuses: [],
         tags: [],
         votedPostIds: [],
@@ -169,6 +174,7 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
           tagIds: data.tagIds as TagId[] | undefined,
           sort: data.sort,
           page: 1,
+          cursor: data.sort === 'new' ? null : undefined,
           limit: 20,
           minVotes: data.minVotes,
           dateFrom: data.dateFrom,
@@ -211,6 +217,7 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
         board: post.board,
       })),
       hasMore: postsResult.hasMore,
+      ...(data.sort === 'new' ? { nextCursor: postsResult.nextCursor ?? null } : {}),
       total: -1,
     }
 
@@ -388,7 +395,13 @@ export const fetchPublicPosts = createServerFn({ method: 'GET' })
 
       const auth = await getOptionalAuth()
       const actor = await policyActorFromAuth(auth)
-      const result = await listPublicPosts({ ...data, page: 1, limit: 20, actor })
+      const result = await listPublicPosts({
+        ...data,
+        page: 1,
+        limit: 20,
+        actor,
+        cursor: data.sort === 'new' ? null : undefined,
+      })
       return {
         ...result,
         items: result.items.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() })),

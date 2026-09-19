@@ -22,6 +22,8 @@ import type { RespondedFilter } from '@/lib/shared/types/filters'
 import { postViewFilter, ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
+import { ValidationError } from '@/lib/shared/errors'
+import { decodePublicPostCursor, encodePublicPostCursor } from './post.public-cursor'
 
 /** Resolve avatar URL from principal's avatar fields */
 export function resolveAvatarUrl(principal: {
@@ -51,14 +53,16 @@ export function parseAvatarData(json: string | null): string | null {
 
 type SortOrder = 'top' | 'new' | 'trending'
 
-function getPostSortOrder(sort: SortOrder) {
+function getPostSortOrder(sort: SortOrder, cursorMode = false) {
   switch (sort) {
     case 'new':
-      return desc(posts.createdAt)
+      return cursorMode ? [desc(posts.createdAt), desc(posts.id)] : [desc(posts.createdAt)]
     case 'trending':
-      return sql`(${posts.voteCount} / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - ${posts.createdAt})) / 86400)) DESC`
+      return [
+        sql`(${posts.voteCount} / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - ${posts.createdAt})) / 86400)) DESC`,
+      ]
     default:
-      return desc(posts.voteCount)
+      return [desc(posts.voteCount)]
   }
 }
 
@@ -86,10 +90,54 @@ interface PostListParams {
   tagIds?: TagId[]
   sort?: SortOrder
   page?: number
+  /** null starts newest-first keyset paging; absent retains page-number compatibility. */
+  cursor?: string | null
   limit?: number
   minVotes?: number
   dateFrom?: string
   responded?: RespondedFilter
+}
+
+function publicPostPagination(params: PostListParams) {
+  const cursorMode = params.cursor !== undefined
+  if (
+    cursorMode &&
+    ((params.sort ?? 'top') !== 'new' ||
+      (params.page ?? 1) !== 1 ||
+      !Number.isInteger(params.limit ?? 20) ||
+      (params.limit ?? 20) < 1 ||
+      (params.limit ?? 20) > 100)
+  ) {
+    throw new ValidationError(
+      'INVALID_CURSOR',
+      'Cursor pagination requires newest sort, page 1, and a limit from 1 to 100.'
+    )
+  }
+  const cursor =
+    cursorMode && params.cursor !== null
+      ? decodePublicPostCursor(params.cursor!, params)
+      : undefined
+  return {
+    cursorMode,
+    condition: cursor
+      ? sql`(${posts.createdAt}, ${posts.id}) < (${cursor.createdAt}::timestamptz, ${toUuid(cursor.id)}::uuid)`
+      : undefined,
+  }
+}
+
+function nextPublicPostCursor(
+  cursorMode: boolean,
+  hasMore: boolean,
+  last: { id: PostId; cursorCreatedAt?: string } | undefined,
+  params: PostListParams
+) {
+  if (!cursorMode) return {}
+  return {
+    nextCursor:
+      hasMore && last
+        ? encodePublicPostCursor({ id: last.id, cursorCreatedAt: last.cursorCreatedAt! }, params)
+        : null,
+  }
 }
 
 function buildPostFilterConditions(params: PostListParams, actor: Actor) {
@@ -170,11 +218,13 @@ function buildPostFilterConditions(params: PostListParams, actor: Actor) {
 
 export async function listPublicPostsWithVotesAndAvatars(
   params: PostListParams & { principalId?: PrincipalId; actor?: Actor }
-): Promise<{ items: PostWithVotesAndAvatars[]; hasMore: boolean }> {
+): Promise<{ items: PostWithVotesAndAvatars[]; hasMore: boolean; nextCursor?: string | null }> {
   const { sort = 'top', page = 1, limit = 20, principalId, actor = ANONYMOUS_ACTOR } = params
   const offset = (page - 1) * limit
   const conditions = buildPostFilterConditions(params, actor)
-  const orderBy = getPostSortOrder(sort)
+  const { cursorMode, condition } = publicPostPagination(params)
+  if (condition) conditions.push(condition)
+  const orderBy = getPostSortOrder(sort, cursorMode)
 
   // Only authenticated users can vote, so we only check principal_id
   // Anonymous users see vote counts but hasVoted is always false
@@ -197,6 +247,14 @@ export async function listPublicPostsWithVotesAndAvatars(
       commentCount: posts.commentCount,
       principalId: posts.principalId,
       createdAt: posts.createdAt,
+      ...(cursorMode
+        ? {
+            cursorCreatedAt:
+              sql<string>`to_char(${posts.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
+                'cursor_created_at'
+              ),
+          }
+        : {}),
       boardId: boards.id,
       boardName: boards.name,
       boardSlug: boards.slug,
@@ -225,32 +283,34 @@ export async function listPublicPostsWithVotesAndAvatars(
     .from(posts)
     .innerJoin(boards, eq(posts.boardId, boards.id))
     .where(and(...conditions))
-    .orderBy(orderBy)
+    .orderBy(...orderBy)
     .limit(limit + 1)
-    .offset(offset)
+    .offset(cursorMode ? 0 : offset)
 
   const hasMore = postsResult.length > limit
   const trimmedResults = hasMore ? postsResult.slice(0, limit) : postsResult
 
-  const items = trimmedResults.map(
-    (post): PostWithVotesAndAvatars => ({
-      id: post.id,
-      title: post.title,
-      content: post.content,
-      statusId: post.statusId,
-      voteCount: post.voteCount,
-      commentCount: post.commentCount,
-      authorName: post.authorName,
-      principalId: post.principalId,
-      createdAt: post.createdAt,
-      tags: parseJson<Array<{ id: TagId; name: string; color: string }>>(post.tagsJson),
-      board: { id: post.boardId, name: post.boardName, slug: post.boardSlug },
-      hasVoted: post.hasVoted ?? false,
-      avatarUrl: parseAvatarData(post.avatarData),
-    })
-  )
+  const items = trimmedResults.map((post): PostWithVotesAndAvatars => ({
+    id: post.id,
+    title: post.title,
+    content: post.content,
+    statusId: post.statusId,
+    voteCount: post.voteCount,
+    commentCount: post.commentCount,
+    authorName: post.authorName,
+    principalId: post.principalId,
+    createdAt: post.createdAt,
+    tags: parseJson<Array<{ id: TagId; name: string; color: string }>>(post.tagsJson),
+    board: { id: post.boardId, name: post.boardName, slug: post.boardSlug },
+    hasVoted: post.hasVoted ?? false,
+    avatarUrl: parseAvatarData(post.avatarData),
+  }))
 
-  return { items, hasMore }
+  return {
+    items,
+    hasMore,
+    ...nextPublicPostCursor(cursorMode, hasMore, trimmedResults.at(-1), params),
+  }
 }
 
 export async function listPublicPosts(
@@ -259,7 +319,9 @@ export async function listPublicPosts(
   const { sort = 'top', page = 1, limit = 20, actor = ANONYMOUS_ACTOR } = params
   const offset = (page - 1) * limit
   const conditions = buildPostFilterConditions(params, actor)
-  const orderBy = getPostSortOrder(sort)
+  const { cursorMode, condition } = publicPostPagination(params)
+  if (condition) conditions.push(condition)
+  const orderBy = getPostSortOrder(sort, cursorMode)
 
   const postsResult = await db
     .select({
@@ -271,6 +333,14 @@ export async function listPublicPosts(
       commentCount: posts.commentCount,
       principalId: posts.principalId,
       createdAt: posts.createdAt,
+      ...(cursorMode
+        ? {
+            cursorCreatedAt:
+              sql<string>`to_char(${posts.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`.as(
+                'cursor_created_at'
+              ),
+          }
+        : {}),
       boardId: boards.id,
       boardName: boards.name,
       boardSlug: boards.slug,
@@ -289,9 +359,9 @@ export async function listPublicPosts(
     .from(posts)
     .innerJoin(boards, eq(posts.boardId, boards.id))
     .where(and(...conditions))
-    .orderBy(orderBy)
+    .orderBy(...orderBy)
     .limit(limit + 1)
-    .offset(offset)
+    .offset(cursorMode ? 0 : offset)
 
   const hasMore = postsResult.length > limit
   const trimmedResults = hasMore ? postsResult.slice(0, limit) : postsResult
@@ -310,7 +380,12 @@ export async function listPublicPosts(
     board: { id: post.boardId, name: post.boardName, slug: post.boardSlug },
   }))
 
-  return { items, total: -1, hasMore }
+  return {
+    items,
+    total: -1,
+    hasMore,
+    ...nextPublicPostCursor(cursorMode, hasMore, trimmedResults.at(-1), params),
+  }
 }
 
 export async function getAllUserVotedPostIds(principalId: PrincipalId): Promise<Set<PostId>> {
