@@ -1,0 +1,58 @@
+import {
+  CheckCircleIcon,
+  ChatBubbleLeftEllipsisIcon,
+  ChatBubbleLeftRightIcon,
+  SparklesIcon,
+  NewspaperIcon,
+  BellIcon,
+} from '@heroicons/react/24/solid'
+import type { NotificationType } from '@/lib/shared/types'
+
+export interface NotificationTypeConfig {
+  icon: typeof BellIcon
+  iconClass: string
+  bgClass: string
+}
+
+export const notificationTypeConfigs: Record<NotificationType, NotificationTypeConfig> = {
+  post_status_changed: {
+    icon: CheckCircleIcon,
+    iconClass: 'text-blue-500',
+    bgClass: 'bg-blue-500/10',
+  },
+  comment_created: {
+    icon: ChatBubbleLeftEllipsisIcon,
+    iconClass: 'text-purple-500',
+    bgClass: 'bg-purple-500/10',
+  },
+  post_mentioned: {
+    icon: SparklesIcon,
+    iconClass: 'text-amber-500',
+    bgClass: 'bg-amber-500/10',
+  },
+  changelog_published: {
+    icon: NewspaperIcon,
+    iconClass: 'text-green-500',
+    bgClass: 'bg-green-500/10',
+  },
+  chat_message: {
+    icon: ChatBubbleLeftRightIcon,
+    iconClass: 'text-teal-500',
+    bgClass: 'bg-teal-500/10',
+  },
+  chat_mention: {
+    icon: ChatBubbleLeftRightIcon,
+    iconClass: 'text-teal-500',
+    bgClass: 'bg-teal-500/10',
+  },
+}
+
+export const defaultNotificationTypeConfig: NotificationTypeConfig = {
+  icon: BellIcon,
+  iconClass: 'text-muted-foreground',
+  bgClass: 'bg-muted',
+}
+
+export function getNotificationTypeConfig(type: string): NotificationTypeConfig {
+  return notificationTypeConfigs[type as NotificationType] ?? defaultNotificationTypeConfig
+}

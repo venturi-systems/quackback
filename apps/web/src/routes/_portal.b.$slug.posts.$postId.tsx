@@ -1,0 +1,299 @@
+import { Suspense, useEffect, useState } from 'react'
+import { useIntl } from 'react-intl'
+import { createFileRoute, notFound, useRouteContext } from '@tanstack/react-router'
+import { useSuspenseQuery } from '@tanstack/react-query'
+import { BackLink } from '@/components/ui/back-link'
+import { portalDetailQueries, type PublicPostDetailView } from '@/lib/client/queries/portal-detail'
+import { portalQueries } from '@/lib/client/queries/portal'
+import { UnsubscribeBanner } from '@/components/public/unsubscribe-banner'
+import { VoteSidebar, VoteSidebarSkeleton } from '@/components/public/post-detail/vote-sidebar'
+import { PostContentSection } from '@/components/public/post-detail/post-content-section'
+import {
+  MetadataSidebar,
+  MetadataSidebarSkeleton,
+} from '@/components/public/post-detail/metadata-sidebar'
+import {
+  CommentsSection,
+  CommentsSectionSkeleton,
+} from '@/components/public/post-detail/comments-section'
+import { DeletePostDialog } from '@/components/public/post-detail/delete-post-dialog'
+import { usePostPermissions, postPermissionsKeys } from '@/lib/client/hooks/use-portal-posts-query'
+import { getPostPermissionsFn } from '@/lib/server/functions/public-posts'
+import { usePostActions } from '@/lib/client/mutations'
+import { usePortalImageUpload } from '@/lib/client/hooks/use-image-upload'
+import {
+  useDeleteComment,
+  usePinComment,
+  useUnpinComment,
+  useRestoreComment,
+} from '@/lib/client/mutations/portal-comments'
+import { toast } from 'sonner'
+import { PortalMergeBanner } from '@/components/public/post-detail/merge-banner'
+import { similarPostsQuery } from '@/components/public/post-detail/similar-posts-section'
+import { isValidTypeId, type CommentId, type PostId } from '@quackback/ids'
+import type { TiptapContent } from '@/lib/shared/schemas/posts'
+
+export const Route = createFileRoute('/_portal/b/$slug/posts/$postId')({
+  loader: async ({ params, context }) => {
+    const { slug, postId: postIdParam } = params
+    const { settings, queryClient } = context
+
+    if (!settings) {
+      throw notFound()
+    }
+
+    if (!isValidTypeId(postIdParam, 'post')) {
+      throw notFound()
+    }
+    const postId = postIdParam as PostId
+
+    // Fire non-critical prefetches (don't await - components handle their own loading via Suspense)
+    queryClient.prefetchQuery(portalDetailQueries.voteSidebarData(postId))
+
+    // Await critical data needed for initial render.
+    // votedPosts must be awaited so usePostVote (non-Suspense) has data during SSR.
+    // commentsSectionData and post permissions are warmed here (not fire-and-forget)
+    // so the comments section and edit/delete controls render their real values on
+    // first paint instead of flashing the undefined defaults (canComment/canEdit/canDelete).
+    const [post] = await Promise.all([
+      queryClient.ensureQueryData(portalDetailQueries.postDetail(postId)),
+      queryClient.ensureQueryData(portalQueries.statuses()),
+      queryClient.ensureQueryData(portalDetailQueries.votedPosts()),
+      queryClient.ensureQueryData(portalDetailQueries.commentsSectionData(postId)),
+      queryClient.ensureQueryData({
+        queryKey: postPermissionsKeys.detail(postId),
+        queryFn: () => getPostPermissionsFn({ data: { postId } }),
+        staleTime: 30_000,
+      }),
+    ])
+
+    if (!post || post.board.slug !== slug) {
+      throw notFound()
+    }
+
+    // Prefetch similar posts now that we have the title (non-blocking)
+    queryClient.prefetchQuery(similarPostsQuery(post.title))
+
+    return {
+      settings,
+      postId,
+      slug,
+      postTitle: post.title,
+      boardName: post.board.name,
+      baseUrl: context.baseUrl ?? '',
+    }
+  },
+  head: ({ loaderData }) => {
+    if (!loaderData) return {}
+    const { postTitle, boardName, slug, postId, baseUrl } = loaderData
+    const title = `${postTitle} - ${boardName}`
+    const description = `${postTitle}. Vote and comment on this ${boardName} post.`
+    const canonicalUrl = baseUrl ? `${baseUrl}/b/${slug}/posts/${postId}` : ''
+    return {
+      meta: [
+        { title },
+        { name: 'description', content: description },
+        { property: 'og:title', content: title },
+        { property: 'og:description', content: description },
+        ...(canonicalUrl ? [{ property: 'og:url', content: canonicalUrl }] : []),
+        { name: 'twitter:title', content: title },
+        { name: 'twitter:description', content: description },
+      ],
+      links: canonicalUrl ? [{ rel: 'canonical', href: canonicalUrl }] : [],
+    }
+  },
+  component: PostDetailPage,
+})
+
+function PostDetailPage() {
+  const { postId, slug } = Route.useLoaderData()
+  const { session } = useRouteContext({ from: '__root__' })
+
+  const intl = useIntl()
+  const [isEditingPost, setIsEditingPost] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+
+  // Post detail already includes board data (JOINed in query)
+  const postQuery = useSuspenseQuery(portalDetailQueries.postDetail(postId))
+  const statusesQuery = useSuspenseQuery(portalQueries.statuses())
+
+  const permissionsQuery = usePostPermissions({ postId })
+  const { canEdit, canDelete, editReason, deleteReason } = permissionsQuery.data ?? {
+    canEdit: false,
+    canDelete: false,
+  }
+
+  const isAnonymousSession = session?.user?.principalType === 'anonymous'
+  const canUploadImages = canEdit && !isAnonymousSession && !!session?.user
+  const { upload: uploadImage } = usePortalImageUpload()
+
+  const {
+    editPost,
+    deletePost,
+    isEditing: isSavingEdit,
+    isDeleting,
+  } = usePostActions({
+    postId,
+    boardSlug: slug,
+    onEditSuccess: () => setIsEditingPost(false),
+    onDeleteSuccess: () => setDeleteDialogOpen(false),
+  })
+
+  const deleteComment = useDeleteComment({
+    postId,
+    onError: (error) => toast.error(error.message || 'Failed to delete comment'),
+  })
+
+  const pinComment = usePinComment({
+    postId,
+    onError: (error) => toast.error(error.message || 'Failed to pin comment'),
+  })
+
+  const unpinComment = useUnpinComment({
+    postId,
+    onError: (error) => toast.error(error.message || 'Failed to unpin comment'),
+  })
+
+  const restoreComment = useRestoreComment({
+    postId,
+    onError: (error) => toast.error(error.message || 'Failed to restore comment'),
+  })
+
+  const post = postQuery.data
+  // Use board data from post (already JOINed in the query)
+  const board = post?.board
+
+  if (!post || !board) {
+    return (
+      <div>
+        {intl.formatMessage({ id: 'portal.postDetail.notFound', defaultMessage: 'Post not found' })}
+      </div>
+    )
+  }
+
+  const currentStatus = statusesQuery.data.find((s) => s.id === post.statusId)
+
+  const typedPost: PublicPostDetailView = {
+    ...post,
+    contentJson: (post.contentJson ?? { type: 'doc' }) as TiptapContent,
+  }
+
+  // Scroll to comment anchor after content loads
+  useEffect(() => {
+    const hash = window.location.hash
+    if (!hash || !hash.startsWith('#comment-')) {
+      return
+    }
+
+    const timeoutId = setTimeout(() => {
+      const element = document.querySelector(hash)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        element.classList.add('bg-primary/5')
+        setTimeout(() => element.classList.remove('bg-primary/5'), 2000)
+      }
+    }, 100)
+
+    return () => clearTimeout(timeoutId)
+  }, [post.comments])
+
+  return (
+    <div data-testid="post-detail" className="mx-auto max-w-6xl w-full px-4 sm:px-6 py-6">
+      <UnsubscribeBanner postId={post.id as PostId} />
+
+      <BackLink to="/" search={{ board: slug }} className="mb-6">
+        {board.name}
+      </BackLink>
+
+      {/* Merge banner for duplicate posts */}
+      {post.mergeInfo && (
+        <PortalMergeBanner
+          canonicalPostTitle={post.mergeInfo.canonicalPostTitle}
+          canonicalPostBoardSlug={post.mergeInfo.canonicalPostBoardSlug}
+          canonicalPostId={post.mergeInfo.canonicalPostId}
+        />
+      )}
+
+      {/* Post detail card */}
+      <div className="bg-card border border-border/40 rounded-lg overflow-hidden">
+        <div className="flex">
+          <Suspense fallback={<VoteSidebarSkeleton />}>
+            <VoteSidebar postId={postId} voteCount={post.voteCount} disabled={!!post.mergeInfo} />
+          </Suspense>
+
+          <PostContentSection
+            post={typedPost}
+            currentStatus={currentStatus}
+            authorAvatarUrl={post.authorAvatarUrl}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            editReason={editReason}
+            deleteReason={deleteReason}
+            onDelete={() => setDeleteDialogOpen(true)}
+            isEditing={isEditingPost}
+            onEditStart={() => setIsEditingPost(true)}
+            onEditSave={editPost}
+            onEditCancel={() => setIsEditingPost(false)}
+            onImageUpload={canUploadImages ? uploadImage : undefined}
+            isSaving={isSavingEdit}
+          />
+
+          <Suspense fallback={<MetadataSidebarSkeleton />}>
+            <MetadataSidebar
+              postId={postId}
+              voteCount={post.voteCount}
+              status={currentStatus}
+              board={board}
+              authorName={post.authorName}
+              authorAvatarUrl={post.authorAvatarUrl}
+              createdAt={new Date(post.createdAt)}
+              tags={post.tags}
+              roadmaps={post.roadmaps}
+            />
+          </Suspense>
+        </div>
+      </div>
+
+      {/* Comments card */}
+      <div className="bg-card border border-border/40 rounded-lg overflow-hidden mt-4">
+        <Suspense fallback={<CommentsSectionSkeleton />}>
+          <CommentsSection
+            postId={postId}
+            comments={post.comments}
+            pinnedCommentId={post.pinnedCommentId}
+            disableCommenting={!!post.mergeInfo || !!post.isCommentsLocked}
+            lockedMessage={
+              post.isCommentsLocked
+                ? intl.formatMessage({
+                    id: 'portal.postDetail.commentsLocked',
+                    defaultMessage: 'Comments are locked on this post',
+                  })
+                : undefined
+            }
+            statuses={statusesQuery.data}
+            currentStatusId={post.statusId}
+            onPinComment={(commentId: CommentId) => pinComment.mutate(commentId)}
+            onUnpinComment={() => unpinComment.mutate()}
+            isPinPending={pinComment.isPending || unpinComment.isPending}
+            onDeleteComment={(commentId: CommentId) => deleteComment.mutate(commentId)}
+            deletingCommentId={
+              deleteComment.isPending ? (deleteComment.variables as CommentId) : null
+            }
+            onRestoreComment={(commentId: CommentId) => restoreComment.mutate(commentId)}
+            restoringCommentId={
+              restoreComment.isPending ? (restoreComment.variables as CommentId) : null
+            }
+          />
+        </Suspense>
+      </div>
+
+      <DeletePostDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        postTitle={post.title}
+        onConfirm={() => deletePost()}
+        isPending={isDeleting}
+      />
+    </div>
+  )
+}

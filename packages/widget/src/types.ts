@@ -1,0 +1,118 @@
+// Tenant Quackback URL — e.g. "https://feedback.acme.com"
+export type InstanceUrl = string
+
+/**
+ * Languages Quackback ships catalogs for, as BCP-47 tags (autocomplete hints
+ * for the `locale` option). This is the single source for the `locale` type
+ * below. The widget is a standalone published package and can't import the
+ * app's `SUPPORTED_LOCALES`, so a parity test in apps/web guarantees this list
+ * never drifts from it.
+ */
+export const WIDGET_LOCALES = [
+  'en',
+  'fr',
+  'de',
+  'es',
+  'ar',
+  'ru',
+  'pt-BR',
+  'zh-CN',
+  'zh-TW',
+] as const
+
+/** Passed to `Quackback("init", ...)` or `Quackback.init(...)`. */
+export interface InitOptions {
+  /** Tenant Quackback instance URL — required when using the npm package. */
+  instanceUrl: InstanceUrl
+  placement?: 'left' | 'right'
+  defaultBoard?: string
+  /** Set `launcher: false` to hide the default floating button and open programmatically. */
+  launcher?: boolean
+  /**
+   * Override the auto-detected UI language. Accepts any BCP-47 tag — the host
+   * forwards it and the Quackback instance resolves the closest catalog it has.
+   * The literals are autocomplete hints for the languages Quackback ships today
+   * (see WIDGET_LOCALES).
+   */
+  locale?: (typeof WIDGET_LOCALES)[number] | (string & {})
+  /** Bundle identity into init — shorthand for init + identify. */
+  identity?: Identity
+}
+
+/**
+ * What the host app passes to identify the current user.
+ *
+ * For anonymous sessions, call `identify()` with no argument — don't pass
+ * `{ anonymous: true }`. (The runtime still accepts `{ anonymous: true }` for
+ * backwards-compat with older integrations, but it's not in the type so
+ * TypeScript users get nudged to the cleaner form.)
+ */
+export type Identity =
+  | { ssoToken: string }
+  | ({ id: string; email: string; name?: string; avatarURL?: string } & Record<string, unknown>)
+
+/**
+ * Arguments to `Quackback.open(...)`. Discriminated on the target:
+ * - omit the payload to open the home view
+ * - `{ view: 'new-post', title?, body?, board? }` pre-fills the new-post form
+ * - `{ view: 'changelog', entryId? }` opens the changelog, optionally to one entry
+ * - `{ view: 'help', query? }` opens help, optionally with search prefilled
+ * - `{ view: 'chat' }` opens the live chat view
+ * - `{ postId }` deep-links to a specific post
+ * - `{ articleId }` deep-links to a help article
+ *
+ * Fields `view` / `title` / `board` are handled by the iframe today.
+ * `body`, `query`, `postId`, `articleId`, `entryId` pass through the postMessage
+ * protocol; full iframe-side handling lands in follow-up iframe work.
+ */
+export type OpenOptions =
+  | undefined
+  | { view?: 'home'; board?: string }
+  | { view: 'new-post'; title?: string; body?: string; board?: string }
+  | { view: 'changelog'; entryId?: string }
+  | { view: 'help'; query?: string }
+  | { view: 'chat' }
+  | { postId: string }
+  | { articleId: string }
+
+export interface WidgetUser {
+  id: string
+  name: string
+  email: string
+  avatarUrl?: string | null
+}
+
+/**
+ * Events emitted by the widget iframe. `open` and `close` carry context about
+ * which view is showing so subscribers can react to deep-link flows.
+ */
+export interface EventMap {
+  ready: Record<string, never>
+  open: {
+    view?: 'home' | 'new-post' | 'changelog' | 'help'
+    postId?: string
+    articleId?: string
+    entryId?: string
+  }
+  close: Record<string, never>
+  'post:created': {
+    id: string
+    title: string
+    board: { id: string; name: string; slug: string }
+    statusId: string | null
+  }
+  vote: { postId: string; voted: boolean; voteCount: number }
+  'comment:created': { postId: string; commentId: string; parentId: string | null }
+  identify: {
+    success: boolean
+    user: WidgetUser | null
+    anonymous: boolean
+    error?: string
+  }
+  /** Fires when an anonymous user supplies an email inline. */
+  'email-submitted': { email: string }
+}
+
+export type EventName = keyof EventMap
+export type EventHandler<T extends EventName> = (payload: EventMap[T]) => void
+export type Unsubscribe = () => void

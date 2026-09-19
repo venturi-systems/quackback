@@ -1,0 +1,328 @@
+// @vitest-environment happy-dom
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createSDK } from '../src/core/sdk'
+
+const ORIGIN = 'https://feedback.acme.com'
+
+function stubIframe() {
+  const postMessage = vi.fn()
+  const spy = vi
+    .spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get')
+    .mockReturnValue({ postMessage } as unknown as Window)
+  return { postMessage, spy }
+}
+
+function fireReady() {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      origin: ORIGIN,
+      data: { type: 'quackback:ready' },
+    })
+  )
+}
+
+describe('sdk', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    document.head.innerHTML = ''
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ theme: {} }) }))
+    )
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('init creates a launcher and iframe', () => {
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    expect(document.querySelector('button[aria-label="Open feedback widget"]')).not.toBeNull()
+    expect(document.querySelector('iframe[title="Feedback Widget"]')).not.toBeNull()
+  })
+
+  it('init with { launcher: false } does not create a button', () => {
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN, launcher: false })
+    expect(document.querySelector('button[aria-label="Open feedback widget"]')).toBeNull()
+  })
+
+  it('a repeat init re-applies launcher: false', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    expect(document.querySelector('button[aria-label="Open feedback widget"]')).not.toBeNull()
+    sdk.dispatch('init', { instanceUrl: ORIGIN, launcher: false })
+    expect(document.querySelector('button[aria-label="Open feedback widget"]')).toBeNull()
+  })
+
+  it('a repeat init moves an existing launcher to the new placement', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    sdk.dispatch('init', { instanceUrl: ORIGIN, placement: 'left' })
+    const btn = document.querySelector(
+      'button[aria-label="Open feedback widget"]'
+    ) as HTMLButtonElement
+    expect(btn.style.left).toBe('24px')
+    expect(btn.style.right).toBe('')
+  })
+
+  it('a repeat init that throws leaves the existing instance intact', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    expect(() => sdk.dispatch('init', { instanceUrl: 'not a url' })).toThrow()
+    // The good first instance is untouched.
+    expect(document.querySelector('iframe[title="Feedback Widget"]')).not.toBeNull()
+  })
+
+  it('init defaults identity to anonymous once iframe is ready', () => {
+    const { postMessage, spy } = stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    fireReady()
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: 'quackback:identify', data: { anonymous: true } },
+      ORIGIN
+    )
+    spy.mockRestore()
+  })
+
+  it('init with bundled identity sends it to iframe', () => {
+    const { postMessage, spy } = stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', {
+      instanceUrl: ORIGIN,
+      identity: { id: 'u1', email: 'a@b.c', name: 'Ada' },
+    })
+    fireReady()
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: 'quackback:identify', data: { id: 'u1', email: 'a@b.c', name: 'Ada' } },
+      ORIGIN
+    )
+    spy.mockRestore()
+  })
+
+  it('identify sends the payload after ready', () => {
+    const { postMessage, spy } = stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    fireReady()
+    sdk.dispatch('identify', { id: 'u2', email: 'b@c.d' })
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { type: 'quackback:identify', data: { id: 'u2', email: 'b@c.d' } },
+      ORIGIN
+    )
+    spy.mockRestore()
+  })
+
+  it('logout sends null identify and keeps the launcher visible', () => {
+    const { spy } = stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    fireReady()
+    sdk.dispatch('logout')
+    const launcher = document.querySelector(
+      'button[aria-label="Open feedback widget"]'
+    ) as HTMLButtonElement
+    expect(launcher).not.toBeNull()
+    expect(launcher.style.display).not.toBe('none')
+    spy.mockRestore()
+  })
+
+  it('isOpen tracks panel state', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    expect(sdk.isOpen()).toBe(false)
+    sdk.dispatch('open')
+    expect(sdk.isOpen()).toBe(true)
+    sdk.dispatch('close')
+    expect(sdk.isOpen()).toBe(false)
+  })
+
+  it('getUser / isIdentified reflect identify-result messages', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    expect(sdk.getUser()).toBeNull()
+    expect(sdk.isIdentified()).toBe(false)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: ORIGIN,
+        data: {
+          type: 'quackback:identify-result',
+          success: true,
+          user: { id: 'u1', name: 'Ada', email: 'a@b.c' },
+        },
+      })
+    )
+    expect(sdk.getUser()).toEqual({ id: 'u1', name: 'Ada', email: 'a@b.c' })
+    expect(sdk.isIdentified()).toBe(true)
+    sdk.dispatch('logout')
+    expect(sdk.getUser()).toBeNull()
+    expect(sdk.isIdentified()).toBe(false)
+  })
+
+  it('open emits an open event with view context', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    const seen: unknown[] = []
+    sdk.dispatch('on', 'open', (payload: unknown) => seen.push(payload))
+    sdk.dispatch('open', { view: 'new-post', title: 'Bug:' })
+    expect(seen).toHaveLength(1)
+    expect((seen[0] as { view: string }).view).toBe('new-post')
+  })
+
+  it('open passes deep-link fields to the iframe', () => {
+    const { postMessage, spy } = stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    fireReady()
+    sdk.dispatch('open', { postId: 'post_01h' })
+    expect(postMessage).toHaveBeenCalledWith(
+      { type: 'quackback:open', data: { postId: 'post_01h' } },
+      ORIGIN
+    )
+    spy.mockRestore()
+  })
+
+  it('metadata merges and sends to iframe', () => {
+    const { postMessage, spy } = stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    fireReady()
+    sdk.dispatch('metadata', { page: '/settings', app_version: '2.4.1' })
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        type: 'quackback:metadata',
+        data: { page: '/settings', app_version: '2.4.1' },
+      },
+      ORIGIN
+    )
+    sdk.dispatch('metadata', { page: null })
+    expect(postMessage).toHaveBeenLastCalledWith(
+      { type: 'quackback:metadata', data: { app_version: '2.4.1' } },
+      ORIGIN
+    )
+    spy.mockRestore()
+  })
+
+  it('hideLauncher hides the button; showLauncher shows it again', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    const launcher = () =>
+      document.querySelector(
+        'button[aria-label="Open feedback widget"]'
+      ) as HTMLButtonElement | null
+    sdk.dispatch('hideLauncher')
+    expect(launcher()?.style.display).toBe('none')
+    sdk.dispatch('showLauncher')
+    expect(launcher()?.style.display).toBe('flex')
+  })
+
+  it('launcher starts hidden and reveals shortly after server config fetch resolves', async () => {
+    stubIframe()
+    let resolveFetch!: (value: unknown) => void
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve
+          })
+      )
+    )
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    const btn = document.querySelector(
+      'button[aria-label="Open feedback widget"]'
+    ) as HTMLButtonElement
+    expect(btn.style.opacity).toBe('0')
+    resolveFetch({ ok: true, json: async () => ({ theme: {} }) })
+    // Let the fetch → json → applyServerTheme → finally chain settle.
+    await new Promise((r) => setTimeout(r, 0))
+    // Still hidden — the launcher waits a short beat after the fetch resolves.
+    expect(btn.style.opacity).toBe('0')
+    // Then it reveals.
+    await new Promise((r) => setTimeout(r, 700))
+    expect(btn.style.opacity).toBe('1')
+  })
+
+  it('launcher reveals via fallback timer if config fetch never resolves', async () => {
+    vi.useFakeTimers()
+    stubIframe()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise(() => {}))
+    ) // never resolves
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    const btn = document.querySelector(
+      'button[aria-label="Open feedback widget"]'
+    ) as HTMLButtonElement
+    expect(btn.style.opacity).toBe('0')
+    vi.advanceTimersByTime(1800)
+    expect(btn.style.opacity).toBe('1')
+    vi.useRealTimers()
+  })
+
+  it('init throws on non-http(s) instanceUrl (javascript: scheme)', () => {
+    const sdk = createSDK()
+    expect(() => sdk.dispatch('init', { instanceUrl: 'javascript:alert(1)' })).toThrow(
+      /instanceUrl must be an http/
+    )
+  })
+
+  it('init throws on malformed instanceUrl', () => {
+    const sdk = createSDK()
+    expect(() => sdk.dispatch('init', { instanceUrl: 'not a url' })).toThrow(
+      /instanceUrl must be an http/
+    )
+  })
+
+  it('navigate opens http(s) URLs with noopener,noreferrer', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: ORIGIN,
+        data: { type: 'quackback:navigate', url: 'https://example.com/thing' },
+      })
+    )
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://example.com/thing',
+      '_blank',
+      'noopener,noreferrer'
+    )
+    openSpy.mockRestore()
+  })
+
+  it('navigate ignores javascript: URLs', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: ORIGIN,
+        data: { type: 'quackback:navigate', url: 'javascript:alert(1)' },
+      })
+    )
+    expect(openSpy).not.toHaveBeenCalled()
+    openSpy.mockRestore()
+  })
+
+  it('destroy removes the iframe and launcher', () => {
+    stubIframe()
+    const sdk = createSDK()
+    sdk.dispatch('init', { instanceUrl: ORIGIN })
+    expect(document.querySelector('iframe[title="Feedback Widget"]')).not.toBeNull()
+    sdk.dispatch('destroy')
+    expect(document.querySelector('iframe[title="Feedback Widget"]')).toBeNull()
+    expect(document.querySelector('button[aria-label="Open feedback widget"]')).toBeNull()
+  })
+})

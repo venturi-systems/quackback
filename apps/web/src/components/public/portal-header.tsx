@@ -1,0 +1,427 @@
+import { useEffect, useState } from 'react'
+import { Link, useRouter, useRouterState, useRouteContext } from '@tanstack/react-router'
+import { useTheme } from 'next-themes'
+import { buildNavItems } from './portal-header-nav'
+import { useIntl, FormattedMessage } from 'react-intl'
+import { cn } from '@/lib/shared/utils'
+import { isTeamMember } from '@/lib/shared/roles'
+import { Button } from '@/components/ui/button'
+import { signOut, authClient } from '@/lib/client/auth-client'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Avatar } from '@/components/ui/avatar'
+import { UserStatsBar } from '@/components/shared/user-stats'
+import {
+  ArrowRightStartOnRectangleIcon,
+  Cog6ToothIcon,
+  ComputerDesktopIcon,
+  Bars3Icon,
+  MoonIcon,
+  ShieldCheckIcon,
+  SunIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/solid'
+import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
+import { hasAnyPortalAuthMethod, resolveSoleOidcProvider } from '@/components/auth/oauth-buttons'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getMyConversationsFn } from '@/lib/server/functions/chat'
+import { PORTAL_MY_CONVERSATIONS_QUERY_KEY } from '@/lib/client/queries/portal-support'
+import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
+import { NotificationBell } from '@/components/notifications'
+
+interface PortalHeaderProps {
+  orgName: string
+  orgLogo?: string | null
+  /** User's role in the organization (passed from server) */
+  userRole?: 'admin' | 'member' | 'user' | null
+  /** Initial user data for SSR (store values override these after hydration) */
+  initialUserData?: {
+    name: string | null
+    email: string | null
+    avatarUrl: string | null
+  }
+  /** Whether to show the theme toggle (hidden when admin forces a specific theme) */
+  showThemeToggle?: boolean
+}
+
+export function PortalHeader({
+  orgName,
+  orgLogo,
+  userRole,
+  initialUserData,
+  showThemeToggle = true,
+}: PortalHeaderProps) {
+  const intl = useIntl()
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const { session, settings, registeredAuthProviders } = useRouteContext({ from: '__root__' })
+
+  const helpCenterEnabled =
+    !!settings?.featureFlags?.helpCenter && !!settings?.helpCenterConfig?.enabled
+  const supportEnabled =
+    !!settings?.featureFlags?.supportInbox && !!settings?.portalConfig?.support?.enabled
+  const onHelpPages = pathname === '/hc' || pathname.startsWith('/hc/')
+  const navItems = buildNavItems({ helpCenterEnabled, supportEnabled })
+
+  // Hide Log in / Sign up when no portal sign-in surface is usable.
+  // Team members can still reach /admin/login directly. Counts any registered
+  // OIDC provider — including a routed-only one with no public button, which a
+  // domain user reaches by entering their email — not just the legacy `sso` id.
+  const portalAuthEnabled = hasAnyPortalAuthMethod(settings?.publicAuthConfig?.oauth ?? {}, {
+    registeredAuthProviders,
+    oidcProviders: settings?.publicPortalConfig?.oidcProviders,
+  })
+
+  // When the ONLY sign-in method is a single OIDC provider, every sign-in goes
+  // through it — so "Log in" / "Sign up" redirect straight to the IdP and skip
+  // the email-entry dialog entirely.
+  const soleOidcProviderId = resolveSoleOidcProvider(
+    registeredAuthProviders,
+    settings?.publicAuthConfig?.oauth ?? {}
+  )
+
+  const authPopover = useAuthPopoverSafe()
+  const openAuthPopover = authPopover?.openAuthPopover
+  const { theme, setTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  // Avoid hydration mismatch for theme toggle
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [pathname])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [mobileNavOpen])
+
+  // Listen for auth success to refetch session and role via router invalidation
+  useAuthBroadcast({
+    onSuccess: () => {
+      // Invalidate user-scoped queries so reaction highlights and vote data refresh
+      queryClient.invalidateQueries({ queryKey: ['portal', 'post'] })
+      queryClient.invalidateQueries({ queryKey: ['votedPosts'] })
+      // Refetch loaders (includes session and userRole) for the new session.
+      void router.invalidate()
+    },
+  })
+
+  // Get user info from session (anonymous sessions don't count as logged in)
+  const user = session?.user
+  const isLoggedIn = !!user && user.principalType !== 'anonymous'
+
+  // Unread count for the Support tab badge — one light query, shared with the
+  // Support pages via the query key. Skipped entirely when signed out.
+  const myConversationsQuery = useQuery({
+    queryKey: PORTAL_MY_CONVERSATIONS_QUERY_KEY,
+    queryFn: () => getMyConversationsFn(),
+    enabled: supportEnabled && isLoggedIn,
+    staleTime: 30_000,
+  })
+  const supportUnreadTotal = (myConversationsQuery.data?.conversations ?? []).reduce(
+    (sum, c) => sum + (c.unreadCount ?? 0),
+    0
+  )
+
+  // Use initialUserData (which includes properly fetched avatar from blob storage)
+  // falling back to session data
+  const name = initialUserData?.name ?? user?.name ?? null
+  const email = initialUserData?.email ?? user?.email ?? null
+  const avatarUrl = initialUserData?.avatarUrl ?? user?.image ?? null
+
+  // Team members (admin, member) can access admin dashboard
+  const canAccessAdmin = isLoggedIn && isTeamMember(userRole)
+
+  // Skip the sign-in dialog for a single-IdP workspace: go straight to the
+  // OIDC provider (same redirect the dialog's "Continue" path uses), returning
+  // to the current page afterwards.
+  const redirectToSoleProvider = () => {
+    if (!soleOidcProviderId) return
+    void authClient.signIn.oauth2({ providerId: soleOidcProviderId, callbackURL: pathname })
+  }
+
+  const handleSignOut = async () => {
+    await signOut()
+    // Clear user-scoped caches so stale reaction/vote highlights don't persist
+    queryClient.invalidateQueries({ queryKey: ['portal', 'post'] })
+    queryClient.invalidateQueries({ queryKey: ['votedPosts'] })
+    router.invalidate() // Refetch session
+    router.navigate({ to: '/' })
+  }
+
+  // Navigation component
+  const Navigation = ({ mobile = false }: { mobile?: boolean }) => (
+    <nav
+      aria-label={mobile ? 'Mobile portal navigation' : 'Portal navigation'}
+      className={cn(
+        'portal-nav gap-1',
+        mobile ? 'flex flex-col py-2' : 'flex items-center whitespace-nowrap'
+      )}
+    >
+      {navItems.map((item) => {
+        const isActive =
+          item.to === '/'
+            ? pathname === '/' || /^\/[^/]+\/posts\//.test(pathname)
+            : item.to === '/hc'
+              ? onHelpPages
+              : pathname.startsWith(item.to)
+
+        return (
+          <Link
+            key={item.to}
+            to={item.to}
+            className={cn(
+              'portal-nav__item px-3 py-2 text-sm font-medium transition-colors [border-radius:calc(var(--radius)*0.8)]',
+              mobile && 'flex min-h-11 items-center',
+              isActive
+                ? 'portal-nav__item--active bg-[var(--nav-active-background)] text-[var(--nav-active-foreground)]'
+                : 'text-[var(--nav-inactive-color)] hover:text-[var(--nav-active-foreground)] hover:bg-[var(--nav-active-background)]/50'
+            )}
+          >
+            {intl.formatMessage({ id: item.messageId, defaultMessage: item.defaultMessage })}
+            {item.to === '/support' && supportUnreadTotal > 0 && (
+              <span
+                className="ms-1.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-[18px] text-primary-foreground"
+                aria-label={intl.formatMessage(
+                  {
+                    id: 'portal.support.unreadBadge',
+                    defaultMessage: '{count} unread',
+                  },
+                  { count: supportUnreadTotal }
+                )}
+              >
+                {supportUnreadTotal > 99 ? '99+' : supportUnreadTotal}
+              </span>
+            )}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+
+  // Compact theme toggle dropdown for the header
+  const ThemeToggle = () => {
+    if (!showThemeToggle || !mounted) return null
+
+    const themeOptions = [
+      {
+        value: 'system',
+        label: intl.formatMessage({ id: 'portal.header.theme.system', defaultMessage: 'System' }),
+        icon: ComputerDesktopIcon,
+      },
+      {
+        value: 'light',
+        label: intl.formatMessage({ id: 'portal.header.theme.light', defaultMessage: 'Light' }),
+        icon: SunIcon,
+      },
+      {
+        value: 'dark',
+        label: intl.formatMessage({ id: 'portal.header.theme.dark', defaultMessage: 'Dark' }),
+        icon: MoonIcon,
+      },
+    ] as const
+
+    const currentTheme = themeOptions.find((t) => t.value === theme) ?? themeOptions[0]
+    const CurrentIcon = currentTheme.icon
+
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-11 w-11">
+            <CurrentIcon className="h-4 w-4" />
+            <span className="sr-only">
+              {intl.formatMessage({
+                id: 'portal.header.theme.toggleLabel',
+                defaultMessage: 'Toggle theme',
+              })}
+            </span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {themeOptions.map((t) => (
+            <DropdownMenuItem
+              key={t.value}
+              onClick={() => setTheme(t.value)}
+              className={cn(theme === t.value && 'bg-accent')}
+            >
+              <t.icon className="me-2 h-4 w-4" />
+              {t.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
+  // Auth/admin buttons component (reused in both layouts)
+  const AuthButtons = () => (
+    <div className="flex items-center">
+      {/* Theme Toggle (when admin allows user choice) */}
+      <ThemeToggle />
+
+      {/* Admin Button (visible for team members) */}
+      {canAccessAdmin && (
+        <Button variant="outline" size="sm" asChild className="ms-1 me-2 min-h-11">
+          <Link to="/admin">
+            <ShieldCheckIcon className="me-2 h-4 w-4" />
+            <FormattedMessage id="portal.header.auth.admin" defaultMessage="Admin" />
+          </Link>
+        </Button>
+      )}
+
+      {/* Notification Bell (logged in users only) */}
+      {isLoggedIn && <NotificationBell popoverSide="bottom" className="me-1" />}
+
+      {/* Auth Buttons */}
+      {isLoggedIn ? (
+        // Logged-in user - show user dropdown
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              className="relative h-11 w-11 rounded-full"
+              aria-label={intl.formatMessage({
+                id: 'portal.header.auth.userMenu',
+                defaultMessage: 'User menu',
+              })}
+            >
+              <Avatar className="h-9 w-9" src={avatarUrl} name={name} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="font-normal">
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-medium">{name}</p>
+                <p className="text-xs text-muted-foreground">{email}</p>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <div className="px-2 py-2">
+              <UserStatsBar />
+            </div>
+            <DropdownMenuSeparator />
+            {canAccessAdmin && (
+              <DropdownMenuItem asChild>
+                <Link to="/admin">
+                  <ShieldCheckIcon className="me-2 h-4 w-4" />
+                  <FormattedMessage id="portal.header.auth.admin" defaultMessage="Admin" />
+                </Link>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem asChild>
+              <Link to="/settings">
+                <Cog6ToothIcon className="me-2 h-4 w-4" />
+                <FormattedMessage id="portal.header.auth.settings" defaultMessage="Settings" />
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleSignOut}>
+              <ArrowRightStartOnRectangleIcon className="me-2 h-4 w-4" />
+              <FormattedMessage id="portal.header.auth.signOut" defaultMessage="Sign out" />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : openAuthPopover && portalAuthEnabled ? (
+        // Anonymous user with auth popover available - show login/signup buttons
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-11"
+            onClick={() =>
+              soleOidcProviderId ? redirectToSoleProvider() : openAuthPopover({ mode: 'login' })
+            }
+          >
+            <FormattedMessage id="portal.header.auth.logIn" defaultMessage="Log in" />
+          </Button>
+          <Button
+            size="sm"
+            className="min-h-11"
+            onClick={() =>
+              soleOidcProviderId ? redirectToSoleProvider() : openAuthPopover({ mode: 'signup' })
+            }
+          >
+            <FormattedMessage id="portal.header.auth.signUp" defaultMessage="Sign up" />
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+
+  // Two-row layout: Logo + Auth on top, Navigation below
+  return (
+    <header className="portal-header w-full py-2 border-b border-[var(--header-border)] bg-[var(--header-background)] shadow-sm">
+      {/* Row 1: Logo + Name + Auth */}
+      <div>
+        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6">
+          <div className="flex h-12 items-center justify-between">
+            <Link
+              to="/"
+              className="portal-header__logo flex min-h-11 items-center gap-2"
+              aria-label={`${orgName} feedback home`}
+            >
+              {orgLogo ? (
+                <img
+                  src={orgLogo}
+                  alt={orgName}
+                  className="h-8 w-8 [border-radius:calc(var(--radius)*0.6)]"
+                />
+              ) : (
+                <div className="h-8 w-8 [border-radius:calc(var(--radius)*0.6)] bg-primary flex items-center justify-center text-primary-foreground font-semibold">
+                  {orgName.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="portal-header__name font-semibold max-w-[18ch] line-clamp-2 text-[var(--header-foreground)]">
+                {orgName}
+              </span>
+            </Link>
+            <AuthButtons />
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: controlled mobile menu and full desktop navigation. */}
+      <div className="mt-2 max-w-6xl mx-auto w-full px-4 sm:px-6">
+        <Button
+          type="button"
+          variant="ghost"
+          shape="default"
+          className="min-h-11 w-full justify-between sm:hidden"
+          aria-expanded={mobileNavOpen}
+          aria-controls="portal-mobile-navigation"
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <FormattedMessage id="portal.header.menu" defaultMessage="Menu" />
+          {mobileNavOpen ? (
+            <XMarkIcon className="h-5 w-5" aria-hidden="true" />
+          ) : (
+            <Bars3Icon className="h-5 w-5" aria-hidden="true" />
+          )}
+        </Button>
+        {mobileNavOpen && (
+          <div id="portal-mobile-navigation" className="sm:hidden">
+            <Navigation mobile />
+          </div>
+        )}
+        <div className="hidden sm:block">
+          <Navigation />
+        </div>
+      </div>
+    </header>
+  )
+}

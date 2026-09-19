@@ -1,0 +1,26 @@
+import { createFileRoute, Navigate, Outlet } from '@tanstack/react-router'
+import { z } from 'zod'
+import type { FeatureFlags } from '@/lib/shared/types/settings'
+
+const searchSchema = z.object({
+  status: z.enum(['draft', 'published']).optional(),
+  category: z.string().optional(),
+  search: z.string().optional(),
+  sort: z.enum(['newest', 'oldest']).optional(),
+  deleted: z.boolean().optional(),
+})
+
+export const Route = createFileRoute('/admin/help-center')({
+  validateSearch: searchSchema,
+  component: HelpCenterLayout,
+})
+
+function HelpCenterLayout() {
+  const { settings } = Route.useRouteContext()
+  const flags = settings?.featureFlags as FeatureFlags | undefined
+  if (!flags?.helpCenter) {
+    return <Navigate to="/admin/feedback" />
+  }
+
+  return <Outlet />
+}

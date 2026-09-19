@@ -1,0 +1,344 @@
+# Dependabot version updates for the quackback monorepo (bun workspace).
+# The workspace entry uses the `bun` ecosystem so each update carries the
+# matching `bun.lock`; Docker covers the two real image directories;
+# github-actions covers SHA-pinned workflow actions.
+
+version: 2
+updates:
+  # 2026-08-27: this entry was `package-ecosystem: "npm"` and every pull request
+  # it opened failed CI at the first step. `portability-gate` is the repository's
+  # ONLY required status context and it runs `bun install --frozen-lockfile`
+  # (.github/workflows/ci.yml), while `packageManager` is pinned to `bun@1.3.7`.
+  # The npm ecosystem edits `package.json` and `package-lock.json` and never
+  # writes `bun.lock`, so the install aborts before lint, build, typecheck or
+  # tests ever run:
+  #   error: lockfile had changes, but lockfile is frozen
+  # Measured on run 32996099490 (#56, bullmq) and reproduced identically on #54
+  # (ioredis) and #55 (@tanstack/react-table) -- three unrelated bumps, one
+  # shared cause, 100% of npm dependency pull requests blocked.
+  #
+  # The header of this file used to assert that "the bun lockfile is regenerated
+  # by CI/humans on merge". No workflow does that and no required check would
+  # pass long enough to reach a merge, so it described a process that was never
+  # built. The `bun` ecosystem updates `bun.lock` alongside the manifest, which
+  # makes the frozen-lockfile check pass on the pull request itself rather than
+  # depending on a repair step that does not exist.
+  #
+  # `directory: "/"`, not the `directories: ["/**"]` glob the npm entry carried:
+  # in a bun workspace the ROOT manifest resolves its members and the single
+  # root `bun.lock` is the only lockfile in the tree, so the root entry already
+  # covers every workspace package. That is the same resolution fact #57 relied
+  # on to collapse the duplicate npm pull requests, applied to the one lockfile
+  # that actually exists.
+  - package-ecosystem: 'bun'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 3
+    groups:
+      # Minor and patch only. A grouped PR is all-or-nothing, so ONE breaking
+      # major takes down every other update riding with it -- #36 lost 22
+      # updates to a single typescript major, and the 2026-08-26 group lost 4
+      # to `@tanstack/react-table` 8 -> 9 (removed the `useReactTable` export)
+      # and `bullmq` 5 -> 6 arriving together.
+      #
+      # Majors still flow, as their own individual PRs, where the migration
+      # they need can be written and reviewed on its own. That is the whole
+      # difference: a major is a code change, and a group is for updates that
+      # are not.
+      workspace-bun:
+        patterns:
+          - '*'
+        # 2026-08-27: a MINOR can be a code change too, so "major" was the wrong
+        # line to draw. `better-auth` 1.6 -> 1.7 removed `genericOAuthClient`
+        # from the published client surface -- verified against the 1.7.1
+        # tarball, where the string does not appear anywhere under `dist/`
+        # (the SERVER `genericOAuth` plugin survives at
+        # `better-auth/plugins/generic-oauth`; only the client export went).
+        # `apps/web/src/lib/server/auth/client.ts:5` imports it, so
+        # `bun run build` dies with
+        #   [MISSING_EXPORT] "genericOAuthClient" is not exported by
+        #   "better-auth/dist/client/plugins/index.mjs"
+        # and, because the group is all-or-nothing, took every other member of
+        # #63 down with it (runs 33039904766, 33046481463).
+        #
+        # Excluding it applies this block's own stated rule -- a migration
+        # belongs in its own reviewable pull request -- to the case where the
+        # migration arrives in a minor. The remaining members now land.
+        #
+        # 2026-08-27, the very next cycle: with better-auth out, the group grew
+        # to 60 updates, built and typechecked cleanly, and reached
+        # `bun run test --run` -- where exactly 2 of 5114 tests failed
+        # (run 33050508738), both `expected null not to be null` in DOM
+        # sanitization:
+        #   apps/web/src/components/public/__tests__/comment-content.test.tsx
+        #   apps/web/src/components/ui/__tests__/rich-text-editor.test.tsx
+        #
+        # ⛔⛔ THAT WAS FIRST BLAMED ON THE TEST ENVIRONMENT, AND THAT WAS WRONG.
+        # The group also carried `happy-dom` 20.9.0 -> 20.11.6 and `vitest`
+        # 4.1.4 -> 4.1.11, so both were excluded on the theory that a bump
+        # changing how tests EXECUTE re-decides the result for every other
+        # member. Dependabot then rebuilt the group as #71 WITHOUT either of
+        # them -- and the same two tests failed identically (run 33052008593).
+        # The hypothesis was refuted, so the exclusion is reverted with it:
+        # keeping it on a rationale the evidence killed would be rationalising.
+        #
+        # ⛔⛔ CORRECTED 2026-08-27. An earlier revision of this block concluded
+        # that `dompurify` 3.4.0 -> 3.4.14 "strips the editor's custom embed
+        # attributes" and that fixing it meant "updating the sanitiser's
+        # allowed-attribute config, an application change with its own review".
+        # Both halves are WRONG, and acting on them held an XSS sanitiser back
+        # from security updates on a false rationale.
+        #
+        # 3.4.14 does not strip those attributes. Under `happy-dom` it strips
+        # EVERY ELEMENT, with no config at all -- measured directly:
+        #   dompurify 3.4.0  + happy-dom -> '<div class="c">hi</div>'   (ok)
+        #   dompurify 3.4.0  + jsdom     -> '<div class="c">hi</div>'   (ok)
+        #   dompurify 3.4.14 + jsdom     -> '<div class="c">hi</div>'   (ok)
+        #   dompurify 3.4.14 + happy-dom -> 'hi'                        (element gone)
+        # `<p>hi</p>` degrades to `hi` the same way, and `DOMPurify.removed`
+        # reports 2 -- so it is an active removal decision, not a fallback.
+        # `isSupported` stays TRUE throughout, which is why it fails silently.
+        # Changing ALLOWED_ATTR / ALLOW_DATA_ATTR / ADD_ATTR does not move it:
+        # every variant still returns ''. The app's allow-list was never at
+        # fault -- it already lists `data-quackback-embed`, `data-kind`, `data-id`.
+        #
+        # ⭐ So this was a TEST-ENVIRONMENT incompatibility, not an application
+        # defect. Production sanitises in a real browser
+        # (`typeof window !== 'undefined' ? DOMPurify.sanitize(...)` in
+        # `rich-text-editor.tsx`), where 3.4.14 behaves correctly.
+        #
+        # Fixed at root by running the two DOM-sanitisation suites under `jsdom`
+        # instead of `happy-dom` -- both files already carried an explicit
+        # `// @vitest-environment` docblock, so it is one line each. 28/28 tests
+        # pass on 3.4.14 under jsdom. dompurify therefore rejoins the group and
+        # its security patches flow again.
+        #
+        # 2026-09-07: `zod` joins for the same reason, and the lockfile proves
+        # it rather than the error message. On `main` there is exactly ONE zod
+        # -- `"zod": ["zod@4.4.3", ...]` -- and no nested copy under the MCP
+        # SDK (`grep -c 'modelcontextprotocol/sdk/zod' bun.lock` returns 0).
+        # #101 bumped the root to 4.5.4 and bun.lock GAINED a second instance:
+        #   "@modelcontextprotocol/sdk/zod": ["zod@4.4.3", ...]   (line 2417)
+        # So the app builds schemas with zod 4.5.4 while
+        # `@modelcontextprotocol/sdk` stays typed against 4.4.3, and every
+        # `server.tool(...)` registration in
+        # apps/web/src/lib/server/mcp/tools.ts fails to typecheck:
+        #   error TS2345: Argument of type '{ ... z.ZodString ... }' is not
+        #   assignable to parameter of type 'ZodRawShapeCompat'.
+        # ~30 call sites, one cause: two structurally distinct zod declarations.
+        #
+        # This is not "zod 4.5 is broken". `@modelcontextprotocol/sdk@1.30.0` is
+        # already the latest release and its declared range is
+        # `zod: ^3.25 || ^4.0`, which admits 4.5.4 -- there is no newer SDK to
+        # bump to, and the dedupe still did not happen. Re-uniting the two
+        # instances is a resolution/override change with its own blast radius,
+        # which is precisely the "migration belongs in its own reviewable pull
+        # request" rule this block already applies to better-auth.
+        #
+        # LIFT THIS once a group PR's bun.lock shows no
+        # `@modelcontextprotocol/sdk/zod` entry -- that single line is the whole
+        # acceptance test.
+        exclude-patterns:
+          - 'better-auth'
+          - '@better-auth/*'
+          - 'zod'
+        update-types:
+          - 'minor'
+          - 'patch'
+    commit-message:
+      prefix: 'fix(deps)'
+    ignore:
+      # @typescript-eslint 8.x cannot parse TypeScript 7. Its published peer
+      # range is `typescript: ">=4.8.4 <6.1.0"` as of 8.68.0, and on TS 7
+      # `bun run lint` does not report findings -- it CRASHES:
+      #   TypeError: Cannot read properties of undefined (reading 'Cjs')
+      #     at @typescript-eslint/typescript-estree@8.58.2/create-program/shared.js:59
+      # That took the whole workspace group down in #36 (22 updates) even
+      # after the lockfile was regenerated, because one member poisons the group.
+      #
+      # Minor and patch TypeScript updates still flow. LIFT THIS when
+      # `npm view typescript-eslint peerDependencies` shows a range admitting
+      # >=7 -- then let the group carry both in one PR.
+      - dependency-name: 'typescript'
+        update-types: ['version-update:semver-major']
+
+      # `vitest` 5 has no jest-dom matcher types to pair with, so every DOM
+      # assertion in the suite stops typechecking. #99 (4.1.11 -> 5.0.0) failed
+      # `Static analysis` with hundreds of:
+      #   error TS2339: Property 'toBeInTheDocument' does not exist on type
+      #   'Assertion<void, HTMLElement>'
+      # across the component test suites. The matchers still RUN -- this is a
+      # types-only break -- but `portability-gate`, the repository's only
+      # required context, fans in from that lane, so the PR can never merge.
+      #
+      # There is nothing to bump to. `@testing-library/jest-dom` publishes
+      # exactly 7.0.0 and 7.0.1 in its 7.x line, 7.0.1 is `latest`, and 7.0.1 is
+      # already what this repo installs. Its vitest entry point
+      # (`node_modules/@testing-library/jest-dom/types/vitest.d.ts`) augments
+      # `declare module 'vitest' { interface Assertion<T = any> ... }`, written
+      # against vitest 4's single-parameter interface; vitest 5 reports
+      # `Assertion<void, HTMLElement>`, so the augmentation no longer lands on
+      # the interface the assertions actually use.
+      #
+      # Minor and patch vitest updates still flow -- 4.1.x keeps arriving.
+      # LIFT THIS when `npm view @testing-library/jest-dom versions` shows a
+      # release advertising vitest 5 support, then let the major land in its own
+      # PR with the setup migration it needs.
+      - dependency-name: 'vitest'
+        update-types: ['version-update:semver-major']
+
+      # `@tanstack/react-table` 9 removed `getCoreRowModel`,
+      # `getFilteredRowModel` and `useReactTable` from its published surface;
+      # `apps/web/src/routes/admin/settings.team.tsx:2` imports all three, so
+      # `bun run build` fails with three [MISSING_EXPORT] errors (#60, runs
+      # 33039911356 and 33046176941). Dependabot reopened that pull request on
+      # every weekly cycle and it failed every time, so the recurrence -- not
+      # the bump -- is what this entry stops.
+      #
+      # LIFT THIS together with the v8 -> v9 table migration in
+      # `settings.team.tsx`; minor and patch updates on the 8.x line still flow.
+      - dependency-name: '@tanstack/react-table'
+        update-types: ['version-update:semver-major']
+
+      # `ioredis` 6 fails `bun run --filter @quackback/web typecheck`, the step
+      # after the build in `portability-gate` (#61, run 33039927464). Same
+      # recurrence shape as above: a major that needs a typed migration, retried
+      # weekly forever.
+      #
+      # LIFT THIS when the ioredis 6 typings are adopted; 5.x minors and patches
+      # (including security patches) still flow.
+      - dependency-name: 'ioredis'
+        update-types: ['version-update:semver-major']
+
+      # `bullmq` 6 removed the repeatable-job API the queue layer is written
+      # against. Measured on #66, run 33050659069, `bun run --filter
+      # @quackback/web typecheck`:
+      #   TS2339 Property 'getRepeatableJobs' does not exist on type 'Queue<...>'
+      #   TS2339 Property 'removeRepeatableByKey' does not exist on type 'Queue<...>'
+      #   TS2353 'repeat' does not exist in type 'JobsOptions'
+      # The 2026-08-26 group had already lost updates to this same major; it now
+      # arrives as its own pull request and fails there instead, weekly.
+      #
+      # LIFT THIS with the repeatable-job migration to bullmq 6's Job Scheduler
+      # API; 5.x minors and patches still flow.
+      - dependency-name: 'bullmq'
+        update-types: ['version-update:semver-major']
+
+      # ⚠ SECURITY-RELEVANT HOLD, deliberately narrow. `better-auth` minors are
+      # held ONLY because 1.7 dropped the `genericOAuthClient` export the app
+      # imports (see the group exclusion above). PATCH updates on the pinned
+      # 1.6.x line are NOT ignored, so security fixes for the line in use still
+      # arrive. Without this, the group exclusion alone would just move the same
+      # failing update into its own weekly pull request.
+      #
+      # LIFT THIS as part of the `apps/web/src/lib/server/auth/client.ts`
+      # migration off `genericOAuthClient` -- this is the one entry here that
+      # should not be left standing.
+      - dependency-name: 'better-auth'
+        update-types: ['version-update:semver-minor']
+
+      # The SAME hold, for the package that carries the same migration. The
+      # group exclusion above covers `@better-auth/*`, but an excluded member
+      # is not an ignored one: it simply arrives as its own pull request. #68
+      # (`@better-auth/oauth-provider` 1.6.16 -> 1.7.1) is that pull request,
+      # and it cannot pass while `better-auth` is held on 1.6.x, because 1.7.1
+      # declares `better-auth: "^1.7.1"` as a PEER dependency:
+      #   npm view @better-auth/oauth-provider@1.7.1 peerDependencies
+      #   { 'better-auth': '^1.7.1', 'better-call': '1.4.0',
+      #     '@better-auth/core': '^1.7.1', '@better-auth/utils': '0.4.2',
+      #     '@better-fetch/fetch': '1.3.1' }
+      # `^1.6.30` does not satisfy `^1.7.1`, so the provider resolves against
+      # the held 1.6.30 and `bun run build` dies with 23 [MISSING_EXPORT]
+      # errors -- `redeemDeviceCode`, `createDpopReplayStore`,
+      # `enforceDpopBinding`, `getConfirmationJkt`, `getDpopJktFromPayload`
+      # and more, none of which exist in 1.6.30 (run 33059952581).
+      #
+      # ⭐ Measured 2026-08-27 by bumping BOTH in lockstep locally: all 23
+      # errors clear and exactly ONE remains -- the `genericOAuthClient` import
+      # at `apps/web/src/lib/server/auth/client.ts:5`. So this bump is not
+      # independently landable; it is the second half of the better-auth 1.7
+      # migration and belongs in that pull request, not in a weekly retry.
+      #
+      # ⛔ Do not "fix" this by bumping `better-auth` alone. `genericOAuthClient()`
+      # supplies `authClient.signIn.oauth2(...)`, which has four live call sites
+      # in the portal sign-in path --
+      #   apps/web/src/components/auth/oauth-buttons.tsx:20
+      #   apps/web/src/components/auth/portal-auth-form-inline.tsx:292, :845
+      #   apps/web/src/components/public/portal-header.tsx:156
+      # -- so dropping the plugin breaks Custom OIDC/SSO sign-in on the live
+      # portal. That is why the two entries lift together, in the same pull
+      # request as the `apps/web/src/lib/server/auth/client.ts` migration.
+      #
+      # LIFT THIS with the `better-auth` entry above, in the same migration --
+      # they must move together or not at all. PATCH updates on 1.6.x still
+      # flow, so security fixes for the line in use are not held.
+      - dependency-name: '@better-auth/oauth-provider'
+        update-types: ['version-update:semver-minor']
+
+      # `react-day-picker` 10 changed `DayPickerProps`: the `initialFocus` prop
+      # the datetime picker passes no longer exists on it. Measured on #79, run
+      # 33067617377, step `Run bun run --filter @quackback/web typecheck`:
+      #   src/components/ui/datetime-picker.tsx(88,11): error TS2322: Type
+      #   '{ mode: "single"; selected: Date | undefined; onSelect: ...;
+      #     disabled: ...; initialFocus: true; }' is not assignable to type
+      #   'IntrinsicAttributes & DayPickerProps'.
+      # Same recurrence shape as the three majors above: a migration retried
+      # weekly forever. Majors are meant to arrive as their own pull request so
+      # the migration can be written -- but an unignored one that nobody has
+      # time to migrate is just a permanent red check.
+      #
+      # LIFT THIS with the `datetime-picker.tsx` v9 -> v10 migration; 9.x minors
+      # and patches still flow.
+      - dependency-name: 'react-day-picker'
+        update-types: ['version-update:semver-major']
+
+  # There is no Dockerfile at the repo root. Pointing this entry at "/" made every
+  # weekly run fail with `dependency_file_not_found: No Dockerfiles nor Kubernetes
+  # YAML found in /`, so the two base images below were never scanned for updates
+  # at all. List the directories that actually hold a Dockerfile.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 2
+    groups:
+      workflow-actions:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: 'ci(deps)'
+
+  # 2026-08-26: one globbed entry per ecosystem replaced the previous narrow
+  # per-directory entries. Dependabot rejects overlapping (ecosystem, directory)
+  # pairs, and a glob was also meant to cover module dirs added later without
+  # maintenance.
+  #
+  # ⛔ 2026-08-27: THE GLOB NEVER EXPANDED. Every docker run since aborted before
+  # fetching a single file:
+  #   ERROR <job_...> Error during file fetching; aborting: /** not found
+  #   dependency_file_not_found | {"message": "/** not found"}
+  # measured on runs 33051577009 and 33050033... -- so the two base images have
+  # NOT been scanned for updates at all since the glob landed. That is the exact
+  # outcome the comment above was written to fix, reintroduced in a new form: the
+  # first version failed on `directory: "/"` because no Dockerfile sits at the
+  # repo root, and this one fails on a pattern that matches nothing.
+  #
+  # ⭐ Back to the two directories that actually hold a Dockerfile, which is what
+  # that earlier fix concluded. `git ls-tree -r --name-only origin/main` shows
+  # exactly two: apps/web/Dockerfile and docker/postgres/Dockerfile. A directory
+  # added later needs a line here -- that maintenance cost is real, and it is
+  # still cheaper than an ecosystem that silently scans nothing.
+  - package-ecosystem: 'docker'
+    directories:
+      - '/apps/web'
+      - '/docker/postgres'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 2
+    groups:
+      docker-all:
+        patterns:
+          - '*'
+    commit-message:
+      prefix: 'fix(deps)'

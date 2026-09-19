@@ -1,0 +1,303 @@
+/**
+ * TypeID type definitions
+ *
+ * Uses template literal types for compile-time prefix validation
+ * while maintaining runtime string compatibility.
+ */
+
+import type { IdPrefix } from './prefixes'
+
+/**
+ * TypeID string type with embedded prefix
+ *
+ * Format: {prefix}_{base32_suffix}
+ * The base32 suffix is always 26 characters (UUIDv7 encoded)
+ *
+ * @example
+ * type PostTypeId = TypeId<'post'> // 'post_${string}'
+ */
+export type TypeId<P extends IdPrefix> = `${P}_${string}`
+
+// ============================================
+// Application Entity IDs
+// ============================================
+
+/** Feedback post ID - e.g., post_01h455vb4pex5vsknk084sn02q */
+export type PostId = TypeId<'post'>
+
+/** Board ID - e.g., board_01h455vb4pex5vsknk084sn02q */
+export type BoardId = TypeId<'board'>
+
+/** Comment ID - e.g., comment_01h455vb4pex5vsknk084sn02q */
+export type CommentId = TypeId<'comment'>
+
+/** Vote ID - e.g., vote_01h455vb4pex5vsknk084sn02q */
+export type VoteId = TypeId<'vote'>
+
+/** Tag ID - e.g., tag_01h455vb4pex5vsknk084sn02q */
+export type TagId = TypeId<'tag'>
+
+/** Post status ID - e.g., status_01h455vb4pex5vsknk084sn02q */
+export type StatusId = TypeId<'status'>
+
+/** Comment reaction ID - e.g., reaction_01h455vb4pex5vsknk084sn02q */
+export type ReactionId = TypeId<'reaction'>
+
+/** Roadmap ID - e.g., roadmap_01h455vb4pex5vsknk084sn02q */
+export type RoadmapId = TypeId<'roadmap'>
+
+/** Changelog entry ID - e.g., changelog_01h455vb4pex5vsknk084sn02q */
+export type ChangelogId = TypeId<'changelog'>
+
+/** Support-inbox conversation ID - e.g., conversation_01h455vb4pex5vsknk084sn02q */
+export type ConversationId = TypeId<'conversation'>
+
+/** Support-inbox message ID - e.g., chat_msg_01h455vb4pex5vsknk084sn02q */
+export type ChatMessageId = TypeId<'chat_msg'>
+
+/** Conversation tag ("label") ID - e.g., chat_tag_01h455vb4pex5vsknk084sn02q */
+export type ChatTagId = TypeId<'chat_tag'>
+
+/** Chat-message @-mention ID - e.g., chat_msg_mention_01h455vb4pex5vsknk084sn02q */
+export type ChatMessageMentionId = TypeId<'chat_msg_mention'>
+
+/** Integration ID - e.g., integration_01h455vb4pex5vsknk084sn02q */
+export type IntegrationId = TypeId<'integration'>
+
+/** Platform credential ID - e.g., platform_cred_01h455vb4pex5vsknk084sn02q */
+export type PlatformCredentialId = TypeId<'platform_cred'>
+
+/** Event mapping ID - e.g., event_mapping_01h455vb4pex5vsknk084sn02q */
+export type EventMappingId = TypeId<'event_mapping'>
+
+/** Linked entity ID - e.g., linked_entity_01h455vb4pex5vsknk084sn02q */
+export type LinkedEntityId = TypeId<'linked_entity'>
+
+/** Sync log ID - e.g., sync_log_01h455vb4pex5vsknk084sn02q */
+export type SyncLogId = TypeId<'sync_log'>
+
+/** Slack channel monitor ID - e.g., slack_monitor_01h455vb4pex5vsknk084sn02q */
+export type SlackMonitorId = TypeId<'slack_monitor'>
+
+/** Post subscription ID - e.g., post_sub_01h455vb4pex5vsknk084sn02q */
+export type PostSubscriptionId = TypeId<'post_sub'>
+
+/** Notification preference ID - e.g., notif_pref_01h455vb4pex5vsknk084sn02q */
+export type NotifPrefId = TypeId<'notif_pref'>
+
+/** Unsubscribe token ID - e.g., unsub_token_01h455vb4pex5vsknk084sn02q */
+export type UnsubTokenId = TypeId<'unsub_token'>
+
+/** In-app notification ID - e.g., notification_01h455vb4pex5vsknk084sn02q */
+export type NotificationId = TypeId<'notification'>
+
+export type PushDeviceId = TypeId<'push_device'>
+
+/** Post edit history ID - e.g., post_edit_01h455vb4pex5vsknk084sn02q */
+export type PostEditId = TypeId<'post_edit'>
+
+/** Comment edit history ID - e.g., comment_edit_01h455vb4pex5vsknk084sn02q */
+export type CommentEditId = TypeId<'comment_edit'>
+
+/** Post mention ID - e.g., post_mention_01h455vb4pex5vsknk084sn02q */
+export type PostMentionId = TypeId<'post_mention'>
+
+/** Internal staff note ID - e.g., note_01h455vb4pex5vsknk084sn02q */
+export type NoteId = TypeId<'note'>
+
+/** Segment ID - e.g., segment_01h455vb4pex5vsknk084sn02q */
+export type SegmentId = TypeId<'segment'>
+
+/** User attribute definition ID - e.g., user_attr_01h455vb4pex5vsknk084sn02q */
+export type UserAttributeId = TypeId<'user_attr'>
+
+// ============================================
+// AI Entity IDs
+// ============================================
+
+/** Post sentiment analysis ID - e.g., sentiment_01h455vb4pex5vsknk084sn02q */
+export type SentimentId = TypeId<'sentiment'>
+
+/** AI usage log entry ID - e.g., ailog_01h455vb4pex5vsknk084sn02q */
+export type AiUsageLogId = TypeId<'ailog'>
+
+/** Pipeline audit log entry ID - e.g., plog_01h455vb4pex5vsknk084sn02q */
+export type PipelineLogId = TypeId<'plog'>
+
+/** Post activity log ID - e.g., activity_01h455vb4pex5vsknk084sn02q */
+export type ActivityId = TypeId<'activity'>
+
+// ============================================
+// Feedback Aggregation Entity IDs
+// ============================================
+
+/** Feedback source ID - e.g., feedback_source_01h455vb4pex5vsknk084sn02q */
+export type FeedbackSourceId = TypeId<'feedback_source'>
+
+/** Raw feedback item ID - e.g., raw_feedback_01h455vb4pex5vsknk084sn02q */
+export type RawFeedbackItemId = TypeId<'raw_feedback'>
+
+/** Feedback signal ID - e.g., feedback_signal_01h455vb4pex5vsknk084sn02q */
+export type FeedbackSignalId = TypeId<'feedback_signal'>
+
+/** Feedback suggestion ID - e.g., feedback_suggestion_01h455vb4pex5vsknk084sn02q */
+export type FeedbackSuggestionId = TypeId<'feedback_suggestion'>
+
+/** External user mapping ID - e.g., user_mapping_01h455vb4pex5vsknk084sn02q */
+export type ExternalUserMappingId = TypeId<'user_mapping'>
+
+/** Merge suggestion ID - e.g., merge_sug_01h455vb4pex5vsknk084sn02q */
+export type MergeSuggestionId = TypeId<'merge_sug'>
+
+// ============================================
+// Help Center Entity IDs
+// ============================================
+
+/** Help center category ID - e.g., category_01h455vb4pex5vsknk084sn02q */
+export type HelpCenterCategoryId = TypeId<'category'>
+
+/** Help center article ID - e.g., article_01h455vb4pex5vsknk084sn02q */
+export type HelpCenterArticleId = TypeId<'article'>
+
+/** Article feedback ID - e.g., article_feedback_01h455vb4pex5vsknk084sn02q */
+export type HelpCenterFeedbackId = TypeId<'article_feedback'>
+
+// ============================================
+// Auth Entity IDs (Better-auth)
+// ============================================
+
+/** Workspace ID - e.g., workspace_01h455vb4pex5vsknk084sn02q */
+export type WorkspaceId = TypeId<'workspace'>
+
+/** User ID - e.g., user_01h455vb4pex5vsknk084sn02q */
+export type UserId = TypeId<'user'>
+
+/** Principal ID - e.g., principal_01h455vb4pex5vsknk084sn02q */
+export type PrincipalId = TypeId<'principal'>
+
+/** Session ID - e.g., session_01h455vb4pex5vsknk084sn02q */
+export type SessionId = TypeId<'session'>
+
+/** Account ID - e.g., account_01h455vb4pex5vsknk084sn02q */
+export type AccountId = TypeId<'account'>
+
+/** Invitation ID - e.g., invite_01h455vb4pex5vsknk084sn02q */
+export type InviteId = TypeId<'invite'>
+
+/** Verification ID - e.g., verification_01h455vb4pex5vsknk084sn02q */
+export type VerificationId = TypeId<'verification'>
+
+/** Domain ID - e.g., domain_01h455vb4pex5vsknk084sn02q */
+export type DomainId = TypeId<'domain'>
+
+/** Transfer token ID - e.g., transfer_token_01h455vb4pex5vsknk084sn02q */
+export type TransferTokenId = TypeId<'transfer_token'>
+
+/** Two-factor enrolment ID - e.g., two_factor_01h455vb4pex5vsknk084sn02q */
+export type TwoFactorId = TypeId<'two_factor'>
+
+/** Audit log entry ID - e.g., audit_01h455vb4pex5vsknk084sn02q */
+export type AuditLogId = TypeId<'audit'>
+
+/** SSO recovery code ID - e.g., rcode_01h455vb4pex5vsknk084sn02q */
+export type SsoRecoveryCodeId = TypeId<'rcode'>
+
+/** Identity provider ID - e.g., idp_01h455vb4pex5vsknk084sn02q */
+export type IdentityProviderId = TypeId<'idp'>
+
+/** API key ID - e.g., api_key_01h455vb4pex5vsknk084sn02q */
+export type ApiKeyId = TypeId<'api_key'>
+
+/** Webhook ID - e.g., webhook_01h455vb4pex5vsknk084sn02q */
+export type WebhookId = TypeId<'webhook'>
+
+// ============================================
+// Billing Entity IDs
+// ============================================
+
+/** Subscription ID - e.g., subscription_01h455vb4pex5vsknk084sn02q */
+export type SubscriptionId = TypeId<'subscription'>
+
+/** Invoice ID - e.g., invoice_01h455vb4pex5vsknk084sn02q */
+export type InvoiceId = TypeId<'invoice'>
+
+// ============================================
+// Type Utilities
+// ============================================
+
+/**
+ * Extract the prefix from a TypeId type
+ */
+export type ExtractPrefix<T extends string> = T extends `${infer P}_${string}` ? P : never
+
+/**
+ * Map from entity type to its TypeId type
+ */
+export interface EntityIdMap {
+  post: PostId
+  board: BoardId
+  comment: CommentId
+  vote: VoteId
+  tag: TagId
+  status: StatusId
+  reaction: ReactionId
+  post_edit: PostEditId
+  comment_edit: CommentEditId
+  post_mention: PostMentionId
+  note: NoteId
+  segment: SegmentId
+  user_attr: UserAttributeId
+  sentiment: SentimentId
+  ai_usage: AiUsageLogId
+  pipeline_log: PipelineLogId
+  activity: ActivityId
+  feedback_source: FeedbackSourceId
+  raw_feedback: RawFeedbackItemId
+  feedback_signal: FeedbackSignalId
+  feedback_suggestion: FeedbackSuggestionId
+
+  user_mapping: ExternalUserMappingId
+  merge_suggestion: MergeSuggestionId
+  roadmap: RoadmapId
+  changelog: ChangelogId
+  conversation: ConversationId
+  chat_message: ChatMessageId
+  chat_tag: ChatTagId
+  chat_message_mention: ChatMessageMentionId
+  integration: IntegrationId
+  platform_cred: PlatformCredentialId
+  event_mapping: EventMappingId
+  linked_entity: LinkedEntityId
+  sync_log: SyncLogId
+  slack_monitor: SlackMonitorId
+  post_subscription: PostSubscriptionId
+  notif_pref: NotifPrefId
+  unsub_token: UnsubTokenId
+  notification: NotificationId
+  push_device: PushDeviceId
+  workspace: WorkspaceId
+  user: UserId
+  principal: PrincipalId
+  session: SessionId
+  account: AccountId
+  invite: InviteId
+  verification: VerificationId
+  domain: DomainId
+  transfer_token: TransferTokenId
+  two_factor: TwoFactorId
+  audit_log: AuditLogId
+  sso_recovery_code: SsoRecoveryCodeId
+  identity_provider: IdentityProviderId
+  api_key: ApiKeyId
+  webhook: WebhookId
+  subscription: SubscriptionId
+  invoice: InvoiceId
+  category: HelpCenterCategoryId
+  article: HelpCenterArticleId
+  article_feedback: HelpCenterFeedbackId
+}
+
+/**
+ * Any TypeId (union of all entity ID types)
+ */
+export type AnyTypeId = EntityIdMap[keyof EntityIdMap]

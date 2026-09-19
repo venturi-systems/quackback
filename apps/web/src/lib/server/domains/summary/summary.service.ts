@@ -1,0 +1,294 @@
+/**
+ * Post summary service.
+ *
+ * Generates AI-powered structured summaries of posts and their comment threads.
+ * Summaries include a prose overview, urgency level, key quotes, and next steps.
+ */
+
+import {
+  db,
+  posts,
+  comments,
+  eq,
+  and,
+  or,
+  isNull,
+  ne,
+  desc,
+  sql,
+  notInArray,
+} from '@/lib/server/db'
+import { getOpenAI, stripCodeFences } from '@/lib/server/domains/ai/config'
+import { getChatModel } from '@/lib/server/domains/ai/models'
+import { withRetry } from '@/lib/server/domains/ai/retry'
+import { enforceAiTokenBudget } from '@/lib/server/domains/settings/tier-enforce'
+import type { PostId } from '@quackback/ids'
+import { logger } from '@/lib/server/logger'
+
+const log = logger.child({ component: 'summary' })
+
+const SYSTEM_PROMPT = `You are a product feedback analyst writing post briefs for a PM's triage queue.
+Your job is to surface what matters for prioritization, not restate the obvious.
+
+Return strict JSON only:
+{
+  "summary": "string",
+  "keyQuotes": ["string"],
+  "nextSteps": ["string"]
+}
+
+Rules for "summary" (1-3 sentences):
+- Lead with the core user need or problem, not "Users are requesting X."
+- Name specifics: what feature, what workflow, what breaks.
+- If comments add context beyond the original post, synthesize it.
+- If there is disagreement or pushback in the thread, note the tension.
+- Write for a PM who has 5 seconds to decide whether to dig deeper.
+- BAD: "Users are requesting improvements to the export functionality."
+- GOOD: "CSV exports silently drop columns with special characters, affecting 3 users. Team acknowledged but no fix timeline given."
+
+Rules for "keyQuotes" (0-2):
+- Only quote user/customer text, never team replies.
+- Pick quotes that capture the emotional or factual core.
+- Keep each under 120 characters. Truncate with "..." if needed.
+- Omit if the post body alone is sufficient.
+
+Rules for "nextSteps" (0-2):
+- Start each with a verb: "Investigate...", "Reproduce...", "Respond to..."
+- Only include when the discussion has enough specificity for a real action.
+- Never include generic advice like "Consider user feedback."`
+
+interface PostSummaryJson {
+  summary: string
+  keyQuotes: string[]
+  nextSteps: string[]
+}
+
+/**
+ * Generate and save an AI summary for a post.
+ * Fetches the post title, content, and comments, then calls the LLM.
+ */
+export async function generateAndSavePostSummary(postId: PostId): Promise<void> {
+  await enforceAiTokenBudget()
+
+  const openai = getOpenAI()
+  const model = getChatModel('summary')
+  if (!openai || !model) return
+
+  // Fetch post (include existing summary for continuity on updates)
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, postId),
+    columns: { title: true, content: true, summaryJson: true },
+  })
+  if (!post) {
+    log.warn({ post_id: postId }, 'post not found for summary')
+    return
+  }
+
+  // Fetch comments (lightweight: just content and author name)
+  const postComments = await db
+    .select({
+      content: comments.content,
+      isTeamMember: comments.isTeamMember,
+    })
+    .from(comments)
+    .where(and(eq(comments.postId, postId), isNull(comments.deletedAt)))
+    .orderBy(comments.createdAt)
+
+  // Build prompt input
+  let input = `# ${post.title}\n\n${post.content}`
+
+  if (postComments.length > 0) {
+    input += '\n\n## Comments\n'
+    for (const c of postComments) {
+      const prefix = c.isTeamMember ? '[Team]' : '[User]'
+      input += `\n${prefix}: ${c.content}`
+    }
+  }
+
+  // Include existing summary for continuity when refreshing
+  const existingSummary = post.summaryJson as PostSummaryJson | null
+  if (existingSummary) {
+    input += '\n\n## Previous Summary\n'
+    input += JSON.stringify(existingSummary)
+  }
+
+  // Truncate to ~6000 chars to stay within token limits
+  if (input.length > 6000) {
+    input = input.slice(0, 6000) + '\n\n[truncated]'
+  }
+
+  const systemPrompt = existingSummary
+    ? SYSTEM_PROMPT +
+      '\n\nA previous summary is included. Update it to reflect the current state of the discussion — preserve existing context that is still relevant, and incorporate any new information from recent comments.'
+    : SYSTEM_PROMPT
+
+  const { result: completion } = await withRetry(() =>
+    openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: input },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.2,
+      max_completion_tokens: 1000,
+    })
+  )
+
+  const responseText = completion.choices[0]?.message?.content
+  if (!responseText) {
+    log.error({ post_id: postId }, 'empty summary response')
+    return
+  }
+
+  let summaryJson: PostSummaryJson
+  try {
+    summaryJson = JSON.parse(stripCodeFences(responseText))
+  } catch {
+    log.error(
+      { post_id: postId, response_length: responseText.length },
+      'failed to parse summary json'
+    )
+    return
+  }
+
+  // Validate shape
+  if (typeof summaryJson.summary !== 'string') {
+    log.error({ post_id: postId }, 'invalid summary shape')
+    return
+  }
+
+  // Coerce arrays
+  if (!Array.isArray(summaryJson.keyQuotes)) {
+    summaryJson.keyQuotes = []
+  }
+  if (!Array.isArray(summaryJson.nextSteps)) {
+    summaryJson.nextSteps = []
+  }
+
+  await db
+    .update(posts)
+    .set({
+      summaryJson,
+      summaryModel: model,
+      summaryUpdatedAt: new Date(),
+      summaryCommentCount: postComments.length,
+    })
+    .where(eq(posts.id, postId))
+
+  log.info({ post_id: postId, comment_count: postComments.length }, 'post summary generated')
+}
+
+const SWEEP_BATCH_SIZE = 50
+const SWEEP_BATCH_DELAY_MS = 500
+const SWEEP_ABORT_AFTER_EMPTY_BATCHES = 2
+
+let _sweepInProgress = false
+
+/**
+ * Refresh stale summaries.
+ *
+ * Finds all posts where the summary is missing or the live comment count has
+ * changed, and processes them in batches until none remain. See #180 for why
+ * the sweep needs an attempted-set, circuit breaker, and reentrancy guard.
+ */
+export async function refreshStaleSummaries(): Promise<void> {
+  // Fast-path skip when AI is off OR the summary model is unset/disabled —
+  // otherwise the sweep would query a batch and per-post no-op until the
+  // circuit breaker trips.
+  if (!getOpenAI() || !getChatModel('summary')) return
+  if (_sweepInProgress) return
+  _sweepInProgress = true
+  try {
+    await _doSweep()
+  } finally {
+    _sweepInProgress = false
+  }
+}
+
+async function _doSweep(): Promise<void> {
+  const liveCommentCountSq = db
+    .select({
+      postId: comments.postId,
+      count: sql<number>`count(*)::int`.as('live_count'),
+    })
+    .from(comments)
+    .where(isNull(comments.deletedAt))
+    .groupBy(comments.postId)
+    .as('live_cc')
+
+  // Failed rows stay stale (summaryJson NULL); without skipping them we'd
+  // re-hit the same top-of-order rows every iteration. Excluding at the DB
+  // level (not client-side after LIMIT) is what lets the sweep peel past a
+  // block of permanent failures and reach healthy rows below them.
+  const attempted = new Set<PostId>()
+  let totalProcessed = 0
+  let totalFailed = 0
+  let consecutiveEmptyBatches = 0
+
+  while (true) {
+    const stalePosts = await db
+      .select({ id: posts.id })
+      .from(posts)
+      .leftJoin(liveCommentCountSq, eq(posts.id, liveCommentCountSq.postId))
+      .where(
+        and(
+          isNull(posts.deletedAt),
+          or(
+            isNull(posts.summaryJson),
+            ne(posts.summaryCommentCount, sql`coalesce(${liveCommentCountSq.count}, 0)`)
+          ),
+          attempted.size > 0 ? notInArray(posts.id, [...attempted]) : undefined
+        )
+      )
+      .orderBy(desc(posts.updatedAt))
+      .limit(SWEEP_BATCH_SIZE)
+
+    if (stalePosts.length === 0) break
+
+    if (totalProcessed === 0 && totalFailed === 0) {
+      log.debug('found stale posts, processing summary sweep')
+    }
+
+    let batchSucceeded = 0
+    for (const { id } of stalePosts) {
+      attempted.add(id)
+      try {
+        await generateAndSavePostSummary(id)
+        totalProcessed++
+        batchSucceeded++
+      } catch (err) {
+        totalFailed++
+        log.error({ post_id: id, err }, 'failed to refresh post summary')
+      }
+    }
+
+    // Two consecutive zero-success batches almost always means a systemic
+    // problem (bad model id, revoked key, upstream down). One zero-success
+    // batch alone isn't enough — it can just be a block of permanent failures
+    // at the top of the order that we need to skip past to reach healthy rows.
+    if (batchSucceeded === 0) {
+      consecutiveEmptyBatches++
+      if (consecutiveEmptyBatches >= SWEEP_ABORT_AFTER_EMPTY_BATCHES) {
+        log.error(
+          {
+            consecutive_empty_batches: consecutiveEmptyBatches,
+            processed: totalProcessed,
+            failed: totalFailed,
+          },
+          'aborting summary sweep after consecutive empty batches'
+        )
+        break
+      }
+    } else {
+      consecutiveEmptyBatches = 0
+      log.debug({ processed: totalProcessed, failed: totalFailed }, 'summary sweep progress')
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, SWEEP_BATCH_DELAY_MS))
+  }
+
+  if (totalProcessed > 0 || totalFailed > 0) {
+    log.info({ processed: totalProcessed, failed: totalFailed }, 'summary sweep completed')
+  }
+}

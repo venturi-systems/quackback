@@ -1,0 +1,81 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { isValidTypeId, type InviteId } from '@quackback/ids'
+import { logger } from '@/lib/server/logger'
+
+const log = logger.child({ component: 'auth-invitation' })
+
+export const Route = createFileRoute('/api/auth/invitation/$invitationId')({
+  server: {
+    handlers: {
+      /**
+       * GET /api/auth/invitation/[invitationId]
+       * Public endpoint to get invitation details for signup form
+       */
+      GET: async ({ request: _request, params }) => {
+        const { db, invitation, eq } = await import('@/lib/server/db')
+
+        const { invitationId: invitationIdParam } = params
+        log.debug({ invitation_id: invitationIdParam }, 'get invitation request')
+
+        try {
+          // Validate TypeID format
+          if (!isValidTypeId(invitationIdParam, 'invite')) {
+            log.warn('invalid invitation id format')
+            return Response.json({ error: 'Invalid invitation ID format' }, { status: 400 })
+          }
+          const invitationId = invitationIdParam as InviteId
+
+          // Get app settings
+          const org = await db.query.settings.findFirst()
+          if (!org) {
+            return Response.json({ error: 'App not configured' }, { status: 500 })
+          }
+
+          // Find the invitation — kind='team' prevents a portal invite
+          // from surfacing on the team signup page.
+          const { and } = await import('@/lib/server/db')
+          const inv = await db.query.invitation.findFirst({
+            where: and(eq(invitation.id, invitationId), eq(invitation.kind, 'team')),
+            with: {
+              inviter: true,
+            },
+          })
+
+          if (!inv) {
+            return Response.json({ error: 'Invitation not found' }, { status: 404 })
+          }
+
+          // Check invitation status
+          if (inv.status !== 'pending') {
+            return Response.json(
+              { error: 'This invitation has already been used or cancelled' },
+              { status: 400 }
+            )
+          }
+
+          // Check expiration
+          if (new Date() > inv.expiresAt) {
+            return Response.json(
+              { error: 'This invitation has expired. Please request a new one.' },
+              { status: 400 }
+            )
+          }
+
+          // Return invitation details (limited info for security)
+          log.debug({ invitation_id: inv.id, role: inv.role }, 'invitation found')
+          return Response.json({
+            id: inv.id,
+            email: inv.email,
+            name: inv.name || null,
+            role: inv.role,
+            workspaceName: org.name,
+            inviterName: inv.inviter?.name || null,
+          })
+        } catch (error) {
+          log.error({ err: error }, 'get invitation failed')
+          return Response.json({ error: 'Failed to get invitation' }, { status: 500 })
+        }
+      },
+    },
+  },
+})

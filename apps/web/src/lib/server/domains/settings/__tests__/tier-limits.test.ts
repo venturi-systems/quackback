@@ -1,0 +1,101 @@
+import { describe, it, expect } from 'vitest'
+import { OSS_TIER_LIMITS, type TierLimits } from '../tier-limits.types'
+import { mergeTierLimits } from '../tier-limits.service'
+
+describe('OSS_TIER_LIMITS', () => {
+  it('has all numeric limits set to null (unlimited)', () => {
+    expect(OSS_TIER_LIMITS.maxBoards).toBeNull()
+    expect(OSS_TIER_LIMITS.maxPosts).toBeNull()
+    expect(OSS_TIER_LIMITS.maxTeamSeats).toBeNull()
+    expect(OSS_TIER_LIMITS.aiTokensPerMonth).toBeNull()
+    expect(OSS_TIER_LIMITS.apiRequestsPerMonth).toBeNull()
+    expect(OSS_TIER_LIMITS.apiRequestsPerMinute).toBeNull()
+  })
+
+  it('has every feature flag set to true (on)', () => {
+    const features = OSS_TIER_LIMITS.features
+    expect(features.customDomain).toBe(true)
+    expect(features.customOidcProvider).toBe(true)
+    expect(features.ipAllowlist).toBe(true)
+    expect(features.webhooks).toBe(true)
+    expect(features.mcpServer).toBe(true)
+    expect(features.analyticsExports).toBe(true)
+    expect(features.aiFeedbackExtraction).toBe(true)
+  })
+
+  it('matches the TierLimits shape (compile-time check)', () => {
+    const _: TierLimits = OSS_TIER_LIMITS
+    expect(_).toBe(OSS_TIER_LIMITS)
+  })
+})
+
+describe('mergeTierLimits', () => {
+  it('returns OSS defaults when stored is null', () => {
+    expect(mergeTierLimits(null)).toEqual(OSS_TIER_LIMITS)
+  })
+
+  it('fails closed on the paid extraction flag for a stored row, even an empty one', () => {
+    // A stored row signals a managed/cloud (or config-managed) tenant. The
+    // paid auto-capture flag must NOT inherit the generous OSS default there,
+    // or pre-existing rows would grant Scale-only extraction to everyone until
+    // re-seeded. Every other flag still falls back to the OSS default.
+    expect(mergeTierLimits({})).toEqual({
+      ...OSS_TIER_LIMITS,
+      features: { ...OSS_TIER_LIMITS.features, aiFeedbackExtraction: false },
+    })
+  })
+
+  it('honours an explicit aiFeedbackExtraction grant in a stored row (Scale)', () => {
+    expect(
+      mergeTierLimits({ features: { aiFeedbackExtraction: true } }).features.aiFeedbackExtraction
+    ).toBe(true)
+  })
+
+  it('overrides numeric limits from stored partial', () => {
+    const result = mergeTierLimits({ maxBoards: 2, maxPosts: 100 })
+    expect(result.maxBoards).toBe(2)
+    expect(result.maxPosts).toBe(100)
+    expect(result.maxTeamSeats).toBeNull()
+  })
+
+  it('overrides feature flags individually without dropping the rest', () => {
+    const result = mergeTierLimits({
+      features: { customDomain: false, ipAllowlist: false },
+    })
+    expect(result.features.customDomain).toBe(false)
+    expect(result.features.ipAllowlist).toBe(false)
+    expect(result.features.customOidcProvider).toBe(true)
+    expect(result.features.webhooks).toBe(true)
+  })
+
+  it('treats explicit null as unlimited (not as missing)', () => {
+    const result = mergeTierLimits({ maxBoards: null })
+    expect(result.maxBoards).toBeNull()
+  })
+})
+
+describe('plan notice passthrough', () => {
+  it('carries a stored notice through the merge', () => {
+    const merged = mergeTierLimits({
+      maxBoards: 5,
+      notice: {
+        label: 'Free trial',
+        expiresAt: '2026-06-24T00:00:00.000Z',
+        actionUrl: 'https://example.com/billing',
+        actionLabel: 'Choose your plan',
+      },
+    })
+    expect(merged.notice).toEqual({
+      label: 'Free trial',
+      expiresAt: '2026-06-24T00:00:00.000Z',
+      actionUrl: 'https://example.com/billing',
+      actionLabel: 'Choose your plan',
+    })
+    expect(merged.maxBoards).toBe(5)
+  })
+
+  it('returns no notice when absent from stored limits', () => {
+    expect(mergeTierLimits({ maxBoards: 1 }).notice).toBeUndefined()
+    expect(mergeTierLimits(null).notice).toBeUndefined()
+  })
+})

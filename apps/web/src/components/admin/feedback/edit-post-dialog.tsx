@@ -1,0 +1,194 @@
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
+import { ModalFooter } from '@/components/shared/modal-footer'
+import { useForm } from 'react-hook-form'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
+import { editPostSchema } from '@/lib/shared/schemas/posts'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { useUpdatePost, useUpdatePostTags } from '@/lib/client/mutations/posts'
+import type { JSONContent } from '@tiptap/react'
+import type { Board, Tag, PostStatusEntity } from '@/lib/shared/db-types'
+import type { BoardId, PostId, StatusId, TagId } from '@quackback/ids'
+import { Form } from '@/components/ui/form'
+import type { AdminEditPostInput } from '@/lib/shared/types'
+import { PostFormFields } from './post-form-fields'
+
+interface PostToEdit {
+  id: PostId
+  title: string
+  content: string
+  contentJson?: unknown
+  statusId: StatusId | null
+  board: { id: BoardId; name: string; slug: string }
+  tags: { id: TagId; name: string; color: string }[]
+}
+
+interface EditPostDialogProps {
+  post: PostToEdit
+  boards: Board[]
+  tags: Tag[]
+  statuses: PostStatusEntity[]
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}
+
+export function EditPostDialog({
+  post,
+  boards,
+  tags,
+  statuses,
+  open,
+  onOpenChange,
+}: EditPostDialogProps) {
+  const [error, setError] = useState('')
+
+  const richMediaEnabled = true
+  const videoEmbedsEnabled = true
+
+  // Use mutations for optimistic updates
+  const updatePost = useUpdatePost()
+  const updateTags = useUpdatePostTags()
+
+  // Convert plain text to TipTap JSON format for posts without contentJson
+  const getInitialContentJson = (post: PostToEdit): JSONContent | null => {
+    if (post.contentJson) {
+      return post.contentJson as JSONContent
+    }
+    // Fallback: convert plain text content to TipTap JSON
+    if (post.content) {
+      return {
+        type: 'doc',
+        content: post.content.split('\n').map((line) => ({
+          type: 'paragraph',
+          content: line ? [{ type: 'text', text: line }] : [],
+        })),
+      }
+    }
+    return null
+  }
+
+  const [contentJson, setContentJson] = useState<JSONContent | null>(getInitialContentJson(post))
+  const lastPostIdRef = useRef(post.id)
+  const wasOpenRef = useRef(false)
+
+  const form = useForm({
+    resolver: standardSchemaResolver(editPostSchema),
+    defaultValues: {
+      title: post.title,
+      content: post.content,
+      boardId: post.board.id as string,
+      statusId: (post.statusId || undefined) as string | undefined,
+      tagIds: post.tags.map((t) => t.id) as string[],
+    },
+  })
+
+  // Reset form when opening dialog (handles both new post and reopening same post)
+  useEffect(() => {
+    const isOpening = open && !wasOpenRef.current
+    const isDifferentPost = post.id !== lastPostIdRef.current
+
+    if (isOpening || isDifferentPost) {
+      lastPostIdRef.current = post.id
+      form.reset({
+        title: post.title,
+        content: post.content,
+        boardId: post.board.id as string,
+        statusId: (post.statusId || undefined) as string | undefined,
+        tagIds: post.tags.map((t) => t.id) as string[],
+      })
+      setContentJson(getInitialContentJson(post))
+    }
+
+    wasOpenRef.current = open
+  }, [open, post, form])
+
+  const handleContentChange = useCallback(
+    (json: JSONContent, _html: string, markdown: string) => {
+      setContentJson(json)
+      form.setValue('content', markdown, { shouldValidate: true })
+    },
+    [form]
+  )
+
+  // Handle form submission
+  const handleSubmit = form.handleSubmit(async (data) => {
+    setError('')
+    const input = { postId: post.id, ...data } as AdminEditPostInput
+
+    try {
+      // Check if tags need updating
+      const currentTagIds = post.tags.map((t) => t.id).sort()
+      const newTagIds = [...input.tagIds].sort()
+      const tagsChanged = JSON.stringify(currentTagIds) !== JSON.stringify(newTagIds)
+
+      // Run mutations in parallel for better performance
+      const mutations: Promise<unknown>[] = [
+        updatePost.mutateAsync({
+          postId: post.id as PostId,
+          title: input.title,
+          content: input.content,
+          contentJson,
+          statusId: input.statusId,
+        }),
+      ]
+
+      if (tagsChanged) {
+        mutations.push(
+          updateTags.mutateAsync({
+            postId: post.id as PostId,
+            tagIds: input.tagIds as string[],
+            allTags: tags,
+          })
+        )
+      }
+
+      await Promise.all(mutations)
+
+      onOpenChange(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update post')
+    }
+  })
+
+  function handleOpenChangeLocal(isOpen: boolean) {
+    onOpenChange(isOpen)
+    if (!isOpen) {
+      setError('')
+    }
+  }
+
+  const handleKeyDown = useKeyboardSubmit(handleSubmit)
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChangeLocal}>
+      <DialogContent
+        className="w-[95vw] max-w-3xl p-0 gap-0 overflow-hidden"
+        onKeyDown={handleKeyDown}
+      >
+        <DialogTitle className="sr-only">Edit post</DialogTitle>
+
+        <Form {...form}>
+          <form onSubmit={handleSubmit}>
+            <PostFormFields
+              form={form}
+              boards={boards}
+              statuses={statuses}
+              tags={tags}
+              contentJson={contentJson}
+              onContentChange={handleContentChange}
+              error={error}
+              richMediaEnabled={richMediaEnabled}
+              videoEmbedsEnabled={videoEmbedsEnabled}
+            />
+
+            <ModalFooter
+              onCancel={() => onOpenChange(false)}
+              submitLabel={form.formState.isSubmitting ? 'Saving...' : 'Save changes'}
+              isPending={form.formState.isSubmitting}
+            />
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  )
+}

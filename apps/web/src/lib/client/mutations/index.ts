@@ -1,0 +1,115 @@
+/**
+ * Mutation hooks barrel export
+ *
+ * All TanStack Query mutation hooks for the application.
+ */
+
+// Admin post mutations
+export {
+  useChangePostStatusId,
+  useUpdatePostOwner,
+  useUpdatePostTags,
+  useUpdatePost,
+  useVotePost,
+  useCreatePost,
+  useDeletePost,
+  useRestorePost,
+  useToggleCommentsLock,
+  useChangePostBoard,
+} from './posts'
+
+// Admin comment mutations
+export { useToggleCommentReaction, useAddComment } from './comments'
+
+// Portal post mutations
+export {
+  useVoteMutation,
+  useCreatePublicPost,
+  useUserEditPost,
+  useUserDeletePost,
+} from './portal-posts'
+
+// Board mutations
+export { useCreateBoard, useUpdateBoard, useUpdateBoardAccess, useDeleteBoard } from './boards'
+
+// Portal comment mutations
+export {
+  useCreateComment,
+  useEditComment,
+  useDeleteComment,
+  useToggleReaction,
+  usePinComment,
+  useUnpinComment,
+} from './portal-comments'
+
+// Portal post action mutations
+export { usePostActions, type EditPostInput } from './portal-post-actions'
+
+// Integration mutations
+export {
+  useUpdateIntegration,
+  useDeleteIntegration,
+  useAddNotificationChannel,
+  useUpdateNotificationChannel,
+  useRemoveNotificationChannel,
+  useAddMonitoredChannel,
+  useUpdateMonitoredChannel,
+  useRemoveMonitoredChannel,
+} from './integrations'
+
+// Status sync mutations
+export { useEnableStatusSync, useDisableStatusSync, useUpdateStatusMappings } from './status-sync'
+
+// Platform credential mutations
+export { useSavePlatformCredentials, useDeletePlatformCredentials } from './platform-credentials'
+
+// Auth provider credential mutations
+export {
+  useSaveAuthProviderCredentials,
+  useDeleteAuthProviderCredentials,
+} from './auth-provider-credentials'
+
+// Roadmap posts mutations
+export { useAddPostToRoadmap, useRemovePostFromRoadmap } from './roadmap-posts'
+
+// Roadmap mutations
+export {
+  useCreateRoadmap,
+  useUpdateRoadmap,
+  useDeleteRoadmap,
+  useReorderRoadmaps,
+} from './roadmaps'
+
+// Notification mutations
+export {
+  useMarkNotificationAsRead,
+  useMarkAllNotificationsAsRead,
+  useArchiveNotification,
+} from './notifications'
+
+// User mutations
+export { useCreatePortalUser, useRemovePortalUser, useUpdatePortalUser } from './users'
+
+// Avatar mutations
+export { useUploadAvatar, useDeleteAvatar } from './avatar'
+
+// Segment mutations
+export {
+  useCreateSegment,
+  useUpdateSegment,
+  useDeleteSegment,
+  useAssignUsersToSegment,
+  useRemoveUsersFromSegment,
+  useEvaluateSegment,
+  useEvaluateAllSegments,
+} from './segments'
+
+// User attribute mutations
+export {
+  useCreateUserAttribute,
+  useUpdateUserAttribute,
+  useDeleteUserAttribute,
+} from './user-attributes'
+
+// Admin subscription mutations
+export { useUpdateVoterSubscription } from './admin-subscriptions'
