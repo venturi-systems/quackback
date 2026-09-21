@@ -58,14 +58,17 @@ Focused checks passed: 31 UI/permission tests; 21 submission-cache, anonymous
 permission, and empty-state tests; and an independent 271-test authorization
 review. These groups overlap and must not be added into a unique total.
 The production build passed after the required widget build. Full lint passed
-with existing warnings; typecheck and CI results are recorded in the associated
-review branch checks.
+with existing warnings, and the full typecheck passed. These checks ran locally
+against the application source published on the review branch.
 
 The required `bun run test --run` command could not execute its suite because
 PostgreSQL was unavailable locally. A separate all-suite Vitest attempt found
 existing migration tests requiring that database and was stopped. This is not
 a full-suite pass. Run the existing CI workflow with its PostgreSQL service
-before proposing a pull request, as required by AGENTS.md.
+before proposing a pull request, as required by AGENTS.md. The available Actions
+dispatch credential returned HTTP 403, so that CI run has not started. Normal
+local user-namespace isolation for PostgreSQL also failed with `Operation not
+permitted`; neither restriction was bypassed.
 
 Synthetic fixtures use the actual new React components and production CSS at
 320, 390, 768, 1024, 1440, 1920, and 2560 pixels. Static role-link checks passed.
