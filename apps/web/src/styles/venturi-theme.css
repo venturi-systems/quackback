@@ -1,0 +1,173 @@
+@import './venturi-dark.css';
+
+/* Compatibility names point to the v6.6.0 authority; no second palette. */
+:root,
+.dark,
+[data-theme] {
+  --font-sans: var(--ds-primitive-font-family-sans);
+  --font-family-sans: var(--ds-primitive-font-family-sans);
+  --font-mono: var(--ds-primitive-font-family-mono);
+  --font-serif: Georgia, serif;
+  --background: var(--ds-color-canvas-page);
+  --foreground: var(--ds-color-text-primary);
+  --card: var(--ds-color-surface-raised);
+  --card-foreground: var(--ds-color-text-primary);
+  --popover: var(--ds-color-canvas-page);
+  --popover-foreground: var(--ds-color-text-primary);
+  --primary: var(--ds-color-interactive-primary-bg);
+  --primary-foreground: var(--ds-color-interactive-primary-text);
+  --secondary: var(--ds-color-surface-control);
+  --secondary-foreground: var(--ds-color-text-primary);
+  --muted: var(--ds-color-surface-control);
+  --muted-foreground: var(--ds-color-text-muted);
+  --accent: var(--ds-color-interactive-hover-tint);
+  --accent-foreground: var(--ds-color-text-primary);
+  --destructive: var(--ds-color-interactive-destructive-bg);
+  --destructive-foreground: var(--ds-color-interactive-destructive-text);
+  --success: var(--ds-color-status-success-text);
+  --success-foreground: var(--ds-color-status-success-bg);
+  --border: var(--ds-color-border-decorative);
+  --input: var(--ds-color-border-control);
+  --ring: var(--ds-color-interactive-focus-ring);
+  --chart-1: var(--ds-color-data-series-1);
+  --chart-2: var(--ds-color-data-series-2);
+  --chart-3: var(--ds-color-data-series-3);
+  --chart-4: var(--ds-color-data-series-4);
+  --chart-5: var(--ds-color-data-series-5);
+  --metric-posts: var(--chart-1);
+  --metric-votes: var(--chart-2);
+  --metric-comments: var(--chart-3);
+  --metric-users: var(--chart-4);
+  --sidebar: var(--ds-color-canvas-page);
+  --sidebar-foreground: var(--ds-color-text-primary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--muted);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --radius: var(--ds-component-input-radius);
+  --letter-spacing: var(--ds-primitive-font-letter-spacing-normal);
+  --shadow-2xs: none;
+  --shadow-xs: none;
+  --shadow-sm: var(--ds-shadow-card);
+  --shadow: var(--ds-shadow-raised);
+  --shadow-md: var(--ds-shadow-modal);
+  --shadow-lg: var(--ds-shadow-modal);
+  --shadow-xl: var(--ds-shadow-modal);
+  --shadow-2xl: var(--ds-shadow-modal);
+  --header-background: var(--ds-color-canvas-page);
+  --header-foreground: var(--foreground);
+  --header-border: var(--border);
+  --post-card-background: var(--card);
+  --post-card-border: var(--border);
+  --post-card-voted-color: var(--foreground);
+  --nav-active-background: var(--muted);
+  --nav-active-foreground: var(--foreground);
+  --nav-inactive-color: var(--muted-foreground);
+  --portal-button-background: var(--primary);
+  --portal-button-foreground: var(--primary-foreground);
+}
+
+.portal-shell {
+  width: 100%;
+  padding-inline: clamp(1rem, 3vw, 4rem);
+}
+
+.portal-introduction {
+  padding-block: clamp(1.5rem, 4vw, 3rem);
+  border-bottom: 1px solid var(--border);
+}
+
+.portal-introduction h1 {
+  margin: 0 0 0.75rem;
+  font: var(--ds-typography-heading-40);
+  text-wrap: balance;
+}
+
+.portal-introduction p {
+  max-width: 68ch;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+
+.portal-participation {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+}
+
+.portal-participation dt {
+  margin-bottom: 0.35rem;
+  font-weight: 500;
+}
+
+.portal-participation dd {
+  margin: 0;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+
+.portal-header__logo .portal-brand-lockup {
+  width: 112px;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+}
+
+.portal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 2rem;
+  padding-block: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.portal-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.portal-footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+#portal-main :is(h1, h2, h3) {
+  font-weight: var(--ds-primitive-font-weight-regular);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+#portal-main [data-slot='button'] {
+  min-height: 44px;
+  height: auto;
+  white-space: normal;
+  text-wrap: pretty;
+}
+
+@media (max-width: 640px) {
+  .portal-participation {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+  .portal-introduction h1 {
+    font: var(--ds-typography-heading-32);
+  }
+}
+
+@media (forced-colors: active) {
+  :is(button, input, textarea, select, [role='button']) {
+    border: 1px solid ButtonText;
+  }
+}

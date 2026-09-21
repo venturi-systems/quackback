@@ -1,11 +1,13 @@
-import { createFileRoute, Link, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { FormattedMessage } from 'react-intl'
 import { lazy, Suspense } from 'react'
 import { z } from 'zod'
-import { ArrowRightIcon, ClipboardDocumentListIcon, MapIcon } from '@heroicons/react/24/outline'
 import { Spinner } from '@/components/shared/spinner'
 import { Button } from '@/components/ui/button'
+import { FeedbackEmptyState } from '@/components/public/feedback/feedback-empty-state'
+import { PortalParticipation } from '@/components/public/portal-participation'
+import { hasAnyPortalAuthMethod } from '@/components/auth/oauth-buttons'
 import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
@@ -136,6 +138,11 @@ function AccessiblePublicPortalPage({
 }) {
   const search = Route.useSearch()
   const { org, session, welcomeCard } = loaderData
+  const { userRole, settings, registeredAuthProviders } = Route.useRouteContext()
+  const canSignIn = hasAnyPortalAuthMethod(settings?.publicAuthConfig?.oauth ?? {}, {
+    registeredAuthProviders,
+    oidcProviders: settings?.publicPortalConfig?.oidcProviders,
+  })
   const authPopover = useAuthPopoverSafe()
   const openAuthPopover = authPopover?.openAuthPopover
 
@@ -148,7 +155,12 @@ function AccessiblePublicPortalPage({
   // refetches with new filters on client-side navigation.
   // keepPreviousData ensures we show stale data while fetching new data.
   // User identifier is read from cookie directly in the server function.
-  const { data: portalData, isFetching } = useQuery({
+  const {
+    data: portalData,
+    isFetching,
+    isError,
+    refetch,
+  } = useQuery({
     ...portalQueries.portalData({
       boardSlug: currentBoard,
       search: currentSearch,
@@ -169,102 +181,33 @@ function AccessiblePublicPortalPage({
   // Anonymous sessions also populate session.user, so !!session is not the
   // right signed-in signal here (matches feedback-container/portal-header).
   const isRealUser = !!session?.user && session.user.principalType !== 'anonymous'
-  if (loaderData.isEmpty && !isFetching && (!portalData || portalData.boards.length === 0)) {
-    if (!isRealUser) {
-      return (
-        <section className="venturi-feedback-empty mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-          <div className="venturi-feedback-empty__copy venturi-feedback-empty__copy--solo">
-            <div className="venturi-feedback-empty__mark" aria-hidden="true">
-              <img src="/venturi-mark.svg" alt="" />
-            </div>
-            <p className="venturi-feedback-empty__eyebrow">Venturi Feedback</p>
-            <h1>Roadmap intake</h1>
-            <p className="venturi-feedback-empty__lede">
-              {org.name} will collect attribution workflow requests, classify them into product
-              signals, and publish the roadmap states that are ready for customer review.
-            </p>
-            <div className="venturi-feedback-empty__actions">
-              <Button onClick={() => openAuthPopover?.({ mode: 'login' })}>
-                <FormattedMessage id="portal.header.auth.logIn" defaultMessage="Log in" />
-                <ArrowRightIcon className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" onClick={() => openAuthPopover?.({ mode: 'signup' })}>
-                <FormattedMessage
-                  id="portal.auth.switch.createAccount"
-                  defaultMessage="Create an account"
-                />
-              </Button>
-            </div>
-            <p className="venturi-feedback-empty__note">
-              <FormattedMessage
-                id="portal.auth.login.tagline"
-                defaultMessage="Sign in to vote and comment on feedback."
-              />
-            </p>
-          </div>
-        </section>
-      )
-    }
+  if (isError && !portalData) {
     return (
-      <section className="venturi-feedback-empty mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
-        <div className="venturi-feedback-empty__grid">
-          <div className="venturi-feedback-empty__copy">
-            <div className="venturi-feedback-empty__mark" aria-hidden="true">
-              <img src="/venturi-mark.svg" alt="" />
-            </div>
-            <p className="venturi-feedback-empty__eyebrow">Venturi Feedback</p>
-            <h1>Roadmap intake</h1>
-            <p className="venturi-feedback-empty__lede">
-              {org.name} will collect attribution workflow requests, classify them into product
-              signals, and publish the roadmap states that are ready for customer review.
-            </p>
-            <div className="venturi-feedback-empty__actions">
-              <Button asChild>
-                <Link to="/admin/roadmap">
-                  Add roadmap component
-                  <ArrowRightIcon className="h-4 w-4" />
-                </Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/admin/feedback">Create feedback item</Link>
-              </Button>
-            </div>
-            <p className="venturi-feedback-empty__note">
-              Venturi employees and admins can sign in to create roadmap components now; public
-              feedback opens once boards are configured.
-            </p>
-          </div>
-          <div className="venturi-feedback-empty__panel" aria-label="Portal setup state">
-            <div className="venturi-feedback-empty__panel-header">
-              <span>Workspace setup</span>
-              <span>Admin required</span>
-            </div>
-            <div className="venturi-feedback-empty__steps">
-              <div>
-                <ClipboardDocumentListIcon className="h-5 w-5" />
-                <div>
-                  <strong>Create feedback boards</strong>
-                  <span>Define where customer and team signals enter the system.</span>
-                </div>
-              </div>
-              <div>
-                <MapIcon className="h-5 w-5" />
-                <div>
-                  <strong>Add roadmap components</strong>
-                  <span>Attach planned, in-progress, and shipped work to the public roadmap.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      <section className="portal-shell py-10" role="alert">
+        <h1 className="text-3xl mb-3">Feedback could not be loaded</h1>
+        <p className="text-muted-foreground mb-5">Try loading the page again.</p>
+        <Button type="button" onClick={() => void refetch()} disabled={isFetching}>
+          Try again
+        </Button>
       </section>
+    )
+  }
+  if (!isFetching && portalData?.boards.length === 0) {
+    return (
+      <FeedbackEmptyState
+        authenticated={isRealUser}
+        role={userRole}
+        onSignIn={
+          canSignIn && openAuthPopover ? () => openAuthPopover({ mode: 'login' }) : undefined
+        }
+      />
     )
   }
 
   // Handle initial loading state (should be rare due to SSR)
   if (!portalData) {
     return (
-      <div className="mx-auto max-w-6xl w-full px-4 sm:px-6 py-6">
+      <div className="portal-shell py-6">
         <div className="flex justify-center py-16">
           <Spinner size="lg" />
         </div>
@@ -275,10 +218,19 @@ function AccessiblePublicPortalPage({
   const user = session?.user ? { name: session.user.name, email: session.user.email } : null
 
   return (
-    <div className="mx-auto max-w-6xl w-full px-4 sm:px-6 py-6">
-      <h1 className="sr-only">
-        <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
-      </h1>
+    <div className="portal-shell py-6">
+      <section className="portal-introduction" aria-labelledby="feedback-title">
+        <h1 id="feedback-title">
+          <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
+        </h1>
+        <p>
+          <FormattedMessage
+            id="portal.feedback.introduction"
+            defaultMessage="Share an idea, support a request, and follow what the team is working on."
+          />
+        </p>
+        <PortalParticipation />
+      </section>
       <Suspense
         fallback={
           <div className="flex justify-center py-16">

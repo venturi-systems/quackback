@@ -497,6 +497,7 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
         statusId: post.statusId,
         voteCount: post.voteCount,
         createdAt: post.createdAt.toISOString(),
+        moderationState: post.moderationState,
         board: {
           id: board.id,
           name: board.name,

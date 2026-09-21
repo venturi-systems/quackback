@@ -18,7 +18,7 @@ import {
 } from '@/lib/client/hooks/use-portal-posts-query'
 import { portalDetailQueries, type PublicPostDetailView } from '@/lib/client/queries/portal-detail'
 import type { PublicPostListItem } from '@/lib/shared/types'
-import type { PostId, BoardId, StatusId } from '@quackback/ids'
+import type { PostId, BoardId } from '@quackback/ids'
 
 // ============================================================================
 // Types
@@ -211,45 +211,9 @@ export function useCreatePublicPost() {
         },
       }),
     onSuccess: (newPost) => {
-      // Add new post to the beginning of all list queries
-      queryClient.setQueriesData<InfiniteData<PublicPostListResult>>(
-        { queryKey: publicPostsKeys.lists() },
-        (old) => {
-          if (!old) return old
-
-          // Create the new post item matching PublicPostListItem shape
-          // Cast id as PostId since API returns TypeID format strings
-          const newPostItem: PublicPostListItem = {
-            id: newPost.id as PostId,
-            title: newPost.title,
-            content: newPost.content,
-            statusId: newPost.statusId as StatusId | null,
-            voteCount: newPost.voteCount,
-            authorName: null, // Will be filled by server on refetch
-            principalId: null,
-            createdAt: new Date(newPost.createdAt),
-            commentCount: 0,
-            tags: [],
-            board: { ...newPost.board, id: newPost.board.id as BoardId },
-          }
-
-          return {
-            ...old,
-            pages: old.pages.map((page, index) => {
-              // Add to first page only
-              if (index === 0) {
-                return {
-                  ...page,
-                  items: [newPostItem, ...page.items],
-                  total: page.total + 1,
-                }
-              }
-              return page
-            }),
-          }
-        }
-      )
-
+      // A submission may await moderation, and existing lists may target a
+      // different board, search, or status. Let the server reapply those filters
+      // instead of inserting an unreviewed post into every cached result.
       // Register the author's auto-vote in the votedPosts cache
       queryClient.setQueryData<Set<string>>(votedPostsKeys.byWorkspace(), (old) => {
         const next = new Set(old || [])
@@ -257,8 +221,9 @@ export function useCreatePublicPost() {
         return next
       })
 
-      // Invalidate to get fresh data with all fields populated
+      // Refresh both the paginated feed and its server-rendered board counts.
       queryClient.invalidateQueries({ queryKey: publicPostsKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: ['portal', 'data'] })
     },
   })
 }

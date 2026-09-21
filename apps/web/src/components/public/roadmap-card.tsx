@@ -24,7 +24,7 @@ export function RoadmapCard({ id, title, voteCount, board }: RoadmapCardProps): 
         <span className="text-sm font-semibold text-foreground">{voteCount}</span>
       </div>
       <div className="roadmap-card__content flex-1 min-w-0 p-3">
-        <p className="text-sm font-medium text-foreground line-clamp-2">{title}</p>
+        <p className="text-sm font-medium text-foreground break-words">{title}</p>
         <Badge variant="secondary" className="mt-2 text-[11px] inline-flex items-center gap-0.5">
           <Squares2X2Icon className="h-3 w-3 text-muted-foreground/40" />
           {board.name}

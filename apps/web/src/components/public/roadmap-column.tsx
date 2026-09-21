@@ -3,6 +3,7 @@ import { useIntl } from 'react-intl'
 import { useInfiniteScroll } from '@/lib/client/hooks/use-infinite-scroll'
 import { RoadmapCard } from './roadmap-card'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import {
@@ -30,13 +31,12 @@ export function RoadmapColumn({
   signInRequiredForItems,
 }: RoadmapColumnProps) {
   const intl = useIntl()
-  const { data, isFetchingNextPage, hasNextPage, fetchNextPage, isLoading } = usePublicRoadmapPosts(
-    {
+  const { data, isFetchingNextPage, hasNextPage, fetchNextPage, isLoading, isError, refetch } =
+    usePublicRoadmapPosts({
       roadmapId,
       statusId,
       filters,
-    }
-  )
+    })
 
   const posts = flattenRoadmapPostEntries(data)
   const total = data?.pages[0]?.total ?? 0
@@ -61,7 +61,7 @@ export function RoadmapColumn({
           </div>
           {/* When items are hidden behind sign-in the true count is unknown to
               this visitor — a "0" badge would misread as an empty column. */}
-          {!(signInRequiredForItems && total === 0) && (
+          {!isLoading && !isError && !(signInRequiredForItems && total === 0) && (
             <Badge variant="secondary" className="text-xs">
               {total}
             </Badge>
@@ -70,7 +70,14 @@ export function RoadmapColumn({
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-0">
         <ScrollArea className="h-full px-6 pb-6">
-          {isLoading ? (
+          {isError ? (
+            <div role="alert" className="py-6">
+              <p className="mb-3 text-sm text-muted-foreground">These items could not be loaded.</p>
+              <Button type="button" variant="outline" onClick={() => void refetch()}>
+                Try again
+              </Button>
+            </div>
+          ) : isLoading ? (
             <div className="h-full flex items-center justify-center py-8 animate-in fade-in duration-200">
               <ArrowPathIcon className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>

@@ -186,6 +186,7 @@ export function PortalHeader({
           <Link
             key={item.to}
             to={item.to}
+            aria-current={isActive ? 'page' : undefined}
             className={cn(
               'portal-nav__item px-3 py-2 text-sm font-medium transition-colors [border-radius:calc(var(--radius)*0.8)]',
               mobile && 'flex min-h-11 items-center',
@@ -308,7 +309,14 @@ export function PortalHeader({
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
                 <p className="text-sm font-medium">{name}</p>
-                <p className="text-xs text-muted-foreground">{email}</p>
+                <p className="text-xs text-muted-foreground break-words">{email}</p>
+                <p className="text-xs text-muted-foreground">
+                  {userRole === 'admin'
+                    ? 'Administrator'
+                    : userRole === 'member'
+                      ? 'Team moderator'
+                      : 'Contributor'}
+                </p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -368,14 +376,20 @@ export function PortalHeader({
     <header className="portal-header w-full py-2 border-b border-[var(--header-border)] bg-[var(--header-background)] shadow-sm">
       {/* Row 1: Logo + Name + Auth */}
       <div>
-        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6">
-          <div className="flex h-12 items-center justify-between">
+        <div className="portal-shell">
+          <div className="flex min-h-12 flex-wrap items-center justify-between gap-3">
             <Link
               to="/"
               className="portal-header__logo flex min-h-11 items-center gap-2"
               aria-label={`${orgName} feedback home`}
             >
-              {orgLogo ? (
+              {orgName === 'Venturi' ? (
+                <img
+                  src="/design-system/brand/venturi-lockup-black.svg"
+                  alt="Venturi"
+                  className="portal-brand-lockup"
+                />
+              ) : orgLogo ? (
                 <img
                   src={orgLogo}
                   alt={orgName}
@@ -386,8 +400,8 @@ export function PortalHeader({
                   {orgName.charAt(0).toUpperCase()}
                 </div>
               )}
-              <span className="portal-header__name font-semibold max-w-[18ch] line-clamp-2 text-[var(--header-foreground)]">
-                {orgName}
+              <span className="portal-header__name text-[var(--header-foreground)]">
+                {orgName === 'Venturi' ? 'Feedback' : orgName}
               </span>
             </Link>
             <AuthButtons />
@@ -396,7 +410,7 @@ export function PortalHeader({
       </div>
 
       {/* Row 2: controlled mobile menu and full desktop navigation. */}
-      <div className="mt-2 max-w-6xl mx-auto w-full px-4 sm:px-6">
+      <div className="mt-2 portal-shell">
         <Button
           type="button"
           variant="ghost"

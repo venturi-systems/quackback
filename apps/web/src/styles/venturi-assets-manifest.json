@@ -1,0 +1,17 @@
+{
+  "designVersion": "6.6.0",
+  "authority": "Attached venturi-final-suite-v6.6.0(1).zip",
+  "sha256": {
+    "src/styles/venturi-tokens.css": "dba6425c8fbf2e23d87db492ea6d0cf692e99bfd0089340505dbe158d89b50e9",
+    "public/design-system/brand/venturi-favicon-adaptive.svg": "eb33ea74bc96af7f6cc9aee07ce3ef5b3f48a6f9f153f56b823486b8643a58ce",
+    "public/design-system/brand/venturi-lockup-black.svg": "a4c74cc33e43803dcb1d46b5492ff1207a3270b53a8441c3c7b8971edb973e96",
+    "public/design-system/brand/venturi-lockup-white.svg": "e45c6bc43a30170df6a4f51ab2ce97c95a5221bf0c8c74656dbce2b250b3a399",
+    "public/design-system/brand/venturi-mark.svg": "f46c29e0047bf7232315903e16b1893d25179a6a57cc510eb8de90a763882a2b",
+    "public/design-system/fonts/DMSans-latin-ext.woff2": "c1054a72c3c00436fcd0aa6590c82ab9059ab5805cdfb181b0ef54b6be202dde",
+    "public/design-system/fonts/DMSans-latin.woff2": "f4c7f982c28bff2f6363f67c9d61e56bfc8c918fb961effc1c67239ecd018398",
+    "public/design-system/fonts/LICENSE-OFL.txt": "48b3976eb90321847ca267ca231f3555b01878e85b2f91356e6735b461f0cb83",
+    "public/design-system/fonts/SpaceGrotesk-latin-ext.woff2": "d825b0ad1f488832d8a1af62b0d48e4b901f6dea98c64af1e7ecfd4c4d06b963",
+    "public/design-system/fonts/SpaceGrotesk-latin.woff2": "7e35501584976267da77f80adfe851af1dded63e7763bd936c83cd241d20d954",
+    "public/design-system/fonts/SpaceGrotesk-vietnamese.woff2": "c8d96715339bc51e48bc2c7a5ea297fc420fd65f2afeea968adfa44aa1252a93"
+  }
+}

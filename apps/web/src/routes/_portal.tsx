@@ -316,6 +316,15 @@ function PortalLayout() {
           <main id="portal-main" tabIndex={-1} className="flex-1 w-full flex flex-col">
             <Outlet />
           </main>
+          <footer className="portal-footer portal-shell">
+            <span>Venturi feedback</span>
+            <nav aria-label="Related Venturi sites">
+              <a href="https://venturi.systems/">Venturi</a>
+              <a href="https://docs.venturi.systems/">Documentation</a>
+              <a href="https://venturi.systems/legal/privacy/">Privacy</a>
+              <a href="https://github.com/venturi-systems/quackback">Source code · AGPL-3.0</a>
+            </nav>
+          </footer>
           <AuthDialog authConfig={authConfig} workspaceName={org.name} />
         </div>
       </AuthPopoverProvider>

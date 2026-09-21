@@ -2,7 +2,7 @@ import type { BoardId } from '@quackback/ids'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
-import { useRouter, useRouteContext } from '@tanstack/react-router'
+import { Link, useRouter, useRouteContext } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PencilIcon } from '@heroicons/react/24/solid'
@@ -59,6 +59,11 @@ export function FeedbackHeaderAnimated({
   const { session } = useRouteContext({ from: '__root__' })
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
+  const [submitted, setSubmitted] = useState<{
+    id: string
+    boardSlug: string
+    pending: boolean
+  } | null>(null)
   const { openAuthPopover } = useAuthPopover()
 
   const createPost = useCreatePublicPost()
@@ -189,6 +194,11 @@ export function FeedbackHeaderAnimated({
         contentJson,
       })
 
+      setSubmitted({
+        id: result.id,
+        boardSlug: result.board.slug,
+        pending: result.moderationState === 'pending',
+      })
       resetForm()
       setExpanded(false)
       onPostCreated?.(result.id, result.board.slug)
@@ -239,14 +249,36 @@ export function FeedbackHeaderAnimated({
     <motion.div
       className="bg-card border border-border rounded-lg mb-5 shadow-sm overflow-hidden"
       initial={false}
-      animate={{
-        boxShadow: expanded
-          ? '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
-          : '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-      }}
+      animate={{ boxShadow: expanded ? 'var(--ds-shadow-card)' : 'none' }}
       transition={{ duration: 0.2 }}
       onKeyDown={handleKeyDown}
     >
+      {submitted && (
+        <div role="status" className="border-b border-border px-4 py-3 text-sm">
+          <p>
+            {submitted.pending
+              ? intl.formatMessage({
+                  id: 'portal.feedback.header.pendingReview',
+                  defaultMessage:
+                    'Your feedback is awaiting team review. It will appear publicly if approved.',
+                })
+              : intl.formatMessage({
+                  id: 'portal.feedback.header.submissionSaved',
+                  defaultMessage: 'Your feedback has been submitted.',
+                })}
+          </p>
+          <Link
+            to="/b/$slug/posts/$postId"
+            params={{ slug: submitted.boardSlug, postId: submitted.id }}
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            <FormattedMessage
+              id="portal.feedback.header.viewSubmission"
+              defaultMessage="View your submission"
+            />
+          </Link>
+        </div>
+      )}
       {/* Board selector - above title when expanded */}
       <AnimatePresence>
         {expanded && boards.length > 0 && (
@@ -258,7 +290,7 @@ export function FeedbackHeaderAnimated({
             className="overflow-hidden"
           >
             <div className="flex items-center px-4 sm:px-5 pt-3 pb-1">
-              <span className="text-xs text-muted-foreground me-1">
+              <span id="feedback-board-label" className="text-xs text-muted-foreground me-1">
                 <FormattedMessage
                   id="portal.feedback.header.postingTo"
                   defaultMessage="Posting to"
@@ -266,6 +298,7 @@ export function FeedbackHeaderAnimated({
               </span>
               <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
                 <SelectTrigger
+                  aria-labelledby="feedback-board-label"
                   size="xs"
                   className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
                 >
@@ -289,6 +322,15 @@ export function FeedbackHeaderAnimated({
         )}
       </AnimatePresence>
 
+      <label
+        htmlFor="feedback-title-input"
+        className="block px-4 pt-3 text-xs text-muted-foreground"
+      >
+        <FormattedMessage
+          id="portal.feedback.header.titleLabel"
+          defaultMessage="Your feedback title"
+        />
+      </label>
       {/* Icon + Title Row - Always visible */}
       <div className="flex items-center gap-3 px-4 py-3.5">
         {/* Icon - fades out when expanded */}
@@ -309,6 +351,9 @@ export function FeedbackHeaderAnimated({
         {/* Title input - always visible, grows when expanded */}
         <motion.input
           ref={titleInputRef}
+          id="feedback-title-input"
+          aria-invalid={!!error}
+          aria-describedby={error ? 'feedback-submit-error' : undefined}
           type="text"
           placeholder={intl.formatMessage({
             id: 'portal.feedback.header.titlePlaceholder',
@@ -349,7 +394,11 @@ export function FeedbackHeaderAnimated({
                   exit={{ opacity: 0, height: 0 }}
                   className="px-4 sm:px-5"
                 >
-                  <div className="[border-radius:calc(var(--radius)*0.8)] bg-destructive/10 px-3 py-2 text-sm text-destructive mb-2">
+                  <div
+                    id="feedback-submit-error"
+                    role="alert"
+                    className="[border-radius:calc(var(--radius)*0.8)] bg-destructive/10 px-3 py-2 text-sm text-destructive mb-2"
+                  >
                     {error}
                   </div>
                 </motion.div>

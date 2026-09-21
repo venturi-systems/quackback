@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useIntl } from 'react-intl'
 import { useInfiniteScroll } from '@/lib/client/hooks/use-infinite-scroll'
+import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/shared/spinner'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
 import { FeedbackHeader } from '@/components/public/feedback/feedback-header'
@@ -140,6 +141,8 @@ export function FeedbackContainer({
     data: postsData,
     isFetching,
     isFetchingNextPage,
+    isError,
+    refetch,
     hasNextPage,
     fetchNextPage,
   } = usePublicPosts({
@@ -260,8 +263,23 @@ export function FeedbackContainer({
             />
           </div>
 
-          <div className="mt-5">
-            {posts.length === 0 && !isLoading ? (
+          <div className="mt-5" aria-busy={isLoading}>
+            {isError && (
+              <div role="alert" className="mb-4 rounded-lg border border-input p-4">
+                <p className="mb-3">
+                  Feedback could not be refreshed. Your filters are still selected.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void refetch()}
+                  disabled={isFetching}
+                >
+                  Try again
+                </Button>
+              </div>
+            )}
+            {posts.length === 0 && !isLoading && !isError ? (
               <p className="text-muted-foreground text-center py-8">
                 {activeSearch || activeFilterCount > 0
                   ? intl.formatMessage({
