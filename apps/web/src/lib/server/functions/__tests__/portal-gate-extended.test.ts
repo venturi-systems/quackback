@@ -275,6 +275,30 @@ const LIST_PUBLIC_CHANGELOGS = 6
 // ---------------------------------------------------------------------------
 
 describe('portal.ts fetchPortalData — portal-visibility gate', () => {
+  it('starts newest cursor pagination and preserves the exact continuation in SSR data', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockListPublicBoardsWithStats.mockResolvedValue([])
+    mockListPublicPostsWithVotesAndAvatars.mockResolvedValue({
+      items: [],
+      hasMore: true,
+      nextCursor: 'exact-newest-cursor',
+    })
+    mockListPublicStatuses.mockResolvedValue([])
+    mockListPublicTags.mockResolvedValue([])
+    mockGetVotedPostIdsByUserId.mockResolvedValue(new Set())
+    const h = await loadModule(PORTAL)
+    const result = await h[FETCH_PORTAL_DATA]({ data: { sort: 'new' } })
+    expect(mockListPublicPostsWithVotesAndAvatars).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sort: 'new',
+        cursor: null,
+        page: 1,
+        limit: 20,
+      })
+    )
+    expect(result).toMatchObject({ posts: { nextCursor: 'exact-newest-cursor', hasMore: true } })
+  })
+
   it('returns empty structure when private portal blocks the caller', async () => {
     mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
     const h = await loadModule(PORTAL)

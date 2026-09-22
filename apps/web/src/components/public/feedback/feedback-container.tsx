@@ -33,6 +33,7 @@ interface FeedbackContainerProps {
   statuses: PostStatusEntity[]
   tags: Tag[]
   hasMore: boolean
+  nextCursor?: string | null
   votedPostIds: string[]
   currentBoard?: string
   currentSearch?: string
@@ -58,6 +59,7 @@ export function FeedbackContainer({
   statuses,
   tags,
   hasMore: initialHasMore,
+  nextCursor: initialNextCursor,
   votedPostIds,
   currentBoard,
   currentSearch,
@@ -149,6 +151,7 @@ export function FeedbackContainer({
           items: initialPosts,
           total: initialPosts.length,
           hasMore: initialHasMore,
+          nextCursor: initialNextCursor,
         }
       : undefined,
   })

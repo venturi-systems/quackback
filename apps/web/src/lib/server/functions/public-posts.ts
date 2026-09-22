@@ -58,6 +58,7 @@ const listPublicPostsSchema = z.object({
   tagIds: z.array(z.string()).optional(),
   sort: z.enum(['top', 'new', 'trending']).optional().default('top'),
   page: z.number().int().min(1).optional().default(1),
+  cursor: z.string().max(512).nullable().optional(),
   limit: z.number().int().min(1).max(100).optional().default(20),
   minVotes: z.number().int().min(1).optional(),
   dateFrom: z
@@ -165,6 +166,7 @@ export const listPublicPostsFn = createServerFn({ method: 'GET' })
         tagIds: data.tagIds as TagId[] | undefined,
         sort: data.sort,
         page: data.page,
+        cursor: data.cursor,
         limit: data.limit,
         minVotes: data.minVotes,
         dateFrom: data.dateFrom,
