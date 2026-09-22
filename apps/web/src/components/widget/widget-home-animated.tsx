@@ -261,7 +261,7 @@ export function WidgetHomeAnimated({
     isFetching: isFetchingPosts,
   } = useInfiniteQuery({
     queryKey: ['widget', 'posts', 'popular', 'top', activeBoardSlug ?? 'all'],
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam }): Promise<{ items: WidgetPost[]; total: number; hasMore: boolean }> =>
       listPublicPostsFn({
         data: {
           sort: 'top',
@@ -285,16 +285,14 @@ export function WidgetHomeAnimated({
   const allPopularPosts: WidgetPost[] = useMemo(
     () =>
       postsData?.pages.flatMap((page) =>
-        page.items.map(
-          (p): WidgetPost => ({
-            id: p.id,
-            title: p.title,
-            voteCount: p.voteCount,
-            statusId: p.statusId ?? null,
-            commentCount: (p as WidgetPost).commentCount ?? 0,
-            board: (p as WidgetPost).board,
-          })
-        )
+        page.items.map((p): WidgetPost => ({
+          id: p.id,
+          title: p.title,
+          voteCount: p.voteCount,
+          statusId: p.statusId ?? null,
+          commentCount: (p as WidgetPost).commentCount ?? 0,
+          board: (p as WidgetPost).board,
+        }))
       ) ?? [],
     [postsData]
   )

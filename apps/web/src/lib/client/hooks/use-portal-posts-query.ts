@@ -23,7 +23,9 @@ interface PublicPostListResult {
   items: PublicPostListItem[]
   total: number
   hasMore: boolean
+  nextCursor?: string | null
 }
+type PublicPostPageParam = number | string | null
 
 interface PostPermissions {
   canEdit: boolean
@@ -74,7 +76,7 @@ export const postPermissionsKeys = {
 
 async function fetchPublicPosts(
   filters: PublicFeedbackFilters,
-  page: number
+  page: PublicPostPageParam
 ): Promise<PublicPostListResult> {
   // Parse status filters - can be TypeIDs or slugs
   const statusIds: string[] = []
@@ -95,7 +97,7 @@ async function fetchPublicPosts(
       statusSlugs: statusSlugs.length > 0 ? statusSlugs : undefined,
       tagIds: filters.tagIds as TagId[] | undefined,
       sort: filters.sort || 'top',
-      page,
+      ...(typeof page === 'number' ? { page } : { cursor: page }),
       limit: 20,
       minVotes: filters.minVotes,
       dateFrom: filters.dateFrom,
@@ -114,15 +116,32 @@ export async function fetchVotedPosts(): Promise<Set<string>> {
 // ============================================================================
 
 export function usePublicPosts({ filters, initialData, enabled = true }: UsePublicPostsOptions) {
-  return useInfiniteQuery({
+  const newest = filters.sort === 'new'
+  // Old/pre-cursor initial data has no safe seek position. Fetch a fresh first
+  // page rather than guessing from its Date values (which lose microseconds).
+  const seed =
+    newest && initialData?.hasMore && initialData.nextCursor === undefined ? undefined : initialData
+  const initialPageParam: PublicPostPageParam = newest ? null : 1
+  return useInfiniteQuery<
+    PublicPostListResult,
+    Error,
+    InfiniteData<PublicPostListResult, PublicPostPageParam>,
+    ReturnType<typeof publicPostsKeys.list>,
+    PublicPostPageParam
+  >({
     queryKey: publicPostsKeys.list(filters),
     queryFn: ({ pageParam }) => fetchPublicPosts(filters, pageParam),
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => (lastPage.hasMore ? allPages.length + 1 : undefined),
-    initialData: initialData
+    initialPageParam,
+    getNextPageParam: (lastPage, allPages) =>
+      !lastPage.hasMore
+        ? undefined
+        : newest
+          ? (lastPage.nextCursor ?? undefined)
+          : allPages.length + 1,
+    initialData: seed
       ? {
-          pages: [initialData],
-          pageParams: [1],
+          pages: [seed],
+          pageParams: [initialPageParam],
         }
       : undefined,
     // Keep showing previous data while loading new filter results

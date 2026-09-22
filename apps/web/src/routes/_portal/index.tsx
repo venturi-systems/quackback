@@ -246,6 +246,7 @@ function AccessiblePublicPortalPage({
           statuses={portalData.statuses}
           tags={portalData.tags}
           hasMore={portalData.posts.hasMore}
+          nextCursor={portalData.posts.nextCursor}
           votedPostIds={portalData.votedPostIds}
           currentBoard={currentBoard}
           currentSearch={currentSearch}
