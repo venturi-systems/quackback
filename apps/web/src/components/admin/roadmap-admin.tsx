@@ -5,12 +5,15 @@ import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
+  type Announcements,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core'
+import { roadmapColumnKeyboardCoordinates } from './roadmap/roadmap-keyboard'
 import { MapIcon, PlusIcon } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
 import { RoadmapSidebar } from './roadmap-sidebar'
@@ -97,8 +100,33 @@ export function RoadmapAdmin({ statuses, currentUser }: RoadmapAdminProps) {
       activationConstraint: {
         distance: 8,
       },
-    })
+    }),
+    // Keyboard alternative to dragging: the card's handle picks the card up,
+    // arrow keys jump between status columns, Space/Enter drops, Escape cancels.
+    useSensor(KeyboardSensor, { coordinateGetter: roadmapColumnKeyboardCoordinates })
   )
+
+  const statusName = (id: unknown) =>
+    statuses.find((status) => status.id === id)?.name ?? 'another status'
+  const postTitle = (data: unknown) =>
+    (data as { post?: RoadmapPostEntry } | undefined)?.post?.title ?? 'item'
+
+  // Screen-reader announcements name the post and the status column instead
+  // of dnd-kit's default internal ids.
+  const announcements: Announcements = {
+    onDragStart: ({ active }) =>
+      `Picked up ${postTitle(active.data.current)}. Use the arrow keys to choose a status, then press Space or Enter to move it, or Escape to cancel.`,
+    onDragOver: ({ active, over }) =>
+      over
+        ? `${postTitle(active.data.current)} is over ${statusName(over.id)}.`
+        : `${postTitle(active.data.current)} is not over a status.`,
+    onDragEnd: ({ active, over }) =>
+      over
+        ? `${postTitle(active.data.current)} dropped on ${statusName(over.id)}.`
+        : `${postTitle(active.data.current)} dropped. Its status did not change.`,
+    onDragCancel: ({ active }) =>
+      `Move cancelled. ${postTitle(active.data.current)} keeps its status.`,
+  }
 
   function handleDragStart(event: DragStartEvent) {
     const { active } = event
@@ -116,12 +144,37 @@ export function RoadmapAdmin({ statuses, currentUser }: RoadmapAdminProps) {
     const sourceStatusId = active.data.current?.statusId as StatusId
     const targetStatusId = over.data.current.statusId as StatusId
 
-    if (sourceStatusId !== targetStatusId) {
-      await changeStatus.mutateAsync({
-        postId: active.id as PostId,
-        statusId: targetStatusId,
-      })
+    if (sourceStatusId === targetStatusId) return
+
+    const postId = active.id as PostId
+    const title = postTitle(active.data.current)
+    try {
+      await changeStatus.mutateAsync({ postId, statusId: targetStatusId })
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? `Could not move ${title}: ${error.message}`
+          : `Could not move ${title}. Its status did not change.`
+      )
+      return
     }
+    // A drop changes a public status and is recorded in the post's activity
+    // history, so offer an immediate way back.
+    toast.success(`Moved ${title} to ${statusName(targetStatusId)}`, {
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          changeStatus.mutate(
+            { postId, statusId: sourceStatusId },
+            {
+              onSuccess: () => toast.success(`${title} is back in ${statusName(sourceStatusId)}`),
+              onError: () =>
+                toast.error(`Could not undo. ${title} is still in ${statusName(targetStatusId)}.`),
+            }
+          )
+        },
+      },
+    })
   }
 
   return (
@@ -172,6 +225,7 @@ export function RoadmapAdmin({ statuses, currentUser }: RoadmapAdminProps) {
 
             <DndContext
               sensors={sensors}
+              accessibility={{ announcements }}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               autoScroll={false}

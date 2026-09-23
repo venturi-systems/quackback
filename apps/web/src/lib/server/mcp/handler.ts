@@ -17,6 +17,7 @@ import { DomainException, RateLimitError } from '@/lib/shared/errors'
 import { getDeveloperConfig } from '@/lib/server/domains/settings/settings.service'
 import { db, principal, eq } from '@/lib/server/db'
 import { config } from '@/lib/server/config'
+import { effectiveRole } from '@/lib/shared/roles'
 import { createMcpServer } from './server'
 import type { PrincipalId } from '@quackback/ids'
 import type { McpAuthContext, McpScope } from './types'
@@ -80,11 +81,13 @@ async function resolveOAuthContext(token: string): Promise<McpAuthContext | null
     // If the principal no longer exists (deleted/revoked), reject the token.
     const principalRecord = await db.query.principal.findFirst({
       where: eq(principal.id, principalId as PrincipalId),
-      columns: { role: true },
+      columns: { role: true, type: true },
     })
     if (!principalRecord) return null
 
-    const role = principalRecord.role
+    // A team role only counts on a human principal: an anonymous principal
+    // that authorized an OAuth client acts as a portal user.
+    const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
 
     // Parse granted scopes from space-separated string
     const scopeStr = (payload.scope as string) ?? ''

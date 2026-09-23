@@ -1,32 +1,41 @@
+import { useEffect, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/shared/utils'
+import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
+import { useInShell } from '@/components/public/shell/shell-context'
+import { VENTURI_SITE_URL } from '@/lib/shared/venturi-identity'
 
 interface ErrorPageProps {
   // TanStack Router types a caught route error as `unknown`: anything can be thrown.
   error: unknown
   reset?: () => void
-  fullPage?: boolean
 }
 
-interface FriendlyShellProps {
-  children: React.ReactNode
-  fullPage?: boolean
+/**
+ * Page title for a status page. The root head sets the site title during
+ * server rendering; once hydrated the tab names the condition, so a visitor
+ * with several tabs (or a screen reader announcing the title) knows which
+ * page failed.
+ */
+function useStatusTitle(title: string) {
+  useEffect(() => {
+    const previous = document.title
+    document.title = `${title} · Venturi Feedback`
+    return () => {
+      document.title = previous
+    }
+  }, [title])
 }
 
-export function FriendlyShell({ children, fullPage = true }: FriendlyShellProps) {
-  return (
-    <div
-      className={cn(
-        'flex items-center justify-center px-4',
-        fullPage ? 'min-h-screen' : 'min-h-[400px]'
-      )}
-    >
-      <div className="w-full max-w-md text-center">
-        <img src="/venturi-mark.svg" alt="Venturi" className="mx-auto mb-6 h-16 w-16" />
-        {children}
-      </div>
-    </div>
-  )
+/**
+ * Chrome for error and not-found content. Inside the portal or the admin the
+ * surrounding layout already draws the header and footer, so the content
+ * renders in place; on its own it gets the public page frame.
+ */
+export function FriendlyShell({ children }: { children: ReactNode }) {
+  const inShell = useInShell()
+  const content = <section className="public-status">{children}</section>
+  if (inShell) return <div className="portal-shell public-status__inline">{content}</div>
+  return <PublicPageFrame>{content}</PublicPageFrame>
 }
 
 /**
@@ -44,32 +53,33 @@ export function errorMessage(error: unknown): string | undefined {
   return undefined
 }
 
-export function DefaultErrorPage({ error, reset, fullPage = true }: ErrorPageProps) {
+export function DefaultErrorPage({ error, reset }: ErrorPageProps) {
   const message = errorMessage(error)
+  useStatusTitle('Page could not load')
   return (
-    <FriendlyShell fullPage={fullPage}>
-      <h1 className="text-2xl font-semibold tracking-tight">Something went wrong.</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        An unexpected error got in the way. Try again, or head back to the home page.
+    <FriendlyShell>
+      <h1 className="public-status__title">This page could not load</h1>
+      <p className="public-status__lead">
+        An unexpected error stopped it. Try again, or return to the feedback home page.
       </p>
 
       {message && (
-        <details className="mt-4 rounded-md border bg-muted/40 px-4 py-3 text-left">
-          <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-            Technical details
-          </summary>
-          <p className="mt-2 break-words text-sm text-muted-foreground">{message}</p>
+        <details className="public-status__details">
+          <summary>Technical details</summary>
+          <p>
+            <code>{message}</code>
+          </p>
         </details>
       )}
 
-      <div className="mt-6 flex items-center justify-center gap-3">
+      <div className="public-status__actions">
         {reset && (
-          <Button onClick={reset} variant="default">
+          <Button size="lg" onClick={reset}>
             Try again
           </Button>
         )}
-        <Button variant="outline" asChild>
-          <a href="/">Go home</a>
+        <Button size="lg" variant="outline" asChild>
+          <a href="/">Go to feedback home</a>
         </Button>
       </div>
     </FriendlyShell>
@@ -77,17 +87,20 @@ export function DefaultErrorPage({ error, reset, fullPage = true }: ErrorPagePro
 }
 
 export function NotFoundPage() {
+  useStatusTitle('Page not found')
   return (
     <FriendlyShell>
-      <h1 className="text-2xl font-semibold tracking-tight">Page not found.</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        We couldn't find what you were looking for. It may have been moved, or the link might be
-        wrong.
+      <h1 className="public-status__title">Page not found</h1>
+      <p className="public-status__lead">
+        The link may be out of date, or the page may have moved.
       </p>
 
-      <div className="mt-6">
-        <Button variant="outline" asChild>
-          <a href="/">Go home</a>
+      <div className="public-status__actions">
+        <Button size="lg" asChild>
+          <a href="/">Go to feedback home</a>
+        </Button>
+        <Button size="lg" variant="outline" asChild>
+          <a href={VENTURI_SITE_URL}>Go to venturi.systems</a>
         </Button>
       </div>
     </FriendlyShell>

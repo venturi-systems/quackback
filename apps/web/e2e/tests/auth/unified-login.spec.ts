@@ -141,8 +141,11 @@ test('(2) portal user reaching /admin gets not_team_member error toast', async (
   const errorCode = rawError?.startsWith('"') ? JSON.parse(rawError) : rawError
   expect(errorCode).toBe('not_team_member')
 
-  // useAutoOpenAuthDialog fires the error toast before opening the dialog.
-  await expect(page.getByText(/team access|team membership/i)).toBeVisible({ timeout: 10000 })
+  // useAutoOpenAuthDialog fires the error toast before opening the dialog. Scope
+  // to the toast: portal copy (the participation explainer) also mentions team access.
+  await expect(
+    page.locator('[data-sonner-toast]').filter({ hasText: /team access|team membership/i })
+  ).toBeVisible({ timeout: 10000 })
 
   // The user is NOT on /admin.
   expect(page.url()).not.toMatch(/\/admin/)

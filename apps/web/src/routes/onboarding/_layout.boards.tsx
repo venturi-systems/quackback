@@ -4,8 +4,7 @@ import { ArrowPathIcon, CheckIcon, PlusIcon, XMarkIcon } from '@heroicons/react/
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { createBoardsBatchFn } from '@/lib/server/functions/boards'
-import { checkOnboardingState } from '@/lib/server/functions/admin'
-import { listBoardsForOnboarding } from '@/lib/server/functions/onboarding'
+import { checkOnboardingState, listBoardsForOnboarding } from '@/lib/server/functions/onboarding'
 import {
   getBoardsForUseCase,
   getBoardOptionsForUseCase,
@@ -22,7 +21,7 @@ export const Route = createFileRoute('/onboarding/_layout/boards')({
       throw redirect({ to: '/onboarding/account' })
     }
 
-    const state = await checkOnboardingState({ data: session.user.id })
+    const state = await checkOnboardingState()
 
     if (state.needsInvitation) {
       throw redirect(buildSigninRedirect('/admin'))

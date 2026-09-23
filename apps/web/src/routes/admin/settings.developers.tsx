@@ -120,7 +120,10 @@ function ApiPage() {
           >
             <McpServerSettings initialEnabled={developerConfigQuery.data.mcpEnabled} />
           </SettingsCard>
-          <McpSetupGuide endpointUrl={mcpEndpointUrl} />
+          <McpSetupGuide
+            endpointUrl={mcpEndpointUrl}
+            oauthRegistrationOpen={developerConfigQuery.data.oauthClientRegistrationOpen}
+          />
         </TabsContent>
       </Tabs>
     </div>

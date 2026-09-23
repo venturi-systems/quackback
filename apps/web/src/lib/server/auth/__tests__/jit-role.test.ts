@@ -36,6 +36,8 @@ vi.mock('@/lib/server/db', () => ({
   account: { userId: 'account.userId', providerId: 'account.providerId' },
   and: vi.fn((...parts: unknown[]) => ({ op: 'and', parts })),
   eq: (...args: unknown[]) => mockEq(...args),
+  // readSsoClaims (hooks.ts) orders the account lookup newest-first.
+  desc: vi.fn((column: unknown) => ({ op: 'desc', column })),
 }))
 
 vi.mock('@/lib/server/audit/log', () => ({

@@ -92,6 +92,18 @@ export interface PublicPostDetailView {
  * Uses server functions to keep database code server-only.
  * These are used with ensureQueryData() in loaders and useSuspenseQuery() in components.
  */
+/**
+ * fetchPublicPostDetail answers null both for a post that does not exist and
+ * for one the viewer may not read, so the two are indistinguishable by design.
+ * The post route turns this error into a 404 page instead of an error page.
+ */
+export class PostNotFoundError extends Error {
+  constructor() {
+    super('Post not found')
+    this.name = 'PostNotFoundError'
+  }
+}
+
 export const portalDetailQueries = {
   /**
    * Get public board by slug
@@ -115,7 +127,7 @@ export const portalDetailQueries = {
       queryKey: ['portal', 'post', postId],
       queryFn: async (): Promise<PublicPostDetailView> => {
         const result = await fetchPublicPostDetail({ data: { postId } })
-        if (!result) throw new Error('Post not found')
+        if (!result) throw new PostNotFoundError()
         return result as PublicPostDetailView
       },
       staleTime: 30 * 1000, // 30s

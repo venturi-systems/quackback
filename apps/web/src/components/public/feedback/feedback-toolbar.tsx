@@ -68,8 +68,8 @@ export function FeedbackToolbar({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 sm:gap-4">
-      <div className="flex items-center gap-1 min-w-0">
+    <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+      <div className="flex flex-wrap items-center gap-1">
         {SORT_OPTIONS.map((option) => {
           const Icon = option.icon
           const isActive = currentSort === option.value
@@ -95,12 +95,22 @@ export function FeedbackToolbar({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {/* Search */}
         <Popover open={searchOpen} onOpenChange={setSearchOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="min-h-11 gap-1.5">
-              <MagnifyingGlassIcon className="h-4 w-4" />
+            {/* The label is display:none below sm; aria-label keeps the control
+                named at every width (same as the roadmap toolbar). */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              aria-label={intl.formatMessage({
+                id: 'portal.feedback.toolbar.search',
+                defaultMessage: 'Search',
+              })}
+            >
+              <MagnifyingGlassIcon className="h-4 w-4" aria-hidden="true" />
               <span className="hidden sm:inline">
                 <FormattedMessage id="portal.feedback.toolbar.search" defaultMessage="Search" />
               </span>

@@ -91,8 +91,12 @@ test.describe('Admin MCP Settings', () => {
 
   test('shows Authentication step', async ({ page }) => {
     await expect(page.getByText('Authentication').first()).toBeVisible({ timeout: 10000 })
-    // Auth description text is split across DOM nodes (link + text), so check parts independently
-    await expect(page.getByText(/or OAuth/).first()).toBeVisible()
+    // Auth description text is split across DOM nodes (link + text), so check parts
+    // independently. CI does not set OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION,
+    // so MCP OAuth client registration is closed and the guide says so.
+    await expect(
+      page.getByText(/OAuth sign-in for MCP clients is turned off on this deployment/).first()
+    ).toBeVisible()
   })
 
   test('authentication step links to API keys settings', async ({ page }) => {
@@ -123,11 +127,14 @@ test.describe('Admin MCP Settings', () => {
     await expect(page.getByText('.mcp.json')).toBeVisible({ timeout: 10000 })
   })
 
-  test('Claude Code client shows OAuth and API Key variant buttons', async ({ page }) => {
-    await expect(page.getByRole('button', { name: /OAuth \(recommended\)/i })).toBeVisible({
-      timeout: 10000,
-    })
-    await expect(page.getByRole('button', { name: /API Key/i })).toBeVisible()
+  test('Claude Code client offers only the API key config while OAuth registration is closed', async ({
+    page,
+  }) => {
+    // Claude Code's OAuth path registers a client before sign-in, which the server
+    // refuses unless OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true (unset in CI).
+    await expect(page.getByText('.mcp.json')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('button', { name: /OAuth/i })).toHaveCount(0)
+    await expect(page.getByText(/QUACKBACK_API_KEY/).first()).toBeVisible()
   })
 
   test('switching to Cursor client updates the code panel filename', async ({ page }) => {
@@ -155,17 +162,17 @@ test.describe('Admin MCP Settings', () => {
     await expect(page.getByText(/windsurf\/mcp_config\.json/)).toBeVisible({ timeout: 5000 })
   })
 
-  test('switching to Claude Desktop shows OAuth and API Key variants', async ({ page }) => {
+  test('switching to Claude Desktop shows only the API key config while OAuth registration is closed', async ({
+    page,
+  }) => {
     const claudeDesktopButton = page.getByRole('button', { name: /Claude Desktop/i })
     await expect(claudeDesktopButton).toBeVisible({ timeout: 10000 })
     await claudeDesktopButton.click()
 
-    await expect(page.getByRole('button', { name: /OAuth \(recommended\)/i })).toBeVisible({
-      timeout: 5000,
-    })
-    await expect(page.getByRole('button', { name: /API Key/i })).toBeVisible()
     // Claude Desktop config filename
-    await expect(page.getByText('claude_desktop_config.json')).toBeVisible()
+    await expect(page.getByText('claude_desktop_config.json')).toBeVisible({ timeout: 5000 })
+    await expect(page.getByRole('button', { name: /OAuth/i })).toHaveCount(0)
+    await expect(page.getByText(/qb_YOUR_API_KEY/).first()).toBeVisible()
   })
 
   test('Copy button is present in the code panel', async ({ page }) => {
@@ -209,12 +216,10 @@ test.describe('Admin MCP Settings', () => {
     expect(href).toContain('quackback.io/docs/mcp')
   })
 
-  test('Claude Code API Key variant shows Authorization Bearer config', async ({ page }) => {
-    // Switch to API Key variant
-    const apiKeyVariant = page.getByRole('button', { name: /API Key/i })
-    if ((await apiKeyVariant.count()) > 0) {
-      await apiKeyVariant.first().click()
-      await expect(page.getByText(/QUACKBACK_API_KEY/).first()).toBeVisible({ timeout: 5000 })
-    }
+  test('Claude Code API Key config shows Authorization Bearer config', async ({ page }) => {
+    // With OAuth registration closed the API key config is the only (and default) one.
+    await expect(page.getByText(/QUACKBACK_API_KEY/).first()).toBeVisible({
+      timeout: 10000,
+    })
   })
 })

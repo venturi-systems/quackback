@@ -6,6 +6,7 @@
  * Usage: bun set-workspace-anon.ts <true|false>
  */
 import postgres from 'postgres'
+import { CACHE_KEYS, getRedis } from '@/lib/server/redis'
 
 const arg = (process.argv[2] || '').toLowerCase()
 if (arg !== 'true' && arg !== 'false') {
@@ -36,8 +37,12 @@ try {
   features.allowAnonymous = enabled
   config.features = features
   await sql`UPDATE settings SET portal_config = ${JSON.stringify(config)} WHERE id = ${id}`
+  // The anonymous sign-in gate reads the same cached settings as auth. A raw
+  // fixture write must invalidate that cache before the browser acts again.
+  await getRedis().del(CACHE_KEYS.TENANT_SETTINGS)
   console.log(JSON.stringify({ allowAnonymous: enabled }))
   await sql.end()
+  await getRedis().quit()
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   await sql.end()

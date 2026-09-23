@@ -54,7 +54,7 @@ type Handlers = {
   DELETE: (args: { request: Request; params: Record<string, string> }) => Promise<Response>
 }
 type RouteOpts = { server: { handlers: Handlers } }
-const { GET, PATCH } = (Route as unknown as { options: RouteOpts }).options.server.handlers
+const { GET, PATCH, DELETE } = (Route as unknown as { options: RouteOpts }).options.server.handlers
 
 const BOARD_ID = 'board_01jz1q2r3s4t5u6v7w8x9y0z1a'
 
@@ -141,5 +141,29 @@ describe('GET /api/v1/boards/:boardId — still returns audience in response', (
     expect(res.status).toBe(200)
     const body = (await res.json()) as { data: typeof BASE_BOARD }
     expect(body.data).toHaveProperty('audience')
+  })
+})
+
+describe('DELETE /api/v1/boards/:boardId — administrator keys only', () => {
+  it('requires an admin-level API key, not a team key', async () => {
+    mockDeleteBoard.mockResolvedValue(undefined)
+    const res = await DELETE({
+      request: new Request(`http://test/api/v1/boards/${BOARD_ID}`, { method: 'DELETE' }),
+      params: { boardId: BOARD_ID },
+    })
+    expect(res.status).toBe(204)
+    expect(mockWithApiKeyAuth).toHaveBeenCalledWith(expect.any(Request), { role: 'admin' })
+    expect(mockDeleteBoard).toHaveBeenCalledWith(BOARD_ID)
+  })
+
+  it('does not delete when the key is refused', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    mockWithApiKeyAuth.mockRejectedValue(new ForbiddenError('FORBIDDEN', 'Admin access required'))
+    const res = await DELETE({
+      request: new Request(`http://test/api/v1/boards/${BOARD_ID}`, { method: 'DELETE' }),
+      params: { boardId: BOARD_ID },
+    })
+    expect(res.status).toBe(403)
+    expect(mockDeleteBoard).not.toHaveBeenCalled()
   })
 })

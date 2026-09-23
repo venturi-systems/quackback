@@ -68,7 +68,7 @@ function RoadmapPage() {
   // Use URL param if present, otherwise fall back to first roadmap
   const initialSelectedId = selectedRoadmapFromUrl ?? firstRoadmapId
 
-  const isTeamMember = userRole === 'admin' || userRole === 'member'
+  const isTeamMember = isAuthenticated && (userRole === 'admin' || userRole === 'member')
 
   return (
     // Cap at viewport height so a column with many cards scrolls internally
@@ -80,15 +80,21 @@ function RoadmapPage() {
     // of a 1920px screen. Heading, toolbar and board all share the page's own
     // left edge so the route stays internally aligned; text measure is capped on
     // the text itself, not on the composition.
-    <div className="mx-auto w-full px-4 sm:px-6 py-8 h-[calc(100dvh-7rem)] flex flex-col min-h-0">
+    <div className="portal-shell py-8 min-h-[calc(100dvh-12rem)] flex flex-col">
       <div className="mb-6 animate-in fade-in duration-200 fill-mode-backwards">
-        <h1 className="text-3xl font-bold mb-2">
+        <h1 className="portal-page-title">
           <FormattedMessage id="portal.roadmap.title" defaultMessage="Roadmap" />
         </h1>
-        <p className="text-muted-foreground">
+        <p className="portal-lead text-muted-foreground">
           <FormattedMessage
             id="portal.roadmap.description"
             defaultMessage="See what we're working on and what's coming next."
+          />
+        </p>
+        <p className="portal-roadmap__note mt-2 text-sm text-muted-foreground">
+          <FormattedMessage
+            id="portal.roadmap.stagesNote"
+            defaultMessage="Team members move items between these stages. Open an item to vote or comment where your board access allows."
           />
         </p>
       </div>

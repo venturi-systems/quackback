@@ -45,25 +45,35 @@ export function CommentContent({ content, contentJson, className }: CommentConte
     () => (!contentJson && isMarkdown ? commentMarkdownToTiptapJson(content) : null),
     [content, contentJson, isMarkdown]
   )
+  // Comment bodies are user-generated: the typography checker routes them to
+  // review (data-text-origin="user") instead of failing authored copy rules.
   if (contentJson) {
     return (
-      <MentionHoverCardOverlay>
-        <EmbedHydration>
-          <RichTextContent content={contentJson} className={className} />
-        </EmbedHydration>
-      </MentionHoverCardOverlay>
+      <div data-text-origin="user" className="contents">
+        <MentionHoverCardOverlay>
+          <EmbedHydration>
+            <RichTextContent content={contentJson} className={className} />
+          </EmbedHydration>
+        </MentionHoverCardOverlay>
+      </div>
     )
   }
   if (!isMarkdown || !fallbackJson) {
-    return <p className={cn('whitespace-pre-wrap', className)}>{content}</p>
+    return (
+      <p data-text-origin="user" className={cn('whitespace-pre-wrap', className)}>
+        {content}
+      </p>
+    )
   }
   // Markdown fallback never contains mention chips or embeds, but wrap anyway so
   // any future syntax routed through this path is covered.
   return (
-    <MentionHoverCardOverlay>
-      <EmbedHydration>
-        <RichTextContent content={fallbackJson} className={className} />
-      </EmbedHydration>
-    </MentionHoverCardOverlay>
+    <div data-text-origin="user" className="contents">
+      <MentionHoverCardOverlay>
+        <EmbedHydration>
+          <RichTextContent content={fallbackJson} className={className} />
+        </EmbedHydration>
+      </MentionHoverCardOverlay>
+    </div>
   )
 }

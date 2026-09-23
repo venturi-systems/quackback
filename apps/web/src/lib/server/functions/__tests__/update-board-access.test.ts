@@ -10,9 +10,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 type Handler = (args: { data: Record<string, unknown> }) => Promise<unknown>
-const hoisted = vi.hoisted(() => ({ handlers: [] as Handler[] }))
+const hoisted = vi.hoisted(() => ({ handlers: [] as Handler[], mockAssertNotManaged: vi.fn() }))
+
+vi.mock('@/lib/server/config-file/managed-guard', () => ({
+  assertNotManaged: hoisted.mockAssertNotManaged,
+}))
 
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator(parse: (data: unknown) => unknown) {
@@ -109,13 +115,11 @@ vi.mock('@/lib/server/db', () => ({
     id: { __col: 'id' } satisfies BoardsColumn,
   },
   settings: {},
-  eq: vi.fn(
-    (col: BoardsColumn, val: string): BoardCondition => ({
-      kind: 'eq',
-      col: col.__col,
-      val,
-    })
-  ),
+  eq: vi.fn((col: BoardsColumn, val: string): BoardCondition => ({
+    kind: 'eq',
+    col: col.__col,
+    val,
+  })),
   // Real constants from db re-export — keep in sync with the schema-level enum.
   ACCESS_TIERS: ['anonymous', 'authenticated', 'segments', 'team'] as const,
   ACCESS_TIER_RANK: { anonymous: 0, authenticated: 1, segments: 2, team: 3 } as const,
@@ -166,6 +170,7 @@ beforeEach(() => {
   state.auditEvents = []
   mockRequireAuth.mockReset()
   mockRequireAuth.mockResolvedValue(AUTH_ADMIN)
+  hoisted.mockAssertNotManaged.mockReset()
 })
 
 describe('updateBoardAccessFn — accepts BoardAccess payload', () => {
@@ -325,5 +330,22 @@ describe('updateBoardAccessFn — auth + not-found', () => {
         },
       })
     ).rejects.toBeInstanceOf(NotFoundError)
+  })
+})
+
+describe('updateBoardAccessFn — policy-managed board access', () => {
+  it('refuses the write when boards.access is managed', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    hoisted.mockAssertNotManaged.mockRejectedValue(
+      new ForbiddenError('FIELD_MANAGED', 'Field "boards.access" is managed')
+    )
+    await expect(
+      getUpdateBoardAccessFn()({
+        data: { boardId: 'board_1', access: { ...BOARD_DEFAULT.access } },
+      })
+    ).rejects.toThrow('is managed')
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('boards.access')
+    expect(state.updates).toHaveLength(0)
+    expect(state.auditEvents).toHaveLength(0)
   })
 })

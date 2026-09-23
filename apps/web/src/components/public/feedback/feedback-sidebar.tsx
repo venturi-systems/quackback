@@ -28,6 +28,7 @@ export function FeedbackSidebar({
             <button
               type="button"
               onClick={() => onBoardChange(undefined)}
+              aria-pressed={!currentBoard}
               className={cn(
                 'max-w-full flex min-h-11 items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer w-full text-left',
                 !currentBoard
@@ -36,7 +37,7 @@ export function FeedbackSidebar({
               )}
             >
               <ListBulletIcon className={cn('h-4 w-4 shrink-0', !currentBoard && 'text-primary')} />
-              <span className="truncate">
+              <span className="break-words">
                 <FormattedMessage
                   id="portal.feedback.sidebar.viewAllPosts"
                   defaultMessage="View all posts"
@@ -52,6 +53,7 @@ export function FeedbackSidebar({
                   key={board.id}
                   type="button"
                   onClick={() => onBoardChange(board.slug)}
+                  aria-pressed={isActive}
                   className={cn(
                     'max-w-full flex min-h-11 items-center gap-2 px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer w-full text-left',
                     isActive
@@ -62,7 +64,7 @@ export function FeedbackSidebar({
                   <ChatBubbleLeftIcon
                     className={cn('h-4 w-4 shrink-0', isActive && 'text-primary')}
                   />
-                  <span className="truncate min-w-0">{board.name}</span>
+                  <span className="break-words min-w-0">{board.name}</span>
                   {board.postCount > 0 && (
                     <span
                       className={cn(
@@ -85,10 +87,7 @@ export function FeedbackSidebar({
             href={`https://venturi.systems/?utm_campaign=${encodeURIComponent(workspaceSlug || 'feedback')}&utm_content=feedback-board&utm_medium=referral&utm_source=feedback-portal`}
             className="group inline-flex min-h-11 items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1 rounded-full bg-muted/50 hover:bg-muted border border-transparent hover:border-border/50"
           >
-            <span
-              aria-hidden="true"
-              className="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_16px_rgba(126,182,255,.65)]"
-            />
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary " />
             <span>
               <FormattedMessage
                 id="portal.feedback.sidebar.poweredBy"

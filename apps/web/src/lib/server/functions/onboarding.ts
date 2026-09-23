@@ -3,40 +3,121 @@ import { createServerFn } from '@tanstack/react-start'
 import type { UserId, StatusId } from '@quackback/ids'
 import { generateId } from '@quackback/ids'
 import { USE_CASE_TYPES, type SetupState, type UseCaseType } from '@/lib/server/db'
-import { isAdmin } from '@/lib/shared/roles'
-import { getSession } from '@/lib/server/auth/session'
+import { effectiveRole } from '@/lib/shared/roles'
+import { getSession, type Session } from '@/lib/server/auth/session'
 import { getSettings } from './workspace'
+import { requireAuth } from './auth-helpers'
 import { syncPrincipalProfile } from '@/lib/server/domains/principals/principal.service'
 import { listBoards } from '@/lib/server/domains/boards/board.service'
-import { db, settings, principal, user, postStatuses, eq, DEFAULT_STATUSES } from '@/lib/server/db'
+import {
+  db,
+  settings,
+  principal,
+  user,
+  postStatuses,
+  and,
+  eq,
+  sql,
+  DEFAULT_STATUSES,
+} from '@/lib/server/db'
 import { invalidateSettingsCache } from '@/lib/server/domains/settings/settings.helpers'
 import { DEFAULT_AUTH_CONFIG, DEFAULT_PORTAL_CONFIG } from '@/lib/server/domains/settings'
 import { assertNotManaged } from '@/lib/server/config-file/managed-guard'
 import { isPathManaged } from '@/lib/server/config-file/managed-paths'
 import { slugify } from '@/lib/shared/utils'
-import { getSetupState } from '@/lib/shared/db-types'
+import { getSetupState, isOnboardingComplete } from '@/lib/shared/db-types'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'onboarding' })
 
-/** Onboarding promotes the acting user to admin in two server fns
- *  (saveUseCaseFn, setupWorkspaceFn). Same DB shape, same intent —
- *  insert when missing, upgrade when present-but-not-admin. */
-async function ensureAdminPrincipal(userId: UserId): Promise<void> {
-  const existing = await db.query.principal.findFirst({
-    where: eq(principal.userId, userId),
-  })
-  if (!existing) {
-    log.debug({ user_id: userId }, 'creating admin member')
-    await db.insert(principal).values({
-      id: generateId('principal'),
-      userId,
-      role: 'admin',
-      createdAt: new Date(),
+/** Refusal messages. Exported so tests assert the exact contract. */
+export const ONBOARDING_DENIED = {
+  anonymous: 'Access denied: sign in with a full account to set up this workspace',
+  notAdmin: 'Access denied: only an administrator can complete setup',
+  complete: 'Workspace already initialized',
+} as const
+
+/**
+ * Onboarding runs before any administrator exists, so it cannot use
+ * requireAuth({ roles: ['admin'] }). It must still never hand out admin to an
+ * arbitrary caller: an anonymous Better Auth session is free for anyone to
+ * mint, and a NULL or partial `setup_state` on a live workspace must not
+ * reopen the bootstrap path.
+ */
+function assertHumanSession(session: Session): void {
+  if (session.user.principalType !== 'user') {
+    throw new Error(ONBOARDING_DENIED.anonymous)
+  }
+}
+
+/**
+ * Bootstrap admin claim, used by the two onboarding writes
+ * (saveUseCaseFn, setupWorkspaceFn).
+ *
+ * The caller becomes admin only when it is a human principal AND no human
+ * admin exists yet. A caller that is already admin is a no-op. Any other
+ * caller is refused, whatever `setup_state` says. The check and the write run
+ * in one transaction under the same advisory lock as the SSO bootstrap
+ * promotion (auth/hooks.ts), so two first sign-ins cannot both claim admin.
+ */
+async function claimBootstrapAdmin(session: Session): Promise<void> {
+  assertHumanSession(session)
+  const userId = session.user.id as UserId
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('quackback:sso_bootstrap'))`)
+
+    const existing = await tx.query.principal.findFirst({
+      where: eq(principal.userId, userId),
     })
-  } else if (!isAdmin(existing.role)) {
-    log.debug({ user_id: userId }, 'upgrading user to admin')
-    await db.update(principal).set({ role: 'admin' }).where(eq(principal.userId, userId))
+    if (existing && existing.type !== 'user') {
+      throw new Error(ONBOARDING_DENIED.anonymous)
+    }
+    if (!existing) {
+      // A session without a principal row is only legitimate for a human
+      // account; never mint an admin principal for an anonymous user row.
+      const userRow = await tx.query.user.findFirst({
+        where: eq(user.id, userId),
+        columns: { isAnonymous: true },
+      })
+      if (!userRow || userRow.isAnonymous) {
+        throw new Error(ONBOARDING_DENIED.anonymous)
+      }
+    }
+    if (existing && effectiveRole(existing.role, existing.type) === 'admin') return
+
+    const humanAdmin = await tx.query.principal.findFirst({
+      where: and(eq(principal.role, 'admin'), eq(principal.type, 'user')),
+      columns: { id: true },
+    })
+    if (humanAdmin) {
+      log.warn({ user_id: userId }, 'onboarding admin claim refused: an administrator exists')
+      throw new Error(ONBOARDING_DENIED.notAdmin)
+    }
+
+    if (!existing) {
+      log.info({ user_id: userId }, 'bootstrap admin: creating admin principal')
+      await tx.insert(principal).values({
+        id: generateId('principal'),
+        userId,
+        role: 'admin',
+        type: 'user',
+        createdAt: new Date(),
+      })
+    } else {
+      log.info({ user_id: userId }, 'bootstrap admin: promoting first human user')
+      await tx.update(principal).set({ role: 'admin' }).where(eq(principal.userId, userId))
+    }
+  })
+}
+
+/** Require the caller to already be a human admin (onboarding past the bootstrap step). */
+async function assertOnboardingAdmin(session: Session): Promise<void> {
+  assertHumanSession(session)
+  const principalRecord = await db.query.principal.findFirst({
+    where: eq(principal.userId, session.user.id as UserId),
+  })
+  if (!principalRecord || effectiveRole(principalRecord.role, principalRecord.type) !== 'admin') {
+    throw new Error(ONBOARDING_DENIED.notAdmin)
   }
 }
 
@@ -80,7 +161,9 @@ export interface SetupWorkspaceResult {
 /**
  * Setup workspace during onboarding.
  * Creates settings and default statuses.
- * Requires authentication. For fresh installs (no settings), makes the user admin.
+ * Requires a human session. The caller becomes admin only through
+ * claimBootstrapAdmin (no human admin exists yet); once the workspace step is
+ * done, only an existing admin may call it.
  *
  * NOTE: Cannot use requireAuth() here because it requires settings to exist,
  * but we're creating settings. We manually check auth and handle member creation.
@@ -95,6 +178,7 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
       if (!session?.user) {
         throw new Error('Authentication required')
       }
+      assertHumanSession(session)
 
       // Block in-app writes when the config-file owns these fields.
       // The reconciler applies the file's value separately; this gate
@@ -120,25 +204,19 @@ export const setupWorkspaceFn = createServerFn({ method: 'POST' })
 
       let setupState: SetupState | null = getSetupState(existingSettings?.setupState ?? null)
 
-      // Fresh install (no settings): first authenticated user becomes admin.
-      // Settings exist + workspace step done: require existing admin.
-      // Settings exist + workspace step not done: ensure user becomes admin.
-      if (!existingSettings) {
-        await ensureAdminPrincipal(session.user.id as UserId)
-      } else if (setupState?.steps?.workspace) {
-        const principalRecord = await db.query.principal.findFirst({
-          where: eq(principal.userId, session.user.id as UserId),
-        })
-        if (!principalRecord || !isAdmin(principalRecord.role)) {
-          throw new Error('Only admin can complete setup')
-        }
+      // Workspace step already done: only an existing human admin may continue.
+      // Otherwise (fresh install, or settings whose workspace step is not done,
+      // including a NULL setup_state) the caller may claim admin only while no
+      // human admin exists.
+      if (existingSettings && setupState?.steps?.workspace) {
+        await assertOnboardingAdmin(session)
       } else {
-        await ensureAdminPrincipal(session.user.id as UserId)
+        await claimBootstrapAdmin(session)
       }
 
       // Check if onboarding is already complete
-      if (setupState?.steps?.core && setupState?.steps?.workspace && setupState?.steps?.boards) {
-        throw new Error('Workspace already initialized')
+      if (isOnboardingComplete(setupState)) {
+        throw new Error(ONBOARDING_DENIED.complete)
       }
 
       // Update user's name if provided (for users created via magic link without a name)
@@ -333,6 +411,7 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
       if (!session?.user) {
         throw new Error('Authentication required')
       }
+      assertHumanSession(session)
 
       // Same rationale as setupWorkspaceFn: don't let the UI overwrite
       // a file-managed useCase. Pre-onboarding the gate is a no-op.
@@ -341,9 +420,23 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
       const existingSettings = await getSettings()
 
       if (existingSettings) {
-        const setupState: SetupState = getSetupState(existingSettings.setupState) ?? {
+        const storedState = getSetupState(existingSettings.setupState)
+        // A finished workspace is never re-onboarded through this endpoint.
+        if (isOnboardingComplete(storedState)) {
+          throw new Error(ONBOARDING_DENIED.complete)
+        }
+        const setupState: SetupState = storedState ?? {
           version: 1,
           steps: { core: true, workspace: false, boards: false },
+        }
+
+        // Authorize BEFORE writing: past the workspace step only an existing
+        // human admin may change the use case; before it, the caller must be
+        // able to claim the bootstrap admin role.
+        if (setupState.steps.workspace) {
+          await assertOnboardingAdmin(session)
+        } else {
+          await claimBootstrapAdmin(session)
         }
 
         const updatedState: SetupState = { ...setupState, useCase: data.useCase }
@@ -352,10 +445,6 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
           .update(settings)
           .set({ setupState: JSON.stringify(updatedState) })
           .where(eq(settings.id, existingSettings.id))
-
-        if (!setupState.steps.workspace) {
-          await ensureAdminPrincipal(session.user.id as UserId)
-        }
 
         await invalidateSettingsCache()
         log.info({ use_case: data.useCase }, 'save use case: saved')
@@ -373,6 +462,9 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
           useCase: data.useCase,
         }
 
+        // Claim admin first so a refused caller never creates settings.
+        await claimBootstrapAdmin(session)
+
         await db.insert(settings).values({
           id: generateId('workspace'),
           name: 'My Workspace', // Placeholder, will be updated in workspace step
@@ -380,8 +472,6 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
           createdAt: new Date(),
           setupState: JSON.stringify(setupState),
         })
-
-        await ensureAdminPrincipal(session.user.id as UserId)
 
         await invalidateSettingsCache()
         log.info({ use_case: data.useCase }, 'save use case: created initial settings')
@@ -393,6 +483,95 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
   })
 
 /**
+ * Check onboarding state for the CALLER.
+ *
+ * The caller is resolved from the session cookie; no client-supplied user id
+ * is accepted, and this GET never writes. The bootstrap admin principal is
+ * created only by the onboarding POST writes (saveUseCaseFn /
+ * setupWorkspaceFn via claimBootstrapAdmin).
+ *
+ * `needsInvitation` is true when the caller cannot become or act as the
+ * workspace admin: an anonymous session, or a non-admin while a human admin
+ * already exists.
+ */
+export const checkOnboardingState = createServerFn({ method: 'GET' }).handler(async () => {
+  log.debug('check onboarding state')
+  try {
+    const session = await getSession()
+    if (!session?.user) {
+      log.debug('check onboarding state: no session')
+      return {
+        principalRecord: null,
+        hasSettings: false,
+        setupState: null,
+        isOnboardingComplete: false,
+      }
+    }
+
+    const needsInvitation = {
+      principalRecord: null,
+      needsInvitation: true,
+      hasSettings: false,
+      setupState: null,
+      isOnboardingComplete: false,
+    }
+
+    if (session.user.principalType !== 'user') {
+      log.debug('check onboarding state: anonymous session')
+      return needsInvitation
+    }
+
+    const principalRecord = await db.query.principal.findFirst({
+      where: eq(principal.userId, session.user.id as UserId),
+    })
+    const role = principalRecord ? effectiveRole(principalRecord.role, principalRecord.type) : null
+
+    if (principalRecord && principalRecord.type !== 'user') {
+      return needsInvitation
+    }
+
+    if (role !== 'admin') {
+      // Check if any human admin exists (exclude service principals)
+      const existingAdmin = await db.query.principal.findFirst({
+        where: and(eq(principal.role, 'admin'), eq(principal.type, 'user')),
+        columns: { id: true },
+      })
+      if (existingAdmin) {
+        // Not the first user - they need an invitation
+        log.debug({ needs_invitation: true }, 'check onboarding state')
+        return needsInvitation
+      }
+    }
+
+    // Get settings to check setup state
+    const currentSettings = await getSettings()
+    const setupState = getSetupState(currentSettings?.setupState ?? null)
+    const onboardingComplete = isOnboardingComplete(setupState)
+
+    log.debug(
+      { setup_state: setupState, is_complete: onboardingComplete },
+      'check onboarding state'
+    )
+    return {
+      principalRecord: principalRecord
+        ? {
+            id: principalRecord.id,
+            userId: principalRecord.userId,
+            role: role ?? 'user',
+          }
+        : null,
+      needsInvitation: false,
+      hasSettings: !!currentSettings,
+      setupState,
+      isOnboardingComplete: onboardingComplete,
+    }
+  } catch (error) {
+    log.error({ err: error }, 'check onboarding state failed')
+    throw error
+  }
+})
+
+/**
  * List existing boards during onboarding plus the tenant's maxBoards
  * tier limit. The wizard's boards step uses both — the first to
  * display existing boards as completed, the second to render the
@@ -400,6 +579,16 @@ export const saveUseCaseFn = createServerFn({ method: 'POST' })
  */
 export const listBoardsForOnboarding = createServerFn({ method: 'GET' }).handler(async () => {
   log.debug('list boards for onboarding: entry')
+  // Every board (including protected ones) is listed here, so only a human
+  // admin may read it. Anyone else (no session, portal user, team member,
+  // anonymous session) gets the same empty shape, so the response is not an
+  // oracle for board names, ids or descriptions.
+  try {
+    await requireAuth({ roles: ['admin'] })
+  } catch {
+    log.debug('list boards for onboarding: caller is not an admin')
+    return { boards: [], maxBoards: null }
+  }
   try {
     const { getTierLimits } = await import('@/lib/server/domains/settings/tier-limits.service')
     const [boardList, limits] = await Promise.all([listBoards(), getTierLimits()])

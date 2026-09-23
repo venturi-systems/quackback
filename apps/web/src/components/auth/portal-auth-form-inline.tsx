@@ -78,6 +78,18 @@ interface PortalAuthFormInlineProps {
  */
 type LoadingAction = 'password' | 'email' | 'sso' | 'forgot' | 'continue' | (string & {})
 
+/**
+ * True when a sign-in request failed before reaching the server (offline,
+ * DNS, blocked request). Browsers report that as a bare TypeError such as
+ * "Failed to fetch" or "Load failed", which is not a message for people.
+ */
+export function isNetworkFailure(err: unknown): boolean {
+  return (
+    err instanceof TypeError &&
+    /failed to fetch|load failed|networkerror|network request failed/i.test(err.message)
+  )
+}
+
 interface OAuthButtonProps {
   icon: React.ReactNode | null
   label: string
@@ -152,6 +164,18 @@ export function PortalAuthFormInline({
   onContextChange,
 }: PortalAuthFormInlineProps) {
   const intl = useIntl()
+  // Readable message for a failed sign-in step: a network failure gets a
+  // recovery hint instead of the browser's raw "Failed to fetch".
+  const readableError = (err: unknown, fallback: string): string => {
+    if (isNetworkFailure(err)) {
+      return intl.formatMessage({
+        id: 'portal.auth.error.network',
+        defaultMessage:
+          "We couldn't reach the sign-in service. Check your connection and try again.",
+      })
+    }
+    return err instanceof Error && err.message ? err.message : fallback
+  }
   const effectiveCallbackUrl = callbackUrl ?? '/'
   const showRecoveryLink = isTeamCallback(callbackUrl)
   const passwordEnabled = authConfig?.oauth?.password ?? true
@@ -306,11 +330,13 @@ export function PortalAuthFormInline({
       setView({ stage: 'methods-step', step: methodsDefaultStep })
     } catch (err) {
       setError(
-        (err as Error).message ||
+        readableError(
+          err,
           intl.formatMessage({
             id: 'portal.auth.error.generic',
             defaultMessage: 'Something went wrong. Please try again.',
           })
+        )
       )
     } finally {
       setLoadingAction((prev) => (prev === 'continue' ? null : prev))
@@ -401,12 +427,13 @@ export function PortalAuthFormInline({
       postAuthSuccess()
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : intl.formatMessage({
-              id: 'portal.auth.error.authFailed',
-              defaultMessage: 'Authentication failed',
-            })
+        readableError(
+          err,
+          intl.formatMessage({
+            id: 'portal.auth.error.authFailed',
+            defaultMessage: 'Authentication failed',
+          })
+        )
       )
       setLoadingAction(null)
     }
@@ -454,12 +481,13 @@ export function PortalAuthFormInline({
       setView({ stage: 'methods-step', step: 'reset' })
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : intl.formatMessage({
-              id: 'portal.auth.error.resetLinkFailed',
-              defaultMessage: 'Failed to send reset link',
-            })
+        readableError(
+          err,
+          intl.formatMessage({
+            id: 'portal.auth.error.resetLinkFailed',
+            defaultMessage: 'Failed to send reset link',
+          })
+        )
       )
     } finally {
       setLoadingAction(null)
@@ -544,12 +572,13 @@ export function PortalAuthFormInline({
     } catch (err) {
       popup.close()
       setError(
-        err instanceof Error
-          ? err.message
-          : intl.formatMessage({
-              id: 'portal.auth.error.initiateSignInFailed',
-              defaultMessage: 'Failed to initiate sign in',
-            })
+        readableError(
+          err,
+          intl.formatMessage({
+            id: 'portal.auth.error.initiateSignInFailed',
+            defaultMessage: 'Failed to initiate sign in',
+          })
+        )
       )
       setLoadingAction(null)
     }
@@ -646,10 +675,13 @@ export function PortalAuthFormInline({
   // showRecoveryLink, so portal users never see it.
   const recoveryLink = showRecoveryLink ? (
     <p className="text-center text-sm text-muted-foreground">
-      <FormattedMessage id="portal.auth.ssoUnavailable" defaultMessage="SSO unavailable?" />{' '}
+      <FormattedMessage
+        id="portal.auth.signInProviderUnavailable"
+        defaultMessage="Can't use your sign-in provider?"
+      />{' '}
       <Link
         to="/auth/recovery"
-        className="font-medium text-foreground hover:underline underline-offset-4"
+        className="inline-flex min-h-11 items-center font-medium text-foreground underline underline-offset-4"
       >
         <FormattedMessage id="portal.auth.useRecoveryCode" defaultMessage="Use a recovery code" />
       </Link>
@@ -746,7 +778,7 @@ export function PortalAuthFormInline({
                     <button
                       type="button"
                       onClick={() => onModeSwitch('signup')}
-                      className="text-primary hover:underline font-medium"
+                      className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
                     >
                       <FormattedMessage
                         id="portal.auth.switch.createAccount"
@@ -763,7 +795,7 @@ export function PortalAuthFormInline({
                     <button
                       type="button"
                       onClick={() => onModeSwitch('login')}
-                      className="text-primary hover:underline font-medium"
+                      className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
                     >
                       <FormattedMessage id="portal.auth.switch.signIn" defaultMessage="Sign in" />
                     </button>
@@ -848,11 +880,13 @@ export function PortalAuthFormInline({
               })
             } catch (err) {
               setError(
-                (err as Error).message ||
+                readableError(
+                  err,
                   intl.formatMessage({
                     id: 'portal.auth.error.ssoStartFailed',
                     defaultMessage: 'Could not start SSO sign-in.',
                   })
+                )
               )
               setView({ stage: 'sso-default', providerId: view.providerId })
               setLoadingAction(null)
@@ -916,7 +950,7 @@ export function PortalAuthFormInline({
                 onModeSwitch('login')
                 setView({ stage: 'email' })
               }}
-              className="text-primary hover:underline font-medium"
+              className="inline-flex min-h-11 items-center font-medium text-primary underline underline-offset-4"
             >
               <FormattedMessage id="portal.auth.signIn" defaultMessage="Sign in" />
             </button>

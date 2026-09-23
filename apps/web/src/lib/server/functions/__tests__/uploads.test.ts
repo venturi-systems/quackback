@@ -3,6 +3,8 @@ import type { PrincipalId, UserId, WorkspaceId } from '@quackback/ids'
 
 // Mock createServerFn so server functions are directly callable in tests
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     let _handler: ((args: { data: unknown }) => Promise<unknown>) | null = null
     const fn = (args: { data: unknown }) => {

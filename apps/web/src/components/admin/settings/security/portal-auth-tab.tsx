@@ -1,3 +1,8 @@
+import {
+  ManagedSettingNote,
+  useIsManagedSetting,
+} from '@/components/admin/settings/managed-setting-note'
+import { MANAGED_PATHS } from '@/lib/client/config-file'
 import { useState, useTransition, useRef } from 'react'
 import { Link, useRouter } from '@tanstack/react-router'
 import {
@@ -84,9 +89,7 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
   // the closure was created — no stale capture is possible.
 
   const currentVisibility = (portalConfig.access?.visibility ?? 'public') as
-    | 'public'
-    | 'authenticated'
-    | 'private'
+    'public' | 'authenticated' | 'private'
   const [visibility, setVisibility] = useState<'public' | 'authenticated' | 'private'>(
     currentVisibility
   )
@@ -243,10 +246,10 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
     }
   }
 
-  // Managed-paths handling moved with the sign-in cards to the
-  // Sign-in providers tab. The portal-access surface doesn't
-  // currently expose any settings governed by config-file
-  // management, so no `isManaged` plumbing is needed here.
+  // Portal visibility can be owned by the deployment configuration
+  // (POLICY_MANAGED_SETTINGS). The server refuses a change to it, so the
+  // choices render read-only with an explanation instead.
+  const visibilityManaged = useIsManagedSetting(MANAGED_PATHS.PORTAL_VISIBILITY)
 
   return (
     <div className="space-y-6">
@@ -254,6 +257,11 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
           four authorization channels each get their own SettingsCard below
           (only when Private) so each one stands on its own. */}
       <SettingsCard title="Portal visibility" description="Choose who can view your portal.">
+        {visibilityManaged && (
+          <div className="mb-4">
+            <ManagedSettingNote what="Portal visibility" />
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {VISIBILITY_OPTIONS.map((option) => {
             const isSelected = visibility === option.value
@@ -263,7 +271,8 @@ export function PortalAuthTab({ portalConfig }: PortalAuthTabProps) {
                 key={option.value}
                 type="button"
                 onClick={() => handleVisibilitySelect(option.value)}
-                disabled={isAccessBusy}
+                disabled={isAccessBusy || visibilityManaged}
+                aria-pressed={isSelected}
                 className={cn(
                   'relative flex flex-col gap-2 rounded-lg border p-4 text-left transition-colors',
                   isSelected

@@ -132,17 +132,39 @@ test.describe('view tier — board-list visibility', () => {
 async function composerState(page: Page, boardSlug: string) {
   await page.goto(`/?board=${boardSlug}`)
   await page.waitForLoadState('networkidle')
-  const composer = page.getByRole('textbox', { name: /what'?s your idea/i }).first()
+  // The share-an-idea surface for the board's feed (#feedback-composer) is one
+  // of: the composer (the viewer can post here), one "Sign in to share an
+  // idea" action (signing in would allow posting), or a note that posting is
+  // restricted. Only that region is read, so page-wide copy such as the
+  // participation explainer cannot satisfy an assertion by accident.
+  const surface = page.locator('#feedback-composer')
+  await expect(surface).toBeVisible({ timeout: 10000 })
+  const signInAction = surface.getByRole('button', { name: /sign in to share an idea/i })
+  if (await signInAction.isVisible().catch(() => false)) {
+    return { needsSignIn: true, noAccess: false, submitEnabled: false }
+  }
+  const composer = surface.getByPlaceholder(/what'?s your idea/i).first()
+  if (!(await composer.isVisible().catch(() => false))) {
+    const note = (await surface.innerText()).toLowerCase()
+    return {
+      needsSignIn: /sign in|log in/.test(note),
+      noAccess: /cannot post|don'?t have access|limited to specific groups or the team/.test(note),
+      submitEnabled: false,
+    }
+  }
+  // The title input is labelled "Your feedback title"; its placeholder is the prompt.
   await composer.click()
   await composer.fill(`E2E access probe ${Date.now()}`)
   await page.waitForTimeout(400)
-  const body = (await page.locator('main').innerText()).toLowerCase()
-  const submitBtn = page.getByRole('button', { name: /^(submit|post|submit feedback)$/i }).first()
+  const body = (await surface.innerText()).toLowerCase()
+  const submitBtn = surface
+    .getByRole('button', { name: /^(submit|post|submit feedback)$/i })
+    .first()
   const submitVisible = await submitBtn.isVisible().catch(() => false)
   const submitEnabled = submitVisible ? await submitBtn.isEnabled().catch(() => false) : false
   return {
     needsSignIn: /sign in|log in/.test(body),
-    noAccess: /don'?t have access|only team members|not allowed/.test(body),
+    noAccess: /don'?t have access|cannot post/.test(body),
     submitEnabled,
   }
 }
@@ -293,7 +315,8 @@ test.describe('vote tier — vote affordance + gating', () => {
 async function submitFeedback(page: Page, boardSlug: string, title: string) {
   await page.goto(`/?board=${boardSlug}`)
   await page.waitForLoadState('networkidle')
-  const composer = page.getByRole('textbox', { name: /what'?s your idea/i }).first()
+  // The title input is labelled "Your feedback title"; its placeholder is the prompt.
+  const composer = page.getByPlaceholder(/what'?s your idea/i).first()
   await composer.click()
   await composer.fill(title)
   const submit = page.getByRole('button', { name: /^submit/i }).first()

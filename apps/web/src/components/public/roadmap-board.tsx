@@ -80,9 +80,11 @@ export function RoadmapBoard({
           </p>
           <div className="mt-5 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
             <Button asChild>
-              <Link to="/admin/roadmap">
-                {isTeamMember ? 'Add roadmap component' : 'Team sign in'}
-              </Link>
+              {isTeamMember ? (
+                <Link to="/admin/roadmap">Manage roadmap</Link>
+              ) : (
+                <Link to="/">Browse feedback</Link>
+              )}
             </Button>
             {isTeamMember && (
               <Button asChild variant="outline">

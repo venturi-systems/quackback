@@ -22,18 +22,23 @@ const buttonVariants = cva(
         destructive:
           'bg-destructive text-white shadow-xs hover:bg-destructive/90 hover:shadow-sm active:bg-destructive/85 focus-visible:ring-destructive',
         outline:
-          'border border-border/50 bg-transparent hover:bg-muted/40 hover:border-border/70 active:bg-muted/60',
+          'border border-input bg-transparent hover:bg-muted/40 hover:border-ring active:bg-muted/60',
         secondary: 'bg-muted text-foreground hover:bg-muted/80 active:bg-muted/70',
         ghost: 'text-muted-foreground hover:text-foreground hover:bg-muted/40 active:bg-muted/60',
         link: 'text-primary underline-offset-4 hover:underline',
       },
+      // v6.6 control heights (component.button.height-*): default 42px,
+      // sm 32px (header, card footers and dense toolbars only), lg 44px.
+      // Heights stay fixed so a caller's own h-* still wins (tailwind-merge),
+      // and on coarse pointers every size meets the 44px touch minimum.
       size: {
-        default: 'h-9 px-4 py-2 has-[>svg]:px-3',
-        sm: 'h-8 gap-1.5 px-3 text-[13px] has-[>svg]:px-2.5',
-        lg: 'h-11 px-6 has-[>svg]:px-5',
-        icon: 'size-9',
-        'icon-sm': 'size-8',
-        'icon-lg': 'size-11',
+        default:
+          'h-(--ds-component-button-height-default) px-4 py-2 has-[>svg]:px-3 pointer-coarse:h-(--ds-component-touch-minimum)',
+        sm: 'h-(--ds-component-button-height-sm) gap-1.5 px-3 has-[>svg]:px-2.5 pointer-coarse:h-(--ds-component-touch-minimum)',
+        lg: 'h-(--ds-component-button-height-lg) px-6 has-[>svg]:px-5',
+        icon: 'size-9 pointer-coarse:size-(--ds-component-touch-minimum)',
+        'icon-sm': 'size-8 pointer-coarse:size-(--ds-component-touch-minimum)',
+        'icon-lg': 'size-(--ds-component-touch-minimum)',
       },
       shape: {
         default: '[border-radius:var(--radius)]',

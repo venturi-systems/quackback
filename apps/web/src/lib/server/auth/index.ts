@@ -96,15 +96,11 @@ async function createAuth() {
 
   // OIDC `locale` claim: shipped by Google, Microsoft, and most generic
   // OIDC IdPs. Pass it through so `user.locale` populates from sign-in
-  // and the segment evaluator can target on language. Wrapped as a
-  // permissive shape because each provider returns a slightly
-  // different profile envelope.
-  const mapProfileLocale = (profile: unknown): { locale: string | null } => {
-    const p = profile as { locale?: unknown } | null | undefined
-    return {
-      locale: typeof p?.locale === 'string' && p.locale.length > 0 ? p.locale : null,
-    }
-  }
+  // and the segment evaluator can target on language. Generic OIDC
+  // providers also get a strict `email_verified` coercion (a stringified
+  // "false" is truthy); social providers keep Better Auth's own flag,
+  // because GitHub has no such claim. See map-profile-claims.ts.
+  const { mapProfileLocale, mapOidcProfileClaims } = await import('./map-profile-claims')
 
   // login_hint pre-selects the typed email in the IdP picker. Read from
   // the `additionalData.loginHint` body field that the team-login /
@@ -144,7 +140,7 @@ async function createAuth() {
     providers: await listIdentityProviders(),
     creds: getIdentityProviderCredentials,
     tierAllowsOidc: tierLimits.features.customOidcProvider,
-    mapProfileToUser: mapProfileLocale,
+    mapProfileToUser: mapOidcProfileClaims,
     buildLoginHintParams,
   })
   genericOAuthConfigs.push(...oidcConfigs)
@@ -409,9 +405,15 @@ async function createAuth() {
         // Consent page — always shown for non-trusted clients
         consentPage: '/oauth/consent',
 
-        // Allow Claude Code (and other MCP clients) to self-register
+        // MCP clients may register themselves, but only from a signed-in
+        // human session by default (anonymous sessions are refused in
+        // hooks.before). Unauthenticated registration lets any internet
+        // caller create oauth_client rows, so it is opt-in per deployment:
+        // OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true restores it for
+        // MCP clients that register before sign-in. API keys (qb_...) remain
+        // the supported agent/service identity for /api/mcp.
         allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: true,
+        allowUnauthenticatedClientRegistration: config.oauthAllowUnauthenticatedClientRegistration,
 
         // Quackback-specific scopes
         scopes: [

@@ -46,6 +46,10 @@ export function isAllowed(decision: Decision): boolean {
  * only touches this function plus its callers via typecheck.
  */
 export function isTeamActor(actor: Actor): boolean {
+  // An anonymous principal never exercises a team role, even if one was
+  // stored on it (see effectiveRole in lib/shared/roles.ts). Service
+  // principals (API keys) keep their team role.
+  if (actor.principalType === 'anonymous') return false
   return actor.role === 'admin' || actor.role === 'member'
 }
 

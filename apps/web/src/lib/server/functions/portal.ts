@@ -11,7 +11,7 @@ import {
   type UserId,
 } from '@quackback/ids'
 import type { BoardSettings, BoardAccess } from '@/lib/server/db'
-import type { Actor } from '@/lib/server/policy'
+import type { Actor, RequireApproval } from '@/lib/server/policy'
 import {
   getOptionalAuth,
   hasAuthCredentials,
@@ -69,24 +69,77 @@ const fetchPortalDataSchema = z.object({
 })
 
 /**
+ * Per-board capability entry sent to the portal and widget.
+ *
+ * - `submitRequiresReview` is true only when this viewer can submit on the board
+ *   AND the moderation decision the post service applies (canCreatePost with the
+ *   workspace default) would hold the new post for team review, so the composer
+ *   can say so before submission. Never true for a board the viewer cannot
+ *   submit to.
+ * - `signedInCanSubmit` answers "would signing in let this viewer post here?"
+ *   for a signed-out viewer: the capability of an ordinary signed-in portal
+ *   user with no segment memberships. For a signed-in viewer it equals
+ *   `canSubmit`. The portal offers "Sign in to share an idea" only when it is
+ *   true, so the prompt never promises a board the viewer's tier would reject.
+ */
+export type BoardPermissionEntry = {
+  canSubmit: boolean
+  canVote: boolean
+  submitRequiresReview: boolean
+  signedInCanSubmit: boolean
+}
+
+/** An ordinary signed-in portal user with no segments: the least a sign-in grants. */
+const SIGNED_IN_PORTAL_USER: Actor = {
+  principalId: null,
+  role: 'user',
+  principalType: 'user',
+  segmentIds: new Set(),
+}
+
+/**
  * Build the per-board submit/vote capability map for `actor` from already-fetched
  * boards. Shared by fetchPortalData (feed SSR) and fetchBoardCapabilitiesFn (the
  * widget's Bearer refetch) so the shape + composition live in one place. The
- * caller passes `allowAnonymous` (and the boards) so it can parallelize the
- * settings read with its own queries.
+ * caller passes `allowAnonymous` and the workspace approval default (and the
+ * boards) so it can parallelize the settings reads with its own queries.
  */
 async function buildBoardPermissions(
   actor: Actor,
   boards: ReadonlyArray<{ id: string; access: BoardAccess }>,
-  allowAnonymous: boolean
-): Promise<Record<string, { canSubmit: boolean; canVote: boolean }>> {
-  const { boardCapabilitiesForActor } = await import('@/lib/server/policy')
-  const map: Record<string, { canSubmit: boolean; canVote: boolean }> = {}
+  allowAnonymous: boolean,
+  workspaceApproval: RequireApproval | undefined
+): Promise<Record<string, BoardPermissionEntry>> {
+  const { boardCapabilitiesForActor, canCreatePost } = await import('@/lib/server/policy')
+  const map: Record<string, BoardPermissionEntry> = {}
   for (const b of boards) {
     const caps = boardCapabilitiesForActor(actor, b.access, allowAnonymous)
-    map[b.id] = { canSubmit: caps.canSubmit, canVote: caps.canVote }
+    const decision = caps.canSubmit
+      ? canCreatePost(actor, { access: b.access }, workspaceApproval)
+      : null
+    const signedInCanSubmit =
+      actor.principalType === 'user'
+        ? caps.canSubmit
+        : boardCapabilitiesForActor(SIGNED_IN_PORTAL_USER, b.access, allowAnonymous).canSubmit
+    map[b.id] = {
+      canSubmit: caps.canSubmit,
+      canVote: caps.canVote,
+      submitRequiresReview: !!decision && decision.allowed && decision.requiresApproval,
+      signedInCanSubmit,
+    }
   }
   return map
+}
+
+/**
+ * Workspace moderation default (`moderationDefault.requireApproval`) from the
+ * merged portal config: the same value post creation reads, so the review
+ * notice and the stored moderation state cannot disagree.
+ */
+async function loadWorkspaceApproval(): Promise<RequireApproval | undefined> {
+  const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+  const portalConfig = await getPortalConfig()
+  return portalConfig?.moderationDefault?.requireApproval
 }
 
 /**
@@ -104,11 +157,24 @@ async function loadAllowAnonymous(): Promise<boolean> {
   return workspaceAllowsAnonymous(settings?.portalConfig)
 }
 
+/**
+ * Whether the signed-in caller may read identity data (principal id, avatar)
+ * for `userId`: only their own, unless they are a team member. Identity reads
+ * behind a gated portal must not be an open lookup for arbitrary ids.
+ */
+async function callerMayReadUserIdentity(userId: string): Promise<boolean> {
+  if (!hasAuthCredentials()) return false
+  const auth = await getOptionalAuth()
+  if (!auth) return false
+  return auth.user.id === userId || isTeamMember(auth.principal.role)
+}
+
 export const getPrincipalIdForUser = createServerFn({ method: 'GET' })
   .validator(z.object({ userId: z.string() }))
   .handler(async ({ data }): Promise<PrincipalId | null> => {
     log.debug({ user_id: data.userId }, 'get principal id for user')
     try {
+      if (!(await callerMayReadUserIdentity(data.userId))) return null
       const record = await db.query.principal.findFirst({
         where: eq(principalTable.userId, data.userId as UserId),
       })
@@ -155,39 +221,48 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
     // Run ALL queries in parallel for maximum performance — including the
     // (fail-closed) anonymous-ceiling read so buildBoardPermissions doesn't
     // serialize an extra round-trip onto this (highest-traffic) loader.
-    const [memberResult, boardsRaw, postsResult, statuses, tags, allVotedPosts, allowAnonymous] =
-      await Promise.all([
-        // Principal lookup (needed for principalId in response)
-        data.userId
-          ? db.query.principal.findFirst({
-              where: eq(principalTable.userId, data.userId as UserId),
-              columns: { id: true },
-            })
-          : null,
-        listPublicBoardsWithStats(actor),
-        // Posts WITHOUT embedded vote check (we get votes separately for parallelism)
-        listPublicPostsWithVotesAndAvatars({
-          actor,
-          boardSlug: data.boardSlug,
-          search: data.search,
-          statusSlugs: data.statusSlugs,
-          tagIds: data.tagIds as TagId[] | undefined,
-          sort: data.sort,
-          page: 1,
-          cursor: data.sort === 'new' ? null : undefined,
-          limit: 20,
-          minVotes: data.minVotes,
-          dateFrom: data.dateFrom,
-          responded: data.responded,
-        }),
-        listPublicStatuses(),
-        listPublicTags(),
-        // Get ALL voted post IDs for this user (runs in parallel, we'll filter to displayed posts)
-        data.userId
-          ? getVotedPostIdsByUserId(data.userId as UserId)
-          : Promise.resolve(new Set<PostId>()),
-        loadAllowAnonymous(),
-      ])
+    const [
+      memberResult,
+      boardsRaw,
+      postsResult,
+      statuses,
+      tags,
+      allVotedPosts,
+      allowAnonymous,
+      workspaceApproval,
+    ] = await Promise.all([
+      // Principal lookup (needed for principalId in response)
+      data.userId
+        ? db.query.principal.findFirst({
+            where: eq(principalTable.userId, data.userId as UserId),
+            columns: { id: true },
+          })
+        : null,
+      listPublicBoardsWithStats(actor),
+      // Posts WITHOUT embedded vote check (we get votes separately for parallelism)
+      listPublicPostsWithVotesAndAvatars({
+        actor,
+        boardSlug: data.boardSlug,
+        search: data.search,
+        statusSlugs: data.statusSlugs,
+        tagIds: data.tagIds as TagId[] | undefined,
+        sort: data.sort,
+        page: 1,
+        cursor: data.sort === 'new' ? null : undefined,
+        limit: 20,
+        minVotes: data.minVotes,
+        dateFrom: data.dateFrom,
+        responded: data.responded,
+      }),
+      listPublicStatuses(),
+      listPublicTags(),
+      // Get ALL voted post IDs for this user (runs in parallel, we'll filter to displayed posts)
+      data.userId
+        ? getVotedPostIdsByUserId(data.userId as UserId)
+        : Promise.resolve(new Set<PostId>()),
+      loadAllowAnonymous(),
+      loadWorkspaceApproval(),
+    ])
     const principalId = memberResult?.id ?? null
 
     // Per-board submit/vote capability for THIS viewer, composed with the
@@ -197,7 +272,12 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
     // Keyed by board id: vote permission is per-board, so this one map also
     // covers infinite-scroll feed pages (every post belongs to one of these
     // boards). Computed in-memory from boardsRaw.access — no extra query.
-    const boardPermissions = await buildBoardPermissions(actor, boardsRaw, allowAnonymous)
+    const boardPermissions = await buildBoardPermissions(
+      actor,
+      boardsRaw,
+      allowAnonymous,
+      workspaceApproval
+    )
 
     // Return ALL voted post IDs (not just page 1) so infinite scroll pages show correct vote state
     const votedPostIds = Array.from(allVotedPosts)
@@ -451,6 +531,11 @@ export const fetchUserAvatar = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     log.debug({ user_id: data.userId }, 'fetch user avatar')
     try {
+      // Callers (admin shell, portal header) only ever ask for the signed-in
+      // user's own avatar; anyone else gets the not-found shape.
+      if (!(await callerMayReadUserIdentity(data.userId))) {
+        return { avatarUrl: data.fallbackImageUrl ?? null, hasCustomAvatar: false }
+      }
       const user = await db.query.user.findFirst({
         where: eq(userTable.id, data.userId as UserId),
         columns: { imageKey: true, image: true },
@@ -479,6 +564,16 @@ export const fetchAvatars = createServerFn({ method: 'GET' })
     try {
       const principalIds = (data as PrincipalId[]).filter((id): id is PrincipalId => id !== null)
       if (principalIds.length === 0) return {}
+
+      // Author avatars are portal content: a caller the portal gate denies
+      // gets no avatar URLs (every requested id maps to null).
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        return Object.fromEntries(principalIds.map((id) => [id, null])) as Record<
+          PrincipalId,
+          string | null
+        >
+      }
 
       const principals = await db
         .select({
@@ -727,7 +822,7 @@ export const getCommentsSectionDataFn = createServerFn({ method: 'GET' })
  */
 export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handler(async () => {
   log.debug('fetch board capabilities')
-  const empty: Record<string, { canSubmit: boolean; canVote: boolean }> = {}
+  const empty: Record<string, BoardPermissionEntry> = {}
 
   // Same portal-visibility + per-board gates as fetchPortalData.
   const access = await resolvePortalAccessForRequest()
@@ -738,9 +833,10 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
 
   // Settings read overlaps the board query — only one DB round-trip is on the
   // critical path for this refetch-on-identify endpoint.
-  const [boards, allowAnonymous] = await Promise.all([
+  const [boards, allowAnonymous, workspaceApproval] = await Promise.all([
     listPublicBoardsWithStats(actor),
     loadAllowAnonymous(),
+    loadWorkspaceApproval(),
   ])
-  return buildBoardPermissions(actor, boards, allowAnonymous)
+  return buildBoardPermissions(actor, boards, allowAnonymous, workspaceApproval)
 })

@@ -10,6 +10,12 @@ export interface PortalAccessGateError {
   /** Discriminant identifying the gate in the loader data. */
   type: 'portal-access-gate'
   reason: 'unauthenticated' | 'unauthorized'
+  /**
+   * The portal's read posture, so the sign-in page can say who may read:
+   * `authenticated` = anyone who signs in, `private` = only people given
+   * access. Optional for older payloads; the page then assumes `private`.
+   */
+  visibility?: 'public' | 'authenticated' | 'private'
   workspaceName: string
   logoUrl: string | null
   themeStyles: string

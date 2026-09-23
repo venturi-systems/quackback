@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { buildNavSections } from '../settings-nav'
+import {
+  buildNavSections,
+  firstSettingsPath,
+  isMemberSettingsPath,
+  MEMBER_SETTINGS_PATHS,
+} from '../settings-nav'
 
 describe('buildNavSections', () => {
   it('has no Support section when no flags provided', () => {
@@ -199,5 +204,38 @@ describe('buildNavSections', () => {
     )
     expect(dupes).toHaveLength(0)
     expect(customers.items.map((i) => i.label)).toEqual(['People'])
+  })
+})
+
+describe('role-aware settings navigation', () => {
+  it('shows a team member only the settings the server lets members change', () => {
+    const sections = buildNavSections({ helpCenter: true, supportInbox: true }, 'member')
+    expect(sections.map((s) => s.label)).toEqual(['Feedback'])
+    expect(sections[0].items.map((i) => i.to)).toEqual([...MEMBER_SETTINGS_PATHS])
+  })
+
+  it('keeps every section for an administrator', () => {
+    const labels = buildNavSections({}, 'admin').map((s) => s.label)
+    expect(labels).toEqual(['Administration', 'Customization', 'Feedback', 'Customers'])
+  })
+
+  it('treats an unknown role like a member, never like an administrator', () => {
+    expect(buildNavSections({}, null).map((s) => s.label)).toEqual(['Feedback'])
+  })
+
+  it('lets members open only the landing page, statuses and tags', () => {
+    expect(isMemberSettingsPath('/admin/settings')).toBe(true)
+    expect(isMemberSettingsPath('/admin/settings/')).toBe(true)
+    expect(isMemberSettingsPath('/admin/settings/statuses')).toBe(true)
+    expect(isMemberSettingsPath('/admin/settings/tags/')).toBe(true)
+    expect(isMemberSettingsPath('/admin/settings/team')).toBe(false)
+    expect(isMemberSettingsPath('/admin/settings/boards')).toBe(false)
+    expect(isMemberSettingsPath('/admin/settings/statuses-extra')).toBe(false)
+    expect(isMemberSettingsPath('/admin/settings/integrations/github')).toBe(false)
+  })
+
+  it('lands each role on a page it can use', () => {
+    expect(firstSettingsPath('admin')).toBe('/admin/settings/team')
+    expect(firstSettingsPath('member')).toBe('/admin/settings/statuses')
   })
 })

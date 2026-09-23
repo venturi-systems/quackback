@@ -46,6 +46,11 @@ const hoisted = vi.hoisted(() => ({
     }),
   }),
   mockValidSegmentRowsState: { rows: [] as Array<{ id: string }> },
+  mockAssertNotManaged: vi.fn(),
+}))
+
+vi.mock('@/lib/server/config-file/managed-guard', () => ({
+  assertNotManaged: hoisted.mockAssertNotManaged,
 }))
 
 // Pull current rows lazily so tests can mutate the array before invoking the handler.
@@ -511,5 +516,45 @@ describe('updatePortalAccessFn — domain normalization', () => {
     for (const d of result) {
       expect(d).not.toContain('@')
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Policy-managed visibility (POLICY_MANAGED_SETTINGS)
+// ---------------------------------------------------------------------------
+
+describe('updatePortalAccessFn — policy-managed visibility', () => {
+  it('refuses a visibility change when the path is managed, and writes nothing', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    hoisted.mockRequireAuth.mockResolvedValue(ADMIN_AUTH)
+    hoisted.mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'authenticated', allowedDomains: [] },
+    })
+    hoisted.mockAssertNotManaged.mockRejectedValue(
+      new ForbiddenError('FIELD_MANAGED', 'Field "portal.access.visibility" is managed')
+    )
+
+    await expect(updatePortalAccessHandler({ data: { visibility: 'public' } })).rejects.toThrow(
+      'is managed'
+    )
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('portal.access.visibility')
+    expect(hoisted.mockUpdatePortalConfig).not.toHaveBeenCalled()
+    expect(hoisted.mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('does not consult the managed list when visibility is unchanged', async () => {
+    hoisted.mockRequireAuth.mockResolvedValue(ADMIN_AUTH)
+    hoisted.mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'authenticated', allowedDomains: [] },
+    })
+    hoisted.mockUpdatePortalConfig.mockResolvedValue({
+      access: { visibility: 'authenticated', allowedDomains: ['acme.com'] },
+    })
+
+    await updatePortalAccessHandler({
+      data: { visibility: 'authenticated', allowedDomains: ['acme.com'] },
+    })
+    expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
+    expect(hoisted.mockUpdatePortalConfig).toHaveBeenCalledOnce()
   })
 })

@@ -16,3 +16,18 @@ export type { BoardWithStats }
  * boardCapabilitiesForActor and never read `access` (#191).
  */
 export type PublicBoardWithStats = Omit<BoardWithStats, 'access'>
+
+/**
+ * Per-board capability for the current viewer, computed on the server
+ * (`buildBoardPermissions` in `lib/server/functions/portal.ts`). The optional
+ * fields are absent from payloads built before they existed; readers treat a
+ * missing value as false.
+ */
+export interface BoardViewerPermissions {
+  canSubmit: boolean
+  canVote: boolean
+  /** The viewer's new post on this board is held for team review. */
+  submitRequiresReview?: boolean
+  /** An ordinary signed-in account could post on this board. */
+  signedInCanSubmit?: boolean
+}

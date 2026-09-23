@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useIntl } from 'react-intl'
 import { useInfiniteScroll } from '@/lib/client/hooks/use-infinite-scroll'
+import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/shared/spinner'
 import { useRouter, useRouteContext } from '@tanstack/react-router'
 import { FeedbackHeader } from '@/components/public/feedback/feedback-header'
@@ -14,6 +15,7 @@ import {
 import { usePublicFilters } from '@/components/public/feedback/use-public-filters'
 import { PostCard } from '@/components/public/post-card'
 import type { PublicBoardWithStats } from '@/lib/shared/types'
+import type { BoardViewerPermissions } from '@/lib/shared/types/boards'
 import type { PortalWelcomeCard as PortalWelcomeCardData } from '@/lib/shared/types/settings'
 import type { PostStatusEntity, Tag } from '@/lib/shared/db-types'
 import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
@@ -46,7 +48,7 @@ interface FeedbackContainerProps {
    * (server-computed). Vote permission is per-board, so this one map gates
    * every card — including infinite-scroll pages — and the submit CTA.
    */
-  boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
+  boardPermissions?: Record<string, BoardViewerPermissions>
   /** Welcome card to render above the post list. Undefined / disabled = hidden. */
   welcomeCard?: PortalWelcomeCardData
 }
@@ -142,6 +144,8 @@ export function FeedbackContainer({
     data: postsData,
     isFetching,
     isFetchingNextPage,
+    isError,
+    refetch,
     hasNextPage,
     fetchNextPage,
   } = usePublicPosts({
@@ -231,6 +235,7 @@ export function FeedbackContainer({
             workspaceName={workspaceName}
             boards={boards}
             defaultBoardId={boardIdForCreate}
+            scopeBoardId={activeBoard ? currentBoardInfo?.id : undefined}
             user={effectiveUser}
             boardPermissions={boardPermissions}
             onPostCreated={handlePostCreated}
@@ -263,8 +268,23 @@ export function FeedbackContainer({
             />
           </div>
 
-          <div className="mt-5">
-            {posts.length === 0 && !isLoading ? (
+          <div className="mt-5" aria-busy={isLoading}>
+            {isError && (
+              <div role="alert" className="mb-4 rounded-lg border border-input p-4">
+                <p className="mb-3">
+                  Feedback could not be refreshed. Your filters are still selected.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void refetch()}
+                  disabled={isFetching}
+                >
+                  Try again
+                </Button>
+              </div>
+            )}
+            {posts.length === 0 && !isLoading && !isError ? (
               <p className="text-muted-foreground text-center py-8">
                 {activeSearch || activeFilterCount > 0
                   ? intl.formatMessage({

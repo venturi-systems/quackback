@@ -11,7 +11,7 @@ import { z } from 'zod'
 import type { UserId } from '@quackback/ids'
 import { getSession } from '@/lib/server/auth/session'
 import { db, principal, eq } from '@/lib/server/db'
-import { isTeamMember } from '@/lib/shared/roles'
+import { effectiveRole, isTeamMember } from '@/lib/shared/roles'
 import { logger } from '@/lib/server/logger'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
 
@@ -51,7 +51,9 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
         throw redirect(unauthRedirect)
       }
 
-      const appSettings = await db.query.settings.findFirst()
+      // This is a client-callable route guard. Only check workspace existence;
+      // raw settings include signing secrets and portal allowlists.
+      const appSettings = await db.query.settings.findFirst({ columns: { id: true } })
       if (!appSettings) {
         throw redirect({ to: '/' })
       }
@@ -65,13 +67,23 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
         throw redirect(unauthRedirect)
       }
 
-      if (!data.allowedRoles.includes(principalRecord.role)) {
+      // A team role only counts on a human principal: an anonymous or service
+      // principal carrying admin/member is treated as a portal user here too,
+      // matching requireAuth, so the admin shell never renders for it.
+      const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
+      if (!data.allowedRoles.includes(role)) {
+        // A team member on an administrator-only page is already signed in with
+        // the right account, so the portal sign-in dialog would be the wrong
+        // answer. Send them to the settings landing page, which renders a
+        // durable "Administrators only" state. Everyone else lacks team access.
+        if (isTeamMember(role)) {
+          throw redirect({ to: '/admin/settings', search: { error: 'not_admin' } })
+        }
         throw redirect(buildSigninRedirect('/admin', { error: 'not_team_member' }))
       }
 
       return {
-        settings: appSettings,
-        principal: principalRecord,
+        principal: { ...principalRecord, role },
         user: session.user,
       }
     } catch (error) {

@@ -1,3 +1,4 @@
+import { ManagedSettingNote } from '@/components/admin/settings/managed-setting-note'
 import {
   useCallback,
   useEffect,
@@ -179,6 +180,9 @@ interface Board {
 
 interface BoardAccessFormProps {
   board: Board
+  /** Board access is owned by the deployment configuration
+   *  (POLICY_MANAGED_SETTINGS `boards.access`): render read-only. */
+  managed?: boolean
 }
 
 type FormShape = BoardAccess
@@ -204,7 +208,7 @@ function deriveActivePreset(values: FormShape): PresetName {
 
 // ─── Main form ────────────────────────────────────────────────────────
 
-export function BoardAccessForm({ board }: BoardAccessFormProps) {
+export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps) {
   const mutation = useUpdateBoardAccess()
   const segmentsQuery = useSegments()
   const segments: SegmentItem[] = useMemo(
@@ -375,66 +379,71 @@ export function BoardAccessForm({ board }: BoardAccessFormProps) {
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 pb-24">
       {mutation.isError && <FormError message={mutation.error?.message ?? 'An error occurred'} />}
+      {managed && <ManagedSettingNote what="Board access" />}
 
-      <div className="space-y-4">
-        <p className="text-xs text-muted-foreground max-w-xl">
-          Pick a preset, or tweak any cell to fine-tune. Custom is set automatically when your
-          configuration doesn&apos;t match a preset.
-        </p>
+      {/* A disabled fieldset makes every preset and matrix control inert
+          when the deployment configuration owns board access. */}
+      <fieldset disabled={managed} className="m-0 min-w-0 space-y-6 border-0 p-0">
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground max-w-xl">
+            Pick a preset, or tweak any cell to fine-tune. Custom is set automatically when your
+            configuration doesn&apos;t match a preset.
+          </p>
 
-        <PresetGrid active={activePreset} onSelect={handlePresetClick} />
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="text-sm font-semibold">Per-action permissions</span>
-          <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
-            {/* Legend swatch: the open→restrictive color ramp is a deliberate
-                data-viz signal and is the sole sanctioned literal-color use
-                in this form (it never appears in the themed matrix cells). */}
-            <span
-              className="inline-block h-1 w-5 rounded-sm"
-              style={{
-                background:
-                  'linear-gradient(to right, rgb(74 222 128), rgb(250 204 21), rgb(248 113 113))',
-              }}
-            />
-            More open <span className="opacity-60">→</span> More restrictive
-          </span>
+          <PresetGrid active={activePreset} onSelect={handlePresetClick} />
         </div>
 
-        <Matrix
-          values={values}
-          wsAllowAnonymous={wsAllowAnonymous}
-          segments={segments}
-          segmentsLoading={segmentsQuery.isLoading}
-          openPicker={openPicker}
-          onCellClick={handleTierClick}
-          onOpenPicker={(id) => setOpenPicker((p) => (p === id ? null : id))}
-          onClosePicker={() => setOpenPicker(null)}
-          onSegsChange={handleSegsChange}
-        />
-
-        {!wsAllowAnonymous && (
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            <GlobeAltIcon className="h-3 w-3 shrink-0" />
-            <span>
-              Workspace policy disables the <span className="text-foreground">Anyone</span> tier
-              for:{' '}
-              <span className="text-foreground">
-                {wsBlockedActions.map((a) => a.label).join(', ')}
-              </span>
-              .
+        <div className="space-y-4">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-sm font-semibold">Per-action permissions</span>
+            <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+              {/* Legend swatch: the open→restrictive color ramp is a deliberate
+                data-viz signal and is the sole sanctioned literal-color use
+                in this form (it never appears in the themed matrix cells). */}
+              <span
+                className="inline-block h-1 w-5 rounded-sm"
+                style={{
+                  background:
+                    'linear-gradient(to right, rgb(74 222 128), rgb(250 204 21), rgb(248 113 113))',
+                }}
+              />
+              More open <span className="opacity-60">→</span> More restrictive
             </span>
-            <Link
-              to="/admin/settings/moderation"
-              className="ml-auto whitespace-nowrap text-primary hover:underline"
-            >
-              Workspace access →
-            </Link>
           </div>
-        )}
-      </div>
+
+          <Matrix
+            values={values}
+            wsAllowAnonymous={wsAllowAnonymous}
+            segments={segments}
+            segmentsLoading={segmentsQuery.isLoading}
+            openPicker={openPicker}
+            onCellClick={handleTierClick}
+            onOpenPicker={(id) => setOpenPicker((p) => (p === id ? null : id))}
+            onClosePicker={() => setOpenPicker(null)}
+            onSegsChange={handleSegsChange}
+          />
+
+          {!wsAllowAnonymous && (
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <GlobeAltIcon className="h-3 w-3 shrink-0" />
+              <span>
+                Workspace policy disables the <span className="text-foreground">Anyone</span> tier
+                for:{' '}
+                <span className="text-foreground">
+                  {wsBlockedActions.map((a) => a.label).join(', ')}
+                </span>
+                .
+              </span>
+              <Link
+                to="/admin/settings/moderation"
+                className="ml-auto whitespace-nowrap text-primary hover:underline"
+              >
+                Workspace access →
+              </Link>
+            </div>
+          )}
+        </div>
+      </fieldset>
 
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <ShieldCheckIcon className="h-3 w-3" />

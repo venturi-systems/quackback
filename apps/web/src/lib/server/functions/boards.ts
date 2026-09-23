@@ -185,12 +185,17 @@ export const updateBoardFn = createServerFn({ method: 'POST' })
 
 /**
  * Delete a board
+ *
+ * Administrator-only. Deleting a board removes every post on it from the
+ * portal, which is a destructive workspace change rather than day-to-day
+ * feedback management, so team members (who may still create and rename
+ * boards) cannot do it. The REST route applies the same rule.
  */
 export const deleteBoardFn = createServerFn({ method: 'POST' })
   .validator(deleteBoardSchema)
   .handler(async ({ data }) => {
     log.debug({ board_id: data.id }, 'delete board')
-    await requireAuth({ roles: ['admin', 'member'] })
+    await requireAuth({ roles: ['admin'] })
 
     await deleteBoard(data.id as BoardId)
     log.info({ board_id: data.id }, 'board deleted')
@@ -313,6 +318,10 @@ export const updateBoardAccessFn = createServerFn({ method: 'POST' })
     if (!isAdmin(auth.principal.role)) {
       throw new ForbiddenError('FORBIDDEN', 'Admin only')
     }
+    // Board access may be owned by an external policy process
+    // (POLICY_MANAGED_SETTINGS: `boards.access`).
+    const { assertNotManaged } = await import('@/lib/server/config-file/managed-guard')
+    await assertNotManaged('boards.access')
     const before = await db.query.boards.findFirst({
       where: eq(boards.id, data.boardId as BoardId),
     })

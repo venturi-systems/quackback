@@ -11,7 +11,7 @@
  *   - Authorized caller on private portal → data flows.
  *
  * Handler registration order (portal.ts):
- *   0  getPrincipalIdForUser
+ *   0  getPrincipalIdForUser  (self-or-team identity gate)
  *   1  fetchPortalData
  *   2  fetchPublicBoards
  *   3  fetchPublicBoardBySlug
@@ -151,12 +151,16 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
   policyActorFromAuth: vi.fn().mockResolvedValue({ type: 'anonymous', role: 'user' }),
 }))
 
+const mockAvatarRows = vi.fn().mockResolvedValue([])
+
 vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
       principal: { findFirst: vi.fn().mockResolvedValue(null) },
       user: { findFirst: vi.fn().mockResolvedValue(null) },
     },
+    // fetchAvatars: db.select(...).from(principal).where(inArray(...))
+    select: () => ({ from: () => ({ where: () => mockAvatarRows() }) }),
   },
   principal: { id: 'id', userId: 'userId' },
   user: { id: 'id' },
@@ -376,11 +380,66 @@ describe('portal.ts fetchBoardCapabilitiesFn — per-board capability map', () =
       { canSubmit: boolean; canVote: boolean }
     >
     // Anonymous actor (mocked) + workspace allowAnonymous=true: the all-anonymous
-    // board is actionable, the sign-in-required board is not.
+    // board is actionable, the sign-in-required board is not — but an ordinary
+    // signed-in account could post there, so the portal may offer sign-in.
     expect(result).toEqual({
-      board_pub: { canSubmit: true, canVote: true },
-      board_auth: { canSubmit: false, canVote: false },
+      board_pub: {
+        canSubmit: true,
+        canVote: true,
+        submitRequiresReview: false,
+        signedInCanSubmit: true,
+      },
+      board_auth: {
+        canSubmit: false,
+        canVote: false,
+        submitRequiresReview: false,
+        signedInCanSubmit: true,
+      },
     })
+  })
+
+  it('reports review before submission from the same moderation rule the post service applies', async () => {
+    const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+    vi.mocked(getPortalConfig).mockResolvedValueOnce({
+      features: { allowAnonymous: true },
+      moderationDefault: { requireApproval: 'anonymous' },
+    } as never)
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockListPublicBoardsWithStats.mockResolvedValue([
+      { id: 'board_inherit', access: anonAccess },
+      {
+        id: 'board_off',
+        access: { ...anonAccess, moderation: { ...anonAccess.moderation, anonPosts: 'off' } },
+      },
+    ])
+    const h = await loadModule(PORTAL)
+    const result = (await h[FETCH_BOARD_CAPABILITIES]({ data: {} })) as Record<
+      string,
+      { submitRequiresReview: boolean }
+    >
+    // The anonymous actor's post inherits "anonymous posts need approval"; a
+    // board that turns anonymous moderation off does not hold it.
+    expect(result.board_inherit.submitRequiresReview).toBe(true)
+    expect(result.board_off.submitRequiresReview).toBe(false)
+  })
+
+  it('never offers sign-in for a board only groups or the team may post to', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockListPublicBoardsWithStats.mockResolvedValue([
+      { id: 'board_team', access: { ...anonAccess, submit: 'team' } },
+      { id: 'board_segments', access: { ...anonAccess, submit: 'segments' } },
+    ])
+    const h = await loadModule(PORTAL)
+    const result = (await h[FETCH_BOARD_CAPABILITIES]({ data: {} })) as Record<
+      string,
+      { canSubmit: boolean; signedInCanSubmit: boolean; submitRequiresReview: boolean }
+    >
+    expect(result.board_team).toMatchObject({
+      canSubmit: false,
+      signedInCanSubmit: false,
+      submitRequiresReview: false,
+    })
+    expect(result.board_segments).toMatchObject({ canSubmit: false, signedInCanSubmit: false })
   })
 })
 
@@ -789,5 +848,128 @@ describe('changelog.ts listPublicChangelogsFn — portal-visibility gate', () =>
     }
     expect(result.items).toHaveLength(1)
     expect(result.items[0].id).toBe('cl_2')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// portal.ts — identity lookups (getPrincipalIdForUser, fetchUserAvatar,
+// fetchAvatars): no open lookup of arbitrary ids behind a gated portal.
+// ---------------------------------------------------------------------------
+
+const GET_PRINCIPAL_ID_FOR_USER = 0
+const FETCH_USER_AVATAR = 8
+const FETCH_AVATARS = 9
+
+describe('portal.ts identity lookups — caller-scoped', () => {
+  type Persona = 'cookieless' | 'anonymous' | 'portalUser' | 'member' | 'admin'
+  const PERSONAS: Record<Exclude<Persona, 'cookieless'>, { userId: string; role: string }> = {
+    anonymous: { userId: 'user_anon', role: 'user' },
+    portalUser: { userId: 'user_portal', role: 'user' },
+    member: { userId: 'user_member', role: 'member' },
+    admin: { userId: 'user_admin', role: 'admin' },
+  }
+
+  async function actAs(persona: Persona) {
+    const helpers = await import('@/lib/server/functions/auth-helpers')
+    const roles = await import('@/lib/shared/roles')
+    vi.mocked(roles.isTeamMember).mockImplementation(
+      (r: string | null | undefined) => r === 'admin' || r === 'member'
+    )
+    if (persona === 'cookieless') {
+      vi.mocked(helpers.hasAuthCredentials).mockReturnValue(false)
+      vi.mocked(helpers.getOptionalAuth).mockResolvedValue(null)
+      return
+    }
+    const p = PERSONAS[persona]
+    vi.mocked(helpers.hasAuthCredentials).mockReturnValue(true)
+    vi.mocked(helpers.getOptionalAuth).mockResolvedValue({
+      user: { id: p.userId },
+      principal: { id: `principal_${p.userId}`, role: p.role },
+    } as never)
+  }
+
+  beforeEach(async () => {
+    const { db } = await import('@/lib/server/db')
+    vi.mocked(db.query.principal.findFirst).mockResolvedValue({ id: 'principal_target' } as never)
+    vi.mocked(db.query.user.findFirst).mockResolvedValue({
+      imageKey: null,
+      image: 'https://avatars.example/target.png',
+    } as never)
+  })
+
+  it.each<Persona>(['cookieless', 'anonymous', 'portalUser'])(
+    'getPrincipalIdForUser returns null to a %s asking about someone else',
+    async (persona) => {
+      await actAs(persona)
+      const h = await loadModule(PORTAL)
+      expect(await h[GET_PRINCIPAL_ID_FOR_USER]({ data: { userId: 'user_target' } })).toBeNull()
+    }
+  )
+
+  it.each<Persona>(['member', 'admin'])(
+    'getPrincipalIdForUser resolves any user for a %s',
+    async (persona) => {
+      await actAs(persona)
+      const h = await loadModule(PORTAL)
+      expect(await h[GET_PRINCIPAL_ID_FOR_USER]({ data: { userId: 'user_target' } })).toBe(
+        'principal_target'
+      )
+    }
+  )
+
+  it('getPrincipalIdForUser resolves the caller itself', async () => {
+    await actAs('portalUser')
+    const h = await loadModule(PORTAL)
+    expect(await h[GET_PRINCIPAL_ID_FOR_USER]({ data: { userId: 'user_portal' } })).toBe(
+      'principal_target'
+    )
+  })
+
+  it.each<Persona>(['cookieless', 'anonymous', 'portalUser'])(
+    'fetchUserAvatar gives a %s only the fallback for someone else',
+    async (persona) => {
+      await actAs(persona)
+      const h = await loadModule(PORTAL)
+      expect(
+        await h[FETCH_USER_AVATAR]({ data: { userId: 'user_target', fallbackImageUrl: null } })
+      ).toEqual({ avatarUrl: null, hasCustomAvatar: false })
+    }
+  )
+
+  it.each<Persona>(['portalUser', 'member', 'admin'])(
+    'fetchUserAvatar serves the %s its own avatar',
+    async (persona) => {
+      await actAs(persona)
+      const h = await loadModule(PORTAL)
+      const own = PERSONAS[persona as Exclude<Persona, 'cookieless'>].userId
+      expect(await h[FETCH_USER_AVATAR]({ data: { userId: own, fallbackImageUrl: null } })).toEqual(
+        { avatarUrl: 'https://avatars.example/target.png', hasCustomAvatar: false }
+      )
+    }
+  )
+
+  it('fetchAvatars maps every id to null for a caller the portal gate denies', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: false, reason: 'unauthenticated' })
+    mockAvatarRows.mockResolvedValue([
+      { id: 'principal_a', avatarKey: null, avatarUrl: 'https://avatars.example/a.png' },
+    ])
+    const h = await loadModule(PORTAL)
+    expect(await h[FETCH_AVATARS]({ data: ['principal_a', 'principal_b'] as never })).toEqual({
+      principal_a: null,
+      principal_b: null,
+    })
+    expect(mockAvatarRows).not.toHaveBeenCalled()
+  })
+
+  it('fetchAvatars serves author avatars to a granted caller', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'authenticated' })
+    mockAvatarRows.mockResolvedValue([
+      { id: 'principal_a', avatarKey: null, avatarUrl: 'https://avatars.example/a.png' },
+    ])
+    const h = await loadModule(PORTAL)
+    expect(await h[FETCH_AVATARS]({ data: ['principal_a', 'principal_b'] as never })).toEqual({
+      principal_a: 'https://avatars.example/a.png',
+      principal_b: null,
+    })
   })
 })

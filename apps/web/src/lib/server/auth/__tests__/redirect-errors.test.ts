@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  authBlockMessage,
   detectAuthBlockRedirect,
   AuthBlockedError,
   AUTH_BLOCK_MESSAGES,
@@ -85,5 +86,27 @@ describe('AUTH_BLOCK_MESSAGES', () => {
     ] as AuthBlockCode[]) {
       expect(AUTH_BLOCK_MESSAGES[code]).toBeTruthy()
     }
+  })
+})
+
+describe('prototype-key codes from the URL', () => {
+  const PROTOTYPE_KEYS = ['__proto__', 'constructor', 'toString', 'hasOwnProperty']
+
+  it.each(PROTOTYPE_KEYS)('authBlockMessage(%s) is null', (code) => {
+    expect(authBlockMessage(code)).toBeNull()
+  })
+
+  it('authBlockMessage returns null for an unknown code and the text for a known one', () => {
+    expect(authBlockMessage('made_up')).toBeNull()
+    expect(authBlockMessage('not_team_member')).toBe(AUTH_BLOCK_MESSAGES.not_team_member)
+  })
+
+  it.each(PROTOTYPE_KEYS)('detectAuthBlockRedirect ignores ?error=%s', (code) => {
+    expect(
+      detectAuthBlockRedirect({
+        redirected: true,
+        url: `https://t.example/?auth=signin&error=${encodeURIComponent(code)}`,
+      })
+    ).toBeNull()
   })
 })

@@ -34,6 +34,7 @@ import {
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 import { actorFromAuth, recordAuditEvent, type AuditEventType } from '@/lib/server/audit/log'
 import { requireAuth } from './auth-helpers'
+import { assertNotManaged } from '@/lib/server/config-file/managed-guard'
 import { getSession } from '@/lib/server/auth/session'
 import { db, principal, user, invitation, account, eq, ne, and } from '@/lib/server/db'
 import { logger } from '@/lib/server/logger'
@@ -114,7 +115,15 @@ export const fetchDeveloperConfig = createServerFn({ method: 'GET' }).handler(as
   log.debug('fetch developer config')
   try {
     await requireAuth({ roles: ['admin'] })
-    return await getDeveloperConfig()
+    const developerConfig = await getDeveloperConfig()
+    // Claude Code and Claude Desktop sign in to MCP with OAuth by registering
+    // a client before any account exists. The setup guide offers that path
+    // only when this deployment allows unauthenticated registration.
+    const { config } = await import('@/lib/server/config')
+    return {
+      ...developerConfig,
+      oauthClientRegistrationOpen: config.oauthAllowUnauthenticatedClientRegistration === true,
+    }
   } catch (error) {
     log.error({ err: error }, 'fetch developer config failed')
     throw error
@@ -345,6 +354,18 @@ export const updatePortalConfigFn = createServerFn({ method: 'POST' })
     log.info('update portal config')
     try {
       await requireAuth({ roles: ['admin'] })
+      // allowAnonymous may be owned by an external policy process
+      // (POLICY_MANAGED_SETTINGS); refuse a change rather than save a value
+      // that would be reverted. Saves that keep the current value pass.
+      const nextAllowAnonymous = (data as { features?: { allowAnonymous?: boolean } }).features
+        ?.allowAnonymous
+      if (nextAllowAnonymous !== undefined) {
+        const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+        const current = await getPortalConfig()
+        if (nextAllowAnonymous !== (current.features?.allowAnonymous ?? true)) {
+          await assertNotManaged('portal.features.allowAnonymous')
+        }
+      }
       return await updatePortalConfig(data as UpdatePortalConfigInput)
     } catch (error) {
       log.error({ err: error }, 'update portal config failed')
@@ -463,6 +484,19 @@ export const updateAuthConfigFn = createServerFn({ method: 'POST' })
               'LAST_SIGN_IN_METHOD',
               'Cannot disable the last enabled sign-in method. Enable another method first.'
             )
+          }
+        }
+
+        // Sign-in providers may be owned by an external policy process
+        // (POLICY_MANAGED_SETTINGS: `auth.oauth`). Only an actual change to a
+        // provider toggle is refused; unchanged values pass through.
+        if (data.oauth) {
+          const current = before ?? (await getAuthConfig())
+          const prior = (current?.oauth ?? {}) as Record<string, boolean | undefined>
+          for (const [key, next] of Object.entries(data.oauth)) {
+            if (typeof next === 'boolean' && next !== (prior[key] ?? false)) {
+              await assertNotManaged(`auth.oauth.${key}`)
+            }
           }
         }
 

@@ -427,11 +427,15 @@ export function PostCard({
         {/* Status badge/dropdown - above title */}
         {statusDisplay}
         {/* Title */}
-        <h3 className="font-semibold text-base text-foreground line-clamp-1">{title}</h3>
+        <h3 className="font-medium text-base text-foreground break-words" data-text-origin="user">
+          {title}
+        </h3>
 
         {/* Description */}
         {(excerpt ?? content) && (
-          <p className="text-sm text-muted-foreground/60 line-clamp-1 mt-1">{description}</p>
+          <p className="text-sm text-muted-foreground mt-1 break-words" data-text-origin="user">
+            {description}
+          </p>
         )}
 
         {/* Tags */}
@@ -456,7 +460,9 @@ export function PostCard({
         )}
 
         {/* Meta row */}
-        <div className="flex items-center text-muted-foreground gap-2 text-xs mt-2.5">
+        {/* Items wrap as whole units on narrow cards, so a date or a name
+            moves to the next line instead of breaking inside itself. */}
+        <div className="flex flex-wrap items-center text-muted-foreground gap-x-2 gap-y-1 text-xs mt-2.5">
           {showAvatar && (
             <Avatar className="h-5 w-5">
               {authorAvatarUrl && (
@@ -476,7 +482,10 @@ export function PostCard({
               </AvatarFallback>
             </Avatar>
           )}
-          <span className={showAvatar ? '' : 'text-foreground/80'}>
+          <span
+            className={showAvatar ? '' : 'text-foreground/80'}
+            data-text-origin={authorName ? 'user' : undefined}
+          >
             {authorName ||
               intl.formatMessage({
                 id: 'portal.postCard.authorFallback',
@@ -484,7 +493,7 @@ export function PostCard({
               })}
           </span>
           <span className="text-muted-foreground/40">·</span>
-          <TimeAgo date={createdAtDate} className="text-muted-foreground/70" />
+          <TimeAgo date={createdAtDate} className="shrink-0 text-muted-foreground/70" />
           {commentCount > 0 && (
             <span className="flex items-center gap-1 text-muted-foreground/50 ms-auto">
               <ChatBubbleLeftIcon className="h-3.5 w-3.5" />

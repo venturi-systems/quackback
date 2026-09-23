@@ -9,13 +9,8 @@ import {
   type SegmentId,
 } from '@quackback/ids'
 import type { BoardId, TagId } from '@quackback/ids'
-import {
-  getSetupState,
-  isOnboardingComplete as checkComplete,
-  type BoardSettings,
-} from '@/lib/server/db'
+import { type BoardSettings } from '@/lib/server/db'
 import { requireAuth } from './auth-helpers'
-import { getSettings } from './workspace'
 import { db, invitation, principal, user, eq, and, gt } from '@/lib/server/db'
 import { listInboxPosts } from '@/lib/server/domains/posts/post.inbox'
 import { listBoards } from '@/lib/server/domains/boards/board.service'
@@ -502,8 +497,7 @@ export const fetchIntegrationByType = createServerFn({ method: 'GET' })
         const targetKey = (m as { targetKey?: string }).targetKey || 'default'
         const actionConfig = (m.actionConfig as Record<string, unknown>) || {}
         const channelId = (actionConfig.channelId || integrationConfig.channelId) as
-          | string
-          | undefined
+          string | undefined
 
         if (!channelId) continue
 
@@ -577,95 +571,6 @@ export const getPublicAuthConfig = createServerFn({ method: 'GET' }).handler(asy
   const ssoEnabled = (await getRegisteredOidcProviderIds()).has('sso')
   return { ssoEnabled }
 })
-
-/**
- * Check onboarding state for a user
- * Returns member record, step, and whether boards exist
- * Note: This function is called during onboarding and may create member records
- */
-export const checkOnboardingState = createServerFn({ method: 'GET' })
-  .validator(z.string().optional())
-  .handler(async ({ data }) => {
-    log.debug('check onboarding state')
-    try {
-      // Allow unauthenticated access for onboarding
-      const userId = data
-
-      if (!userId) {
-        log.debug('check onboarding state no user id')
-        return {
-          principalRecord: null,
-          hasSettings: false,
-          setupState: null,
-          isOnboardingComplete: false,
-        }
-      }
-
-      // Check if user has a principal record
-      let principalRecord = await db.query.principal.findFirst({
-        where: eq(principal.userId, userId as UserId),
-      })
-
-      if (!principalRecord) {
-        // Check if any human admin exists (exclude service principals)
-        const existingAdmin = await db.query.principal.findFirst({
-          where: and(eq(principal.role, 'admin'), eq(principal.type, 'user')),
-        })
-
-        if (existingAdmin) {
-          // Not first user - they need an invitation
-          log.debug({ needs_invitation: true }, 'check onboarding state')
-          return {
-            principalRecord: null,
-            needsInvitation: true,
-            hasSettings: false,
-            setupState: null,
-            isOnboardingComplete: false,
-          }
-        }
-
-        // First user - create admin principal record
-        const [newPrincipal] = await db
-          .insert(principal)
-          .values({
-            id: generateId('principal'),
-            userId: userId as UserId,
-            role: 'admin',
-            createdAt: new Date(),
-          })
-          .returning()
-
-        principalRecord = newPrincipal
-        log.info({ principal_id: principalRecord.id }, 'created admin principal')
-      }
-
-      // Get settings to check setup state
-      const currentSettings = await getSettings()
-      const setupState = getSetupState(currentSettings?.setupState ?? null)
-      const isOnboardingComplete = checkComplete(setupState)
-
-      log.debug(
-        { setup_state: setupState, is_complete: isOnboardingComplete },
-        'check onboarding state'
-      )
-      return {
-        principalRecord: principalRecord
-          ? {
-              id: principalRecord.id,
-              userId: principalRecord.userId,
-              role: principalRecord.role,
-            }
-          : null,
-        needsInvitation: false,
-        hasSettings: !!currentSettings,
-        setupState,
-        isOnboardingComplete,
-      }
-    } catch (error) {
-      log.error({ err: error }, 'check onboarding state failed')
-      throw error
-    }
-  })
 
 // ============================================
 // Portal Users Operations

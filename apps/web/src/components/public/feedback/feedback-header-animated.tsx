@@ -2,7 +2,7 @@ import type { BoardId } from '@quackback/ids'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
-import { useRouter, useRouteContext } from '@tanstack/react-router'
+import { Link, useRouter, useRouteContext } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PencilIcon } from '@heroicons/react/24/solid'
@@ -17,13 +17,20 @@ import {
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { usePortalImageUpload } from '@/lib/client/hooks/use-image-upload'
 import { useCreatePublicPost } from '@/lib/client/mutations/portal-posts'
-import { useAuthPopover } from '@/components/auth/auth-popover-context'
 import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
 import { useSimilarPosts } from '@/lib/client/hooks/use-similar-posts'
 import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session'
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
-import { signOut } from '@/lib/client/auth-client'
-import { resolveSubmitState } from '@/components/public/feedback/submit-permission'
+import { cn } from '@/lib/shared/utils'
+import {
+  resolveSubmitState,
+  submittableBoardIds,
+} from '@/components/public/feedback/submit-permission'
+import {
+  COMPOSER_ANCHOR,
+  useOpenedAtComposer,
+} from '@/components/public/feedback/share-idea-access'
+import type { BoardViewerPermissions } from '@/lib/shared/types/boards'
 import type { JSONContent } from '@tiptap/react'
 
 interface BoardOption {
@@ -36,14 +43,20 @@ export interface FeedbackHeaderProps {
   workspaceName: string
   boards: BoardOption[]
   defaultBoardId?: string
+  /**
+   * The board whose feed is showing, when the visitor filtered to one board.
+   * The share-an-idea surface then answers for that board alone.
+   */
+  scopeBoardId?: string
   user?: { name: string | null; email: string } | null
   /**
-   * Per-board submit/vote capability for the current viewer, keyed by board id
+   * Per-board capability for the current viewer, keyed by board id
    * (server-computed; composes the board's access.submit tier with the
-   * workspace anonymous switch). The submit CTA follows the selected board's
-   * `canSubmit` instead of the workspace-wide flag.
+   * workspace anonymous switch). The composer lists only boards whose
+   * `canSubmit` is true and shows the review notice from
+   * `submitRequiresReview`, never from the workspace-wide flag.
    */
-  boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
+  boardPermissions?: Record<string, BoardViewerPermissions>
   onPostCreated?: (postId: string, boardSlug: string) => void
 }
 
@@ -59,7 +72,11 @@ export function FeedbackHeaderAnimated({
   const { session } = useRouteContext({ from: '__root__' })
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
-  const { openAuthPopover } = useAuthPopover()
+  const [submitted, setSubmitted] = useState<{
+    id: string
+    boardSlug: string
+    pending: boolean
+  } | null>(null)
 
   const createPost = useCreatePublicPost()
   const ensureAnonSession = useEnsureAnonSession()
@@ -83,15 +100,31 @@ export function FeedbackHeaderAnimated({
     enabled: expanded,
   })
 
-  // Board selection - only default if on a specific board page
-  const [selectedBoardId, setSelectedBoardId] = useState(defaultBoardId || '')
+  // Only boards this viewer can post to are offered. FeedbackHeader renders
+  // this composer only when at least one exists; the others get a sign-in
+  // action or a restriction note instead of a form that cannot submit.
+  const postableIds = submittableBoardIds(
+    boards.map((b) => b.id),
+    boardPermissions
+  )
+  const postableBoards = boards.filter((b) => postableIds.includes(b.id))
+  const initialBoardId =
+    defaultBoardId && postableIds.includes(defaultBoardId) ? defaultBoardId : (postableIds[0] ?? '')
 
-  // Sync selectedBoardId when defaultBoardId prop changes
+  const [selectedBoardId, setSelectedBoardId] = useState(initialBoardId)
+
+  // Sync the selection when the page's board changes (for example a board
+  // filter), keeping it on a board the viewer can post to.
   useEffect(() => {
-    if (defaultBoardId) {
-      setSelectedBoardId(defaultBoardId)
-    }
-  }, [defaultBoardId])
+    setSelectedBoardId(initialBoardId)
+  }, [initialBoardId])
+
+  // Returning from "Sign in to share an idea" lands on the composer anchor:
+  // open the form there so the visitor continues where they started.
+  const openedAtComposer = useOpenedAtComposer()
+  useEffect(() => {
+    if (openedAtComposer) setExpanded(true)
+  }, [openedAtComposer])
 
   // Submit CTA follows the SELECTED board's server-computed capability (which
   // composes its access.submit tier with the workspace anonymous switch for
@@ -99,6 +132,10 @@ export function FeedbackHeaderAnimated({
   // on a board whose tier requires sign-in (Codex #191).
   const boardCanSubmit = boardPermissions?.[selectedBoardId]?.canSubmit ?? false
   const { canSubmit, canPostAnonymously, noAccess } = resolveSubmitState(boardCanSubmit, session)
+  // Truthful before submission: shown only when the server's moderation
+  // decision for this viewer and board would hold the post for review.
+  const submitRequiresReview =
+    boardCanSubmit && (boardPermissions?.[selectedBoardId]?.submitRequiresReview ?? false)
 
   const [title, setTitle] = useState('')
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
@@ -189,6 +226,11 @@ export function FeedbackHeaderAnimated({
         contentJson,
       })
 
+      setSubmitted({
+        id: result.id,
+        boardSlug: result.board.slug,
+        pending: result.moderationState === 'pending',
+      })
       resetForm()
       setExpanded(false)
       onPostCreated?.(result.id, result.board.slug)
@@ -221,7 +263,7 @@ export function FeedbackHeaderAnimated({
   }
 
   function resetForm() {
-    setSelectedBoardId(defaultBoardId || '')
+    setSelectedBoardId(initialBoardId)
     setTitle('')
     setContentJson(null)
     setContentMarkdown('')
@@ -237,19 +279,48 @@ export function FeedbackHeaderAnimated({
 
   return (
     <motion.div
-      className="bg-card border border-border rounded-lg mb-5 shadow-sm overflow-hidden"
+      id={COMPOSER_ANCHOR}
+      // The title field and the editor are borderless, so the card shows the
+      // v6.6 focus ring while either one has keyboard or text focus.
+      className={cn(
+        'bg-card border border-border rounded-lg mb-5 shadow-sm overflow-hidden',
+        'has-[#feedback-title-input:focus-visible]:outline-2 has-[#feedback-title-input:focus-visible]:outline-offset-2 has-[#feedback-title-input:focus-visible]:outline-(--ds-color-interactive-focus-ring)',
+        'has-[.ProseMirror-focused]:outline-2 has-[.ProseMirror-focused]:outline-offset-2 has-[.ProseMirror-focused]:outline-(--ds-color-interactive-focus-ring)'
+      )}
       initial={false}
-      animate={{
-        boxShadow: expanded
-          ? '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)'
-          : '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-      }}
+      animate={{ boxShadow: expanded ? 'var(--ds-shadow-card)' : 'none' }}
       transition={{ duration: 0.2 }}
       onKeyDown={handleKeyDown}
     >
+      {submitted && (
+        <div role="status" className="border-b border-border px-4 py-3 text-sm">
+          <p>
+            {submitted.pending
+              ? intl.formatMessage({
+                  id: 'portal.feedback.header.pendingReview',
+                  defaultMessage:
+                    'Your feedback is awaiting team review. It will appear publicly if approved.',
+                })
+              : intl.formatMessage({
+                  id: 'portal.feedback.header.submissionSaved',
+                  defaultMessage: 'Your feedback has been submitted.',
+                })}
+          </p>
+          <Link
+            to="/b/$slug/posts/$postId"
+            params={{ slug: submitted.boardSlug, postId: submitted.id }}
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            <FormattedMessage
+              id="portal.feedback.header.viewSubmission"
+              defaultMessage="View your submission"
+            />
+          </Link>
+        </div>
+      )}
       {/* Board selector - above title when expanded */}
       <AnimatePresence>
-        {expanded && boards.length > 0 && (
+        {expanded && postableBoards.length > 0 && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -258,7 +329,7 @@ export function FeedbackHeaderAnimated({
             className="overflow-hidden"
           >
             <div className="flex items-center px-4 sm:px-5 pt-3 pb-1">
-              <span className="text-xs text-muted-foreground me-1">
+              <span id="feedback-board-label" className="text-xs text-muted-foreground me-1">
                 <FormattedMessage
                   id="portal.feedback.header.postingTo"
                   defaultMessage="Posting to"
@@ -266,8 +337,9 @@ export function FeedbackHeaderAnimated({
               </span>
               <Select value={selectedBoardId} onValueChange={setSelectedBoardId}>
                 <SelectTrigger
+                  aria-labelledby="feedback-board-label"
                   size="xs"
-                  className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
+                  className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ds-color-interactive-focus-ring)"
                 >
                   <SelectValue
                     placeholder={intl.formatMessage({
@@ -277,7 +349,7 @@ export function FeedbackHeaderAnimated({
                   />
                 </SelectTrigger>
                 <SelectContent align="start">
-                  {boards.map((board) => (
+                  {postableBoards.map((board) => (
                     <SelectItem key={board.id} value={board.id} className="text-xs py-1">
                       {board.name}
                     </SelectItem>
@@ -289,6 +361,15 @@ export function FeedbackHeaderAnimated({
         )}
       </AnimatePresence>
 
+      <label
+        htmlFor="feedback-title-input"
+        className="block px-4 pt-3 text-xs text-muted-foreground"
+      >
+        <FormattedMessage
+          id="portal.feedback.header.titleLabel"
+          defaultMessage="Your feedback title"
+        />
+      </label>
       {/* Icon + Title Row - Always visible */}
       <div className="flex items-center gap-3 px-4 py-3.5">
         {/* Icon - fades out when expanded */}
@@ -309,6 +390,9 @@ export function FeedbackHeaderAnimated({
         {/* Title input - always visible, grows when expanded */}
         <motion.input
           ref={titleInputRef}
+          id="feedback-title-input"
+          aria-invalid={!!error}
+          aria-describedby={error ? 'feedback-submit-error' : undefined}
           type="text"
           placeholder={intl.formatMessage({
             id: 'portal.feedback.header.titlePlaceholder',
@@ -349,7 +433,11 @@ export function FeedbackHeaderAnimated({
                   exit={{ opacity: 0, height: 0 }}
                   className="px-4 sm:px-5"
                 >
-                  <div className="[border-radius:calc(var(--radius)*0.8)] bg-destructive/10 px-3 py-2 text-sm text-destructive mb-2">
+                  <div
+                    id="feedback-submit-error"
+                    role="alert"
+                    className="[border-radius:calc(var(--radius)*0.8)] bg-destructive/10 px-3 py-2 text-sm text-destructive mb-2"
+                  >
                     {error}
                   </div>
                 </motion.div>
@@ -384,91 +472,67 @@ export function FeedbackHeaderAnimated({
               className="px-4 sm:px-5 pb-3"
             />
 
-            {/* Footer with auth and actions */}
+            {/* Review notice: before submission, and only when true. */}
+            {submitRequiresReview && (
+              <p
+                id="feedback-review-note"
+                className="px-4 sm:px-5 pb-3 text-sm text-muted-foreground"
+              >
+                <FormattedMessage
+                  id="portal.feedback.header.reviewNotice"
+                  defaultMessage="The team reviews posts on this board before they appear publicly."
+                />
+              </p>
+            )}
+
+            {/* Footer with identity and actions */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, delay: 0.2 }}
-              className="flex items-center justify-between px-4 sm:px-5 py-3 border-t bg-muted/30"
+              className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 border-t bg-muted/30"
             >
               {noAccess ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   <FormattedMessage
                     id="portal.feedback.header.noAccess"
                     defaultMessage="You don't have access to post on this board"
                   />
                 </p>
               ) : effectiveUser ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   <FormattedMessage
                     id="portal.feedback.header.postingAs"
                     defaultMessage="Posting as"
                   />{' '}
-                  <span className="font-medium text-foreground">
+                  <span className="font-medium text-foreground" data-text-origin="user">
                     {effectiveUser.name || effectiveUser.email}
                   </span>
-                  {' ('}
-                  <button
-                    type="button"
-                    className="text-primary hover:underline"
-                    onClick={async () => {
-                      await signOut()
-                      router.invalidate()
-                    }}
-                  >
-                    <FormattedMessage
-                      id="portal.feedback.header.signOut"
-                      defaultMessage="sign out"
-                    />
-                  </button>
-                  {')'}
                 </p>
               ) : canPostAnonymously ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   <FormattedMessage
                     id="portal.feedback.header.postingAnonymously"
                     defaultMessage="Posting anonymously"
                   />
                 </p>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => openAuthPopover({ mode: 'login' })}
-                  className="text-xs text-primary hover:underline font-medium"
-                >
-                  <FormattedMessage
-                    id="portal.feedback.header.signInToPost"
-                    defaultMessage="Sign in to post"
-                  />
-                </button>
+                <span />
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   onClick={handleCancel}
                   disabled={createPost.isPending}
                 >
                   <FormattedMessage id="portal.feedback.header.cancel" defaultMessage="Cancel" />
                 </Button>
                 <Button
-                  size="sm"
+                  type="button"
                   onClick={handleSubmit}
-                  disabled={createPost.isPending || !canSubmit}
-                  title={
-                    !canSubmit
-                      ? noAccess
-                        ? intl.formatMessage({
-                            id: 'portal.feedback.header.submitTooltipNoAccess',
-                            defaultMessage: "You don't have access to post on this board",
-                          })
-                        : intl.formatMessage({
-                            id: 'portal.feedback.header.submitTooltipSignIn',
-                            defaultMessage: 'Please sign in to submit feedback',
-                          })
-                      : undefined
-                  }
+                  disabled={createPost.isPending}
+                  aria-describedby={submitRequiresReview ? 'feedback-review-note' : undefined}
                   className="portal-submit-button bg-[var(--portal-button-background)] text-[var(--portal-button-foreground)] hover:bg-[var(--portal-button-background)]/90"
                 >
                   {createPost.isPending ? (

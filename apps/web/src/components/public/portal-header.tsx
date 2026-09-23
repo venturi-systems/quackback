@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link, useRouter, useRouterState, useRouteContext } from '@tanstack/react-router'
 import { useTheme } from 'next-themes'
 import { buildNavItems } from './portal-header-nav'
+import { VenturiBrand } from './shell/venturi-brand'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { cn } from '@/lib/shared/utils'
-import { isTeamMember } from '@/lib/shared/roles'
+import { isTeamMember, roleLabel } from '@/lib/shared/roles'
 import { Button } from '@/components/ui/button'
 import { signOut, authClient } from '@/lib/client/auth-client'
 import {
@@ -36,8 +37,6 @@ import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
 import { NotificationBell } from '@/components/notifications'
 
 interface PortalHeaderProps {
-  orgName: string
-  orgLogo?: string | null
   /** User's role in the organization (passed from server) */
   userRole?: 'admin' | 'member' | 'user' | null
   /** Initial user data for SSR (store values override these after hydration) */
@@ -51,8 +50,6 @@ interface PortalHeaderProps {
 }
 
 export function PortalHeader({
-  orgName,
-  orgLogo,
   userRole,
   initialUserData,
   showThemeToggle = true,
@@ -186,6 +183,7 @@ export function PortalHeader({
           <Link
             key={item.to}
             to={item.to}
+            aria-current={isActive ? 'page' : undefined}
             className={cn(
               'portal-nav__item px-3 py-2 text-sm font-medium transition-colors [border-radius:calc(var(--radius)*0.8)]',
               mobile && 'flex min-h-11 items-center',
@@ -308,7 +306,8 @@ export function PortalHeader({
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
                 <p className="text-sm font-medium">{name}</p>
-                <p className="text-xs text-muted-foreground">{email}</p>
+                <p className="text-xs text-muted-foreground break-words">{email}</p>
+                <p className="text-xs text-muted-foreground">{roleLabel(userRole)}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -368,35 +367,16 @@ export function PortalHeader({
     <header className="portal-header w-full py-2 border-b border-[var(--header-border)] bg-[var(--header-background)] shadow-sm">
       {/* Row 1: Logo + Name + Auth */}
       <div>
-        <div className="max-w-6xl mx-auto w-full px-4 sm:px-6">
-          <div className="flex h-12 items-center justify-between">
-            <Link
-              to="/"
-              className="portal-header__logo flex min-h-11 items-center gap-2"
-              aria-label={`${orgName} feedback home`}
-            >
-              {orgLogo ? (
-                <img
-                  src={orgLogo}
-                  alt={orgName}
-                  className="h-8 w-8 [border-radius:calc(var(--radius)*0.6)]"
-                />
-              ) : (
-                <div className="h-8 w-8 [border-radius:calc(var(--radius)*0.6)] bg-primary flex items-center justify-center text-primary-foreground font-semibold">
-                  {orgName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <span className="portal-header__name font-semibold max-w-[18ch] line-clamp-2 text-[var(--header-foreground)]">
-                {orgName}
-              </span>
-            </Link>
+        <div className="portal-shell">
+          <div className="flex min-h-12 flex-wrap items-center justify-between gap-3">
+            <VenturiBrand spa />
             <AuthButtons />
           </div>
         </div>
       </div>
 
       {/* Row 2: controlled mobile menu and full desktop navigation. */}
-      <div className="mt-2 max-w-6xl mx-auto w-full px-4 sm:px-6">
+      <div className="mt-2 portal-shell">
         <Button
           type="button"
           variant="ghost"

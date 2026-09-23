@@ -38,6 +38,8 @@ vi.mock('@/lib/shared/types/settings', () => ({
   DEFAULT_AUTH_CONFIG: { oauth: { google: true, github: true, password: true }, openSignup: false },
 }))
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator() {

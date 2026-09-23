@@ -1,153 +1,11 @@
 @import 'tailwindcss';
 @plugin "@tailwindcss/typography";
 @import 'tw-animate-css';
-/* Self-hosted Inter (variable, wght 100..900). Bundled from npm so no
-   fonts.googleapis.com <link> exists for a CDN (Cloudflare Fonts) to
-   rewrite — see the widget hydration / CDN-rewrite notes. */
-@import '@fontsource-variable/inter/index.css';
+@import './styles/venturi-fonts.css';
+@import './styles/venturi-tokens.css';
+@import './styles/venturi-theme.css';
 
 @custom-variant dark (&:is(.dark *));
-
-@theme {
-  --font-family-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
-}
-
-/* ==============================================
-   VENTURI WEB STANDARD THEME
-
-   Default fork theme for feedback.venturi.systems. Tenant-provided branding
-   can still override these variables at runtime, but the app fallback now
-   matches the corpus-governed light-default Venturi Web Standard used by the
-   public website, product UI, and feedback portal. Portal routes force this
-   light register (__root themeMode); the A+B dark tokens below remain for
-   any surface where user/tenant theming is enabled.
-   ============================================== */
-
-:root {
-  color-scheme: light;
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --card: #ffffff;
-  --card-foreground: #0f172a;
-  --popover: #ffffff;
-  --popover-foreground: #0f172a;
-  --primary: #2563eb;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f5f9;
-  --secondary-foreground: #0f172a;
-  --muted: #f1f5f9;
-  --muted-foreground: #475569;
-  --accent: #eff6ff;
-  --accent-foreground: #1d4ed8;
-  --destructive: #b91c1c;
-  --destructive-foreground: #ffffff;
-  --success: #047857;
-  --success-foreground: #ffffff;
-  --border: #e2e8f0;
-  --input: #cbd5e1;
-  --ring: #2563eb;
-  --chart-1: #2563eb;
-  --chart-2: #0f766e;
-  --chart-3: #475569;
-  --chart-4: #b45309;
-  --chart-5: #b91c1c;
-  --metric-posts: #2563eb;
-  --metric-votes: #0f766e;
-  --metric-comments: #475569;
-  --metric-users: #b45309;
-  --sidebar: #ffffff;
-  --sidebar-foreground: #0f172a;
-  --sidebar-primary: #2563eb;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f1f5f9;
-  --sidebar-accent-foreground: #0f172a;
-  --sidebar-border: #e2e8f0;
-  --sidebar-ring: #2563eb;
-  --radius: 0.5rem;
-  --letter-spacing: 0em;
-  --shadow-2xs: 0 1px 0 rgba(15, 23, 42, 0.04);
-  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.05);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
-  --shadow: 0 14px 36px -28px rgba(15, 23, 42, 0.22);
-  --shadow-md: 0 18px 42px -30px rgba(15, 23, 42, 0.24);
-  --shadow-lg: 0 24px 64px -38px rgba(15, 23, 42, 0.28);
-  --shadow-xl: 0 30px 80px -44px rgba(15, 23, 42, 0.32);
-  --shadow-2xl: 0 45px 110px -52px rgba(15, 23, 42, 0.38);
-  --header-background: rgba(255, 255, 255, 0.88);
-  --header-foreground: #0f172a;
-  --header-border: #e2e8f0;
-  --post-card-background: #ffffff;
-  --post-card-border: #e2e8f0;
-  --post-card-voted-color: #2563eb;
-  --nav-active-background: rgba(37, 99, 235, 0.08);
-  --nav-active-foreground: #0f172a;
-  --nav-inactive-color: #475569;
-  --portal-button-background: #2563eb;
-  --portal-button-foreground: #ffffff;
-}
-
-.dark {
-  color-scheme: dark;
-  --background: #080b12;
-  --foreground: #eff3f8;
-  --card: #0e131e;
-  --card-foreground: #eff3f8;
-  --popover: #0e131e;
-  --popover-foreground: #eff3f8;
-  --primary: #7eb6ff;
-  --primary-foreground: #06090f;
-  --secondary: #121926;
-  --secondary-foreground: #eff3f8;
-  --muted: #121926;
-  --muted-foreground: #bac5d4;
-  --accent: #172033;
-  --accent-foreground: #eff3f8;
-  --destructive: #f87171;
-  --destructive-foreground: #06090f;
-  --success: #4ade80;
-  --success-foreground: #06120d;
-  --border: #313e54;
-  --input: #313e54;
-  --ring: #7eb6ff;
-  --chart-1: #7eb6ff;
-  --chart-2: #5ec4b6;
-  --chart-3: #bac5d4;
-  --chart-4: #fbbf24;
-  --chart-5: #f87171;
-  --metric-posts: #7eb6ff;
-  --metric-votes: #5ec4b6;
-  --metric-comments: #bac5d4;
-  --metric-users: #fbbf24;
-  --sidebar: #0b1019;
-  --sidebar-foreground: #eff3f8;
-  --sidebar-primary: #7eb6ff;
-  --sidebar-primary-foreground: #06090f;
-  --sidebar-accent: #172033;
-  --sidebar-accent-foreground: #eff3f8;
-  --sidebar-border: #313e54;
-  --sidebar-ring: #7eb6ff;
-  --radius: 0.5rem;
-  --letter-spacing: 0em;
-  --shadow-2xs: 0 1px 0 rgba(0, 0, 0, 0.28);
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.34), 0 1px 2px rgba(0, 0, 0, 0.22);
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.26);
-  --shadow-md: 0 18px 45px rgba(0, 0, 0, 0.34);
-  --shadow-lg: 0 22px 70px rgba(0, 0, 0, 0.42);
-  --shadow-xl: 0 32px 95px rgba(0, 0, 0, 0.5);
-  --shadow-2xl: 0 45px 140px rgba(0, 0, 0, 0.62);
-  --header-background: rgba(8, 11, 18, 0.88);
-  --header-foreground: #eff3f8;
-  --header-border: rgba(126, 182, 255, 0.18);
-  --post-card-background: #0e131e;
-  --post-card-border: rgba(126, 182, 255, 0.18);
-  --post-card-voted-color: #7eb6ff;
-  --nav-active-background: rgba(126, 182, 255, 0.13);
-  --nav-active-foreground: #eff3f8;
-  --nav-inactive-color: #bac5d4;
-  --portal-button-background: #7eb6ff;
-  --portal-button-foreground: #06090f;
-}
 
 @theme inline {
   /* Colors */
@@ -193,10 +51,11 @@
   /* Portal component colors */
   --color-post-card-voted: var(--post-card-voted-color);
 
-  /* Typography */
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-  --font-serif: var(--font-serif);
+  /* Typography: Tailwind's font utilities resolve straight to the v6.6
+     primitives (DM Sans / mono), never to a self-referencing variable. */
+  --font-sans: var(--ds-primitive-font-family-sans);
+  --font-mono: var(--ds-primitive-font-family-mono);
+  --font-serif: Georgia, serif;
 
   /* Border radius - scaled from base --radius to avoid negative values */
   --radius-sm: calc(var(--radius) * 0.5);
@@ -288,7 +147,9 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    /* Full-strength focus color (v6.6 interactive.focus-ring, 90% black):
+       half opacity measured 3.4:1 on white, below the suite's ring. */
+    @apply border-border outline-ring;
   }
   body {
     -webkit-font-smoothing: antialiased;
@@ -299,21 +160,32 @@
   [role='button']:not(:disabled) {
     cursor: pointer;
   }
+  /* v6.6 focus (module 13 §4): a 2px focus-ring outline with a 2px offset on
+     every keyboard-focusable element that has no ring of its own. Controls
+     that draw a ring (Button, Input) set outline-none in the utilities layer,
+     which outranks this base-layer rule. */
+  :where(a[href], summary, [tabindex]:not([tabindex='-1']), [role='button']):focus-visible {
+    outline: var(--ds-component-focus-ring-width) solid var(--ds-color-interactive-focus-ring);
+    outline-offset: var(--ds-component-focus-ring-offset);
+  }
+  :focus-visible {
+    scroll-margin-block-start: calc(var(--ds-component-header-height, 68px) + 24px);
+  }
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline-color: Highlight;
+    }
+  }
 }
 
 html {
   background: var(--background);
 }
 
-body {
-  background: #f8fafc;
-}
-
+body,
 .dark body {
-  background:
-    radial-gradient(circle at 78% 6%, rgba(126, 182, 255, 0.16), transparent 28rem),
-    radial-gradient(circle at 12% 18%, rgba(94, 196, 182, 0.11), transparent 24rem),
-    linear-gradient(180deg, #080b12 0%, #0a0f18 44%, #080b12 100%);
+  background: var(--background);
+  font-family: var(--font-sans);
 }
 
 .portal-nav__item,
@@ -325,7 +197,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 40;
-  backdrop-filter: saturate(1.02) blur(14px);
+
   box-shadow: none;
 }
 
@@ -365,15 +237,13 @@ body {
 }
 
 .venturi-portal-card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.58)), var(--card);
+  background: var(--card);
   border-color: var(--post-card-border);
   box-shadow: var(--shadow);
 }
 
 .dark .venturi-portal-card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)), var(--card);
+  background: var(--card);
 }
 
 .portal-empty-state {
@@ -432,7 +302,7 @@ body {
   margin-bottom: 24px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--background);
 }
 
 .venturi-feedback-empty__mark img {
@@ -448,14 +318,14 @@ body {
    Dropping the card chrome keeps the composition; the measure stays capped on
    the text itself (the lede and note already carry their own max-widths). */
 .venturi-feedback-empty__copy--solo {
-  max-width: 46rem;
+  max-width: none;
   margin-inline: auto;
   padding: clamp(8px, 2vw, 16px) 0;
   border: 0;
   border-radius: 0;
   background: none;
   box-shadow: none;
-  text-align: center;
+  text-align: start;
 }
 
 .venturi-feedback-empty__copy--solo .venturi-feedback-empty__mark {
@@ -472,7 +342,7 @@ body {
 }
 
 .venturi-feedback-empty__copy--solo .venturi-feedback-empty__actions {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .venturi-feedback-empty__eyebrow {
@@ -486,11 +356,11 @@ body {
 }
 
 .venturi-feedback-empty h1 {
-  max-width: 15ch;
+  max-width: none;
   margin: 0;
   color: var(--foreground);
   font-size: clamp(2.25rem, 5vw, 3.85rem);
-  font-weight: 640;
+  font-weight: 400;
   line-height: 1.02;
   letter-spacing: 0;
 }
@@ -557,7 +427,7 @@ body {
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #f8fafc;
+  background: var(--muted);
 }
 
 .venturi-feedback-empty__steps svg {
@@ -588,7 +458,7 @@ body {
   }
 
   .venturi-feedback-empty h1 {
-    max-width: 13ch;
+    max-width: none;
   }
 }
 

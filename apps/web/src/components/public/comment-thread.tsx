@@ -525,7 +525,7 @@ function CommentItem({
             isDeleted && isTeamMember && 'opacity-50'
           )}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <Avatar className="h-8 w-8 shrink-0">
               {comment.avatarUrl && (
                 <AvatarImage
@@ -541,7 +541,10 @@ function CommentItem({
               )}
               <AvatarFallback className="text-xs">{getInitials(comment.authorName)}</AvatarFallback>
             </Avatar>
-            <span className="font-medium text-sm">
+            <span
+              className="font-medium text-sm"
+              data-text-origin={comment.authorName ? 'user' : undefined}
+            >
               {comment.authorName ||
                 intl.formatMessage({
                   id: 'portal.commentThread.authorFallback',
@@ -616,7 +619,7 @@ function CommentItem({
               </Badge>
             )}
             <span className="text-muted-foreground text-xs">·</span>
-            <TimeAgo date={comment.createdAt} className="text-xs text-muted-foreground" />
+            <TimeAgo date={comment.createdAt} className="shrink-0 text-xs text-muted-foreground" />
             {comment.isEdited && (
               <span className="text-xs text-muted-foreground/60">
                 {intl.formatMessage({
@@ -632,7 +635,7 @@ function CommentItem({
             <div className="mt-1.5 ms-10">
               <div
                 data-testid="edit-comment-editor"
-                className="rounded-lg border border-border/50 bg-background overflow-hidden focus-within:border-border focus-within:ring-1 focus-within:ring-ring/20 transition-colors px-3 py-2"
+                className="rounded-lg border border-border/50 bg-background overflow-hidden focus-within:border-border focus-within:ring-2 focus-within:ring-ring transition-colors px-3 py-2"
                 onKeyDownCapture={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                     e.preventDefault()

@@ -2,9 +2,10 @@
  * Server functions for workspace data fetching.
  */
 
-import { createServerFn } from '@tanstack/react-start'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { db, principal, eq } from '@/lib/server/db'
 import { getSession } from '@/lib/server/auth/session'
+import { effectiveRole } from '@/lib/shared/roles'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'workspace' })
@@ -16,8 +17,13 @@ const log = logger.child({ component: 'workspace' })
  * portalConfig, ...) come back as unparsed text. For parsed, default-merged
  * reads use the settings domain service (getTenantSettings / isFeatureEnabled)
  * instead of casting a column off this row.
+ *
+ * Server-only. The raw row carries server-only policy (portal allowlists,
+ * tier limits) and the widget HMAC secret, so it must never be reachable as
+ * a public `/_serverFn` RPC. Client-side code reads the redacted tenant
+ * settings from the router context instead.
  */
-export const getSettings = createServerFn({ method: 'GET' }).handler(async () => {
+export const getSettings = createServerOnlyFn(async () => {
   try {
     const org = await db.query.settings.findFirst()
     return org ?? null
@@ -48,8 +54,9 @@ export const getCurrentUserRole = createServerFn({ method: 'GET' }).handler(
         log.debug('no principal')
         return null
       }
-      log.debug({ role: principalRecord.role }, 'current user role')
-      return principalRecord.role as 'admin' | 'member' | 'user'
+      const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
+      log.debug({ role }, 'current user role')
+      return role
     } catch (error) {
       log.error({ err: error }, 'get current user role failed')
       throw error
@@ -58,9 +65,12 @@ export const getCurrentUserRole = createServerFn({ method: 'GET' }).handler(
 )
 
 /**
- * Validate API workspace access
+ * Validate API workspace access.
+ *
+ * Server-only: used by the /api/import and /api/export server routes. It
+ * returns the raw settings row, so it must not be exposed as an RPC.
  */
-export const validateApiWorkspaceAccess = createServerFn({ method: 'GET' }).handler(async () => {
+export const validateApiWorkspaceAccess = createServerOnlyFn(async () => {
   try {
     const session = await getSession()
     if (!session?.user) {
@@ -85,7 +95,12 @@ export const validateApiWorkspaceAccess = createServerFn({ method: 'GET' }).hand
     return {
       success: true as const,
       settings: appSettings,
-      principal: principalRecord,
+      // Callers gate on principal.role; a team role only counts on a human
+      // principal (see effectiveRole), so cap it before returning.
+      principal: {
+        ...principalRecord,
+        role: effectiveRole(principalRecord.role, principalRecord.type) ?? 'user',
+      },
       user: session.user,
     }
   } catch (error) {

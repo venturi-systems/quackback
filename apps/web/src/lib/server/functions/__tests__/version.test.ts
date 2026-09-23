@@ -26,3 +26,32 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('0.5.0', '0.4.9')).toBe(false)
   })
 })
+
+describe('getLatestVersion upstream check switch', () => {
+  it('returns null without calling GitHub unless UPSTREAM_VERSION_CHECK=true', async () => {
+    const { vi } = await import('vitest')
+    vi.resetModules()
+    const handlers: Array<() => Promise<unknown>> = []
+    vi.doMock('@tanstack/react-start', () => ({
+      createServerFn: () => ({
+        handler(fn: () => Promise<unknown>) {
+          handlers.push(fn)
+          return fn
+        },
+      }),
+    }))
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    vi.stubEnv('UPSTREAM_VERSION_CHECK', '')
+    try {
+      await import('../version')
+      expect(await handlers[0]()).toBeNull()
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllEnvs()
+      vi.unstubAllGlobals()
+      vi.doUnmock('@tanstack/react-start')
+      vi.resetModules()
+    }
+  })
+})
