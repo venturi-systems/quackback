@@ -70,6 +70,7 @@ vi.mock('@/lib/server/domains/settings/settings.helpers', () => ({
 
 type BoardRow = {
   id: string
+  slug?: string
   access?: Record<string, unknown>
 }
 const state: {
@@ -154,6 +155,7 @@ const AUTH_ADMIN = {
 
 const BOARD_DEFAULT: BoardRow = {
   id: 'board_1',
+  slug: 'feature-requests',
   access: {
     view: 'anonymous',
     vote: 'anonymous',
@@ -334,18 +336,70 @@ describe('updateBoardAccessFn — auth + not-found', () => {
 })
 
 describe('updateBoardAccessFn — policy-managed board access', () => {
-  it('refuses the write when boards.access is managed', async () => {
+  const TIGHTER_ACCESS = {
+    view: 'authenticated',
+    vote: 'authenticated',
+    comment: 'authenticated',
+    submit: 'authenticated',
+    segments: { view: [], vote: [], comment: [], submit: [] },
+    moderation: { anonPosts: 'on', signedPosts: 'on', comments: 'on' },
+  }
+
+  /** Drive the mocked guard with the real path matcher over a managed list. */
+  async function manage(paths: string[]) {
     const { ForbiddenError } = await import('@/lib/shared/errors')
-    hoisted.mockAssertNotManaged.mockRejectedValue(
-      new ForbiddenError('FIELD_MANAGED', 'Field "boards.access" is managed')
-    )
+    const { isPathManaged } = await import('@/lib/server/config-file/managed-paths')
+    hoisted.mockAssertNotManaged.mockImplementation(async (path: string) => {
+      if (isPathManaged(path, paths)) {
+        throw new ForbiddenError('FIELD_MANAGED', `Field "${path}" is managed`)
+      }
+    })
+  }
+
+  it('refuses a change to a board whose access is managed, before writing', async () => {
+    await manage(['boards.feature-requests.access'])
     await expect(
-      getUpdateBoardAccessFn()({
-        data: { boardId: 'board_1', access: { ...BOARD_DEFAULT.access } },
-      })
-    ).rejects.toThrow('is managed')
-    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('boards.access')
+      getUpdateBoardAccessFn()({ data: { boardId: 'board_1', access: TIGHTER_ACCESS } })
+    ).rejects.toMatchObject({ code: 'FIELD_MANAGED' })
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('boards.feature-requests.access')
     expect(state.updates).toHaveLength(0)
     expect(state.auditEvents).toHaveLength(0)
+  })
+
+  it('refuses a moderation-only change to a managed board', async () => {
+    await manage(['boards.feature-requests.access'])
+    const access = {
+      ...BOARD_DEFAULT.access,
+      moderation: { anonPosts: 'on', signedPosts: 'inherit', comments: 'inherit' },
+    }
+    await expect(
+      getUpdateBoardAccessFn()({ data: { boardId: 'board_1', access } })
+    ).rejects.toMatchObject({ code: 'FIELD_MANAGED' })
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('lets every other board change while one board is managed', async () => {
+    await manage(['boards.feature-requests.access'])
+    state.boards = [{ ...BOARD_DEFAULT, id: 'board_2', slug: 'bug-reports' }]
+    await getUpdateBoardAccessFn()({ data: { boardId: 'board_2', access: TIGHTER_ACCESS } })
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('boards.bug-reports.access')
+    expect(state.updates).toEqual([{ access: TIGHTER_ACCESS }])
+  })
+
+  it('passes a save that keeps a managed board unchanged, without consulting the list', async () => {
+    await manage(['boards.feature-requests.access'])
+    await getUpdateBoardAccessFn()({
+      data: { boardId: 'board_1', access: structuredClone(BOARD_DEFAULT.access) },
+    })
+    expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
+    expect(state.updates).toHaveLength(1)
+  })
+
+  it('answers a missing board with 404 before consulting the list', async () => {
+    await manage(['boards.feature-requests.access'])
+    await expect(
+      getUpdateBoardAccessFn()({ data: { boardId: 'missing', access: TIGHTER_ACCESS } })
+    ).rejects.toMatchObject({ code: 'BOARD_NOT_FOUND' })
+    expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
   })
 })

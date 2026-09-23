@@ -466,6 +466,28 @@ export const updateAuthConfigFn = createServerFn({ method: 'POST' })
       const before = tracksAnyToggle || tracksSso ? await getAuthConfig() : null
 
       try {
+        // Sign-in methods and open sign-up may be owned by an external policy
+        // process (POLICY_MANAGED_SETTINGS: `auth.oauth`, `auth.openSignup`).
+        // Only an actual change to a managed field is refused, each field
+        // checked on its own path, so unchanged values and unmanaged fields
+        // pass. This runs first so a managed field always answers
+        // FIELD_MANAGED, whatever else the payload would trip.
+        if (data.oauth || data.openSignup !== undefined) {
+          const current = before ?? (await getAuthConfig())
+          const prior = (current?.oauth ?? {}) as Record<string, boolean | undefined>
+          for (const [key, next] of Object.entries(data.oauth ?? {})) {
+            if (typeof next === 'boolean' && next !== (prior[key] ?? false)) {
+              await assertNotManaged(`auth.oauth.${key}`)
+            }
+          }
+          if (
+            typeof data.openSignup === 'boolean' &&
+            data.openSignup !== (current?.openSignup ?? false)
+          ) {
+            await assertNotManaged('auth.openSignup')
+          }
+        }
+
         // Backstop the unified "keep ≥1 working sign-in method" invariant — a
         // direct API call must not be able to disable the workspace's last way
         // in (the client `isLastMethod` guard covers only the UI). A blocked
@@ -484,19 +506,6 @@ export const updateAuthConfigFn = createServerFn({ method: 'POST' })
               'LAST_SIGN_IN_METHOD',
               'Cannot disable the last enabled sign-in method. Enable another method first.'
             )
-          }
-        }
-
-        // Sign-in providers may be owned by an external policy process
-        // (POLICY_MANAGED_SETTINGS: `auth.oauth`). Only an actual change to a
-        // provider toggle is refused; unchanged values pass through.
-        if (data.oauth) {
-          const current = before ?? (await getAuthConfig())
-          const prior = (current?.oauth ?? {}) as Record<string, boolean | undefined>
-          for (const [key, next] of Object.entries(data.oauth)) {
-            if (typeof next === 'boolean' && next !== (prior[key] ?? false)) {
-              await assertNotManaged(`auth.oauth.${key}`)
-            }
           }
         }
 

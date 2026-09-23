@@ -20,7 +20,7 @@ import { BoardImportSection } from '@/components/admin/settings/boards/board-imp
 import { BoardExportSection } from '@/components/admin/settings/boards/board-export-section'
 import { DeleteBoardForm } from '@/components/admin/settings/boards/delete-board-form'
 import { useIsManagedSetting } from '@/components/admin/settings/managed-setting-note'
-import { MANAGED_PATHS } from '@/lib/client/config-file'
+import { boardAccessManagedPath } from '@/lib/client/config-file'
 import {
   useBoardSelection,
   type BoardTab,
@@ -105,7 +105,9 @@ interface BoardTabContentProps {
 }
 
 function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
-  const boardAccessManaged = useIsManagedSetting(MANAGED_PATHS.BOARD_ACCESS)
+  // A policy process may own this board's access (moderation included) through
+  // POLICY_MANAGED_SETTINGS `boards.<slug>.access`; other boards stay editable.
+  const boardAccessManaged = useIsManagedSetting(boardAccessManagedPath(board.slug))
   switch (tab) {
     case 'general':
       return (
@@ -130,7 +132,7 @@ function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
     case 'moderation':
       return (
         <SettingsCard title="Moderation">
-          <BoardModerationForm key={board.id} board={board} />
+          <BoardModerationForm key={board.id} board={board} managed={boardAccessManaged} />
         </SettingsCard>
       )
 

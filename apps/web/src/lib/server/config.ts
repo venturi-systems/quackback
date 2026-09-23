@@ -12,6 +12,10 @@
 
 import { z } from 'zod'
 import { logger } from '@/lib/server/logger'
+import {
+  isPolicyManagedPathOption,
+  POLICY_MANAGED_PATH_OPTIONS,
+} from '@/lib/shared/policy-managed-paths'
 
 const log = logger.child({ component: 'config' })
 
@@ -351,10 +355,12 @@ export const config = {
 
   // Settings that an external policy process owns (for Venturi, the feedback
   // infrastructure repository's reconciler, which rewrites them in the
-  // database). Comma-separated dot-paths from POLICY_MANAGED_PATH_OPTIONS;
-  // unknown entries are ignored. The admin UI shows these as read-only and the
-  // matching mutators refuse to change them (FIELD_MANAGED), so an admin never
-  // sees a save succeed and then silently revert.
+  // database). Comma-separated dot-paths from POLICY_MANAGED_PATH_OPTIONS plus
+  // `boards.<slug>.access` and `auth.oauth.<method>`
+  // (lib/shared/policy-managed-paths.ts); unknown entries are ignored. The
+  // admin UI shows exactly these fields as read-only and the matching mutators
+  // refuse to change them (FIELD_MANAGED), so an admin never sees a save
+  // succeed and then silently revert.
   get policyManagedSettings(): string[] {
     return parsePolicyManagedSettings(process.env.POLICY_MANAGED_SETTINGS)
   },
@@ -419,23 +425,24 @@ export function resetConfig(): void {
 
 export type { Config }
 
-/** Settings paths an external policy process may declare as managed. */
-export const POLICY_MANAGED_PATH_OPTIONS = [
-  'portal.access.visibility',
-  'portal.features.allowAnonymous',
-  'auth.oauth',
-  'boards.access',
-] as const
+export { POLICY_MANAGED_PATH_OPTIONS }
+
+// Warn once per distinct raw value: the getter runs on every request.
+const warnedPolicyManagedValues = new Set<string>()
 
 /** Parse POLICY_MANAGED_SETTINGS: comma-separated, trimmed, known paths only. */
 export function parsePolicyManagedSettings(raw: string | undefined): string[] {
   if (!raw) return []
-  const allowed = new Set<string>(POLICY_MANAGED_PATH_OPTIONS)
   const seen = new Set<string>()
+  const unknown: string[] = []
   for (const entry of raw.split(',')) {
     const path = entry.trim()
-    if (allowed.has(path)) seen.add(path)
-    else if (path) log.warn({ path }, 'ignoring unknown POLICY_MANAGED_SETTINGS entry')
+    if (isPolicyManagedPathOption(path)) seen.add(path)
+    else if (path) unknown.push(path)
+  }
+  if (unknown.length > 0 && !warnedPolicyManagedValues.has(raw)) {
+    warnedPolicyManagedValues.add(raw)
+    log.warn({ paths: unknown }, 'ignoring unknown POLICY_MANAGED_SETTINGS entries')
   }
   return [...seen]
 }
