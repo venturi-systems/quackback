@@ -371,7 +371,7 @@ export function FeedbackHeaderAnimated({
         />
       </label>
       {/* Icon + Title Row - Always visible */}
-      <div className="flex items-center gap-3 px-4 py-3.5">
+      <div className="flex items-center gap-3 px-4 py-2.5">
         {/* Icon - fades out when expanded */}
         <AnimatePresence>
           {!expanded && (
@@ -404,7 +404,7 @@ export function FeedbackHeaderAnimated({
             if (!expanded) setExpanded(true)
           }}
           onFocus={() => !expanded && setExpanded(true)}
-          className="flex-1 bg-transparent border-0 outline-none text-foreground font-semibold placeholder:text-muted-foreground/60 placeholder:font-normal caret-primary"
+          className="flex-1 min-h-11 bg-transparent border-0 outline-none text-foreground font-semibold placeholder:text-muted-foreground/60 placeholder:font-normal caret-primary"
           initial={false}
           animate={{
             fontSize: expanded ? '1.25rem' : '1rem',

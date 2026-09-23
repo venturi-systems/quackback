@@ -224,8 +224,10 @@ export function CommentThread({
       )
     }
 
+    // flex-wrap: on a narrow screen the button moves under the prompt instead
+    // of squeezing "Sign in to comment" onto two lines.
     return (
-      <div className="flex items-center justify-center gap-3 py-4 px-4 bg-muted/30 [border-radius:var(--radius)] border border-border/30">
+      <div className="flex flex-wrap items-center justify-center gap-3 py-4 px-4 bg-muted/30 [border-radius:var(--radius)] border border-border/30">
         <p className="text-sm text-muted-foreground">
           {intl.formatMessage({
             id: 'portal.commentThread.signInToComment',
