@@ -41,9 +41,12 @@ ENV NODE_ENV=production
 # via a Vite ?raw import, so the file must exist before the TanStack Start build runs.
 RUN bun run --filter @quackback/widget build
 
-# Build the TanStack Start application
+# Build the TanStack Start application. SOURCE_COMMIT (the exact commit being
+# built, passed by the image workflow) becomes the AGPL source link in the
+# portal footer; without it the link points at the repository.
+ARG SOURCE_COMMIT=unknown
 WORKDIR /app/apps/web
-RUN bun run build
+RUN SOURCE_COMMIT="$SOURCE_COMMIT" bun run build
 
 # Patch Nitro's lazy SSR loading: Nitro 3.x wraps the SSR service in
 # `lazyService(() => import('./_ssr/ssr.mjs'))` which only fires the import

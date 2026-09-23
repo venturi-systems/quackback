@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useRouter, useRouterState, useRouteContext } from '@tanstack/react-router'
 import { useTheme } from 'next-themes'
 import { buildNavItems } from './portal-header-nav'
+import { VenturiBrand } from './shell/venturi-brand'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { cn } from '@/lib/shared/utils'
 import { isTeamMember, roleLabel } from '@/lib/shared/roles'
@@ -36,8 +37,6 @@ import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
 import { NotificationBell } from '@/components/notifications'
 
 interface PortalHeaderProps {
-  orgName: string
-  orgLogo?: string | null
   /** User's role in the organization (passed from server) */
   userRole?: 'admin' | 'member' | 'user' | null
   /** Initial user data for SSR (store values override these after hydration) */
@@ -51,8 +50,6 @@ interface PortalHeaderProps {
 }
 
 export function PortalHeader({
-  orgName,
-  orgLogo,
   userRole,
   initialUserData,
   showThemeToggle = true,
@@ -372,32 +369,7 @@ export function PortalHeader({
       <div>
         <div className="portal-shell">
           <div className="flex min-h-12 flex-wrap items-center justify-between gap-3">
-            <Link
-              to="/"
-              className="portal-header__logo flex min-h-11 items-center gap-2"
-              aria-label={`${orgName} feedback home`}
-            >
-              {orgName === 'Venturi' ? (
-                <img
-                  src="/design-system/brand/venturi-lockup-black.svg"
-                  alt="Venturi"
-                  className="portal-brand-lockup"
-                />
-              ) : orgLogo ? (
-                <img
-                  src={orgLogo}
-                  alt={orgName}
-                  className="h-8 w-8 [border-radius:calc(var(--radius)*0.6)]"
-                />
-              ) : (
-                <div className="h-8 w-8 [border-radius:calc(var(--radius)*0.6)] bg-primary flex items-center justify-center text-primary-foreground font-semibold">
-                  {orgName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <span className="portal-header__name text-[var(--header-foreground)]">
-                {orgName === 'Venturi' ? 'Feedback' : orgName}
-              </span>
-            </Link>
+            <VenturiBrand spa />
             <AuthButtons />
           </div>
         </div>

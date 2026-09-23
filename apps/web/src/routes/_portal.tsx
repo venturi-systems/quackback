@@ -1,6 +1,8 @@
 import { createFileRoute, redirect, Outlet } from '@tanstack/react-router'
 import { fetchUserAvatar } from '@/lib/server/functions/portal'
 import { PortalHeader } from '@/components/public/portal-header'
+import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer'
+import { InShell } from '@/components/public/shell/shell-context'
 import { AuthPopoverProvider } from '@/components/auth/auth-popover-context'
 import { AuthDialog } from '@/components/auth/auth-dialog'
 import { PortalAccessGate } from '@/components/portal/portal-access-gate'
@@ -99,6 +101,7 @@ export const Route = createFileRoute('/_portal')({
       const gate: PortalAccessGateError = {
         type: 'portal-access-gate',
         reason: accessResult.reason,
+        visibility: settings?.portalConfig?.access?.visibility ?? 'private',
         workspaceName: org?.name ?? '',
         logoUrl: brandingData?.logoUrl ?? null,
         themeStyles: hasThemeConfig ? generateThemeCSS(brandingConfig) : '',
@@ -249,6 +252,7 @@ function PortalLayout() {
     return (
       <PortalAccessGate
         reason={gate.reason}
+        visibility={gate.visibility}
         workspaceName={gate.workspaceName}
         logoUrl={gate.logoUrl}
         authConfig={gate.authConfig}
@@ -266,7 +270,6 @@ function PortalLayout() {
     org,
     userRole,
     session,
-    brandingData,
     themeStyles,
     customCss,
     themeMode,
@@ -308,29 +311,21 @@ function PortalLayout() {
           {/* Custom CSS is injected after theme styles so it can override */}
           {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
           <PortalHeader
-            orgName={org.name}
-            orgLogo={brandingData?.logoUrl ?? '/venturi-mark.svg'}
             userRole={userRole}
             initialUserData={initialUserData}
             showThemeToggle={themeMode === 'user'}
           />
           <main id="portal-main" tabIndex={-1} className="flex-1 w-full flex flex-col">
-            {prompt.error && (
-              <div className="portal-shell pt-4">
-                <AuthNotice code={prompt.error} />
-              </div>
-            )}
-            <Outlet />
+            <InShell>
+              {prompt.error && (
+                <div className="portal-shell pt-4">
+                  <AuthNotice code={prompt.error} />
+                </div>
+              )}
+              <Outlet />
+            </InShell>
           </main>
-          <footer className="portal-footer portal-shell">
-            <span>Venturi feedback</span>
-            <nav aria-label="Related Venturi sites">
-              <a href="https://venturi.systems/">Venturi</a>
-              <a href="https://docs.venturi.systems/">Documentation</a>
-              <a href="https://venturi.systems/legal/privacy/">Privacy</a>
-              <a href="https://github.com/venturi-systems/quackback">Source code · AGPL-3.0</a>
-            </nav>
-          </footer>
+          <VenturiSiteFooter />
           <AuthDialog authConfig={authConfig} workspaceName={org.name} />
         </div>
       </AuthPopoverProvider>
