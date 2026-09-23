@@ -1,5 +1,6 @@
 import { test, expect, type Page, type BrowserContext, type Locator } from '@playwright/test'
 import { portalStorageState } from '../../utils/portal-auth'
+import { setupAccessFixtures, type BoardFixture } from '../../utils/access-helpers'
 
 // Run serially to avoid contending for the shared demo account's session
 test.describe.configure({ mode: 'serial' })
@@ -7,13 +8,19 @@ test.describe.configure({ mode: 'serial' })
 // ---------------------------------------------------------------------------
 // Helper: navigate to the first available post detail page
 // ---------------------------------------------------------------------------
-async function goToFirstPost(page: Page) {
-  await page.goto('/')
-  await page.waitForLoadState('networkidle')
+async function goToFirstPost(page: Page, fixture?: BoardFixture) {
+  if (fixture) {
+    await page.goto(`/b/${fixture.slug}/posts/${fixture.postId}`)
+  } else {
+    // Keep authenticated comment workflows on a seeded board, away from the
+    // separate anonymous and moderated boards provisioned by access tests.
+    await page.goto('/?board=features')
+    await page.waitForLoadState('networkidle')
 
-  const postLinks = page.locator('a[href*="/posts/"]')
-  await expect(postLinks.first()).toBeVisible({ timeout: 15000 })
-  await postLinks.first().click()
+    const postLinks = page.locator('a[href*="/posts/"]')
+    await expect(postLinks.first()).toBeVisible({ timeout: 15000 })
+    await postLinks.first().click()
+  }
   await page.waitForURL(/\/posts\//)
   await page.waitForLoadState('networkidle')
   // Wait for the comments heading (count badge rendered by CommentsSection)
@@ -62,9 +69,16 @@ async function expectEditorEmpty(editor: ReturnType<typeof commentEditor>) {
 // ===========================================================================
 test.describe('Unauthenticated user — comments section', () => {
   test.setTimeout(60000)
+  let authenticatedComments: BoardFixture
+
+  test.beforeAll(() => {
+    // Anonymous-view board with comment:authenticated, independent of whichever
+    // random seed post happens to lead the feed or the workspace anon switch.
+    authenticatedComments = setupAccessFixtures('demo@example.com').boards.public
+  })
 
   test.beforeEach(async ({ page }) => {
-    await goToFirstPost(page)
+    await goToFirstPost(page, authenticatedComments)
   })
 
   // -------------------------------------------------------------------------
@@ -105,7 +119,7 @@ test.describe('Unauthenticated user — comments section', () => {
 
   // -------------------------------------------------------------------------
   test('Edit button is NOT shown to unauthenticated users', async ({ page }) => {
-    const commentItems = page.locator('[id^="comment-"]')
+    const commentItems = page.locator('div[id^="comment-"]')
     if ((await commentItems.count()) === 0) return
     await expect(page.getByRole('button', { name: /^edit$/i })).toHaveCount(0, { timeout: 5000 })
   })
@@ -114,7 +128,7 @@ test.describe('Unauthenticated user — comments section', () => {
   test('existing comments are visible to unauthenticated users', async ({ page }) => {
     // The comment list is always rendered regardless of auth state.
     // If there are no seed comments we get the empty-state message — either is valid.
-    const commentItems = page.locator('[id^="comment-"]')
+    const commentItems = page.locator('div[id^="comment-"]')
     const emptyState = page.getByText(/no comments yet/i)
 
     const hasComments = (await commentItems.count()) > 0
@@ -132,7 +146,7 @@ test.describe('Unauthenticated user — comments section', () => {
 
     // Count only top-level comment nodes (id="comment-*")
     // Nested replies also have `id="comment-*"`, so count all of them.
-    const commentNodes = page.locator('[id^="comment-"]')
+    const commentNodes = page.locator('div[id^="comment-"]')
     const domCount = await commentNodes.count()
 
     // The heading count == total live comments (including nested);
@@ -142,7 +156,7 @@ test.describe('Unauthenticated user — comments section', () => {
 
   // -------------------------------------------------------------------------
   test('comments show author name', async ({ page }) => {
-    const commentItems = page.locator('[id^="comment-"]')
+    const commentItems = page.locator('div[id^="comment-"]')
     if ((await commentItems.count()) === 0) {
       // No seed comments on this post — skip gracefully
       return
@@ -159,7 +173,7 @@ test.describe('Unauthenticated user — comments section', () => {
 
   // -------------------------------------------------------------------------
   test('comments show a relative timestamp', async ({ page }) => {
-    const commentItems = page.locator('[id^="comment-"]')
+    const commentItems = page.locator('div[id^="comment-"]')
     if ((await commentItems.count()) === 0) {
       return
     }
@@ -175,13 +189,13 @@ test.describe('Unauthenticated user — comments section', () => {
 
   // -------------------------------------------------------------------------
   test('comments are sorted most-recent-first (newest comment appears first)', async ({ page }) => {
-    const commentItems = page.locator('[id^="comment-"]')
+    const commentItems = page.locator('div[id^="comment-"]')
     const count = await commentItems.count()
     if (count < 2) return // need at least two comments to test ordering
 
     // Grab the text content of the first two timestamps (TimeAgo elements)
     // They live inside the `<span>` rendered by <TimeAgo> which has a `datetime` attribute
-    const timeEls = page.locator('[id^="comment-"] time')
+    const timeEls = page.locator('div[id^="comment-"] time')
     const timeCount = await timeEls.count()
     if (timeCount < 2) return // need at least two time elements to compare ordering
 
@@ -329,7 +343,7 @@ test.describe('Authenticated user — comment form and submission', () => {
       await expectEditorEmpty(editor)
 
       // Find the newly rendered comment
-      const newComment = page.locator('[id^="comment-"]').filter({ hasText: uniqueText })
+      const newComment = page.locator('div[id^="comment-"]').filter({ hasText: uniqueText })
       await expect(newComment).toBeVisible({ timeout: 10000 })
 
       // Author name should include "Demo" (seed account name = "Demo User")
@@ -592,7 +606,7 @@ test.describe('Edge cases — comment content', () => {
     try {
       await goToFirstPost(page)
 
-      const commentItems = page.locator('[id^="comment-"]')
+      const commentItems = page.locator('div[id^="comment-"]')
       if ((await commentItems.count()) === 0) return
 
       const replyBtn = commentItems.first().getByTestId('reply-button')
@@ -608,7 +622,7 @@ test.describe('Edge cases — comment content', () => {
     try {
       await goToFirstPost(page)
 
-      const commentItems = page.locator('[id^="comment-"]')
+      const commentItems = page.locator('div[id^="comment-"]')
       if ((await commentItems.count()) === 0) return
 
       const replyBtn = commentItems.first().getByTestId('reply-button')
@@ -664,12 +678,12 @@ test.describe('Comment editing', () => {
     // Wait for this specific comment to receive a real server ID (not optimistic placeholder)
     await page.waitForFunction(
       (text) =>
-        Array.from(document.querySelectorAll('[id^="comment-"]')).some(
+        Array.from(document.querySelectorAll('div[id^="comment-"]')).some(
           (el) => el.textContent?.includes(text) && !el.id.includes('optimistic')
         ),
       uniqueText
     )
-    const commentItem = page.locator('[id^="comment-"]').filter({ hasText: uniqueText }).first()
+    const commentItem = page.locator('div[id^="comment-"]').filter({ hasText: uniqueText }).first()
     const elementId = await commentItem.getAttribute('id')
     if (!elementId) throw new Error(`Could not resolve element ID for comment: ${uniqueText}`)
     return { elementId, uniqueText }
@@ -680,7 +694,10 @@ test.describe('Comment editing', () => {
     const page = await sharedContext.newPage()
     try {
       const { uniqueText } = await submitAndLocate(page)
-      const commentItem = page.locator('[id^="comment-"]').filter({ hasText: uniqueText }).first()
+      const commentItem = page
+        .locator('div[id^="comment-"]')
+        .filter({ hasText: uniqueText })
+        .first()
       await expect(commentItem.getByRole('button', { name: /^edit$/i })).toBeVisible({
         timeout: 5000,
       })
@@ -882,7 +899,7 @@ test.describe('Markdown comment rendering', () => {
       // Scope assertions to the new comment node so we don't collide with
       // any markdown rendered by other comments / page chrome.
       const newComment = page
-        .locator('[id^="comment-"]')
+        .locator('div[id^="comment-"]')
         .filter({ hasText: `My heading ${marker}` })
         .first()
       await expect(newComment).toBeVisible({ timeout: 10000 })
