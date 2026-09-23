@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, type ErrorComponentProps } from '@tanstack/react-router'
 import { useSuspenseQuery, useQuery } from '@tanstack/react-query'
 import { adminQueries } from '@/lib/client/queries/admin'
 import { mergeSuggestionQueries } from '@/lib/client/queries/signals'
@@ -8,6 +8,7 @@ import type { InboxPostPreviewResult } from '@/lib/shared/types/posts'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
+import { errorMessage } from '@/components/shared/error-page'
 
 export const Route = createFileRoute('/admin/feedback/')({
   loaderDeps: ({ search }) => ({
@@ -86,14 +87,14 @@ export const Route = createFileRoute('/admin/feedback/')({
   component: FeedbackIndexPage,
 })
 
-function FeedbackErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function FeedbackErrorComponent({ error, reset }: ErrorComponentProps) {
   return (
     <div className="flex items-center justify-center min-h-[400px] p-4">
       <Alert variant="destructive" className="max-w-2xl">
         <ExclamationCircleIcon className="h-4 w-4" />
         <AlertTitle>Failed to load feedback</AlertTitle>
         <AlertDescription className="mt-2">
-          <p className="mb-4">{error.message}</p>
+          <p className="mb-4">{errorMessage(error)}</p>
           <Button onClick={reset} variant="outline" size="sm">
             Try again
           </Button>
