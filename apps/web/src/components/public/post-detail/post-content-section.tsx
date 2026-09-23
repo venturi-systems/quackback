@@ -240,11 +240,15 @@ export function PostContentSection({
         {post.title}
       </h1>
 
-      <PostContent
-        content={post.content}
-        contentJson={post.contentJson}
-        className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-foreground/90"
-      />
+      {/* The post body is user-generated: the typography checker reviews it
+          (data-text-origin="user") instead of failing it as authored copy. */}
+      <div data-text-origin="user">
+        <PostContent
+          content={post.content}
+          contentJson={post.contentJson}
+          className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-foreground/90"
+        />
+      </div>
 
       {/* The editing branch returned above, so this always renders here */}
       <SimilarPostsSection postTitle={post.title} currentPostId={post.id as PostId} />

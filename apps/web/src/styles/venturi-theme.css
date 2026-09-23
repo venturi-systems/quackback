@@ -80,10 +80,22 @@
   border-bottom: 1px solid var(--border);
 }
 
-.portal-introduction h1 {
+.portal-introduction h1,
+.portal-page-title {
   margin: 0 0 0.75rem;
   font: var(--ds-typography-heading-40);
   text-wrap: balance;
+}
+
+/* Portal pages outside the feedback and roadmap layouts (post detail,
+   changelog, notifications, account settings) start on the same rail as the
+   header and footer. The measure is capped on the content box, and the page
+   is never centered: content-box sizing keeps the shared gutter outside the
+   72rem cap. */
+.portal-page {
+  box-sizing: content-box;
+  max-width: 72rem;
+  padding-inline: clamp(20px, 4vw, 56px);
 }
 
 .portal-introduction p {
@@ -105,10 +117,12 @@
   font-weight: 500;
 }
 
+/* Two-line statements in equal-width columns: balance keeps the second line
+   substantial at every column width (pretty still left 26-34% final lines). */
 .portal-participation dd {
   margin: 0;
   color: var(--muted-foreground);
-  text-wrap: pretty;
+  text-wrap: balance;
 }
 
 /* Brand cluster: approved lockup (24px high, identity.md minimum) linking to
@@ -475,7 +489,8 @@
     grid-template-columns: 1fr;
     gap: 1rem;
   }
-  .portal-introduction h1 {
+  .portal-introduction h1,
+  .portal-page-title {
     font: var(--ds-typography-heading-32);
   }
 }
@@ -515,9 +530,32 @@
 .portal-participation-disclosure > summary {
   display: inline-flex;
   align-items: center;
+  gap: 0.625rem;
   min-height: var(--ds-component-touch-minimum);
   cursor: pointer;
   font-weight: var(--ds-primitive-font-weight-medium);
+}
+
+/* Flex removes the native disclosure triangle, so draw the affordance: a
+   chevron that points right when closed and down when open. */
+.portal-participation-disclosure > summary::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 250ms ease;
+}
+
+.portal-participation-disclosure[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal-participation-disclosure > summary::before {
+    transition: none;
+  }
 }
 
 .portal-participation-disclosure .portal-participation {

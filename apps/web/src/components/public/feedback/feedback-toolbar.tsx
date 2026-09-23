@@ -99,8 +99,18 @@ export function FeedbackToolbar({
         {/* Search */}
         <Popover open={searchOpen} onOpenChange={setSearchOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className="min-h-11 gap-1.5">
-              <MagnifyingGlassIcon className="h-4 w-4" />
+            {/* The label is display:none below sm; aria-label keeps the control
+                named at every width (same as the roadmap toolbar). */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              aria-label={intl.formatMessage({
+                id: 'portal.feedback.toolbar.search',
+                defaultMessage: 'Search',
+              })}
+            >
+              <MagnifyingGlassIcon className="h-4 w-4" aria-hidden="true" />
               <span className="hidden sm:inline">
                 <FormattedMessage id="portal.feedback.toolbar.search" defaultMessage="Search" />
               </span>

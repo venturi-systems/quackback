@@ -239,11 +239,18 @@ export function CommentForm({
 
             {error && <p className="text-sm text-destructive px-3 pb-1">{error}</p>}
 
-            {/* Toolbar footer */}
-            <div className="flex items-center gap-2 border-t border-border/30 bg-muted/20 px-3 py-2">
+            {/* Toolbar footer. Controls wrap as whole units on narrow screens
+                instead of squeezing their labels onto several lines, and the
+                full name stays visible (no truncation). */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/30 bg-muted/20 px-3 py-2">
               {/* Left: Identity */}
-              <p className="text-xs text-muted-foreground me-auto truncate">
-                <span className="font-medium text-foreground">
+              <p className="text-xs text-muted-foreground me-auto min-w-0 break-words">
+                <span
+                  className="font-medium text-foreground"
+                  data-text-origin={
+                    effectiveUser?.name || effectiveUser?.email ? 'user' : undefined
+                  }
+                >
                   {effectiveUser?.name ||
                     effectiveUser?.email ||
                     intl.formatMessage({
@@ -253,131 +260,134 @@ export function CommentForm({
                 </span>
               </p>
 
-              {/* Status selector: a team power, so it carries a visible label and
-                  a "Team only" tag instead of appearing as a bare pill. */}
-              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span id={`comment-status-label-${postId}`}>
-                  {intl.formatMessage({
-                    id: 'portal.commentForm.setStatusLabel',
-                    defaultMessage: 'Set status',
-                  })}
-                </span>
-                <span className="rounded-full border border-border px-1.5 py-px text-[11px] leading-4 text-muted-foreground">
-                  {intl.formatMessage({
-                    id: 'portal.commentForm.teamOnlyTag',
-                    defaultMessage: 'Team only',
-                  })}
-                </span>
-              </span>
-              <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    type="button"
-                    aria-labelledby={`comment-status-label-${postId} comment-status-value-${postId}`}
-                    className={cn(
-                      'inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
-                      'hover:bg-muted/80',
-                      selectedStatus
-                        ? 'bg-muted/60 border border-border/50'
-                        : 'text-muted-foreground hover:text-foreground'
-                    )}
-                  >
-                    <span
-                      id={`comment-status-value-${postId}`}
-                      className="inline-flex items-center gap-1.5"
-                    >
-                      {selectedStatus ? (
-                        <StatusBadge name={selectedStatus.name} color={selectedStatus.color} />
-                      ) : (
-                        <>
-                          <span
-                            className="size-1.5 rounded-full shrink-0"
-                            style={{ backgroundColor: currentStatus?.color ?? '#94a3b8' }}
-                            aria-hidden
-                          />
-                          <span>
-                            {currentStatus?.name ??
-                              intl.formatMessage({
-                                id: 'portal.commentForm.noStatus',
-                                defaultMessage: 'No status',
-                              })}
-                          </span>
-                        </>
-                      )}
-                    </span>
-                  </button>
-                </PopoverTrigger>
-                {/* Clearing a pending change is its own control, not a button
-                    nested inside the popover trigger. */}
-                {selectedStatus && (
-                  <button
-                    type="button"
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80"
-                    aria-label={intl.formatMessage({
-                      id: 'portal.commentForm.clearStatusChange',
-                      defaultMessage: 'Clear status change',
-                    })}
-                    onClick={() => setSelectedStatusId(null)}
-                  >
-                    <span aria-hidden>&times;</span>
-                  </button>
-                )}
-                <PopoverContent className="w-44 p-1" align="end">
-                  <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+              {/* Label, tag and control wrap together as one unit. */}
+              <span className="inline-flex flex-wrap items-center gap-x-1.5">
+                {/* Status selector: a team power, so it carries a visible label and
+                    a "Team only" tag instead of appearing as a bare pill. */}
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span id={`comment-status-label-${postId}`}>
                     {intl.formatMessage({
-                      id: 'portal.commentForm.updateStatus',
-                      defaultMessage: 'Update status',
+                      id: 'portal.commentForm.setStatusLabel',
+                      defaultMessage: 'Set status',
                     })}
-                  </div>
-                  {statuses.map((status) => {
-                    const isCurrent = status.id === currentStatusId
-                    const isSelected = status.id === selectedStatusId
-                    return (
-                      <button
-                        key={status.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedStatusId(isCurrent ? null : status.id)
-                          setStatusPopoverOpen(false)
-                        }}
-                        className={cn(
-                          'w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-xs transition-colors',
-                          'hover:bg-muted/50',
-                          isSelected && 'bg-muted/40'
-                        )}
+                  </span>
+                  <span className="rounded-full border border-border px-1.5 py-px text-[11px] leading-4 text-muted-foreground">
+                    {intl.formatMessage({
+                      id: 'portal.commentForm.teamOnlyTag',
+                      defaultMessage: 'Team only',
+                    })}
+                  </span>
+                </span>
+                <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-labelledby={`comment-status-label-${postId} comment-status-value-${postId}`}
+                      className={cn(
+                        'inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+                        'hover:bg-muted/80',
+                        selectedStatus
+                          ? 'bg-muted/60 border border-border/50'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      <span
+                        id={`comment-status-value-${postId}`}
+                        className="inline-flex items-center gap-1.5"
                       >
-                        <span
-                          className="size-2 rounded-full shrink-0"
-                          style={{ backgroundColor: status.color }}
-                        />
-                        <span className="flex-1 text-start">{status.name}</span>
-                        {isCurrent && !isSelected && (
-                          <span className="text-muted-foreground text-[10px]">current</span>
+                        {selectedStatus ? (
+                          <StatusBadge name={selectedStatus.name} color={selectedStatus.color} />
+                        ) : (
+                          <>
+                            <span
+                              className="size-1.5 rounded-full shrink-0"
+                              style={{ backgroundColor: currentStatus?.color ?? '#94a3b8' }}
+                              aria-hidden
+                            />
+                            <span>
+                              {currentStatus?.name ??
+                                intl.formatMessage({
+                                  id: 'portal.commentForm.noStatus',
+                                  defaultMessage: 'No status',
+                                })}
+                            </span>
+                          </>
                         )}
-                        {isSelected && <CheckIcon className="size-3.5 text-primary shrink-0" />}
-                      </button>
-                    )
-                  })}
-                  {selectedStatusId && (
-                    <>
-                      <div className="my-1 border-t border-border/30" />
-                      <button
-                        type="button"
-                        className="w-full text-start px-2 py-1.5 text-xs rounded-sm hover:bg-muted/50 transition-colors text-muted-foreground"
-                        onClick={() => {
-                          setSelectedStatusId(null)
-                          setStatusPopoverOpen(false)
-                        }}
-                      >
-                        {intl.formatMessage({
-                          id: 'portal.commentForm.clearStatusChange',
-                          defaultMessage: 'Clear status change',
-                        })}
-                      </button>
-                    </>
+                      </span>
+                    </button>
+                  </PopoverTrigger>
+                  {/* Clearing a pending change is its own control, not a button
+                      nested inside the popover trigger. */}
+                  {selectedStatus && (
+                    <button
+                      type="button"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                      aria-label={intl.formatMessage({
+                        id: 'portal.commentForm.clearStatusChange',
+                        defaultMessage: 'Clear status change',
+                      })}
+                      onClick={() => setSelectedStatusId(null)}
+                    >
+                      <span aria-hidden>&times;</span>
+                    </button>
                   )}
-                </PopoverContent>
-              </Popover>
+                  <PopoverContent className="w-44 p-1" align="end">
+                    <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                      {intl.formatMessage({
+                        id: 'portal.commentForm.updateStatus',
+                        defaultMessage: 'Update status',
+                      })}
+                    </div>
+                    {statuses.map((status) => {
+                      const isCurrent = status.id === currentStatusId
+                      const isSelected = status.id === selectedStatusId
+                      return (
+                        <button
+                          key={status.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedStatusId(isCurrent ? null : status.id)
+                            setStatusPopoverOpen(false)
+                          }}
+                          className={cn(
+                            'w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-xs transition-colors',
+                            'hover:bg-muted/50',
+                            isSelected && 'bg-muted/40'
+                          )}
+                        >
+                          <span
+                            className="size-2 rounded-full shrink-0"
+                            style={{ backgroundColor: status.color }}
+                          />
+                          <span className="flex-1 text-start">{status.name}</span>
+                          {isCurrent && !isSelected && (
+                            <span className="text-muted-foreground text-[10px]">current</span>
+                          )}
+                          {isSelected && <CheckIcon className="size-3.5 text-primary shrink-0" />}
+                        </button>
+                      )
+                    })}
+                    {selectedStatusId && (
+                      <>
+                        <div className="my-1 border-t border-border/30" />
+                        <button
+                          type="button"
+                          className="w-full text-start px-2 py-1.5 text-xs rounded-sm hover:bg-muted/50 transition-colors text-muted-foreground"
+                          onClick={() => {
+                            setSelectedStatusId(null)
+                            setStatusPopoverOpen(false)
+                          }}
+                        >
+                          {intl.formatMessage({
+                            id: 'portal.commentForm.clearStatusChange',
+                            defaultMessage: 'Clear status change',
+                          })}
+                        </button>
+                      </>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </span>
 
               {/* Private toggle */}
               <TooltipProvider>
@@ -498,8 +508,10 @@ export function CommentForm({
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        <div className="flex items-center justify-end gap-2">
-          <p className="text-xs text-muted-foreground me-auto">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {/* The identity and the sign-out action wrap as two whole units, so a
+              narrow form never strands the closing parenthesis on its own line. */}
+          <p className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground me-auto">
             {isAnonymousCommenter ? (
               intl.formatMessage({
                 id: 'portal.commentForm.postingAnonymously',
@@ -507,36 +519,40 @@ export function CommentForm({
               })
             ) : (
               <>
-                {intl.formatMessage(
-                  { id: 'portal.commentForm.postingAs', defaultMessage: 'Posting as {name}' },
-                  {
-                    name: (
-                      <span className="font-medium text-foreground">
-                        {effectiveUser?.name || effectiveUser?.email}
-                      </span>
-                    ),
-                  }
-                )}
-                {' ('}
-                <button
-                  type="button"
-                  className="text-primary hover:underline"
-                  onClick={() => {
-                    signOut({
-                      fetchOptions: {
-                        onSuccess: () => {
-                          router.invalidate()
+                <span className="text-balance">
+                  {intl.formatMessage(
+                    { id: 'portal.commentForm.postingAs', defaultMessage: 'Posting as {name}' },
+                    {
+                      name: (
+                        <span className="font-medium text-foreground" data-text-origin="user">
+                          {effectiveUser?.name || effectiveUser?.email}
+                        </span>
+                      ),
+                    }
+                  )}
+                </span>
+                <span className="inline-flex items-center">
+                  {'('}
+                  <button
+                    type="button"
+                    className="inline-flex min-h-11 items-center text-primary underline-offset-4 hover:underline"
+                    onClick={() => {
+                      signOut({
+                        fetchOptions: {
+                          onSuccess: () => {
+                            router.invalidate()
+                          },
                         },
-                      },
-                    })
-                  }}
-                >
-                  {intl.formatMessage({
-                    id: 'portal.commentForm.signOut',
-                    defaultMessage: 'sign out',
-                  })}
-                </button>
-                {')'}
+                      })
+                    }}
+                  >
+                    {intl.formatMessage({
+                      id: 'portal.commentForm.signOut',
+                      defaultMessage: 'sign out',
+                    })}
+                  </button>
+                  {')'}
+                </span>
               </>
             )}
           </p>

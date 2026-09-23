@@ -107,7 +107,7 @@ function RecoveryContent() {
             onChange={(e) => setCode(e.target.value)}
             disabled={submitting}
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground text-balance">
             <FormattedMessage
               id="portal.auth.recovery.codeHint"
               defaultMessage="Codes are case-insensitive and dashes are optional."

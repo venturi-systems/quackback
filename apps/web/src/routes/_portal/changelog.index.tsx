@@ -2,7 +2,6 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useIntl } from 'react-intl'
 import { RssIcon } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/button'
-import { PageHeader } from '@/components/shared/page-header'
 import { ChangelogListPublic } from '@/components/portal/changelog'
 import { publicChangelogQueries } from '@/lib/client/queries/changelog'
 
@@ -42,27 +41,39 @@ function ChangelogPage() {
   const intl = useIntl()
 
   return (
-    <div className="mx-auto max-w-6xl w-full px-4 sm:px-6 py-8">
-      <PageHeader
-        size="large"
-        title={intl.formatMessage({ id: 'portal.changelog.title', defaultMessage: 'Changelog' })}
-        description={intl.formatMessage({
-          id: 'portal.changelog.description',
-          defaultMessage: 'Stay up to date with the latest product updates and shipped features.',
-        })}
-        action={
-          <Button variant="outline" size="sm" asChild className="shrink-0 gap-1.5">
-            <a href="/changelog/feed" target="_blank" rel="noopener noreferrer">
-              <RssIcon className="h-4 w-4" />
-              <span className="hidden sm:inline">
-                {intl.formatMessage({ id: 'portal.changelog.rssFeed', defaultMessage: 'RSS Feed' })}
-              </span>
-            </a>
-          </Button>
-        }
-        animate
-        className="mb-8"
-      />
+    <div className="portal-page py-8">
+      {/* Same heading scale and lead as the feedback and roadmap pages. */}
+      <div className="mb-8 flex items-start justify-between gap-4 animate-in fade-in duration-200 fill-mode-backwards">
+        <div className="min-w-0">
+          <h1 className="portal-page-title">
+            {intl.formatMessage({ id: 'portal.changelog.title', defaultMessage: 'Changelog' })}
+          </h1>
+          <p className="portal-lead text-muted-foreground">
+            {intl.formatMessage({
+              id: 'portal.changelog.description',
+              defaultMessage:
+                'Stay up to date with the latest product updates and shipped features.',
+            })}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" asChild className="shrink-0 gap-1.5">
+          {/* The label is hidden below sm; aria-label keeps the link named. */}
+          <a
+            href="/changelog/feed"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={intl.formatMessage({
+              id: 'portal.changelog.rssFeed',
+              defaultMessage: 'RSS Feed',
+            })}
+          >
+            <RssIcon className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">
+              {intl.formatMessage({ id: 'portal.changelog.rssFeed', defaultMessage: 'RSS Feed' })}
+            </span>
+          </a>
+        </Button>
+      </div>
 
       <div
         className="animate-in fade-in duration-300 fill-mode-backwards"

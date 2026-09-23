@@ -938,7 +938,7 @@ export function MetadataSidebar({
                 disabled={!isMember}
               />
             </div>
-            <p className="text-xs text-muted-foreground/70 mt-2">
+            <p className="text-xs text-muted-foreground/70 mt-2 text-balance">
               <FormattedMessage
                 id="portal.postDetail.metadata.subscribeHint"
                 defaultMessage="Get notified when there are updates to this post"

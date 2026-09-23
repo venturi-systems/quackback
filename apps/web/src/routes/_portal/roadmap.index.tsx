@@ -82,7 +82,7 @@ function RoadmapPage() {
     // the text itself, not on the composition.
     <div className="portal-shell py-8 min-h-[calc(100dvh-12rem)] flex flex-col">
       <div className="mb-6 animate-in fade-in duration-200 fill-mode-backwards">
-        <h1 className="text-3xl font-normal mb-2">
+        <h1 className="portal-page-title">
           <FormattedMessage id="portal.roadmap.title" defaultMessage="Roadmap" />
         </h1>
         <p className="portal-lead text-muted-foreground">

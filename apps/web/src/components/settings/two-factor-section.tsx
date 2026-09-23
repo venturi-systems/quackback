@@ -26,7 +26,7 @@ export function TwoFactorSection({ enrolled, onChanged }: Props) {
     <section className="space-y-3">
       <div>
         <h3 className="text-sm font-semibold">Two-factor authentication</h3>
-        <p className="text-xs text-muted-foreground mt-0.5">
+        <p className="text-xs text-muted-foreground mt-0.5 text-balance">
           Adds a 6-digit code from an authenticator app on top of your password. Has no effect on
           SSO sign-ins.
         </p>

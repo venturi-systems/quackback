@@ -7,13 +7,13 @@ function ParticipationList({ className }: { className?: string }) {
       aria-label="How participation works"
     >
       <div>
-        <dt>
+        <dt data-text-profile="headline">
           <FormattedMessage
             id="portal.participation.read.title"
             defaultMessage="Explore feedback"
           />
         </dt>
-        <dd>
+        <dd data-text-profile="short-copy">
           <FormattedMessage
             id="portal.participation.read.description"
             defaultMessage="Read published ideas and follow progress on the roadmap."
@@ -21,13 +21,13 @@ function ParticipationList({ className }: { className?: string }) {
         </dd>
       </div>
       <div>
-        <dt>
+        <dt data-text-profile="headline">
           <FormattedMessage
             id="portal.participation.contribute.title"
             defaultMessage="Share your perspective"
           />
         </dt>
-        <dd>
+        <dd data-text-profile="short-copy">
           <FormattedMessage
             id="portal.participation.contribute.description"
             defaultMessage="Your board access determines whether you can submit, vote, or comment. Signing in does not grant team access."
@@ -35,13 +35,13 @@ function ParticipationList({ className }: { className?: string }) {
         </dd>
       </div>
       <div>
-        <dt>
+        <dt data-text-profile="headline">
           <FormattedMessage
             id="portal.participation.manage.title"
             defaultMessage="The team manages progress"
           />
         </dt>
-        <dd>
+        <dd data-text-profile="short-copy">
           <FormattedMessage
             id="portal.participation.manage.description"
             defaultMessage="Only team members and administrators can review submissions, move roadmap items, or change their status."
