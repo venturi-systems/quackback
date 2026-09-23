@@ -5,7 +5,6 @@
 .dark,
 [data-theme] {
   --font-sans: var(--ds-primitive-font-family-sans);
-  --font-family-sans: var(--ds-primitive-font-family-sans);
   --font-mono: var(--ds-primitive-font-family-mono);
   --font-serif: Georgia, serif;
   --background: var(--ds-color-canvas-page);
@@ -110,37 +109,357 @@
   text-wrap: pretty;
 }
 
-.portal-header__logo .portal-brand-lockup {
-  width: 112px;
-  height: auto;
+/* Brand cluster: approved lockup (24px high, identity.md minimum) linking to
+   the Venturi website, and the product label linking to the portal home. */
+.venturi-brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--ds-primitive-dimension-space-16, 16px);
+}
+
+.venturi-brand__home {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ds-component-touch-minimum);
+  /* Clear space >= 9/108 of the mark height on every side. */
+  padding: 2px;
+  color: var(--ds-color-text-primary);
+}
+
+.venturi-brand__lockup {
+  display: block;
+  width: auto;
+  height: 24px;
   border: 0;
   border-radius: 0;
 }
 
-.portal-footer {
+.venturi-brand__product {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ds-component-touch-minimum);
+  padding-inline-start: var(--ds-primitive-dimension-space-16, 16px);
+  border-inline-start: 1px solid var(--border);
+  color: var(--ds-color-text-primary);
+  font-size: var(--ds-primitive-font-size-16);
+  font-weight: var(--ds-primitive-font-weight-medium);
+  text-decoration: none;
+}
+
+.venturi-site-header__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem 2rem;
-  padding-block: 1rem;
-  border-top: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 0.875rem;
+  gap: 12px 24px;
+  min-height: var(--ds-component-header-height);
+  padding-block: 12px;
 }
 
-.portal-footer nav {
+@media (max-width: 479px) {
+  .venturi-site-header__row {
+    min-height: var(--ds-component-header-height-compact, 54px);
+    padding-block: 10px;
+  }
+}
+
+/* Public footer: related sites and the AGPL source link, then the full-width
+   legal row (12px medium, 24px gaps, 44px targets), mirroring the public
+   website's footer contract. */
+.venturi-footer {
+  margin-top: auto;
+  padding-block: var(--ds-primitive-dimension-space-24, 24px);
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+
+.venturi-footer__shell {
+  display: grid;
+  gap: var(--ds-primitive-dimension-space-8, 8px);
+}
+
+.venturi-footer__related {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
+  column-gap: var(--ds-primitive-dimension-space-24, 24px);
 }
 
-.portal-footer a {
+.venturi-footer a {
   display: inline-flex;
   align-items: center;
-  min-height: 44px;
-  text-decoration: underline;
-  text-underline-offset: 0.25em;
+  min-height: var(--ds-component-touch-minimum);
+  color: var(--ds-color-text-strong);
+  font-weight: var(--ds-primitive-font-weight-medium);
+  text-decoration: none;
+  transition: opacity 250ms ease;
+}
+
+.venturi-footer a:hover {
+  opacity: 0.8;
+}
+
+.venturi-footer__related a {
+  font-size: var(--ds-primitive-font-size-14);
+}
+
+.venturi-footer__legal-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: var(--ds-primitive-dimension-space-24, 24px);
+  padding-top: var(--ds-primitive-dimension-space-8, 8px);
+  border-top: 1px solid var(--border);
+  font-size: var(--ds-primitive-font-size-12);
+  font-weight: var(--ds-primitive-font-weight-medium);
+}
+
+.venturi-footer__copyright {
+  margin: 0;
+  color: var(--ds-color-text-legal);
+}
+
+.venturi-footer__legal ul {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--ds-primitive-dimension-space-24, 24px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.venturi-footer__legal a {
+  color: var(--ds-color-text-primary);
+  font-size: var(--ds-primitive-font-size-12);
+}
+
+@media (max-width: 767px) {
+  .venturi-footer__legal-row {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .venturi-footer__legal ul {
+    justify-content: center;
+    column-gap: var(--ds-primitive-dimension-space-16, 16px);
+  }
+}
+
+/* Public page frame (sign-in page, standalone auth pages, 404 and error). */
+.public-frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.public-frame__skip {
+  position: absolute;
+  inset-inline-start: 16px;
+  top: -100px;
+  z-index: 50;
+  padding: 12px 16px;
+  border-radius: var(--ds-component-button-radius, 8px);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.public-frame__skip:focus {
+  top: 16px;
+}
+
+.public-frame__main {
+  flex: 1;
+  width: 100%;
+}
+
+.public-frame__main:focus {
+  outline: none;
+}
+
+.public-frame__content {
+  padding-block: clamp(24px, 5vw, 64px);
+}
+
+.public-frame :is(h1, h2, h3, h4) {
+  font-weight: var(--ds-primitive-font-weight-regular);
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
+
+/* Sign-in page: reading-start composition. The heading and lead span the
+   page; below them the sign-in form keeps a form-sized column and the
+   who-can-do-what summary takes the remaining width. */
+.portal-gate__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 48px) clamp(32px, 5vw, 80px);
+  align-items: start;
+}
+
+@media (min-width: 1024px) {
+  .portal-gate__layout {
+    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
+    grid-template-areas:
+      'intro intro'
+      'signin roles';
+  }
+  .portal-gate__layout > .portal-gate__intro {
+    grid-area: intro;
+  }
+  .portal-gate__layout > .portal-gate__signin {
+    grid-area: signin;
+  }
+  .portal-gate__layout > .portal-gate__roles {
+    grid-area: roles;
+  }
+}
+
+.portal-gate__title {
+  margin: 0 0 12px;
+  font: var(--ds-typography-heading-40);
+}
+
+.portal-gate__lead {
+  margin: 0 0 12px;
+  color: var(--ds-color-text-secondary);
+  font: var(--ds-typography-body-18);
+  text-wrap: balance;
+}
+
+.portal-gate__email {
+  color: var(--ds-color-text-primary);
+  font-weight: var(--ds-primitive-font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.portal-gate__actions {
+  margin-top: 24px;
+}
+
+.portal-gate__signin {
+  width: 100%;
+  max-width: 26rem;
+}
+
+.portal-gate__signing-in {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--ds-component-touch-minimum);
+  color: var(--ds-color-text-secondary);
+  font-size: var(--ds-primitive-font-size-14);
+}
+
+.portal-roles__title {
+  margin: 0 0 16px;
+  font: var(--ds-typography-heading-24);
+}
+
+.portal-roles__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 24px;
+}
+
+.portal-roles__group {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.portal-roles__role {
+  margin: 0;
+  font: var(--ds-typography-heading-18);
+  font-weight: var(--ds-primitive-font-weight-medium);
+}
+
+.portal-roles__who {
+  margin: 4px 0 12px;
+  color: var(--ds-color-text-secondary);
+  font-size: var(--ds-primitive-font-size-14);
+}
+
+.portal-roles__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.portal-roles__list li,
+.portal-roles__who,
+.portal-roles__note {
+  text-wrap: balance;
+}
+
+.portal-roles__note {
+  margin: 24px 0 0;
+  color: var(--ds-color-text-secondary);
+  font-size: var(--ds-primitive-font-size-14);
+}
+
+@media (max-width: 640px) {
+  .portal-gate__title {
+    font: var(--ds-typography-heading-32);
+  }
+  .portal-gate__lead {
+    font: var(--ds-typography-body-16);
+  }
+}
+
+/* 404 and error content: reading-start, with 44px recovery actions. */
+.public-status__inline {
+  padding-block: clamp(24px, 5vw, 64px);
+}
+
+.public-status__title {
+  margin: 0 0 12px;
+  font: var(--ds-typography-heading-40);
+  font-weight: var(--ds-primitive-font-weight-regular);
+  text-wrap: balance;
+}
+
+.public-status__lead {
+  margin: 0;
+  color: var(--ds-color-text-secondary);
+  font: var(--ds-typography-body-18);
+  text-wrap: balance;
+}
+
+.public-status__details {
+  margin-top: 16px;
+  font-size: var(--ds-primitive-font-size-14);
+}
+
+.public-status__details summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ds-component-touch-minimum);
+  cursor: pointer;
+  color: var(--ds-color-text-secondary);
+}
+
+.public-status__details code {
+  overflow-wrap: anywhere;
+}
+
+.public-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+@media (max-width: 640px) {
+  .public-status__title {
+    font: var(--ds-typography-heading-32);
+  }
+  .public-status__lead {
+    font: var(--ds-typography-body-16);
+  }
 }
 
 #portal-main :is(h1, h2, h3) {
@@ -149,11 +468,21 @@
   overflow-wrap: break-word;
 }
 
-#portal-main [data-slot='button'] {
-  min-height: 44px;
+#portal-main [data-slot='button'],
+.portal-gate [data-slot='button'] {
+  min-height: var(--ds-component-touch-minimum);
   height: auto;
   white-space: normal;
   text-wrap: pretty;
+}
+
+/* Editorial (public) fields use the 48px input and 16px text of the suite;
+   the admin keeps the 42px product control. */
+#portal-main [data-slot='input'],
+.portal-gate [data-slot='input'] {
+  height: auto;
+  min-height: var(--ds-component-input-height);
+  font-size: var(--ds-primitive-font-size-16);
 }
 
 @media (max-width: 640px) {

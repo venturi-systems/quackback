@@ -39,11 +39,17 @@ function stubServerLoggerInClient(): PluginOption {
 
 function getBuildInfo() {
   const pkg = JSON.parse(readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'))
-  let gitCommit = 'unknown'
-  try {
-    gitCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
-  } catch {
-    // git unavailable
+  // The image build has no .git (see .dockerignore), so the release workflow
+  // passes the exact commit as SOURCE_COMMIT. The portal footer links the
+  // AGPL source to that commit.
+  const sourceCommit = process.env.SOURCE_COMMIT?.trim() ?? ''
+  let gitCommit = /^[0-9a-f]{7,40}$/.test(sourceCommit) ? sourceCommit : 'unknown'
+  if (gitCommit === 'unknown') {
+    try {
+      gitCommit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim()
+    } catch {
+      // git unavailable
+    }
   }
   return {
     version: pkg.version ?? '0.0.0',

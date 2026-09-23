@@ -51,10 +51,11 @@
   /* Portal component colors */
   --color-post-card-voted: var(--post-card-voted-color);
 
-  /* Typography */
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-mono);
-  --font-serif: var(--font-serif);
+  /* Typography: Tailwind's font utilities resolve straight to the v6.6
+     primitives (DM Sans / mono), never to a self-referencing variable. */
+  --font-sans: var(--ds-primitive-font-family-sans);
+  --font-mono: var(--ds-primitive-font-family-mono);
+  --font-serif: Georgia, serif;
 
   /* Border radius - scaled from base --radius to avoid negative values */
   --radius-sm: calc(var(--radius) * 0.5);
@@ -156,6 +157,22 @@
   button:not(:disabled),
   [role='button']:not(:disabled) {
     cursor: pointer;
+  }
+  /* v6.6 focus (module 13 §4): a 2px focus-ring outline with a 2px offset on
+     every keyboard-focusable element that has no ring of its own. Controls
+     that draw a ring (Button, Input) set outline-none in the utilities layer,
+     which outranks this base-layer rule. */
+  :where(a[href], summary, [tabindex]:not([tabindex='-1']), [role='button']):focus-visible {
+    outline: var(--ds-component-focus-ring-width) solid var(--ds-color-interactive-focus-ring);
+    outline-offset: var(--ds-component-focus-ring-offset);
+  }
+  :focus-visible {
+    scroll-margin-block-start: calc(var(--ds-component-header-height, 68px) + 24px);
+  }
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline-color: Highlight;
+    }
   }
 }
 
