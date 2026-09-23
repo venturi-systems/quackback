@@ -27,7 +27,41 @@ The server remains the authority for every action.
 Existing database-backed role checks were reviewed in current and deployed
 source. Status changes, moving posts, and roadmap changes require `admin` or
 `member`; role changes and invitations require `admin`. Public signup creates
-`user`. This change does not promote accounts or alter those permissions.
+`user`. The design change itself does not alter those permissions; the
+authorization fixes below close the paths that could.
+
+## Authorization Fixes
+
+These server-side fixes apply under both the private (sign-in) posture and a
+future public-read posture:
+
+- `listBoardsForOnboarding` lists every board, protected boards included, so it
+  now answers only a human administrator. Every other caller receives an empty
+  list. Its RPC id is unchanged, so an anonymous probe can assert zero boards.
+- Onboarding (`saveUseCaseFn`, `setupWorkspaceFn`) grants `admin` only while
+  no human administrator exists, never to an anonymous session, and never
+  because `setup_state` is empty or partial. The claim runs in one transaction
+  under the same advisory lock as the SSO bootstrap promotion.
+- `checkOnboardingState` identifies the caller from the session, accepts no
+  client-supplied user id, and never writes.
+- A team role (`admin`, `member`) only counts on a human principal. Anonymous
+  principals are treated as portal users in `requireAuth`, the optional-auth
+  path, the admin shell guard, widget and MCP OAuth sessions, and image upload.
+- `POST /api/auth/sign-in/anonymous` is refused unless the workspace allows
+  anonymous participation.
+- OAuth dynamic client registration requires a signed-in account unless the
+  operator sets `OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true`.
+  Anonymous sessions cannot register clients. API keys remain the supported
+  identity for agents, and the admin MCP guide offers OAuth configs only when
+  registration is open.
+- The raw settings row (widget signing secret, portal allowlists) is no longer
+  reachable through a public RPC, and bootstrap data is redacted before it
+  leaves the server.
+- Help-center reads, author avatars and identity lookups follow the portal
+  gate. The widget document returns 404 while the widget is disabled.
+- Inline widget email capture uses the identify route's unverified path. It no
+  longer obtains a server-signed token for a typed address, which the route
+  would have trusted as host-verified.
 
 The create-post response now includes its persisted moderation state. A durable
 confirmation explains when a submission awaits review and links to the author's
@@ -69,6 +103,10 @@ before proposing a pull request, as required by AGENTS.md. The available Actions
 dispatch credential returned HTTP 403, so that CI run has not started. Normal
 local user-namespace isolation for PostgreSQL also failed with `Operation not
 permitted`; neither restriction was bypassed.
+
+The authorization fixes were verified later with the full suite against a
+disposable PostgreSQL service and a local production build. The pull request
+records the exact commands and results.
 
 Synthetic fixtures use the actual new React components and production CSS at
 320, 390, 768, 1024, 1440, 1920, and 2560 pixels. Static role-link checks passed.

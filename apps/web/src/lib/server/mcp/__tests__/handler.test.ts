@@ -383,8 +383,9 @@ function oauthRequest(body: unknown, token = 'oauth_test_token_abc123'): Request
 }
 
 /** Set up mocks for a valid OAuth JWT verification. */
-async function setupValidOAuth(overrides?: { role?: string; scopes?: string[] }) {
+async function setupValidOAuth(overrides?: { role?: string; scopes?: string[]; type?: string }) {
   const role = overrides?.role ?? 'admin'
+  const type = overrides?.type ?? 'user'
   const { verifyAccessToken } = await import('better-auth/oauth2')
   vi.mocked(verifyAccessToken).mockResolvedValue({
     sub: MOCK_USER_ID,
@@ -394,8 +395,8 @@ async function setupValidOAuth(overrides?: { role?: string; scopes?: string[] })
     name: 'Jane Admin',
     email: 'jane@example.com',
   })
-  // resolveOAuthContext re-reads the principal's current role from DB
-  mockFindFirst.mockResolvedValue({ role })
+  // resolveOAuthContext re-reads the principal's current role (and type) from DB
+  mockFindFirst.mockResolvedValue({ role, type })
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -504,6 +505,27 @@ describe('MCP HTTP Handler', () => {
       )
 
       expect(response.status).toBe(200)
+    })
+
+    it('treats an anonymous principal holding a team role as a portal user', async () => {
+      // A stored admin role on an anonymous principal only arises from a
+      // privilege-escalation path; the OAuth context must cap it at 'user',
+      // so with portal MCP access off the request is refused like any
+      // portal user's.
+      await setupValidOAuth({ role: 'admin', type: 'anonymous' })
+
+      const { handleMcpRequest } = await import('../handler')
+      const response = await handleMcpRequest(
+        oauthRequest(
+          jsonRpcRequest('initialize', {
+            protocolVersion: '2025-03-26',
+            capabilities: {},
+            clientInfo: { name: 'test', version: '1.0' },
+          })
+        )
+      )
+
+      expect(response.status).toBe(403)
     })
 
     it('should drop scopes the MCP server does not recognize', async () => {

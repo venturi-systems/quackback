@@ -67,6 +67,16 @@ describe('POST /api/upload/image', () => {
     expect(await res.json()).toMatchObject({ error: 'Forbidden' })
   })
 
+  it('returns 403 for an anonymous principal that carries a stored team role', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(userSession)
+    vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(
+      mockPrincipal({ role: 'admin', type: 'anonymous' })
+    )
+    const res = await handleAdminUpload({ request: makeRequest() })
+    expect(res.status).toBe(403)
+    expect(uploadObject).not.toHaveBeenCalled()
+  })
+
   it('allows members to upload', async () => {
     vi.mocked(auth.api.getSession).mockResolvedValueOnce(memberSession)
     vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(memberPrincipal)

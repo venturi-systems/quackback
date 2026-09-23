@@ -186,6 +186,16 @@ describe('getTenantSettings', () => {
     )
   })
 
+  it('keeps the widget HMAC secret out of TenantSettings and the cache', async () => {
+    mockCacheGet.mockResolvedValue(null)
+    mockFindFirst.mockResolvedValue(makeSettingsRow({ widgetSecret: 'wgt_do_not_leak' }))
+
+    const result = await getTenantSettings()
+
+    expect(result?.settings).not.toHaveProperty('widgetSecret')
+    expect(JSON.stringify(mockCacheSet.mock.calls)).not.toContain('wgt_do_not_leak')
+  })
+
   it('returns null when no settings exist (does not cache null)', async () => {
     mockCacheGet.mockResolvedValue(null)
     mockFindFirst.mockResolvedValue(null)

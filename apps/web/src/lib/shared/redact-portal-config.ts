@@ -1,4 +1,23 @@
-import type { PortalConfig, PortalAccessConfig } from '@/lib/server/domains/settings/settings.types'
+import type {
+  PortalConfig,
+  PortalAccessConfig,
+  TenantSettings,
+} from '@/lib/server/domains/settings/settings.types'
+
+/**
+ * Raw settings-row columns that must never leave the server. `widgetSecret`
+ * is the HMAC key that signs widget identity tokens (settings.widget.ts); a
+ * client that reads it can forge any widget identity.
+ */
+const SERVER_ONLY_SETTINGS_COLUMNS = ['widgetSecret'] as const
+
+function stripServerOnlyColumns<T>(row: T): T {
+  if (!row || typeof row !== 'object') return row
+  if (!SERVER_ONLY_SETTINGS_COLUMNS.some((key) => key in (row as object))) return row
+  const copy = { ...(row as Record<string, unknown>) }
+  for (const key of SERVER_ONLY_SETTINGS_COLUMNS) delete copy[key]
+  return copy as T
+}
 
 /** Redacted access shape — visibility only. */
 type RedactedAccess = Pick<PortalAccessConfig, 'visibility'>
@@ -26,17 +45,19 @@ function redactPortalConfig(portalConfig: PortalConfig): RedactedPortalConfig {
 
 /**
  * Strips the server-only access policy fields (allowedDomains, widgetSignIn,
- * allowedSegmentIds) from a settings row before returning it to a client-bound
- * context. Keeps access.visibility (it's already public via
- * publicPortalConfig.portalAccess).
+ * allowedSegmentIds) and server-only columns (widgetSecret) from a settings row
+ * before returning it to a client-bound context. Keeps access.visibility (it's
+ * already public via publicPortalConfig.portalAccess).
  *
  * Accepts either a parsed PortalConfig object or a JSON-string column (raw DB
  * row). When the field is absent or carries no `access` key it is returned
  * untouched. Handles null/undefined gracefully.
  */
 export function redactSettingsForClient<T extends { portalConfig?: PortalConfig | string | null }>(
-  row: T
+  input: T
 ): T {
+  // Server-only columns (the widget HMAC secret) are dropped unconditionally.
+  const row = stripServerOnlyColumns(input)
   const { portalConfig } = row
 
   if (!portalConfig) return row
@@ -62,4 +83,34 @@ export function redactSettingsForClient<T extends { portalConfig?: PortalConfig 
   }
 
   return row
+}
+
+/**
+ * Client-bound copy of TenantSettings: the parsed portalConfig keeps only
+ * access.visibility, and the raw settings row goes through
+ * redactSettingsForClient. Applied both at the bootstrap RPC boundary
+ * (getBootstrapData, which is a public `/_serverFn` endpoint) and when the
+ * root route places settings into the router context.
+ */
+export function redactTenantSettingsForClient(
+  settings: TenantSettings | null
+): TenantSettings | null {
+  if (!settings) return settings
+  return {
+    ...settings,
+    // 1. Parsed config on TenantSettings
+    portalConfig: settings.portalConfig?.access
+      ? {
+          ...settings.portalConfig,
+          access: {
+            // Only expose visibility — keep allowedDomains and widgetSignIn off the wire.
+            visibility: settings.portalConfig.access.visibility,
+          },
+        }
+      : settings.portalConfig,
+    // 2. Raw DB row — portalConfig column is a JSON string; redact inline.
+    settings: settings.settings
+      ? redactSettingsForClient(settings.settings as Record<string, unknown>)
+      : settings.settings,
+  } as TenantSettings
 }

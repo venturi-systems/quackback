@@ -17,3 +17,21 @@ export function isTeamMember(role: string | null | undefined): boolean {
 export function isAdmin(role: string | null | undefined): boolean {
   return role === 'admin'
 }
+
+/**
+ * The role a principal may actually exercise.
+ *
+ * Only a human principal (`type: 'user'`) can hold a team role. An anonymous
+ * Better Auth principal or a service principal that carries `admin` or
+ * `member` (for example one promoted by a pre-fix onboarding call) is capped at
+ * `user`, so it can never satisfy a team-role check anywhere a session is
+ * resolved. Returns null for an unrecognised role string.
+ */
+export function effectiveRole(
+  role: string | null | undefined,
+  principalType: string | null | undefined
+): Role | null {
+  if (role !== 'admin' && role !== 'member' && role !== 'user') return null
+  if (isTeamMember(role) && principalType !== 'user') return 'user'
+  return role
+}

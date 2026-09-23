@@ -99,4 +99,36 @@ describe('requireWorkspaceRole redirect target', () => {
     expect(search?.callbackUrl).toBe('/admin')
     expect(search?.error).toBe('not_team_member')
   })
+
+  it('redirects an anonymous principal that carries a stored admin role (team role cap)', async () => {
+    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_anon' } })
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      role: 'admin',
+      type: 'anonymous',
+    })
+
+    const err = await requireWorkspaceRole({ data: { allowedRoles: ['admin', 'member'] } })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    const search = err?.search ?? err?.options?.search
+    expect(search?.error).toBe('not_team_member')
+  })
+
+  it('lets a human admin through with its role intact', async () => {
+    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_admin' } })
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      role: 'admin',
+      type: 'user',
+    })
+
+    const result = (await requireWorkspaceRole({
+      data: { allowedRoles: ['admin', 'member'] },
+    })) as {
+      principal: { role: string }
+    }
+    expect(result.principal.role).toBe('admin')
+  })
 })

@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { isFeatureEnabled } from '@/lib/server/domains/settings/settings.service'
+import { isPublicHelpCenterReadable } from '@/lib/server/functions/help-center'
 import { hybridSearch } from '@/lib/server/domains/help-center/help-center-search.service'
 import { logger } from '@/lib/server/logger'
 
@@ -9,7 +9,9 @@ export const Route = createFileRoute('/api/widget/kb-search')({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        if (!(await isFeatureEnabled('helpCenter'))) {
+        // Same gate as the portal help-center reads: flag + config enabled and
+        // the caller (cookie or widget Bearer session) passes portal access.
+        if (!(await isPublicHelpCenterReadable())) {
           return Response.json(
             { error: { code: 'NOT_FOUND', message: 'Knowledge base not found' } },
             { status: 404, headers: corsHeaders() }

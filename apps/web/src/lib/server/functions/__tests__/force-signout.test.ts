@@ -33,6 +33,8 @@ const hoisted = vi.hoisted(() => {
 })
 
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       _handler: undefined as AnyHandler | undefined,

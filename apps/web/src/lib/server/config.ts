@@ -341,6 +341,14 @@ export const config = {
     return process.env.HELP_CENTER_DEV === 'true'
   },
 
+  // OAuth dynamic client registration without a signed-in session. Off by
+  // default: when off, only a signed-in human account can register an OAuth
+  // client (auth/index.ts, auth/hooks.ts). Direct process.env read like
+  // helpCenterDev; only the literal string 'true' enables it.
+  get oauthAllowUnauthenticatedClientRegistration(): boolean {
+    return process.env.OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION === 'true'
+  },
+
   // Platform (OAuth-app) credential source.
   //   'db'  (default) — self-host: the integration_platform_credentials table + admin UI.
   //   'env' — managed cloud: shared app creds from INTEGRATION_<PROVIDER>_<FIELD> env

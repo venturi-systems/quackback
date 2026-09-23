@@ -19,6 +19,8 @@ const hoisted = vi.hoisted(() => ({
 }))
 
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator() {
@@ -85,15 +87,17 @@ vi.mock('@/lib/server/audit/log', () => ({
   actorFromAuth: vi.fn(),
 }))
 
-// Import after mocks — updateBoardFn is handler #6 (0-indexed) in boards.ts
-// (workspace.ts adds handlers 0-2 before boards.ts adds its own:
-//  3=fetchBoardsFn, 4=fetchBoardFn, 5=createBoardFn, 6=updateBoardFn,
-//  7=deleteBoardFn, 8=createBoardsBatchFn, 9=updateBoardAccessFn)
+// Import after mocks — updateBoardFn is handler #4 (0-indexed) in boards.ts
+// (workspace.ts adds one RPC handler, getCurrentUserRole, before boards.ts
+// adds its own; getSettings and validateApiWorkspaceAccess are server-only
+// and register none: 1=fetchBoardsFn, 2=fetchBoardFn, 3=createBoardFn,
+// 4=updateBoardFn, 5=deleteBoardFn, 6=createBoardsBatchFn,
+// 7=updateBoardAccessFn)
 import * as boardsModule from '../boards'
 
 function getUpdateBoardFn(): AnyHandler {
   expect(boardsModule).toHaveProperty('updateBoardFn')
-  return hoisted.handlers[6]
+  return hoisted.handlers[4]
 }
 
 const BOARD_ID = 'board_test_1'

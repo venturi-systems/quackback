@@ -13,7 +13,7 @@ import { getSetupState, isOnboardingComplete } from '@/lib/shared/db-types'
 import appCss from '../globals.css?url'
 import { getBootstrapData, type BootstrapData } from '@/lib/server/functions/bootstrap'
 import type { TenantSettings } from '@/lib/shared/types/settings'
-import { redactSettingsForClient } from '@/lib/shared/redact-portal-config'
+import { redactTenantSettingsForClient } from '@/lib/shared/redact-portal-config'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import { DefaultErrorPage } from '@/components/shared/error-page'
@@ -82,23 +82,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     //   2. settings.settings.portalConfig (raw DB row JSON string) — child loaders
     //      that pass `settings` or `settings.settings` into their SSR payload would
     //      otherwise carry the full access config in the dehydrated context.
-    const redactedSettings: TenantSettings | null = settings
-      ? ({
-          ...settings,
-          // 1. Parsed config on TenantSettings
-          portalConfig: settings.portalConfig?.access
-            ? {
-                ...settings.portalConfig,
-                access: {
-                  // Only expose visibility — keep allowedDomains and widgetSignIn off the wire.
-                  visibility: settings.portalConfig.access.visibility,
-                },
-              }
-            : settings.portalConfig,
-          // 2. Raw DB row — portalConfig column is a JSON string; redact inline.
-          settings: redactSettingsForClient(settings.settings as Record<string, unknown>),
-        } as TenantSettings)
-      : settings
+    //      The raw row's widgetSecret column is dropped too.
+    // getBootstrapData already applies the same redaction at its RPC boundary;
+    // repeating it here is idempotent and keeps this contract local.
+    const redactedSettings = redactTenantSettingsForClient(settings)
 
     return {
       baseUrl,

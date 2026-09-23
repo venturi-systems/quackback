@@ -114,7 +114,15 @@ export const fetchDeveloperConfig = createServerFn({ method: 'GET' }).handler(as
   log.debug('fetch developer config')
   try {
     await requireAuth({ roles: ['admin'] })
-    return await getDeveloperConfig()
+    const developerConfig = await getDeveloperConfig()
+    // Claude Code and Claude Desktop sign in to MCP with OAuth by registering
+    // a client before any account exists. The setup guide offers that path
+    // only when this deployment allows unauthenticated registration.
+    const { config } = await import('@/lib/server/config')
+    return {
+      ...developerConfig,
+      oauthClientRegistrationOpen: config.oauthAllowUnauthenticatedClientRegistration === true,
+    }
   } catch (error) {
     log.error({ err: error }, 'fetch developer config failed')
     throw error

@@ -19,7 +19,7 @@
  *     cookie, and redirect.
  */
 
-import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import {
   findProviderForDomainEmail,
   isRegisteredOidcProvider,
@@ -295,10 +295,99 @@ export async function handleSignInPreCheck(ctx: {
   }
 }
 
+/** Refusal text for a blocked `POST /sign-in/anonymous`. */
+export const ANONYMOUS_SIGN_IN_DISABLED_MESSAGE =
+  'Anonymous participation is not enabled for this workspace. Sign in to continue.'
+
+/**
+ * Anonymous sign-in gate.
+ *
+ * `POST /sign-in/anonymous` mints a Better Auth session for any caller. The
+ * product only needs one when the workspace allows anonymous interaction, so
+ * the endpoint is refused unless `portalConfig.features.allowAnonymous` is
+ * explicitly true. The flag is read fail-closed from the RAW settings row via
+ * workspaceAllowsAnonymous, the same source every anonymous write gate uses, so
+ * this gate cannot out-permit them. A settings read failure also refuses.
+ */
+export async function handleAnonymousSignInGate(ctx: { path?: string }): Promise<void> {
+  if (ctx.path !== '/sign-in/anonymous') return
+
+  const allowed = await (async () => {
+    try {
+      const [{ getTenantSettings }, { workspaceAllowsAnonymous }] = await Promise.all([
+        import('@/lib/server/domains/settings/settings.service'),
+        import('@/lib/server/domains/settings/settings.types'),
+      ])
+      const tenant = await getTenantSettings()
+      return workspaceAllowsAnonymous(
+        (tenant?.settings as { portalConfig?: string | null } | undefined)?.portalConfig
+      )
+    } catch (error) {
+      log.error({ err: error }, 'anonymous sign-in gate: settings read failed; refusing')
+      return false
+    }
+  })()
+
+  if (!allowed) {
+    throw new APIError('FORBIDDEN', {
+      code: 'anonymous_sign_in_disabled',
+      message: ANONYMOUS_SIGN_IN_DISABLED_MESSAGE,
+    })
+  }
+}
+
+type SessionResolver = (ctx: never) => Promise<{ user?: { id?: string } } | null>
+
+/**
+ * OAuth dynamic client registration gate (`POST /oauth2/register`).
+ *
+ * Unauthenticated registration is off unless the operator opts in (see
+ * `allowUnauthenticatedClientRegistration` in auth/index.ts). An anonymous
+ * Better Auth session is not an authenticated identity either, so it must not
+ * be able to register clients in place of a real account. Callers with no
+ * session fall through to the OAuth provider, which applies the opt-in.
+ */
+export async function handleClientRegistrationGate(
+  ctx: { path?: string },
+  resolveSession: SessionResolver = getSessionFromCtx as unknown as SessionResolver
+): Promise<void> {
+  if (ctx.path !== '/oauth2/register') return
+
+  const session = await resolveSession(ctx as never).catch(() => null)
+  const userId = session?.user?.id
+  if (!userId) return
+
+  const principalType = await (async (): Promise<string | null> => {
+    try {
+      const { db, principal: principalTable, eq } = await import('@/lib/server/db')
+      type UserId = `user_${string}`
+      const row = await db.query.principal.findFirst({
+        where: eq(principalTable.userId, userId as UserId),
+        columns: { type: true },
+      })
+      return row?.type ?? null
+    } catch (error) {
+      log.error({ err: error }, 'client registration gate: principal lookup failed; refusing')
+      return null
+    }
+  })()
+
+  if (principalType !== 'user') {
+    throw new APIError('UNAUTHORIZED', {
+      error: 'invalid_token',
+      error_description: 'Authentication required for client registration',
+    })
+  }
+}
+
 export const hooksBefore = createAuthMiddleware(async (ctx) => {
   // Disjoint path matchers: grace heal only touches /oauth2/token,
-  // sign-in pre-check only touches sign-in/OTP paths. Order is irrelevant.
+  // sign-in pre-check only touches sign-in/OTP paths, the anonymous gate
+  // only /sign-in/anonymous and the registration gate only /oauth2/register.
+  // Order is irrelevant.
   await handleRefreshGraceHeal(ctx)
+  await handleAnonymousSignInGate(ctx)
+  await handleClientRegistrationGate(ctx)
   await handleSignInPreCheck(ctx as Parameters<typeof handleSignInPreCheck>[0])
 })
 

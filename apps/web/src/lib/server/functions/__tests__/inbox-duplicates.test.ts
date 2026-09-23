@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 type Input = { data: Record<string, unknown> }
 
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     let schema: { parse(value: unknown): Input['data'] } | undefined
     const chain = {

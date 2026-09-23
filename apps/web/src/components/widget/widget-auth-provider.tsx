@@ -27,7 +27,6 @@ import { normalizeLocale, DEFAULT_LOCALE, type SupportedLocale } from '@/lib/sha
 import { htmlLangDir } from '@/lib/shared/document-locale'
 import { useIntlSetup } from '@/lib/client/hooks/use-intl-setup'
 import { onIntlError } from '@/lib/client/intl-error'
-import { createWidgetIdentifyTokenFn } from '@/lib/server/functions/widget'
 
 interface WidgetUser {
   id: string
@@ -240,9 +239,13 @@ export function WidgetAuthProvider({
           if (hmacRequired) return false
 
           const previousToken = getWidgetToken()
-          const { ssoToken } = await createWidgetIdentifyTokenFn({
-            data: { email, name: name || email.split('@')[0] },
-          })
+
+          // Inline capture is an UNVERIFIED identify: the visitor typed the
+          // address, so it goes through the identify route's unverified path
+          // (team-address guard, no durable subject, hmacVerified=false). It
+          // must never be sent as a server-signed ssoToken, which the route
+          // trusts as host-verified and exempts from the team-address guard.
+          const identity = { id: email, email, name: name || email.split('@')[0] }
 
           const headers: Record<string, string> = { 'Content-Type': 'application/json' }
           if (previousToken) {
@@ -252,7 +255,7 @@ export function WidgetAuthProvider({
           const response = await fetch('/api/widget/identify', {
             method: 'POST',
             headers,
-            body: JSON.stringify(previousToken ? { ssoToken, previousToken } : { ssoToken }),
+            body: JSON.stringify(previousToken ? { ...identity, previousToken } : identity),
           })
           if (!response.ok) return false
           applyIdentifyResult(await response.json())

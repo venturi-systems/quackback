@@ -4,6 +4,8 @@ import { resolveLocale, type SupportedLocale } from '@/lib/shared/i18n'
 import type { Session, PrincipalType } from '@/lib/server/auth/session'
 import type { TenantSettings } from '@/lib/server/domains/settings'
 import type { SessionId, UserId } from '@quackback/ids'
+import { redactTenantSettingsForClient } from '@/lib/shared/redact-portal-config'
+import { effectiveRole } from '@/lib/shared/roles'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'bootstrap' })
@@ -101,7 +103,8 @@ async function getSessionAndRole(): Promise<{
           updatedAt: session.user.updatedAt.toISOString(),
         },
       },
-      role: (principalRecord?.role as 'admin' | 'member' | 'user' | null) ?? null,
+      // A team role only counts on a human principal (see effectiveRole).
+      role: principalRecord ? effectiveRole(principalRecord.role, principalRecord.type) : null,
     }
   } catch (error) {
     // During SSR, auth might fail due to env var issues
@@ -152,7 +155,10 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
   return {
     baseUrl: config.baseUrl,
     session,
-    settings,
+    // getBootstrapData is a public `/_serverFn` endpoint: strip server-only
+    // policy (portal allowlists) and the widget HMAC secret before it leaves
+    // the server. Server-side consumers read getTenantSettings directly.
+    settings: redactTenantSettingsForClient(settings),
     userRole,
     themeCookie,
     managedFieldPaths: settings?.managedFieldPaths ?? [],

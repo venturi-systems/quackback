@@ -1,8 +1,7 @@
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { CheckCircleIcon, ArrowRightIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
-import { checkOnboardingState } from '@/lib/server/functions/admin'
-import { getSettings } from '@/lib/server/functions/workspace'
+import { checkOnboardingState } from '@/lib/server/functions/onboarding'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
 
 export const Route = createFileRoute('/onboarding/_layout/complete')({
@@ -13,7 +12,7 @@ export const Route = createFileRoute('/onboarding/_layout/complete')({
       throw redirect({ to: '/onboarding/account' })
     }
 
-    const state = await checkOnboardingState({ data: session.user.id })
+    const state = await checkOnboardingState()
 
     if (state.needsInvitation) {
       throw redirect(buildSigninRedirect('/admin'))
@@ -26,10 +25,10 @@ export const Route = createFileRoute('/onboarding/_layout/complete')({
       throw redirect({ to: '/onboarding/boards' })
     }
 
-    const settings = await getSettings()
-
+    // Root beforeLoad re-reads tenant settings on every navigation, so the
+    // workspace name in context is current; no raw settings RPC is needed.
     return {
-      workspaceName: settings?.name ?? 'Your workspace',
+      workspaceName: context.settings?.name ?? 'Your workspace',
     }
   },
   component: CompleteStep,

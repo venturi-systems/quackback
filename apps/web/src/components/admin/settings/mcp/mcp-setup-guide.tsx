@@ -61,6 +61,13 @@ const CLIENT_ICONS: Record<string, (props: IconProps) => React.ReactElement> = {
 
 interface McpSetupGuideProps {
   endpointUrl: string
+  /**
+   * Whether this deployment lets MCP clients register an OAuth client before
+   * signing in (OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION). Claude Code
+   * and Claude Desktop need that for OAuth, so the OAuth configs are offered
+   * only when it is on; otherwise the guide shows API-key configs only.
+   */
+  oauthRegistrationOpen?: boolean
 }
 
 // ——————————————————————————————————————————————————
@@ -267,13 +274,26 @@ const MCP_TOOLS = [
 // Component
 // ——————————————————————————————————————————————————
 
-export function McpSetupGuide({ endpointUrl }: McpSetupGuideProps) {
+export function McpSetupGuide({ endpointUrl, oauthRegistrationOpen = false }: McpSetupGuideProps) {
   const [selectedClient, setSelectedClient] = useState('claude-code')
-  const [selectedVariant, setSelectedVariant] = useState('oauth')
+  const [selectedVariant, setSelectedVariant] = useState(
+    oauthRegistrationOpen ? 'oauth' : 'api-key'
+  )
   const [copiedCode, setCopiedCode] = useState(false)
   const [copiedEndpoint, setCopiedEndpoint] = useState(false)
 
-  const client = CLIENTS.find((c) => c.id === selectedClient) ?? CLIENTS[0]
+  // Never offer an OAuth config the server would refuse to register.
+  const clients = useMemo(
+    () =>
+      oauthRegistrationOpen
+        ? CLIENTS
+        : CLIENTS.map((c) =>
+            c.variants ? { ...c, variants: c.variants.filter((v) => v.id !== 'oauth') } : c
+          ),
+    [oauthRegistrationOpen]
+  )
+
+  const client = clients.find((c) => c.id === selectedClient) ?? clients[0]
 
   // Build the code output
   const codeOutput = useMemo(() => {
@@ -362,7 +382,9 @@ export function McpSetupGuide({ endpointUrl }: McpSetupGuideProps) {
               >
                 API key
               </Link>{' '}
-              or OAuth (browser login). Claude Code and Claude Desktop support both.
+              {oauthRegistrationOpen
+                ? 'or OAuth (browser login). Claude Code and Claude Desktop support both.'
+                : 'for every client. OAuth sign-in for MCP clients is turned off on this deployment.'}
             </p>
           </div>
 
@@ -381,7 +403,7 @@ export function McpSetupGuide({ endpointUrl }: McpSetupGuideProps) {
             <div className="ml-7 space-y-3">
               {/* Client selector */}
               <div className="flex flex-wrap gap-1">
-                {CLIENTS.map((c) => {
+                {clients.map((c) => {
                   const Icon = CLIENT_ICONS[c.id]
                   return (
                     <button
@@ -403,7 +425,7 @@ export function McpSetupGuide({ endpointUrl }: McpSetupGuideProps) {
               </div>
 
               {/* Variant selector (OAuth / API Key) */}
-              {client.variants && (
+              {client.variants && client.variants.length > 1 && (
                 <div className="flex gap-1">
                   {client.variants.map((v) => (
                     <button

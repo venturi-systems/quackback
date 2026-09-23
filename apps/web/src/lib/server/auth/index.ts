@@ -409,9 +409,15 @@ async function createAuth() {
         // Consent page — always shown for non-trusted clients
         consentPage: '/oauth/consent',
 
-        // Allow Claude Code (and other MCP clients) to self-register
+        // MCP clients may register themselves, but only from a signed-in
+        // human session by default (anonymous sessions are refused in
+        // hooks.before). Unauthenticated registration lets any internet
+        // caller create oauth_client rows, so it is opt-in per deployment:
+        // OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true restores it for
+        // MCP clients that register before sign-in. API keys (qb_...) remain
+        // the supported agent/service identity for /api/mcp.
         allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: true,
+        allowUnauthenticatedClientRegistration: config.oauthAllowUnauthenticatedClientRegistration,
 
         // Quackback-specific scopes
         scopes: [

@@ -780,8 +780,13 @@ export async function getTenantSettings(): Promise<TenantSettings | null> {
       headerDisplayName: org.headerDisplayName,
     }
 
+    // The widget HMAC secret is read only through getWidgetSecret(); keep it
+    // out of TenantSettings (and therefore out of the Redis cache and every
+    // client-bound copy of this object).
+    const { widgetSecret: _widgetSecret, ...orgWithoutSecret } = org
+
     const result: TenantSettings = {
-      settings: org,
+      settings: orgWithoutSecret,
       name: org.name,
       slug: org.slug,
       authConfig,

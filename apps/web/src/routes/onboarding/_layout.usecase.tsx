@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
-import { checkOnboardingState } from '@/lib/server/functions/admin'
-import { saveUseCaseFn } from '@/lib/server/functions/onboarding'
+import { checkOnboardingState, saveUseCaseFn } from '@/lib/server/functions/onboarding'
 import { UseCaseSelector } from '@/components/onboarding/use-case-selector'
 import type { UseCaseType } from '@/lib/shared/db-types'
 import { pickOnboardingStep } from './-onboarding-step'
@@ -18,7 +17,7 @@ export const Route = createFileRoute('/onboarding/_layout/usecase')({
       throw redirect({ to: '/onboarding/account' })
     }
 
-    const state = await checkOnboardingState({ data: session.user.id })
+    const state = await checkOnboardingState()
 
     if (state.needsInvitation) {
       throw redirect(buildSigninRedirect('/admin'))

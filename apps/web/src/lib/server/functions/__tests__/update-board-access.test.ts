@@ -13,6 +13,8 @@ type Handler = (args: { data: Record<string, unknown> }) => Promise<unknown>
 const hoisted = vi.hoisted(() => ({ handlers: [] as Handler[] }))
 
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator(parse: (data: unknown) => unknown) {
@@ -109,13 +111,11 @@ vi.mock('@/lib/server/db', () => ({
     id: { __col: 'id' } satisfies BoardsColumn,
   },
   settings: {},
-  eq: vi.fn(
-    (col: BoardsColumn, val: string): BoardCondition => ({
-      kind: 'eq',
-      col: col.__col,
-      val,
-    })
-  ),
+  eq: vi.fn((col: BoardsColumn, val: string): BoardCondition => ({
+    kind: 'eq',
+    col: col.__col,
+    val,
+  })),
   // Real constants from db re-export — keep in sync with the schema-level enum.
   ACCESS_TIERS: ['anonymous', 'authenticated', 'segments', 'team'] as const,
   ACCESS_TIER_RANK: { anonymous: 0, authenticated: 1, segments: 2, team: 3 } as const,

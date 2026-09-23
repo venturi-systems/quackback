@@ -4,7 +4,8 @@ import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { authClient } from '@/lib/client/auth-client'
-import { checkOnboardingState, getPublicAuthConfig } from '@/lib/server/functions/admin'
+import { getPublicAuthConfig } from '@/lib/server/functions/admin'
+import { checkOnboardingState } from '@/lib/server/functions/onboarding'
 import { pickOnboardingStep } from './-onboarding-step'
 
 export const Route = createFileRoute('/onboarding/_layout/account')({
@@ -12,7 +13,7 @@ export const Route = createFileRoute('/onboarding/_layout/account')({
     const { session } = context
 
     if (session?.user) {
-      const state = await checkOnboardingState({ data: session.user.id })
+      const state = await checkOnboardingState()
       throw redirect({
         to: pickOnboardingStep({
           session: { userId: session.user.id },

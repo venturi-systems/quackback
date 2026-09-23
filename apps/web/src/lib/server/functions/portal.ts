@@ -104,11 +104,24 @@ async function loadAllowAnonymous(): Promise<boolean> {
   return workspaceAllowsAnonymous(settings?.portalConfig)
 }
 
+/**
+ * Whether the signed-in caller may read identity data (principal id, avatar)
+ * for `userId`: only their own, unless they are a team member. Identity reads
+ * behind a gated portal must not be an open lookup for arbitrary ids.
+ */
+async function callerMayReadUserIdentity(userId: string): Promise<boolean> {
+  if (!hasAuthCredentials()) return false
+  const auth = await getOptionalAuth()
+  if (!auth) return false
+  return auth.user.id === userId || isTeamMember(auth.principal.role)
+}
+
 export const getPrincipalIdForUser = createServerFn({ method: 'GET' })
   .validator(z.object({ userId: z.string() }))
   .handler(async ({ data }): Promise<PrincipalId | null> => {
     log.debug({ user_id: data.userId }, 'get principal id for user')
     try {
+      if (!(await callerMayReadUserIdentity(data.userId))) return null
       const record = await db.query.principal.findFirst({
         where: eq(principalTable.userId, data.userId as UserId),
       })
@@ -451,6 +464,11 @@ export const fetchUserAvatar = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     log.debug({ user_id: data.userId }, 'fetch user avatar')
     try {
+      // Callers (admin shell, portal header) only ever ask for the signed-in
+      // user's own avatar; anyone else gets the not-found shape.
+      if (!(await callerMayReadUserIdentity(data.userId))) {
+        return { avatarUrl: data.fallbackImageUrl ?? null, hasCustomAvatar: false }
+      }
       const user = await db.query.user.findFirst({
         where: eq(userTable.id, data.userId as UserId),
         columns: { imageKey: true, image: true },
@@ -479,6 +497,16 @@ export const fetchAvatars = createServerFn({ method: 'GET' })
     try {
       const principalIds = (data as PrincipalId[]).filter((id): id is PrincipalId => id !== null)
       if (principalIds.length === 0) return {}
+
+      // Author avatars are portal content: a caller the portal gate denies
+      // gets no avatar URLs (every requested id maps to null).
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        return Object.fromEntries(principalIds.map((id) => [id, null])) as Record<
+          PrincipalId,
+          string | null
+        >
+      }
 
       const principals = await db
         .select({

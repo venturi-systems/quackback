@@ -3,8 +3,7 @@ import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { setupWorkspaceFn } from '@/lib/server/functions/onboarding'
-import { checkOnboardingState } from '@/lib/server/functions/admin'
+import { checkOnboardingState, setupWorkspaceFn } from '@/lib/server/functions/onboarding'
 import { pickOnboardingStep } from './-onboarding-step'
 import { isPathManagedFromBootstrap, MANAGED_PATHS } from '@/lib/client/config-file'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
@@ -17,7 +16,7 @@ export const Route = createFileRoute('/onboarding/_layout/workspace')({
       throw redirect({ to: '/onboarding/account' })
     }
 
-    const state = await checkOnboardingState({ data: session.user.id })
+    const state = await checkOnboardingState()
 
     if (state.needsInvitation) {
       throw redirect(buildSigninRedirect('/admin'))

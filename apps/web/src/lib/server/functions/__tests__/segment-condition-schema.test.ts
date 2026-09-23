@@ -14,6 +14,8 @@ import { describe, it, expect, vi } from 'vitest'
 // admin.ts registers server functions on import — mock the two deps that
 // execute side-effectful registration code.
 vi.mock('@tanstack/react-start', () => ({
+  // workspace.ts getSettings is server-only (createServerOnlyFn).
+  createServerOnlyFn: <T>(fn: T) => fn,
   createServerFn: () => {
     const chain = {
       validator() {

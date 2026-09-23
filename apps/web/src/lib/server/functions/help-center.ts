@@ -2,7 +2,7 @@
  * Server Functions for Help Center Operations
  */
 
-import { createServerFn } from '@tanstack/react-start'
+import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import type { HelpCenterCategoryId, HelpCenterArticleId, PrincipalId } from '@quackback/ids'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { requireAuth, getOptionalAuth } from './auth-helpers'
@@ -50,9 +50,43 @@ import {
 } from '@/lib/shared/schemas/help-center'
 import { z } from 'zod'
 import { toIsoString, toIsoStringOrNull } from '@/lib/shared/utils'
+import { NotFoundError } from '@/lib/shared/errors'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'help-center' })
+
+// ============================================================================
+// Public read gate
+// ============================================================================
+
+/**
+ * Public help-center content is portal content. It is served only when the
+ * help center is switched on (the `helpCenter` feature flag AND
+ * helpCenterConfig.enabled, the same pair the /hc route checks) AND the caller
+ * passes the portal-access gate every other portal read uses
+ * (resolvePortalAccessForRequest). Any failure to decide denies. Server-only:
+ * also used by the /api/widget/kb-search server route.
+ */
+export const isPublicHelpCenterReadable = createServerOnlyFn(async (): Promise<boolean> => {
+  try {
+    const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
+    const tenant = await getTenantSettings()
+    if (!tenant?.featureFlags?.helpCenter || !tenant.helpCenterConfig?.enabled) return false
+    const { resolvePortalAccessForRequest } = await import('./portal-access')
+    const access = await resolvePortalAccessForRequest()
+    return access.granted
+  } catch (error) {
+    log.error({ err: error }, 'help center read gate failed; denying')
+    return false
+  }
+})
+
+/** Throw the same not-found shape the slug lookups use when the gate denies. */
+async function assertPublicHelpCenterReadable(): Promise<void> {
+  if (!(await isPublicHelpCenterReadable())) {
+    throw new NotFoundError('HELP_CENTER_NOT_FOUND', 'Help center not found')
+  }
+}
 
 // ============================================================================
 // Helper: serialize article dates
@@ -96,6 +130,7 @@ export const listCategoriesFn = createServerFn({ method: 'GET' })
 export const listPublicCategoriesFn = createServerFn({ method: 'GET' })
   .validator(z.object({}))
   .handler(async () => {
+    if (!(await isPublicHelpCenterReadable())) return []
     const categories = await listPublicCategories()
     return categories.map(serializeCategory)
   })
@@ -111,6 +146,7 @@ export const getCategoryFn = createServerFn({ method: 'GET' })
 export const getPublicCategoryBySlugFn = createServerFn({ method: 'GET' })
   .validator(getCategoryBySlugSchema)
   .handler(async ({ data }) => {
+    await assertPublicHelpCenterReadable()
     // Use the public variant so categories an admin marked private aren't
     // reachable by direct-slug lookup. The route serves unauthenticated
     // help-center traffic.
@@ -192,6 +228,9 @@ export const restoreArticleFn = createServerFn({ method: 'POST' })
 export const listPublicArticlesFn = createServerFn({ method: 'GET' })
   .validator(listPublicArticlesSchema)
   .handler(async ({ data }) => {
+    if (!(await isPublicHelpCenterReadable())) {
+      return { items: [], nextCursor: null, hasMore: false }
+    }
     const result = await listPublicArticles(data)
     return {
       ...result,
@@ -202,6 +241,7 @@ export const listPublicArticlesFn = createServerFn({ method: 'GET' })
 export const listPublicArticlesForCategoryFn = createServerFn({ method: 'GET' })
   .validator(z.object({ categoryId: z.string() }))
   .handler(async ({ data }) => {
+    if (!(await isPublicHelpCenterReadable())) return []
     const articles = await listPublicArticlesForCategory(data.categoryId)
     return articles.map((a) => ({
       ...a,
@@ -212,6 +252,7 @@ export const listPublicArticlesForCategoryFn = createServerFn({ method: 'GET' })
 export const listPublicCategoryEditorsFn = createServerFn({ method: 'GET' })
   .validator(z.object({}))
   .handler(async () => {
+    if (!(await isPublicHelpCenterReadable())) return {}
     return listPublicCategoryEditors()
   })
 
@@ -226,6 +267,7 @@ export const getArticleFn = createServerFn({ method: 'GET' })
 export const getPublicArticleBySlugFn = createServerFn({ method: 'GET' })
   .validator(getArticleBySlugSchema)
   .handler(async ({ data }) => {
+    await assertPublicHelpCenterReadable()
     const article = await getPublicArticleBySlug(data.slug)
     const { helpfulCount: _h, notHelpfulCount: _n, ...publicArticle } = serializeArticle(article)
     return publicArticle
@@ -284,6 +326,8 @@ export const deleteArticleFn = createServerFn({ method: 'POST' })
 export const recordArticleFeedbackFn = createServerFn({ method: 'POST' })
   .validator(articleFeedbackSchema)
   .handler(async ({ data }) => {
+    // Feedback is a write on portal content: same gate as the reads.
+    await assertPublicHelpCenterReadable()
     const auth = await getOptionalAuth()
     await recordArticleFeedback(
       data.articleId as HelpCenterArticleId,
@@ -302,6 +346,7 @@ export const searchPublicArticlesFn = createServerFn({ method: 'GET' })
     z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).optional() })
   )
   .handler(async ({ data }) => {
+    if (!(await isPublicHelpCenterReadable())) return []
     const { hybridSearch } =
       await import('@/lib/server/domains/help-center/help-center-search.service')
     return hybridSearch(data.query, data.limit ?? 10)

@@ -4,7 +4,7 @@
  * Pure function — no DB, no mocks needed.
  */
 import { describe, it, expect } from 'vitest'
-import { redactSettingsForClient } from '../redact-portal-config'
+import { redactSettingsForClient, redactTenantSettingsForClient } from '../redact-portal-config'
 import type { PortalConfig } from '@/lib/server/domains/settings/settings.types'
 
 const ACCESS_POLICY = {
@@ -163,5 +163,57 @@ describe('redactSettingsForClient — SSR payload invariants', () => {
     expect(payload).not.toContain('allowedDomains')
     expect(payload).not.toContain('acme.example')
     expect(payload).not.toContain('widgetSignIn')
+  })
+})
+
+describe('redactSettingsForClient — server-only columns', () => {
+  it('drops widgetSecret even when portalConfig is absent', () => {
+    const row = { name: 'Acme', widgetSecret: 'wgt_secret', portalConfig: null }
+    const result = redactSettingsForClient(row)
+    expect(result).not.toHaveProperty('widgetSecret')
+    expect(result.name).toBe('Acme')
+  })
+
+  it('drops widgetSecret alongside the access-policy redaction', () => {
+    const row = {
+      name: 'Acme',
+      widgetSecret: 'wgt_secret',
+      portalConfig: JSON.stringify(FULL_PORTAL_CONFIG),
+    }
+    const result = redactSettingsForClient(row)
+    expect(result).not.toHaveProperty('widgetSecret')
+    expect(JSON.parse(result.portalConfig as string).access).toEqual({ visibility: 'private' })
+  })
+
+  it('does not mutate the input row', () => {
+    const row = { name: 'Acme', widgetSecret: 'wgt_secret', portalConfig: null }
+    redactSettingsForClient(row)
+    expect(row.widgetSecret).toBe('wgt_secret')
+  })
+})
+
+describe('redactTenantSettingsForClient', () => {
+  it('returns null unchanged', () => {
+    expect(redactTenantSettingsForClient(null)).toBeNull()
+  })
+
+  it('redacts the parsed portalConfig and the raw row, including widgetSecret', () => {
+    const tenant = {
+      name: 'Acme',
+      portalConfig: FULL_PORTAL_CONFIG,
+      settings: {
+        name: 'Acme',
+        widgetSecret: 'wgt_secret',
+        portalConfig: JSON.stringify(FULL_PORTAL_CONFIG),
+      },
+    } as unknown as Parameters<typeof redactTenantSettingsForClient>[0]
+    const result = redactTenantSettingsForClient(tenant)!
+    expect(result.portalConfig.access).toEqual({ visibility: 'private' })
+    expect(result.settings).not.toHaveProperty('widgetSecret')
+    expect(JSON.parse(result.settings.portalConfig as string).access).toEqual({
+      visibility: 'private',
+    })
+    expect(JSON.stringify(result)).not.toContain('acme.example')
+    expect(JSON.stringify(result)).not.toContain('wgt_secret')
   })
 })

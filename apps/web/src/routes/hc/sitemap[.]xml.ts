@@ -21,6 +21,23 @@ export const Route = createFileRoute('/hc/sitemap.xml')({
           return new Response('Not Found', { status: 404 })
         }
 
+        // A sitemap is read anonymously by crawlers: publish article URLs only
+        // when the help center is enabled AND the portal is public (mirrors
+        // /sitemap.xml, which returns an empty urlset for non-public portals).
+        const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
+        const tenant = await getTenantSettings()
+        if (!tenant?.helpCenterConfig?.enabled) {
+          return new Response('Not Found', { status: 404 })
+        }
+        if (tenant.portalConfig?.access?.visibility !== 'public') {
+          return new Response(renderSitemap([], new URL(request.url).origin, null) ?? '', {
+            headers: {
+              'Content-Type': 'application/xml; charset=utf-8',
+              'Cache-Control': 'public, max-age=3600',
+            },
+          })
+        }
+
         const url = new URL(request.url)
         const baseUrl = url.origin
         const pageParam = url.searchParams.get('page')

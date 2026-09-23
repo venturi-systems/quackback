@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
+import { createFileRoute, notFound, Outlet, redirect } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders, setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
@@ -50,6 +50,14 @@ export const Route = createFileRoute('/widget')({
     const org = settings?.settings
     if (!org) {
       throw redirect({ to: '/onboarding' })
+    }
+
+    // The SDK and /api/widget/config.json already refuse a disabled widget;
+    // the iframe document must too, instead of rendering a live-looking
+    // feedback shell (with a false empty state) on a workspace that never
+    // enabled the widget.
+    if (!settings.publicWidgetConfig?.enabled) {
+      throw notFound()
     }
 
     await setIframeHeaders()
