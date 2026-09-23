@@ -509,3 +509,32 @@ describe('PRESET_META ↔ accessForPreset agreement (round-trip guard)', () => {
     })
   }
 })
+
+// ---------------------------------------------------------------------------
+// Policy-managed board access (POLICY_MANAGED_SETTINGS boards.<slug>.access)
+// ---------------------------------------------------------------------------
+
+describe('<BoardAccessForm> policy-managed', () => {
+  function renderManaged(managed: boolean) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={client}>
+        <BoardAccessForm board={{ id: BOARD_ID, access: PUBLIC_ACCESS }} managed={managed} />
+      </QueryClientProvider>
+    )
+  }
+
+  it('explains the lock and makes the matrix inert when managed', () => {
+    renderManaged(true)
+    expect(screen.getByTestId('managed-setting-note')).toHaveTextContent(
+      'Board access is managed by the deployment configuration'
+    )
+    expect(screen.getByRole('button', { name: 'View: Anyone' })).toBeDisabled()
+  })
+
+  it('keeps the matrix editable when this board is not managed', () => {
+    renderManaged(false)
+    expect(screen.queryByTestId('managed-setting-note')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View: Anyone' })).not.toBeDisabled()
+  })
+})

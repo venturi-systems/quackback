@@ -267,3 +267,38 @@ describe('<BoardModerationForm> save', () => {
     expect(region.getAttribute('data-dirty')).toBeNull()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Policy-managed board access (POLICY_MANAGED_SETTINGS boards.<slug>.access)
+// ---------------------------------------------------------------------------
+
+describe('<BoardModerationForm> policy-managed', () => {
+  function renderManaged(managed: boolean) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={client}>
+        <BoardModerationForm board={{ id: BOARD_ID, access: PUBLIC_ACCESS }} managed={managed} />
+      </QueryClientProvider>
+    )
+  }
+
+  it('explains the lock and makes every rule control inert when managed', () => {
+    renderManaged(true)
+    expect(screen.getByTestId('managed-setting-note')).toHaveTextContent(
+      'Board moderation is managed by the deployment configuration'
+    )
+    for (const label of Object.values(MOD_RULE_LABELS)) {
+      for (const option of ['Inherit', 'On', 'Off']) {
+        expect(screen.getByRole('radio', { name: `${label}: ${option}` })).toBeDisabled()
+      }
+    }
+  })
+
+  it('keeps the rule controls editable when this board is not managed', () => {
+    renderManaged(false)
+    expect(screen.queryByTestId('managed-setting-note')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('radio', { name: `${MOD_RULE_LABELS.anonPosts}: On` })
+    ).not.toBeDisabled()
+  })
+})

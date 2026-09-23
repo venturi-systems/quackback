@@ -1,11 +1,18 @@
+import type { ReactNode } from 'react'
 import { useRouteContext } from '@tanstack/react-router'
 import { LockClosedIcon } from '@heroicons/react/24/outline'
 import { isPathManagedFromBootstrap } from '@/lib/client/config-file'
 
+/** A check for several paths at once, e.g. one per sign-in method. */
+export function useManagedSettingCheck(): (path: string) => boolean {
+  const { managedFieldPaths } = useRouteContext({ from: '__root__' })
+  const managed = managedFieldPaths ?? []
+  return (path) => isPathManagedFromBootstrap(path, managed)
+}
+
 /** True when the deployment declares this settings path as managed. */
 export function useIsManagedSetting(path: string): boolean {
-  const { managedFieldPaths } = useRouteContext({ from: '__root__' })
-  return isPathManagedFromBootstrap(path, managedFieldPaths ?? [])
+  return useManagedSettingCheck()(path)
 }
 
 /**
@@ -13,7 +20,7 @@ export function useIsManagedSetting(path: string): boolean {
  * Without it an administrator could save a value, see success, and later find
  * it silently reverted by the policy process that owns the field.
  */
-export function ManagedSettingNote({ what }: { what: string }) {
+export function ManagedSettingNote({ what, detail }: { what: string; detail?: ReactNode }) {
   return (
     <p
       className="flex items-start gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
@@ -23,6 +30,7 @@ export function ManagedSettingNote({ what }: { what: string }) {
       <span>
         {what} is managed by the deployment configuration (for this workspace, the feedback
         infrastructure repository). Change it there; it is read-only here.
+        {detail && <> {detail}</>}
       </span>
     </p>
   )

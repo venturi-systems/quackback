@@ -152,8 +152,12 @@ describe('getBootstrapData managed settings', () => {
       'workspace.name',
       'auth.oauth',
     ]
-    hoisted.policyManagedSettings = ['auth.oauth', 'boards.access']
+    hoisted.policyManagedSettings = ['auth.oauth', 'boards.feature-requests.access']
     const data = await getBootstrapData()
-    expect(data.managedFieldPaths).toEqual(['workspace.name', 'auth.oauth', 'boards.access'])
+    expect(data.managedFieldPaths).toEqual([
+      'workspace.name',
+      'auth.oauth',
+      'boards.feature-requests.access',
+    ])
   })
 })
