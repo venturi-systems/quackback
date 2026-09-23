@@ -68,8 +68,8 @@ export function FeedbackToolbar({
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 sm:gap-4">
-      <div className="flex items-center gap-1 min-w-0">
+    <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+      <div className="flex flex-wrap items-center gap-1">
         {SORT_OPTIONS.map((option) => {
           const Icon = option.icon
           const isActive = currentSort === option.value
@@ -95,7 +95,7 @@ export function FeedbackToolbar({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         {/* Search */}
         <Popover open={searchOpen} onOpenChange={setSearchOpen}>
           <PopoverTrigger asChild>
