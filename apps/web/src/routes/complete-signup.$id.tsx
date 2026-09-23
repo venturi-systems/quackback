@@ -1,4 +1,5 @@
 import { createFileRoute, isRedirect } from '@tanstack/react-router'
+import { ownMessage } from '@/lib/shared/own-message'
 import { useState } from 'react'
 import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import {
@@ -84,7 +85,7 @@ function AcceptInvitationPage() {
   // redirect attempt (e.g. Outlook Safe Links) should not override the valid invitation.
   if (errorCode && data.state !== 'welcome') {
     const message =
-      ERROR_MESSAGES[errorCode] ??
+      ownMessage(ERROR_MESSAGES, errorCode) ??
       'Something went wrong with the invitation link. Please ask your administrator to resend the invitation.'
     return (
       <PageShell>

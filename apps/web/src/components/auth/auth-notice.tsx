@@ -1,10 +1,10 @@
 import { ExclamationCircleIcon } from '@heroicons/react/24/outline'
-import { AUTH_BLOCK_MESSAGES, type AuthBlockCode } from '@/lib/server/auth/redirect-errors'
+import { authBlockMessage } from '@/lib/server/auth/redirect-errors'
 
-/** The durable message for a sign-in or access redirect code, or null. */
+/** The durable message for a sign-in or access redirect code, or null.
+ *  The code comes from the URL; authBlockMessage only matches own keys. */
 export function authNoticeMessage(code: string | null | undefined): string | null {
-  if (!code) return null
-  return AUTH_BLOCK_MESSAGES[code as AuthBlockCode] ?? null
+  return authBlockMessage(code)
 }
 
 /**

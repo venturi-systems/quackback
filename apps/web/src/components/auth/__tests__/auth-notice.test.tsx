@@ -24,3 +24,16 @@ describe('AuthNotice', () => {
     expect(notice.getAttribute('aria-live')).toBeNull()
   })
 })
+
+describe('AuthNotice with prototype-key codes from the URL', () => {
+  it.each(['__proto__', 'constructor', 'toString', 'unknown_code'])(
+    'returns no message and renders nothing for ?error=%s',
+    (code) => {
+      expect(authNoticeMessage(code)).toBeNull()
+      // Before the own-key guard, __proto__ resolved to Object.prototype and
+      // rendering it threw "Objects are not valid as a React child".
+      const { container } = render(<AuthNotice code={code} />)
+      expect(container).toBeEmptyDOMElement()
+    }
+  )
+})

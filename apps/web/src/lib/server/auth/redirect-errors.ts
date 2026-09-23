@@ -19,6 +19,7 @@
  * error code) so the wording stays in one place.
  */
 import { ForbiddenError } from '@/lib/shared/errors'
+import { ownMessage } from '@/lib/shared/own-message'
 
 /** Closed set of codes `handleSignInPreCheck` and `auth-restrictions`
  *  emit. Adding a producer-side code without listing it here makes
@@ -63,6 +64,16 @@ export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
 }
 
 /**
+ * The message for a redirect `error` code, or null for anything that is not
+ * one of the codes above. The code usually comes from a URL, so it is looked
+ * up as an own property only: `__proto__`, `constructor` and similar keys
+ * never resolve to an inherited Object.prototype member.
+ */
+export function authBlockMessage(code: string | null | undefined): string | null {
+  return ownMessage(AUTH_BLOCK_MESSAGES, code)
+}
+
+/**
  * 403 domain error for pre-check denials. Extending `ForbiddenError`
  * keeps the auth-client throw path on the same hierarchy the rest of
  * the codebase catches via `DomainException` / `instanceof`.
@@ -103,7 +114,7 @@ export function detectAuthBlockRedirect(response: {
   }
   const code = parsed.searchParams.get('error')
   if (!code) return null
-  const message = AUTH_BLOCK_MESSAGES[code as AuthBlockCode]
+  const message = authBlockMessage(code)
   if (!message) return null
   return new AuthBlockedError(code, message)
 }
