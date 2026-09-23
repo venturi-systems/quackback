@@ -153,9 +153,11 @@ jobs:
           context: .
           file: ./apps/web/Dockerfile
           platforms: ${{ matrix.platform }}
-          # Exact commit for the portal footer's AGPL source link.
+          # Exact commit for the portal footer's AGPL source link: the resolved
+          # source commit this leg checked out (the dispatch input for manual
+          # builds), not the workflow run's own commit.
           build-args: |
-            SOURCE_COMMIT=${{ github.sha }}
+            SOURCE_COMMIT=${{ needs.resolve-source.outputs.source_sha }}
           # No tags here — the manifest list (and its tags) is assembled in the
           # merge job; each leg pushes an untagged per-arch image by digest.
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
