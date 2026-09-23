@@ -17,13 +17,19 @@ import {
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { usePortalImageUpload } from '@/lib/client/hooks/use-image-upload'
 import { useCreatePublicPost } from '@/lib/client/mutations/portal-posts'
-import { useAuthPopover } from '@/components/auth/auth-popover-context'
 import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
 import { useSimilarPosts } from '@/lib/client/hooks/use-similar-posts'
 import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session'
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
-import { signOut } from '@/lib/client/auth-client'
-import { resolveSubmitState } from '@/components/public/feedback/submit-permission'
+import {
+  resolveSubmitState,
+  submittableBoardIds,
+} from '@/components/public/feedback/submit-permission'
+import {
+  COMPOSER_ANCHOR,
+  useOpenedAtComposer,
+} from '@/components/public/feedback/share-idea-access'
+import type { BoardViewerPermissions } from '@/lib/shared/types/boards'
 import type { JSONContent } from '@tiptap/react'
 
 interface BoardOption {
@@ -38,12 +44,13 @@ export interface FeedbackHeaderProps {
   defaultBoardId?: string
   user?: { name: string | null; email: string } | null
   /**
-   * Per-board submit/vote capability for the current viewer, keyed by board id
+   * Per-board capability for the current viewer, keyed by board id
    * (server-computed; composes the board's access.submit tier with the
-   * workspace anonymous switch). The submit CTA follows the selected board's
-   * `canSubmit` instead of the workspace-wide flag.
+   * workspace anonymous switch). The composer lists only boards whose
+   * `canSubmit` is true and shows the review notice from
+   * `submitRequiresReview`, never from the workspace-wide flag.
    */
-  boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
+  boardPermissions?: Record<string, BoardViewerPermissions>
   onPostCreated?: (postId: string, boardSlug: string) => void
 }
 
@@ -64,7 +71,6 @@ export function FeedbackHeaderAnimated({
     boardSlug: string
     pending: boolean
   } | null>(null)
-  const { openAuthPopover } = useAuthPopover()
 
   const createPost = useCreatePublicPost()
   const ensureAnonSession = useEnsureAnonSession()
@@ -88,15 +94,31 @@ export function FeedbackHeaderAnimated({
     enabled: expanded,
   })
 
-  // Board selection - only default if on a specific board page
-  const [selectedBoardId, setSelectedBoardId] = useState(defaultBoardId || '')
+  // Only boards this viewer can post to are offered. FeedbackHeader renders
+  // this composer only when at least one exists; the others get a sign-in
+  // action or a restriction note instead of a form that cannot submit.
+  const postableIds = submittableBoardIds(
+    boards.map((b) => b.id),
+    boardPermissions
+  )
+  const postableBoards = boards.filter((b) => postableIds.includes(b.id))
+  const initialBoardId =
+    defaultBoardId && postableIds.includes(defaultBoardId) ? defaultBoardId : (postableIds[0] ?? '')
 
-  // Sync selectedBoardId when defaultBoardId prop changes
+  const [selectedBoardId, setSelectedBoardId] = useState(initialBoardId)
+
+  // Sync the selection when the page's board changes (for example a board
+  // filter), keeping it on a board the viewer can post to.
   useEffect(() => {
-    if (defaultBoardId) {
-      setSelectedBoardId(defaultBoardId)
-    }
-  }, [defaultBoardId])
+    setSelectedBoardId(initialBoardId)
+  }, [initialBoardId])
+
+  // Returning from "Sign in to share an idea" lands on the composer anchor:
+  // open the form there so the visitor continues where they started.
+  const openedAtComposer = useOpenedAtComposer()
+  useEffect(() => {
+    if (openedAtComposer) setExpanded(true)
+  }, [openedAtComposer])
 
   // Submit CTA follows the SELECTED board's server-computed capability (which
   // composes its access.submit tier with the workspace anonymous switch for
@@ -104,6 +126,10 @@ export function FeedbackHeaderAnimated({
   // on a board whose tier requires sign-in (Codex #191).
   const boardCanSubmit = boardPermissions?.[selectedBoardId]?.canSubmit ?? false
   const { canSubmit, canPostAnonymously, noAccess } = resolveSubmitState(boardCanSubmit, session)
+  // Truthful before submission: shown only when the server's moderation
+  // decision for this viewer and board would hold the post for review.
+  const submitRequiresReview =
+    boardCanSubmit && (boardPermissions?.[selectedBoardId]?.submitRequiresReview ?? false)
 
   const [title, setTitle] = useState('')
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
@@ -231,7 +257,7 @@ export function FeedbackHeaderAnimated({
   }
 
   function resetForm() {
-    setSelectedBoardId(defaultBoardId || '')
+    setSelectedBoardId(initialBoardId)
     setTitle('')
     setContentJson(null)
     setContentMarkdown('')
@@ -247,6 +273,7 @@ export function FeedbackHeaderAnimated({
 
   return (
     <motion.div
+      id={COMPOSER_ANCHOR}
       className="bg-card border border-border rounded-lg mb-5 shadow-sm overflow-hidden"
       initial={false}
       animate={{ boxShadow: expanded ? 'var(--ds-shadow-card)' : 'none' }}
@@ -281,7 +308,7 @@ export function FeedbackHeaderAnimated({
       )}
       {/* Board selector - above title when expanded */}
       <AnimatePresence>
-        {expanded && boards.length > 0 && (
+        {expanded && postableBoards.length > 0 && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -310,7 +337,7 @@ export function FeedbackHeaderAnimated({
                   />
                 </SelectTrigger>
                 <SelectContent align="start">
-                  {boards.map((board) => (
+                  {postableBoards.map((board) => (
                     <SelectItem key={board.id} value={board.id} className="text-xs py-1">
                       {board.name}
                     </SelectItem>
@@ -433,91 +460,67 @@ export function FeedbackHeaderAnimated({
               className="px-4 sm:px-5 pb-3"
             />
 
-            {/* Footer with auth and actions */}
+            {/* Review notice: before submission, and only when true. */}
+            {submitRequiresReview && (
+              <p
+                id="feedback-review-note"
+                className="px-4 sm:px-5 pb-3 text-sm text-muted-foreground"
+              >
+                <FormattedMessage
+                  id="portal.feedback.header.reviewNotice"
+                  defaultMessage="The team reviews posts on this board before they appear publicly."
+                />
+              </p>
+            )}
+
+            {/* Footer with identity and actions */}
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2, delay: 0.2 }}
-              className="flex items-center justify-between px-4 sm:px-5 py-3 border-t bg-muted/30"
+              className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-5 py-3 border-t bg-muted/30"
             >
               {noAccess ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   <FormattedMessage
                     id="portal.feedback.header.noAccess"
                     defaultMessage="You don't have access to post on this board"
                   />
                 </p>
               ) : effectiveUser ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   <FormattedMessage
                     id="portal.feedback.header.postingAs"
                     defaultMessage="Posting as"
                   />{' '}
-                  <span className="font-medium text-foreground">
+                  <span className="font-medium text-foreground" data-text-origin="user">
                     {effectiveUser.name || effectiveUser.email}
                   </span>
-                  {' ('}
-                  <button
-                    type="button"
-                    className="text-primary hover:underline"
-                    onClick={async () => {
-                      await signOut()
-                      router.invalidate()
-                    }}
-                  >
-                    <FormattedMessage
-                      id="portal.feedback.header.signOut"
-                      defaultMessage="sign out"
-                    />
-                  </button>
-                  {')'}
                 </p>
               ) : canPostAnonymously ? (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                   <FormattedMessage
                     id="portal.feedback.header.postingAnonymously"
                     defaultMessage="Posting anonymously"
                   />
                 </p>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => openAuthPopover({ mode: 'login' })}
-                  className="text-xs text-primary hover:underline font-medium"
-                >
-                  <FormattedMessage
-                    id="portal.feedback.header.signInToPost"
-                    defaultMessage="Sign in to post"
-                  />
-                </button>
+                <span />
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
                   onClick={handleCancel}
                   disabled={createPost.isPending}
                 >
                   <FormattedMessage id="portal.feedback.header.cancel" defaultMessage="Cancel" />
                 </Button>
                 <Button
-                  size="sm"
+                  type="button"
                   onClick={handleSubmit}
-                  disabled={createPost.isPending || !canSubmit}
-                  title={
-                    !canSubmit
-                      ? noAccess
-                        ? intl.formatMessage({
-                            id: 'portal.feedback.header.submitTooltipNoAccess',
-                            defaultMessage: "You don't have access to post on this board",
-                          })
-                        : intl.formatMessage({
-                            id: 'portal.feedback.header.submitTooltipSignIn',
-                            defaultMessage: 'Please sign in to submit feedback',
-                          })
-                      : undefined
-                  }
+                  disabled={createPost.isPending}
+                  aria-describedby={submitRequiresReview ? 'feedback-review-note' : undefined}
                   className="portal-submit-button bg-[var(--portal-button-background)] text-[var(--portal-button-foreground)] hover:bg-[var(--portal-button-background)]/90"
                 >
                   {createPost.isPending ? (

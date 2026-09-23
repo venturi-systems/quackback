@@ -15,6 +15,7 @@ import {
 import { usePublicFilters } from '@/components/public/feedback/use-public-filters'
 import { PostCard } from '@/components/public/post-card'
 import type { PublicBoardWithStats } from '@/lib/shared/types'
+import type { BoardViewerPermissions } from '@/lib/shared/types/boards'
 import type { PortalWelcomeCard as PortalWelcomeCardData } from '@/lib/shared/types/settings'
 import type { PostStatusEntity, Tag } from '@/lib/shared/db-types'
 import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
@@ -47,7 +48,7 @@ interface FeedbackContainerProps {
    * (server-computed). Vote permission is per-board, so this one map gates
    * every card — including infinite-scroll pages — and the submit CTA.
    */
-  boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
+  boardPermissions?: Record<string, BoardViewerPermissions>
   /** Welcome card to render above the post list. Undefined / disabled = hidden. */
   welcomeCard?: PortalWelcomeCardData
 }

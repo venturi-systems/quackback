@@ -380,11 +380,66 @@ describe('portal.ts fetchBoardCapabilitiesFn — per-board capability map', () =
       { canSubmit: boolean; canVote: boolean }
     >
     // Anonymous actor (mocked) + workspace allowAnonymous=true: the all-anonymous
-    // board is actionable, the sign-in-required board is not.
+    // board is actionable, the sign-in-required board is not — but an ordinary
+    // signed-in account could post there, so the portal may offer sign-in.
     expect(result).toEqual({
-      board_pub: { canSubmit: true, canVote: true },
-      board_auth: { canSubmit: false, canVote: false },
+      board_pub: {
+        canSubmit: true,
+        canVote: true,
+        submitRequiresReview: false,
+        signedInCanSubmit: true,
+      },
+      board_auth: {
+        canSubmit: false,
+        canVote: false,
+        submitRequiresReview: false,
+        signedInCanSubmit: true,
+      },
     })
+  })
+
+  it('reports review before submission from the same moderation rule the post service applies', async () => {
+    const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+    vi.mocked(getPortalConfig).mockResolvedValueOnce({
+      features: { allowAnonymous: true },
+      moderationDefault: { requireApproval: 'anonymous' },
+    } as never)
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockListPublicBoardsWithStats.mockResolvedValue([
+      { id: 'board_inherit', access: anonAccess },
+      {
+        id: 'board_off',
+        access: { ...anonAccess, moderation: { ...anonAccess.moderation, anonPosts: 'off' } },
+      },
+    ])
+    const h = await loadModule(PORTAL)
+    const result = (await h[FETCH_BOARD_CAPABILITIES]({ data: {} })) as Record<
+      string,
+      { submitRequiresReview: boolean }
+    >
+    // The anonymous actor's post inherits "anonymous posts need approval"; a
+    // board that turns anonymous moderation off does not hold it.
+    expect(result.board_inherit.submitRequiresReview).toBe(true)
+    expect(result.board_off.submitRequiresReview).toBe(false)
+  })
+
+  it('never offers sign-in for a board only groups or the team may post to', async () => {
+    mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+    mockListPublicBoardsWithStats.mockResolvedValue([
+      { id: 'board_team', access: { ...anonAccess, submit: 'team' } },
+      { id: 'board_segments', access: { ...anonAccess, submit: 'segments' } },
+    ])
+    const h = await loadModule(PORTAL)
+    const result = (await h[FETCH_BOARD_CAPABILITIES]({ data: {} })) as Record<
+      string,
+      { canSubmit: boolean; signedInCanSubmit: boolean; submitRequiresReview: boolean }
+    >
+    expect(result.board_team).toMatchObject({
+      canSubmit: false,
+      signedInCanSubmit: false,
+      submitRequiresReview: false,
+    })
+    expect(result.board_segments).toMatchObject({ canSubmit: false, signedInCanSubmit: false })
   })
 })
 

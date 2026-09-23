@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveSubmitState } from '../submit-permission'
+import { resolveComposerMode, resolveSubmitState, submittableBoardIds } from '../submit-permission'
 
 /**
  * The submit CTA must follow the SERVER-computed per-board `canSubmit` (which
@@ -64,5 +64,62 @@ describe('resolveSubmitState', () => {
   it('does not flag noAccess when submission is allowed', () => {
     expect(resolveSubmitState(true, userSession).noAccess).toBe(false)
     expect(resolveSubmitState(true, null).noAccess).toBe(false)
+  })
+})
+
+describe('resolveComposerMode (E-8: one honest share-an-idea surface)', () => {
+  const anonSession = { user: { principalType: 'anonymous' } }
+  const userSession = { user: { principalType: 'user' } }
+  const ids = ['board_a', 'board_b']
+
+  it('shows the composer when the viewer can post on any listed board', () => {
+    const perms = {
+      board_a: { canSubmit: false, signedInCanSubmit: true },
+      board_b: { canSubmit: true, signedInCanSubmit: true },
+    }
+    expect(resolveComposerMode(ids, perms, null)).toBe('composer')
+    expect(resolveComposerMode(ids, perms, userSession)).toBe('composer')
+  })
+
+  it('offers sign-in to a signed-out visitor only when signing in would allow posting', () => {
+    const perms = {
+      board_a: { canSubmit: false, signedInCanSubmit: true },
+      board_b: { canSubmit: false, signedInCanSubmit: false },
+    }
+    expect(resolveComposerMode(ids, perms, null)).toBe('sign-in')
+    expect(resolveComposerMode(ids, perms, anonSession)).toBe('sign-in')
+  })
+
+  it('never promises sign-in when every board is restricted to groups or the team', () => {
+    const perms = {
+      board_a: { canSubmit: false, signedInCanSubmit: false },
+      board_b: { canSubmit: false, signedInCanSubmit: false },
+    }
+    expect(resolveComposerMode(ids, perms, null)).toBe('no-access')
+  })
+
+  it('tells a signed-in viewer they cannot post instead of asking them to sign in', () => {
+    const perms = {
+      board_a: { canSubmit: false, signedInCanSubmit: false },
+      board_b: { canSubmit: false, signedInCanSubmit: false },
+    }
+    expect(resolveComposerMode(ids, perms, userSession)).toBe('no-access')
+  })
+
+  it('fails closed with no permission data', () => {
+    expect(resolveComposerMode(ids, undefined, null)).toBe('no-access')
+    expect(resolveComposerMode([], {}, userSession)).toBe('no-access')
+  })
+
+  it('lists only the boards the viewer can post to, in order', () => {
+    const perms = {
+      board_a: { canSubmit: false },
+      board_b: { canSubmit: true },
+      board_c: { canSubmit: true },
+    }
+    expect(submittableBoardIds(['board_c', 'board_a', 'board_b'], perms)).toEqual([
+      'board_c',
+      'board_b',
+    ])
   })
 })
