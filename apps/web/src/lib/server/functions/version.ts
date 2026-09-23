@@ -34,6 +34,12 @@ export interface LatestVersionResult {
 
 export const getLatestVersion = createServerFn({ method: 'GET' }).handler(
   async (): Promise<LatestVersionResult | null> => {
+    // Off unless UPSTREAM_VERSION_CHECK=true: this fork is pinned and released
+    // through its own review, so the upstream "new version" banner is noise and
+    // the api.github.com call is avoidable. null renders no banner.
+    const { config } = await import('@/lib/server/config')
+    if (!config.upstreamVersionCheck) return null
+
     // Return cached result if fresh
     if (versionCache && Date.now() < versionCache.expiresAt) {
       return versionCache.data

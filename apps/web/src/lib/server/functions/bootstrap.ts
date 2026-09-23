@@ -161,7 +161,10 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
     settings: redactTenantSettingsForClient(settings),
     userRole,
     themeCookie,
-    managedFieldPaths: settings?.managedFieldPaths ?? [],
+    // Config-file paths plus POLICY_MANAGED_SETTINGS (read at request time).
+    managedFieldPaths: [
+      ...new Set([...(settings?.managedFieldPaths ?? []), ...config.policyManagedSettings]),
+    ],
     registeredAuthProviders,
     acceptLanguageLocale,
   }

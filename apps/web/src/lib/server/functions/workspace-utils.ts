@@ -70,6 +70,13 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
       // matching requireAuth, so the admin shell never renders for it.
       const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
       if (!data.allowedRoles.includes(role)) {
+        // A team member on an administrator-only page is already signed in with
+        // the right account, so the portal sign-in dialog would be the wrong
+        // answer. Send them to the settings landing page, which renders a
+        // durable "Administrators only" state. Everyone else lacks team access.
+        if (isTeamMember(role)) {
+          throw redirect({ to: '/admin/settings', search: { error: 'not_admin' } })
+        }
         throw redirect(buildSigninRedirect('/admin', { error: 'not_team_member' }))
       }
 

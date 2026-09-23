@@ -100,11 +100,11 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
 
       /**
        * DELETE /api/v1/boards/:boardId
-       * Delete a board
+       * Delete a board. Administrator keys only, matching deleteBoardFn.
        */
       DELETE: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          await withApiKeyAuth(request, { role: 'admin' })
 
           const boardId = parseTypeId<BoardId>(params.boardId, 'board', 'board ID')
 

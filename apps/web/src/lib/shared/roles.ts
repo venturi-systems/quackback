@@ -35,3 +35,18 @@ export function effectiveRole(
   if (isTeamMember(role) && principalType !== 'user') return 'user'
   return role
 }
+
+/**
+ * The one vocabulary for workspace roles in every surface: the portal account
+ * menu, the sign-in page explainer, the admin restricted state and the docs.
+ */
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: 'Administrator',
+  member: 'Team member',
+  user: 'Contributor',
+}
+
+/** Display label for a role; unknown or missing roles read as Contributor. */
+export function roleLabel(role: string | null | undefined): string {
+  return role === 'admin' || role === 'member' ? ROLE_LABELS[role] : ROLE_LABELS.user
+}

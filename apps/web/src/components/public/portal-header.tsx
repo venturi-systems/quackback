@@ -4,7 +4,7 @@ import { useTheme } from 'next-themes'
 import { buildNavItems } from './portal-header-nav'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { cn } from '@/lib/shared/utils'
-import { isTeamMember } from '@/lib/shared/roles'
+import { isTeamMember, roleLabel } from '@/lib/shared/roles'
 import { Button } from '@/components/ui/button'
 import { signOut, authClient } from '@/lib/client/auth-client'
 import {
@@ -310,13 +310,7 @@ export function PortalHeader({
               <div className="flex flex-col space-y-1">
                 <p className="text-sm font-medium">{name}</p>
                 <p className="text-xs text-muted-foreground break-words">{email}</p>
-                <p className="text-xs text-muted-foreground">
-                  {userRole === 'admin'
-                    ? 'Administrator'
-                    : userRole === 'member'
-                      ? 'Team moderator'
-                      : 'Contributor'}
-                </p>
+                <p className="text-xs text-muted-foreground">{roleLabel(userRole)}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

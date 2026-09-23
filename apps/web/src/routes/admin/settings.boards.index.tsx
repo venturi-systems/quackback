@@ -19,6 +19,8 @@ import { BoardModerationForm } from '@/components/admin/settings/boards/board-mo
 import { BoardImportSection } from '@/components/admin/settings/boards/board-import-section'
 import { BoardExportSection } from '@/components/admin/settings/boards/board-export-section'
 import { DeleteBoardForm } from '@/components/admin/settings/boards/delete-board-form'
+import { useIsManagedSetting } from '@/components/admin/settings/managed-setting-note'
+import { MANAGED_PATHS } from '@/lib/client/config-file'
 import {
   useBoardSelection,
   type BoardTab,
@@ -103,6 +105,7 @@ interface BoardTabContentProps {
 }
 
 function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
+  const boardAccessManaged = useIsManagedSetting(MANAGED_PATHS.BOARD_ACCESS)
   switch (tab) {
     case 'general':
       return (
@@ -120,7 +123,7 @@ function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
     case 'access':
       return (
         <SettingsCard title="Access Control">
-          <BoardAccessForm key={board.id} board={board} />
+          <BoardAccessForm key={board.id} board={board} managed={boardAccessManaged} />
         </SettingsCard>
       )
 

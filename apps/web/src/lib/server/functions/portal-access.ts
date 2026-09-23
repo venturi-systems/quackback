@@ -372,6 +372,14 @@ export const updatePortalAccessFn = createServerFn({ method: 'POST' })
       await import('@/lib/server/domains/settings/settings.service')
     const before = await getPortalConfig()
 
+    // Visibility may be owned by an external policy process
+    // (POLICY_MANAGED_SETTINGS). Refuse a change instead of saving a value the
+    // policy would silently revert; saves that keep the visibility pass.
+    if (data.visibility !== (before.access?.visibility ?? 'public')) {
+      const { assertNotManaged } = await import('@/lib/server/config-file/managed-guard')
+      await assertNotManaged('portal.access.visibility')
+    }
+
     const normalizedDomains =
       data.allowedDomains !== undefined
         ? normalizeDomains(data.allowedDomains)

@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const hoisted = vi.hoisted(() => ({
+  policyManagedSettings: [] as string[],
   tenant: null as null | Record<string, unknown>,
   cookie: '' as string,
   principal: null as null | { type: string; role: string },
@@ -29,7 +30,14 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
 vi.mock('@/lib/server/auth/registered-providers', () => ({
   getRegisteredAuthProviders: async () => ['google', 'github'],
 }))
-vi.mock('@/lib/server/config', () => ({ config: { baseUrl: 'https://feedback.acme.example' } }))
+vi.mock('@/lib/server/config', () => ({
+  config: {
+    baseUrl: 'https://feedback.acme.example',
+    get policyManagedSettings() {
+      return hoisted.policyManagedSettings
+    },
+  },
+}))
 vi.mock('@/lib/server/auth/index', () => ({
   auth: {
     api: {
@@ -70,6 +78,7 @@ const { getBootstrapData } = (await import('../bootstrap')) as unknown as {
   getBootstrapData: () => Promise<{
     settings: Record<string, unknown> | null
     userRole: string | null
+    managedFieldPaths: string[]
   }>
 }
 
@@ -99,6 +108,7 @@ beforeEach(() => {
     },
     managedFieldPaths: [],
   }
+  hoisted.policyManagedSettings = []
 })
 
 describe('getBootstrapData RPC boundary', () => {
@@ -133,5 +143,17 @@ describe('getBootstrapData RPC boundary', () => {
     hoisted.principal = { type: 'user', role: 'admin' }
     const data = await getBootstrapData()
     expect(data.userRole).toBe('admin')
+  })
+})
+
+describe('getBootstrapData managed settings', () => {
+  it('adds POLICY_MANAGED_SETTINGS paths to the config-file list without duplicates', async () => {
+    ;(hoisted.tenant as { managedFieldPaths: string[] }).managedFieldPaths = [
+      'workspace.name',
+      'auth.oauth',
+    ]
+    hoisted.policyManagedSettings = ['auth.oauth', 'boards.access']
+    const data = await getBootstrapData()
+    expect(data.managedFieldPaths).toEqual(['workspace.name', 'auth.oauth', 'boards.access'])
   })
 })

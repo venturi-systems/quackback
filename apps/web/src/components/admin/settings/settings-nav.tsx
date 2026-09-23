@@ -31,10 +31,44 @@ interface NavSection {
   items: NavItem[]
 }
 
-export function buildNavSections(flags?: {
-  helpCenter?: boolean
-  supportInbox?: boolean
-}): NavSection[] {
+/**
+ * Settings pages a team member (role `member`) may open. Every other settings
+ * page is administrator-only: its loader reads admin-only data and its actions
+ * are refused by the server for members. The settings layout redirects members
+ * away from anything not listed here, and the nav shows members only these.
+ */
+export const MEMBER_SETTINGS_PATHS = ['/admin/settings/statuses', '/admin/settings/tags'] as const
+
+/** True when a member may open this settings path (the landing page included). */
+export function isMemberSettingsPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '')
+  return path === '/admin/settings' || (MEMBER_SETTINGS_PATHS as readonly string[]).includes(path)
+}
+
+/** Where the settings landing page sends each role on wide screens. */
+export function firstSettingsPath(role: string | null | undefined): string {
+  return role === 'admin' ? '/admin/settings/team' : MEMBER_SETTINGS_PATHS[0]
+}
+
+export function buildNavSections(
+  flags?: {
+    helpCenter?: boolean
+    supportInbox?: boolean
+  },
+  role: string | null | undefined = 'admin'
+): NavSection[] {
+  if (role !== 'admin') {
+    return [
+      {
+        label: 'Feedback',
+        items: [
+          { label: 'Statuses', to: '/admin/settings/statuses', icon: Cog6ToothIcon },
+          { label: 'Tags', to: '/admin/settings/tags', icon: TagIcon },
+        ],
+      },
+    ]
+  }
+
   const sections: NavSection[] = [
     {
       label: 'Administration',
@@ -103,10 +137,10 @@ export function buildNavSections(flags?: {
 
 export function SettingsNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const { settings } = useRouteContext({ from: '__root__' })
+  const { settings, userRole } = useRouteContext({ from: '__root__' })
   const flags = settings?.featureFlags as FeatureFlags | undefined
 
-  const navSections = useMemo(() => buildNavSections(flags), [flags])
+  const navSections = useMemo(() => buildNavSections(flags, userRole), [flags, userRole])
 
   return (
     <div className="space-y-1">

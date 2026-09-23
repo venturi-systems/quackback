@@ -31,6 +31,11 @@ const hoisted = vi.hoisted(() => ({
   mockRecordAuditEvent: vi.fn(),
   mockUpdateAuthConfig: vi.fn(),
   mockGetAuthConfig: vi.fn(),
+  mockAssertNotManaged: vi.fn(),
+}))
+
+vi.mock('@/lib/server/config-file/managed-guard', () => ({
+  assertNotManaged: hoisted.mockAssertNotManaged,
 }))
 
 vi.mock('@/lib/server/functions/auth-helpers', () => ({
@@ -241,5 +246,33 @@ describe('updateAuthConfigFn audit-log wiring', () => {
 
     const events = hoisted.mockRecordAuditEvent.mock.calls.map((c) => c[0].event)
     expect(events).not.toContain('sso.config.changed')
+  })
+})
+
+describe('updateAuthConfigFn policy-managed providers', () => {
+  it('checks the managed list only for providers whose value changes', async () => {
+    hoisted.mockGetAuthConfig.mockResolvedValue({
+      oauth: { password: true, magicLink: true, google: true },
+    })
+
+    await updateAuthConfig({ data: { oauth: { password: false, google: true } } })
+
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledTimes(1)
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('auth.oauth.password')
+  })
+
+  it('refuses a managed provider change before writing', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    hoisted.mockGetAuthConfig.mockResolvedValue({
+      oauth: { password: true, magicLink: true, github: true },
+    })
+    hoisted.mockAssertNotManaged.mockRejectedValue(
+      new ForbiddenError('FIELD_MANAGED', 'Field "auth.oauth.github" is managed')
+    )
+
+    await expect(updateAuthConfig({ data: { oauth: { github: false } } })).rejects.toThrow(
+      'is managed'
+    )
+    expect(hoisted.mockUpdateAuthConfig).not.toHaveBeenCalled()
   })
 })

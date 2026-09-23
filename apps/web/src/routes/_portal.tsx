@@ -18,6 +18,7 @@ import { redactSettingsForClient } from '@/lib/shared/redact-portal-config'
 import { parseAuthPromptSearch } from '@/lib/shared/auth-prompt'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { useAutoOpenAuthDialog } from '@/components/auth/use-auto-open-auth'
+import { AuthNotice } from '@/components/auth/auth-notice'
 import { resolveInstantSsoRedirectFn } from '@/lib/server/functions/instant-sso'
 import { FormattedMessage } from 'react-intl'
 
@@ -314,6 +315,11 @@ function PortalLayout() {
             showThemeToggle={themeMode === 'user'}
           />
           <main id="portal-main" tabIndex={-1} className="flex-1 w-full flex flex-col">
+            {prompt.error && (
+              <div className="portal-shell pt-4">
+                <AuthNotice code={prompt.error} />
+              </div>
+            )}
             <Outlet />
           </main>
           <footer className="portal-footer portal-shell">

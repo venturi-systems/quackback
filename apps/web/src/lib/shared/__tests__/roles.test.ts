@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isTeamMember, isAdmin, effectiveRole } from '../roles'
+import { isTeamMember, isAdmin, effectiveRole, roleLabel, ROLE_LABELS } from '../roles'
 
 describe('isTeamMember', () => {
   it('returns true for admin', () => {
@@ -74,5 +74,24 @@ describe('effectiveRole', () => {
   it('returns null for unrecognised roles', () => {
     expect(effectiveRole('owner', 'user')).toBeNull()
     expect(effectiveRole(null, 'user')).toBeNull()
+  })
+})
+
+describe('roleLabel', () => {
+  it('uses one vocabulary for every role', () => {
+    expect(roleLabel('admin')).toBe('Administrator')
+    expect(roleLabel('member')).toBe('Team member')
+    expect(roleLabel('user')).toBe('Contributor')
+    expect(ROLE_LABELS).toEqual({
+      admin: 'Administrator',
+      member: 'Team member',
+      user: 'Contributor',
+    })
+  })
+
+  it('reads unknown or missing roles as Contributor', () => {
+    expect(roleLabel(null)).toBe('Contributor')
+    expect(roleLabel(undefined)).toBe('Contributor')
+    expect(roleLabel('owner')).toBe('Contributor')
   })
 })

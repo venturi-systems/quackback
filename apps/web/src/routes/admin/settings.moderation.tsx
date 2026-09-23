@@ -1,3 +1,8 @@
+import {
+  ManagedSettingNote,
+  useIsManagedSetting,
+} from '@/components/admin/settings/managed-setting-note'
+import { MANAGED_PATHS } from '@/lib/client/config-file'
 import { useState, useTransition } from 'react'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
@@ -115,6 +120,7 @@ function ModerationPage() {
   }
 
   const isBusy = savingField !== null || isPending
+  const allowAnonymousManaged = useIsManagedSetting(MANAGED_PATHS.ALLOW_ANONYMOUS)
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -131,6 +137,7 @@ function ModerationPage() {
         title="Anonymous access"
         description="Control whether visitors without an account can interact with your portal."
       >
+        {allowAnonymousManaged && <ManagedSettingNote what="Anonymous interaction" />}
         <div className="divide-y divide-border/50">
           <PermissionToggle
             id="allow-anonymous"
@@ -142,7 +149,7 @@ function ModerationPage() {
               setAllowAnonymous(checked)
               updateFeature('allowAnonymous', checked, () => setAllowAnonymous(!checked))
             }}
-            disabled={isBusy}
+            disabled={isBusy || allowAnonymousManaged}
           />
         </div>
       </SettingsCard>

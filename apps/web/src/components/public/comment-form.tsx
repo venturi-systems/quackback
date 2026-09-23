@@ -253,50 +253,75 @@ export function CommentForm({
                 </span>
               </p>
 
-              {/* Status selector */}
+              {/* Status selector: a team power, so it carries a visible label and
+                  a "Team only" tag instead of appearing as a bare pill. */}
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span id={`comment-status-label-${postId}`}>
+                  {intl.formatMessage({
+                    id: 'portal.commentForm.setStatusLabel',
+                    defaultMessage: 'Set status',
+                  })}
+                </span>
+                <span className="rounded-full border border-border px-1.5 py-px text-[11px] leading-4 text-muted-foreground">
+                  {intl.formatMessage({
+                    id: 'portal.commentForm.teamOnlyTag',
+                    defaultMessage: 'Team only',
+                  })}
+                </span>
+              </span>
               <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
                 <PopoverTrigger asChild>
                   <button
                     type="button"
+                    aria-labelledby={`comment-status-label-${postId} comment-status-value-${postId}`}
                     className={cn(
-                      'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
+                      'inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors',
                       'hover:bg-muted/80',
                       selectedStatus
                         ? 'bg-muted/60 border border-border/50'
                         : 'text-muted-foreground hover:text-foreground'
                     )}
                   >
-                    {selectedStatus ? (
-                      <>
+                    <span
+                      id={`comment-status-value-${postId}`}
+                      className="inline-flex items-center gap-1.5"
+                    >
+                      {selectedStatus ? (
                         <StatusBadge name={selectedStatus.name} color={selectedStatus.color} />
-                        <button
-                          type="button"
-                          className="ms-0.5 text-muted-foreground hover:text-foreground"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setSelectedStatusId(null)
-                          }}
-                        >
-                          &times;
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span
-                          className="size-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: currentStatus?.color ?? '#94a3b8' }}
-                        />
-                        <span>
-                          {currentStatus?.name ??
-                            intl.formatMessage({
-                              id: 'portal.commentForm.noStatus',
-                              defaultMessage: 'No status',
-                            })}
-                        </span>
-                      </>
-                    )}
+                      ) : (
+                        <>
+                          <span
+                            className="size-1.5 rounded-full shrink-0"
+                            style={{ backgroundColor: currentStatus?.color ?? '#94a3b8' }}
+                            aria-hidden
+                          />
+                          <span>
+                            {currentStatus?.name ??
+                              intl.formatMessage({
+                                id: 'portal.commentForm.noStatus',
+                                defaultMessage: 'No status',
+                              })}
+                          </span>
+                        </>
+                      )}
+                    </span>
                   </button>
                 </PopoverTrigger>
+                {/* Clearing a pending change is its own control, not a button
+                    nested inside the popover trigger. */}
+                {selectedStatus && (
+                  <button
+                    type="button"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                    aria-label={intl.formatMessage({
+                      id: 'portal.commentForm.clearStatusChange',
+                      defaultMessage: 'Clear status change',
+                    })}
+                    onClick={() => setSelectedStatusId(null)}
+                  >
+                    <span aria-hidden>&times;</span>
+                  </button>
+                )}
                 <PopoverContent className="w-44 p-1" align="end">
                   <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
                     {intl.formatMessage({
@@ -362,18 +387,19 @@ export function CommentForm({
                       type="button"
                       onClick={() => setIsPrivate(!isPrivate)}
                       disabled={isPrivateLocked}
+                      aria-pressed={isPrivate}
                       className={cn(
-                        'inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors',
+                        'inline-flex min-h-11 items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors',
                         isPrivate
                           ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                           : 'text-muted-foreground hover:text-foreground hover:bg-muted/80',
                         isPrivateLocked && 'opacity-70 cursor-not-allowed'
                       )}
                     >
-                      <LockClosedIcon className="h-3 w-3" />
+                      <LockClosedIcon className="h-3 w-3" aria-hidden />
                       {intl.formatMessage({
-                        id: 'portal.commentForm.private',
-                        defaultMessage: 'Private',
+                        id: 'portal.commentForm.internalNote',
+                        defaultMessage: 'Internal note (team only)',
                       })}
                     </button>
                   </TooltipTrigger>
@@ -536,6 +562,7 @@ export function CommentForm({
                     size="sm"
                     onClick={() => setIsPrivate(!isPrivate)}
                     disabled={isPrivateLocked}
+                    aria-pressed={isPrivate}
                     className={cn(
                       isPrivate
                         ? 'bg-amber-500 hover:bg-amber-600 text-white border-0 gap-1.5'
@@ -543,10 +570,10 @@ export function CommentForm({
                       isPrivateLocked && 'opacity-70 cursor-not-allowed'
                     )}
                   >
-                    <LockClosedIcon className="h-3.5 w-3.5" />
+                    <LockClosedIcon className="h-3.5 w-3.5" aria-hidden />
                     {intl.formatMessage({
-                      id: 'portal.commentForm.private',
-                      defaultMessage: 'Private',
+                      id: 'portal.commentForm.internalNote',
+                      defaultMessage: 'Internal note (team only)',
                     })}
                   </Button>
                 </TooltipTrigger>

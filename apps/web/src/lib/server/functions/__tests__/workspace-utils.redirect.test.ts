@@ -116,6 +116,42 @@ describe('requireWorkspaceRole redirect target', () => {
     expect(search?.error).toBe('not_team_member')
   })
 
+  it('sends a team member on an administrator-only route to the durable settings notice', async () => {
+    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_member' } })
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      role: 'member',
+      type: 'user',
+    })
+
+    const err = await requireWorkspaceRole({ data: { allowedRoles: ['admin'] } })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    expect(err?.to ?? err?.options?.to).toBe('/admin/settings')
+    const search = err?.search ?? err?.options?.search
+    expect(search?.error).toBe('not_admin')
+    // Never the portal sign-in dialog: the member is already signed in.
+    expect(search?.auth).toBeUndefined()
+  })
+
+  it('still sends a portal user on an administrator-only route to sign-in with not_team_member', async () => {
+    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_portal' } })
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      role: 'user',
+      type: 'user',
+    })
+
+    const err = await requireWorkspaceRole({ data: { allowedRoles: ['admin'] } })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    const search = err?.search ?? err?.options?.search
+    expect(search?.error).toBe('not_team_member')
+    expect(search?.auth).toBe('signin')
+  })
+
   it('lets a human admin through with its role intact', async () => {
     hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_admin' } })
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })

@@ -1,3 +1,8 @@
+import {
+  ManagedSettingNote,
+  useIsManagedSetting,
+} from '@/components/admin/settings/managed-setting-note'
+import { MANAGED_PATHS } from '@/lib/client/config-file'
 import { useState, useTransition } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
@@ -210,9 +215,14 @@ export function SignInProvidersTab({
   }
 
   const busy = saving || isPending
+  // Provider toggles owned by the deployment configuration are read-only; the
+  // server refuses changes to them too (FIELD_MANAGED).
+  const oauthManaged = useIsManagedSetting(MANAGED_PATHS.AUTH_OAUTH)
+  const locked = busy || oauthManaged
 
   return (
     <div className="space-y-6">
+      {oauthManaged && <ManagedSettingNote what="Which sign-in methods are enabled" />}
       {noAuthEnabled && (
         <WarningBox
           variant="warning"
@@ -234,7 +244,7 @@ export function SignInProvidersTab({
           description="Sign in with email and password."
           checked={passwordEnabled}
           onCheckedChange={(v) => void saveBuiltin('password', v)}
-          disabled={busy || isLastMethod('password')}
+          disabled={locked || isLastMethod('password')}
         />
         {/* Nested under Password: 2FA enforcement builds on top of the password
             (TOTP enrols over it). The left rule + indent mark it as a child
@@ -265,7 +275,7 @@ export function SignInProvidersTab({
           }
           checked={magicLinkEnabled}
           onCheckedChange={(v) => void saveBuiltin('magicLink', v)}
-          disabled={busy || !emailConfigured || isLastMethod('magicLink')}
+          disabled={locked || !emailConfigured || isLastMethod('magicLink')}
         />
       </SettingsCard>
 
@@ -279,7 +289,7 @@ export function SignInProvidersTab({
           enabled={oauthState}
           credentialStatus={credentialStatus}
           isLastMethod={isLastMethod}
-          saving={busy}
+          saving={locked}
           onToggle={(id, checked) => void saveOauthProvider(id, checked)}
           onConfigure={openConfigDialog}
           excludeProviderIds={['custom-oidc']}

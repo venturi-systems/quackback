@@ -349,6 +349,24 @@ export const config = {
     return process.env.OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION === 'true'
   },
 
+  // Settings that an external policy process owns (for Venturi, the feedback
+  // infrastructure repository's reconciler, which rewrites them in the
+  // database). Comma-separated dot-paths from POLICY_MANAGED_PATH_OPTIONS;
+  // unknown entries are ignored. The admin UI shows these as read-only and the
+  // matching mutators refuse to change them (FIELD_MANAGED), so an admin never
+  // sees a save succeed and then silently revert.
+  get policyManagedSettings(): string[] {
+    return parsePolicyManagedSettings(process.env.POLICY_MANAGED_SETTINGS)
+  },
+
+  // The admin "new version available" banner polls api.github.com for the
+  // upstream Quackback release. Off unless explicitly enabled: this fork is
+  // pinned and released through its own review, so an upstream prompt is noise
+  // and an avoidable outbound call. Only the literal string 'true' enables it.
+  get upstreamVersionCheck(): boolean {
+    return process.env.UPSTREAM_VERSION_CHECK === 'true'
+  },
+
   // Platform (OAuth-app) credential source.
   //   'db'  (default) — self-host: the integration_platform_credentials table + admin UI.
   //   'env' — managed cloud: shared app creds from INTEGRATION_<PROVIDER>_<FIELD> env
@@ -400,3 +418,24 @@ export function resetConfig(): void {
 }
 
 export type { Config }
+
+/** Settings paths an external policy process may declare as managed. */
+export const POLICY_MANAGED_PATH_OPTIONS = [
+  'portal.access.visibility',
+  'portal.features.allowAnonymous',
+  'auth.oauth',
+  'boards.access',
+] as const
+
+/** Parse POLICY_MANAGED_SETTINGS: comma-separated, trimmed, known paths only. */
+export function parsePolicyManagedSettings(raw: string | undefined): string[] {
+  if (!raw) return []
+  const allowed = new Set<string>(POLICY_MANAGED_PATH_OPTIONS)
+  const seen = new Set<string>()
+  for (const entry of raw.split(',')) {
+    const path = entry.trim()
+    if (allowed.has(path)) seen.add(path)
+    else if (path) log.warn({ path }, 'ignoring unknown POLICY_MANAGED_SETTINGS entry')
+  }
+  return [...seen]
+}

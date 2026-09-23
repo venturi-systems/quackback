@@ -239,9 +239,12 @@ function PostDetailPage() {
           />
 
           <Suspense fallback={<MetadataSidebarSkeleton />}>
+            {/* One vote control per post: the left rail owns voting, so the
+                metadata sidebar omits its duplicate Upvotes button. */}
             <MetadataSidebar
               postId={postId}
               voteCount={post.voteCount}
+              hideVote
               status={currentStatus}
               board={board}
               authorName={post.authorName}
