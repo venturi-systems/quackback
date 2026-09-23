@@ -75,6 +75,14 @@ jobs:
             echo "Private operator email leaked into tracked files." >&2
             exit 1
           fi
+          # Zero tolerance for the retired predecessor company name, in every tracked
+          # file and path, any letter case. It is spelled as hex escapes so this
+          # workflow does not carry the name it forbids.
+          retired_name=$(printf '%b' '\x61\x72\x67\x6d\x69\x6e')
+          if git grep -n -i -I -e "$retired_name" -- . || git ls-files | grep -i -e "$retired_name"; then
+            echo "The retired predecessor name appeared in a tracked file or path." >&2
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
