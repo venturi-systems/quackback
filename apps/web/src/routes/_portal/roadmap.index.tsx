@@ -85,15 +85,17 @@ function RoadmapPage() {
         <h1 className="text-3xl font-normal mb-2">
           <FormattedMessage id="portal.roadmap.title" defaultMessage="Roadmap" />
         </h1>
-        <p className="text-muted-foreground">
+        <p className="portal-lead text-muted-foreground">
           <FormattedMessage
             id="portal.roadmap.description"
             defaultMessage="See what we're working on and what's coming next."
           />
         </p>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Team moderators manage these stages. You can open an item to add your perspective where
-          your board access allows.
+        <p className="portal-roadmap__note mt-2 text-sm text-muted-foreground">
+          <FormattedMessage
+            id="portal.roadmap.stagesNote"
+            defaultMessage="Team members move items between these stages. Open an item to vote or comment where your board access allows."
+          />
         </p>
       </div>
 

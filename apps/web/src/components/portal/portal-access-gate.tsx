@@ -254,7 +254,7 @@ function GateCard({
 
       {isBaseStep && (
         <div className="portal-gate__roles">
-          <PortalRolesExplainer />
+          <PortalRolesExplainer visibility={visibility} />
         </div>
       )}
     </div>

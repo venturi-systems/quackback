@@ -70,7 +70,7 @@ vi.mock('@/components/ui/input-otp', () => ({
   InputOTPSixSlots: () => null,
 }))
 
-import { PortalAuthFormInline } from '../portal-auth-form-inline'
+import { PortalAuthFormInline, isNetworkFailure } from '../portal-auth-form-inline'
 import { postAuthSuccess } from '@/lib/client/hooks/use-auth-broadcast'
 import { authClient } from '@/lib/client/auth-client'
 
@@ -111,7 +111,9 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
     )
     const oauthButton = screen.getByRole('button', { name: /sign in with custom oidc/i })
     expect(oauthButton).toBeInTheDocument()
-    expect(oauthButton).toHaveClass('h-11')
+    // Provider buttons use the large v6.6 control (component.button.height-lg,
+    // 44px), the touch minimum on every pointer.
+    expect(oauthButton).toHaveClass('h-(--ds-component-button-height-lg)')
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
     expect(screen.queryByText('or')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create an account/i })).not.toBeInTheDocument()
@@ -255,5 +257,28 @@ describe('PortalAuthFormInline — post-sign-in navigation', () => {
     })
     // Navigation is solely the dialog opener's responsibility via the broadcast.
     expect(navigate).not.toHaveBeenCalled()
+  })
+})
+
+// E-16: a request that never reached the server surfaces as the browser's raw
+// TypeError ("Failed to fetch", "Load failed"). The form replaces that with a
+// readable recovery message, and only for that failure class.
+describe('isNetworkFailure', () => {
+  it("recognizes the browsers' network TypeErrors", () => {
+    for (const message of [
+      'Failed to fetch',
+      'Load failed',
+      'NetworkError when attempting to fetch resource.',
+      'Network request failed',
+    ]) {
+      expect(isNetworkFailure(new TypeError(message))).toBe(true)
+    }
+  })
+
+  it('leaves server and programming errors alone', () => {
+    expect(isNetworkFailure(new Error('Failed to fetch'))).toBe(false)
+    expect(isNetworkFailure(new TypeError('x is not a function'))).toBe(false)
+    expect(isNetworkFailure('Failed to fetch')).toBe(false)
+    expect(isNetworkFailure(null)).toBe(false)
   })
 })

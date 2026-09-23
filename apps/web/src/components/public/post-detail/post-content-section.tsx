@@ -233,7 +233,12 @@ export function PostContentSection({
         </div>
       </div>
 
-      <h1 className="text-xl sm:text-2xl font-semibold text-foreground mb-4">{post.title}</h1>
+      <h1
+        className="text-xl sm:text-2xl font-semibold text-foreground mb-4"
+        data-text-origin="user"
+      >
+        {post.title}
+      </h1>
 
       <PostContent
         content={post.content}

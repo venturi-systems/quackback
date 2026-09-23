@@ -1,9 +1,11 @@
 import { FormattedMessage } from 'react-intl'
 
-/** Explains the actual server-enforced role boundary without granting access. */
-export function PortalParticipation() {
+function ParticipationList({ className }: { className?: string }) {
   return (
-    <dl className="portal-participation" aria-label="How participation works">
+    <dl
+      className={`portal-participation ${className ?? ''}`.trim()}
+      aria-label="How participation works"
+    >
       <div>
         <dt>
           <FormattedMessage
@@ -47,5 +49,30 @@ export function PortalParticipation() {
         </dd>
       </div>
     </dl>
+  )
+}
+
+/**
+ * Explains the actual server-enforced role boundary without granting access.
+ *
+ * Wide screens show the three statements side by side. On phones the same
+ * statements sit behind a "How participation works" disclosure, so the
+ * composer and the first posts stay in the first viewport; nothing is removed,
+ * only disclosed on request. CSS shows exactly one of the two renderings.
+ */
+export function PortalParticipation() {
+  return (
+    <>
+      <details className="portal-participation-disclosure">
+        <summary>
+          <FormattedMessage
+            id="portal.participation.disclosure"
+            defaultMessage="How participation works"
+          />
+        </summary>
+        <ParticipationList />
+      </details>
+      <ParticipationList className="portal-participation--wide" />
+    </>
   )
 }

@@ -90,6 +90,47 @@ describe('PortalAccessGate — content privacy', () => {
   })
 })
 
+describe('PortalAccessGate — explanatory sign-in page', () => {
+  // Owner decision 5 on landing-page#2309: keep sign-in, and make the page
+  // explain what the portal is and who can do what, with the Venturi header
+  // and footer.
+  it('is a full public page with the Venturi header, a main landmark and the footer', () => {
+    render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
+    expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
+    expect(screen.getByRole('main')).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
+  })
+
+  it('says what the portal is and that anyone who signs in can take part', () => {
+    render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
+    expect(screen.getByTestId('portal-gate-lead')).toHaveTextContent(
+      'Share product ideas, vote on requests and follow the roadmap. Anyone who signs in can read and take part.'
+    )
+    expect(screen.getByRole('heading', { level: 2, name: 'Who can do what' })).toBeVisible()
+    expect(screen.getByRole('region', { name: 'Sign in' })).toContainElement(
+      screen.getByTestId('auth-form-body')
+    )
+  })
+
+  it('calls the portal private only when sign-in does not grant read access', () => {
+    render(<PortalAccessGate {...baseProps} visibility="private" />)
+    expect(screen.getByTestId('portal-gate-lead')).toHaveTextContent(
+      'This portal is private: only people given access can read it.'
+    )
+  })
+
+  it('keeps the who-can-do-what summary off the later sign-in steps', () => {
+    render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
+    const onContextChange = formProps.onContextChange as (ctx: {
+      step: string
+      email: string
+    }) => void
+    act(() => onContextChange({ step: 'code', email: 'alice@example.com' }))
+    expect(screen.queryByRole('heading', { name: 'Who can do what' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('portal-gate-lead')).not.toBeInTheDocument()
+  })
+})
+
 describe('PortalAccessGate — callbackUrl', () => {
   it('navigates to callbackUrl after a successful sign-in', async () => {
     render(<PortalAccessGate {...baseProps} callbackUrl="/admin" />)

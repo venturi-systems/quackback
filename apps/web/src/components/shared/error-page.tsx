@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
 import { useInShell } from '@/components/public/shell/shell-context'
@@ -8,6 +8,22 @@ interface ErrorPageProps {
   // TanStack Router types a caught route error as `unknown`: anything can be thrown.
   error: unknown
   reset?: () => void
+}
+
+/**
+ * Page title for a status page. The root head sets the site title during
+ * server rendering; once hydrated the tab names the condition, so a visitor
+ * with several tabs (or a screen reader announcing the title) knows which
+ * page failed.
+ */
+function useStatusTitle(title: string) {
+  useEffect(() => {
+    const previous = document.title
+    document.title = `${title} · Venturi Feedback`
+    return () => {
+      document.title = previous
+    }
+  }, [title])
 }
 
 /**
@@ -39,6 +55,7 @@ export function errorMessage(error: unknown): string | undefined {
 
 export function DefaultErrorPage({ error, reset }: ErrorPageProps) {
   const message = errorMessage(error)
+  useStatusTitle('Page could not load')
   return (
     <FriendlyShell>
       <h1 className="public-status__title">This page could not load</h1>
@@ -70,6 +87,7 @@ export function DefaultErrorPage({ error, reset }: ErrorPageProps) {
 }
 
 export function NotFoundPage() {
+  useStatusTitle('Page not found')
   return (
     <FriendlyShell>
       <h1 className="public-status__title">Page not found</h1>

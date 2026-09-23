@@ -70,7 +70,9 @@
 
 .portal-shell {
   width: 100%;
-  padding-inline: clamp(1rem, 3vw, 4rem);
+  /* One page gutter for header, main and footer (rulebook §4.2): 20px on
+     phones rising to 56px, so every region shares the reading-start rail. */
+  padding-inline: clamp(20px, 4vw, 56px);
 }
 
 .portal-introduction {
@@ -289,32 +291,15 @@
   text-wrap: balance;
 }
 
-/* Sign-in page: reading-start composition. The heading and lead span the
-   page; below them the sign-in form keeps a form-sized column and the
-   who-can-do-what summary takes the remaining width. */
+/* Sign-in page: reading-start composition in task order. The heading and
+   lead span the page, the sign-in actions keep a form-sized column, and the
+   who-can-do-what summary uses the full width below them (three role columns
+   on wide screens), so no idle column sits beside a short form. */
 .portal-gate__layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: clamp(24px, 4vw, 48px) clamp(32px, 5vw, 80px);
+  gap: clamp(24px, 4vw, 48px);
   align-items: start;
-}
-
-@media (min-width: 1024px) {
-  .portal-gate__layout {
-    grid-template-columns: minmax(20rem, 26rem) minmax(0, 1fr);
-    grid-template-areas:
-      'intro intro'
-      'signin roles';
-  }
-  .portal-gate__layout > .portal-gate__intro {
-    grid-area: intro;
-  }
-  .portal-gate__layout > .portal-gate__signin {
-    grid-area: signin;
-  }
-  .portal-gate__layout > .portal-gate__roles {
-    grid-area: roles;
-  }
 }
 
 .portal-gate__title {
@@ -360,8 +345,8 @@
 
 .portal-roles__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 24px clamp(24px, 3vw, 48px);
 }
 
 .portal-roles__group {
@@ -518,4 +503,58 @@
   margin: 0;
   color: var(--muted-foreground);
   text-wrap: pretty;
+}
+
+/* Participation explainer: side by side on wide screens; on phones the same
+   statements sit in a disclosure so the composer stays in the first viewport. */
+.portal-participation-disclosure {
+  display: none;
+  margin-top: 1rem;
+}
+
+.portal-participation-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--ds-component-touch-minimum);
+  cursor: pointer;
+  font-weight: var(--ds-primitive-font-weight-medium);
+}
+
+.portal-participation-disclosure .portal-participation {
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .portal-participation-disclosure {
+    display: block;
+  }
+  .portal-participation--wide {
+    display: none;
+  }
+}
+
+/* Short page leads and notes: balanced lines so a short final line never
+   strands one or two words (typography-quality.md §3 step 4). */
+.portal-lead,
+.portal-roadmap__note,
+.portal-introduction p {
+  text-wrap: balance;
+}
+
+/* Standalone auth pages (password reset, recovery): heading and lead on the
+   page rail, the form in a form-sized column below them. */
+.public-auth__form {
+  width: 100%;
+  max-width: 26rem;
+  margin-top: clamp(24px, 3vw, 32px);
+}
+
+.public-auth [data-slot='button'] {
+  min-height: var(--ds-component-touch-minimum);
+}
+
+.public-auth [data-slot='input'] {
+  height: auto;
+  min-height: var(--ds-component-input-height);
+  font-size: var(--ds-primitive-font-size-16);
 }

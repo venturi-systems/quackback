@@ -427,11 +427,15 @@ export function PostCard({
         {/* Status badge/dropdown - above title */}
         {statusDisplay}
         {/* Title */}
-        <h3 className="font-medium text-base text-foreground break-words">{title}</h3>
+        <h3 className="font-medium text-base text-foreground break-words" data-text-origin="user">
+          {title}
+        </h3>
 
         {/* Description */}
         {(excerpt ?? content) && (
-          <p className="text-sm text-muted-foreground mt-1 break-words">{description}</p>
+          <p className="text-sm text-muted-foreground mt-1 break-words" data-text-origin="user">
+            {description}
+          </p>
         )}
 
         {/* Tags */}
