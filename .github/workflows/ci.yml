@@ -410,6 +410,7 @@ jobs:
           cat > .env <<EOF
           DATABASE_URL=$DATABASE_URL
           BASE_URL=$BASE_URL
+          TRUSTED_ORIGINS=http://acme.localhost:3000
           PORT=3000
           SECRET_KEY=$SECRET_KEY
           REDIS_URL=$REDIS_URL

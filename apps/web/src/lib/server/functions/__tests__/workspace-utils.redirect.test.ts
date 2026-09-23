@@ -152,6 +152,29 @@ describe('requireWorkspaceRole redirect target', () => {
     expect(search?.auth).toBe('signin')
   })
 
+  it.each(['user', 'member', 'admin'])(
+    'does not expose raw settings when a %s caller supplies its own allowed role',
+    async (role) => {
+      hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_001' } })
+      ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 1,
+        widgetSecret: 'private-signing-secret',
+        portalConfig: '{"access":{"allowedEmails":["private@acme.example"]}}',
+      })
+      ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'principal_001',
+        role,
+        type: 'user',
+      })
+
+      const result = await requireWorkspaceRole({ data: { allowedRoles: [role] } })
+      expect(result).not.toHaveProperty('settings')
+      expect(JSON.stringify(result)).not.toContain('private-signing-secret')
+      expect(JSON.stringify(result)).not.toContain('private@acme.example')
+      expect(db.query.settings.findFirst).toHaveBeenCalledWith({ columns: { id: true } })
+    }
+  )
+
   it('lets a human admin through with its role intact', async () => {
     hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_admin' } })
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })

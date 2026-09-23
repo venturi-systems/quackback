@@ -51,7 +51,9 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
         throw redirect(unauthRedirect)
       }
 
-      const appSettings = await db.query.settings.findFirst()
+      // This is a client-callable route guard. Only check workspace existence;
+      // raw settings include signing secrets and portal allowlists.
+      const appSettings = await db.query.settings.findFirst({ columns: { id: true } })
       if (!appSettings) {
         throw redirect({ to: '/' })
       }
@@ -81,7 +83,6 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
       }
 
       return {
-        settings: appSettings,
         principal: { ...principalRecord, role },
         user: session.user,
       }
