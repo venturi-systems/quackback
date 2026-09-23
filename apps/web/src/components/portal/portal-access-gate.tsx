@@ -1,13 +1,17 @@
 /**
- * In-place privacy wall for private portals.
+ * Sign-in page for a portal that requires sign-in to read.
  *
- * Renders a focused sign-in or access-denied screen. Portal chrome, boards,
- * posts, and roadmap content are not rendered before access is granted.
+ * Rendered in place (HTTP 200) when the visitor may not read the portal yet.
+ * Portal chrome, boards, posts and roadmap content are not rendered before
+ * access is granted. The page is a left-aligned public page with the Venturi
+ * header and footer that says what the portal is, who can read it, and who
+ * can do what, next to the sign-in form.
  *
  * Two variants:
- *   - unauthenticated: the shared portal auth form, embedded directly as a
- *     dedicated sign-in screen (the same form public portals show in a dialog).
- *   - unauthorized: informational message, no form.
+ *   - unauthenticated: explanation, the shared portal auth form, and the
+ *     who-can-do-what summary.
+ *   - unauthorized: the signed-in account has no access; explanation and a
+ *     sign-out action.
  *
  * After a successful sign-in the router is invalidated so the _portal loader
  * re-runs; if the visitor is now authorized, the real portal replaces this.
@@ -27,6 +31,8 @@ import { signOut } from '@/lib/client/auth-client'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
+import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
+import { PortalRolesExplainer } from '@/components/portal/portal-roles-explainer'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
@@ -40,8 +46,9 @@ export type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error
 
 interface GateCardProps {
   reason: 'unauthenticated' | 'unauthorized'
+  /** Portal read posture; drives the "who can read" sentence. */
+  visibility?: PortalAccessGateError['visibility']
   workspaceName: string
-  logoUrl: string | null
   authConfig: PortalAccessGateError['authConfig']
   /** Signed-in visitor's email when reason === 'unauthorized'. */
   userEmail?: string | null
@@ -52,8 +59,8 @@ interface GateCardProps {
 
 function GateCard({
   reason,
+  visibility,
   workspaceName,
-  logoUrl,
   authConfig,
   userEmail,
   callbackUrl,
@@ -157,74 +164,98 @@ function GateCard({
   }
 
   const header = headerForStep(mode, stepCtx, { surface: 'private-portal', workspaceName })
+  // The base step explains the portal; later steps (email code, password
+  // reset) show that step's own description instead.
+  const isBaseStep = stepCtx.step === 'credentials'
+  const anyoneCanRead = visibility === 'authenticated'
+
+  if (reason === 'unauthorized') {
+    return (
+      <div className="portal-gate__intro">
+        <h1 className="portal-gate__title">
+          <FormattedMessage
+            id="portal.gate.noAccessTitle"
+            defaultMessage="This account has no access"
+          />
+        </h1>
+        <p className="portal-gate__lead">
+          {userEmail ? (
+            <FormattedMessage
+              id="portal.gate.noAccessSignedInAs"
+              defaultMessage="You are signed in as {email}. This portal is private, and that account is not on its access list."
+              values={{ email: <strong className="portal-gate__email">{userEmail}</strong> }}
+            />
+          ) : (
+            <FormattedMessage
+              id="portal.gate.noAccessGeneric"
+              defaultMessage="This portal is private, and your account is not on its access list."
+            />
+          )}
+        </p>
+        <p className="portal-gate__lead">
+          <FormattedMessage
+            id="portal.gate.noAccessNext"
+            defaultMessage="Ask the {workspace} team for access, or sign out and use another account."
+            values={{ workspace: workspaceName || 'Venturi' }}
+          />
+        </p>
+        <div className="portal-gate__actions">
+          <Button variant="outline" onClick={() => void handleSignOut()} disabled={signingOut}>
+            {signingOut ? (
+              <ArrowPathIcon className="mr-2 h-3 w-3 animate-spin" aria-hidden />
+            ) : null}
+            <FormattedMessage id="portal.gate.signOut" defaultMessage="Sign out" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="rounded-xl border bg-card shadow-lg p-8 w-full max-w-md text-center space-y-4">
-      {/* Org logo, or the workspace initial as a branded fallback (matches
-          the portal header — never a generic icon). */}
-      {logoUrl ? (
-        <img src={logoUrl} alt={workspaceName} className="mx-auto h-12 w-auto object-contain" />
-      ) : (
-        <div className="mx-auto flex h-12 w-12 items-center justify-center [border-radius:calc(var(--radius)*0.6)] bg-primary text-lg font-semibold text-primary-foreground">
-          {workspaceName.charAt(0).toUpperCase()}
-        </div>
-      )}
+    <div className="portal-gate__layout">
+      <div className="portal-gate__intro">
+        <h1 className="portal-gate__title">{header.title}</h1>
+        {isBaseStep ? (
+          <p className="portal-gate__lead" data-testid="portal-gate-lead">
+            {anyoneCanRead ? (
+              <FormattedMessage
+                id="portal.gate.leadOpen"
+                defaultMessage="Share product ideas, vote on requests and follow the roadmap. Anyone who signs in can read and take part."
+              />
+            ) : (
+              <FormattedMessage
+                id="portal.gate.leadPrivate"
+                defaultMessage="Share product ideas, vote on requests and follow the roadmap. This portal is private: only people given access can read it."
+              />
+            )}
+          </p>
+        ) : (
+          <p className="portal-gate__lead">{header.description}</p>
+        )}
+      </div>
 
-      {reason === 'unauthenticated' ? (
-        signingIn ? (
-          <div
-            className="flex h-9 items-center justify-center gap-2 text-sm text-muted-foreground"
-            aria-live="polite"
-          >
+      <section className="portal-gate__signin" aria-label="Sign in">
+        {signingIn ? (
+          <div className="portal-gate__signing-in" aria-live="polite">
             <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden="true" />
             <FormattedMessage id="portal.auth.signingIn" defaultMessage="Signing in..." />
           </div>
         ) : (
-          <>
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight">{header.title}</h1>
-              <p className="mt-2 text-sm text-muted-foreground">{header.description}</p>
-            </div>
-            <div className="text-left">
-              <PortalAuthFormInline
-                mode={mode}
-                authConfig={authConfig}
-                workspaceName={workspaceName}
-                callbackUrl={safeCallback}
-                onModeSwitch={setMode}
-                onContextChange={setStepCtx}
-              />
-            </div>
-          </>
-        )
-      ) : (
-        <>
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">You don&apos;t have access</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {userEmail ? (
-                <>
-                  You&apos;re signed in as{' '}
-                  <span className="font-medium text-foreground">{userEmail}</span>, but this account
-                  isn&apos;t on the access list for this private portal.
-                </>
-              ) : (
-                <>This portal is private and your account isn&apos;t on the access list.</>
-              )}{' '}
-              Reach out to the {workspaceName} team to request access, or sign out and try a
-              different account.
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => void handleSignOut()}
-            disabled={signingOut}
-          >
-            {signingOut ? <ArrowPathIcon className="mr-2 h-3 w-3 animate-spin" /> : null}
-            Sign out
-          </Button>
-        </>
+          <PortalAuthFormInline
+            mode={mode}
+            authConfig={authConfig}
+            workspaceName={workspaceName}
+            callbackUrl={safeCallback}
+            onModeSwitch={setMode}
+            onContextChange={setStepCtx}
+          />
+        )}
+      </section>
+
+      {isBaseStep && (
+        <div className="portal-gate__roles">
+          <PortalRolesExplainer />
+        </div>
       )}
     </div>
   )
@@ -237,13 +268,13 @@ export interface PortalAccessGateProps
     Omit<GateCardProps, 'authConfig'>,
     Pick<
       PortalAccessGateError,
-      'authConfig' | 'themeStyles' | 'customCss' | 'userEmail' | 'locale'
+      'authConfig' | 'themeStyles' | 'customCss' | 'userEmail' | 'locale' | 'logoUrl'
     > {}
 
 export function PortalAccessGate({
   reason,
+  visibility,
   workspaceName,
-  logoUrl,
   authConfig,
   themeStyles,
   customCss,
@@ -253,29 +284,26 @@ export function PortalAccessGate({
   autoOpenSignin,
 }: PortalAccessGateProps) {
   return (
-    // The gate renders on the route's error path (a beforeLoad throw), which
-    // skips the loader that mounts PortalIntlProvider for the normal portal.
-    // The embedded auth form uses react-intl, so the gate provides its own
-    // provider — without it <FormattedMessage> has no context and crashes.
-    // No SSR catalog here (the error path has no loader data); useIntlSetup
-    // fetches it client-side, which lands well before the form needs it.
+    // The gate renders from the _portal loader's gate branch, which does not
+    // mount the portal's PortalIntlProvider. The embedded auth form uses
+    // react-intl, so the gate provides its own provider; without it
+    // <FormattedMessage> has no context and crashes. No SSR catalog here;
+    // useIntlSetup fetches it client-side, well before the form needs it.
     <PortalIntlProvider locale={locale ?? DEFAULT_LOCALE}>
-      <div className="min-h-screen bg-background">
-        {/* Keep the authenticated perimeter visually consistent with the portal. */}
-        {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
-        {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
-        <main className="flex min-h-screen items-center justify-center px-4 py-8 sm:py-12">
-          <GateCard
-            reason={reason}
-            workspaceName={workspaceName}
-            logoUrl={logoUrl}
-            authConfig={authConfig}
-            userEmail={userEmail}
-            callbackUrl={callbackUrl}
-            autoOpenSignin={autoOpenSignin}
-          />
-        </main>
-      </div>
+      {/* Keep the sign-in page visually consistent with the portal. */}
+      {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
+      {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
+      <PublicPageFrame className="portal-gate">
+        <GateCard
+          reason={reason}
+          visibility={visibility}
+          workspaceName={workspaceName}
+          authConfig={authConfig}
+          userEmail={userEmail}
+          callbackUrl={callbackUrl}
+          autoOpenSignin={autoOpenSignin}
+        />
+      </PublicPageFrame>
     </PortalIntlProvider>
   )
 }

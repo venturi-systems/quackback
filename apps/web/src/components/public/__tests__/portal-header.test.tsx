@@ -104,7 +104,7 @@ function renderHeader({
     <IntlProvider locale="en" defaultLocale="en">
       {/* showThemeToggle=false removes the theme dropdown trigger so the only
           remaining button is the avatar / user-dropdown trigger */}
-      <PortalHeader orgName="Acme" userRole={userRole} showThemeToggle={false} />
+      <PortalHeader userRole={userRole} showThemeToggle={false} />
     </IntlProvider>
   )
 }

@@ -8,6 +8,7 @@ import { getLatestVersion, isNewerVersion } from '@/lib/server/functions/version
 import { AdminSidebar } from '@/components/admin/admin-sidebar'
 import { PostModal } from '@/components/admin/feedback/post-modal'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { InShell } from '@/components/public/shell/shell-context'
 import { UpdateBanner } from '@/components/admin/update-banner'
 import { PlanNoticeBanner } from '@/components/admin/plan-notice-banner'
 import { getPlanNotice } from '@/lib/server/functions/plan-notice'
@@ -112,26 +113,28 @@ function AdminLayout() {
 
   return (
     <IntlProvider locale={DEFAULT_LOCALE} defaultLocale={DEFAULT_LOCALE}>
-      <TooltipProvider delayDuration={0}>
-        <div className="flex h-screen bg-background">
-          <AdminSidebar initialUserData={initialUserData} latestVersion={latestVersion} />
-          <main className="flex-1 min-w-0 overflow-hidden sm:h-screen sm:py-2 sm:pr-2 sm:pl-1 p-0">
-            {/* Mobile: Add padding for fixed header */}
-            <div className="h-full sm:pt-0 pt-14 sm:rounded-lg sm:border sm:border-border overflow-hidden flex flex-col">
-              <PlanNoticeBanner notice={planNotice} />
-              <UpdateBanner latestVersion={latestVersion} />
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <Outlet />
+      <InShell>
+        <TooltipProvider delayDuration={0}>
+          <div className="flex h-screen bg-background">
+            <AdminSidebar initialUserData={initialUserData} latestVersion={latestVersion} />
+            <main className="flex-1 min-w-0 overflow-hidden sm:h-screen sm:py-2 sm:pr-2 sm:pl-1 p-0">
+              {/* Mobile: Add padding for fixed header */}
+              <div className="h-full sm:pt-0 pt-14 sm:rounded-lg sm:border sm:border-border overflow-hidden flex flex-col">
+                <PlanNoticeBanner notice={planNotice} />
+                <UpdateBanner latestVersion={latestVersion} />
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <Outlet />
+                </div>
               </div>
-            </div>
-          </main>
-          {currentUser && (
-            <Suspense>
-              <PostModal postId={postId} currentUser={currentUser} />
-            </Suspense>
-          )}
-        </div>
-      </TooltipProvider>
+            </main>
+            {currentUser && (
+              <Suspense>
+                <PostModal postId={postId} currentUser={currentUser} />
+              </Suspense>
+            )}
+          </div>
+        </TooltipProvider>
+      </InShell>
     </IntlProvider>
   )
 }
