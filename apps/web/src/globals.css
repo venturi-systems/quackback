@@ -147,7 +147,9 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    /* Full-strength focus color (v6.6 interactive.focus-ring, 90% black):
+       half opacity measured 3.4:1 on white, below the suite's ring. */
+    @apply border-border outline-ring;
   }
   body {
     -webkit-font-smoothing: antialiased;

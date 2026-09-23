@@ -47,8 +47,13 @@
   --sidebar-ring: var(--ring);
   --radius: var(--ds-component-input-radius);
   --letter-spacing: var(--ds-primitive-font-letter-spacing-normal);
-  --shadow-2xs: none;
-  --shadow-xs: none;
+  /* "No shadow" must be a transparent zero shadow, never `none`: Tailwind
+     composes shadow-xs with the focus ring into one box-shadow list
+     (ring, offset, shadow), and `none` inside a list invalidates the whole
+     declaration, which removed the keyboard focus ring from every primary
+     button and input. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
   --shadow-sm: var(--ds-shadow-card);
   --shadow: var(--ds-shadow-raised);
   --shadow-md: var(--ds-shadow-modal);

@@ -635,7 +635,7 @@ function CommentItem({
             <div className="mt-1.5 ms-10">
               <div
                 data-testid="edit-comment-editor"
-                className="rounded-lg border border-border/50 bg-background overflow-hidden focus-within:border-border focus-within:ring-1 focus-within:ring-ring/20 transition-colors px-3 py-2"
+                className="rounded-lg border border-border/50 bg-background overflow-hidden focus-within:border-border focus-within:ring-2 focus-within:ring-ring transition-colors px-3 py-2"
                 onKeyDownCapture={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                     e.preventDefault()

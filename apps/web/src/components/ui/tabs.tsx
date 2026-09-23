@@ -60,7 +60,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
         'dark:data-[state=active]:text-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30',
         // Transitions + focus
         'transition-[color,box-shadow]',
-        'focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring focus-visible:ring-[3px] focus-visible:outline-1',
+        'focus-visible:border-ring focus-visible:ring-ring focus-visible:outline-ring focus-visible:ring-[3px] focus-visible:outline-1',
         // Disabled
         'disabled:pointer-events-none disabled:opacity-50',
         className

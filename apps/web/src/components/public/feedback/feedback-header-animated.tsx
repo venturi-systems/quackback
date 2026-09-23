@@ -21,6 +21,7 @@ import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
 import { useSimilarPosts } from '@/lib/client/hooks/use-similar-posts'
 import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session'
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
+import { cn } from '@/lib/shared/utils'
 import {
   resolveSubmitState,
   submittableBoardIds,
@@ -274,7 +275,13 @@ export function FeedbackHeaderAnimated({
   return (
     <motion.div
       id={COMPOSER_ANCHOR}
-      className="bg-card border border-border rounded-lg mb-5 shadow-sm overflow-hidden"
+      // The title field and the editor are borderless, so the card shows the
+      // v6.6 focus ring while either one has keyboard or text focus.
+      className={cn(
+        'bg-card border border-border rounded-lg mb-5 shadow-sm overflow-hidden',
+        'has-[#feedback-title-input:focus-visible]:outline-2 has-[#feedback-title-input:focus-visible]:outline-offset-2 has-[#feedback-title-input:focus-visible]:outline-(--ds-color-interactive-focus-ring)',
+        'has-[.ProseMirror-focused]:outline-2 has-[.ProseMirror-focused]:outline-offset-2 has-[.ProseMirror-focused]:outline-(--ds-color-interactive-focus-ring)'
+      )}
       initial={false}
       animate={{ boxShadow: expanded ? 'var(--ds-shadow-card)' : 'none' }}
       transition={{ duration: 0.2 }}
@@ -327,7 +334,7 @@ export function FeedbackHeaderAnimated({
                 <SelectTrigger
                   aria-labelledby="feedback-board-label"
                   size="xs"
-                  className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
+                  className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--ds-color-interactive-focus-ring)"
                 >
                   <SelectValue
                     placeholder={intl.formatMessage({
