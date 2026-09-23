@@ -1,9 +1,9 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 /**
  * Navigate to the first available post from the portal home page and return its URL.
  */
-async function navigateToFirstPost(page: Parameters<typeof test>[1] extends (args: { page: infer P }) => unknown ? P : never) {
+async function navigateToFirstPost(page: Page) {
   await page.goto('/')
   const postCards = page.locator('a[href*="/posts/"]:has(h3)')
   await expect(postCards.first()).toBeVisible({ timeout: 15000 })
@@ -20,12 +20,26 @@ test.describe('Post detail page', () => {
 
   // ---- Layout & structure ----
 
-  test('content is constrained within a max-width container', async ({ page }) => {
+  test('content starts on the header rail with a capped measure', async ({ page }) => {
+    // v6.6 reading-start composition: the post starts on the same gutter as
+    // the header (not a centered column) and caps its own measure at 72rem.
     const viewport = page.viewportSize()!
-    const box = await page.getByTestId('post-detail').boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.x).toBeGreaterThan(0)
-    expect(box!.x + box!.width).toBeLessThan(viewport.width)
+    const contentBox = (selector: string) =>
+      page
+        .locator(selector)
+        .first()
+        .evaluate((el) => {
+          const style = getComputedStyle(el)
+          const rect = el.getBoundingClientRect()
+          const left = rect.x + parseFloat(style.paddingLeft)
+          return { left, right: rect.right - parseFloat(style.paddingRight) }
+        })
+    const detail = await contentBox('[data-testid="post-detail"]')
+    const header = await contentBox('header .portal-shell')
+    expect(detail.left).toBeGreaterThan(0)
+    expect(Math.abs(detail.left - header.left)).toBeLessThanOrEqual(1)
+    expect(detail.right).toBeLessThanOrEqual(viewport.width)
+    expect(detail.right - detail.left).toBeLessThanOrEqual(72 * 16 + 1)
   })
 
   test('URL matches /:boardSlug/posts/:postId pattern', async ({ page }) => {
@@ -105,9 +119,9 @@ test.describe('Post detail page', () => {
   }) => {
     // Either a sign-in prompt or a comment form must be present
     const signInPrompt = page.getByText(/sign in to comment/i)
-    const commentForm = page.locator('textarea[placeholder*="comment" i]').or(
-      page.locator('[data-testid="comment-form"]')
-    )
+    const commentForm = page
+      .locator('textarea[placeholder*="comment" i]')
+      .or(page.locator('[data-testid="comment-form"]'))
 
     const hasSignIn = (await signInPrompt.count()) > 0
     const hasForm = (await commentForm.count()) > 0
@@ -145,9 +159,9 @@ test.describe('Post detail page', () => {
       const firstComment = comments.first()
 
       // Author name renders as a font-medium span
-      const authorSpan = firstComment.locator('span.font-medium').or(
-        firstComment.locator('[class*="font-medium"]').first()
-      )
+      const authorSpan = firstComment
+        .locator('span.font-medium')
+        .or(firstComment.locator('[class*="font-medium"]').first())
       if ((await authorSpan.count()) > 0) {
         await expect(authorSpan.first()).toBeVisible()
       }
@@ -208,7 +222,8 @@ test.describe('Post detail page', () => {
     const boardSlug = currentUrl.match(/\/b\/([^/]+)\/posts\//)?.[1]
 
     if (boardSlug) {
-      const boardLink = page.locator(`a[href*="?board=${boardSlug}"]`)
+      const boardLink = page
+        .locator(`a[href*="?board=${boardSlug}"]`)
         .or(page.locator(`a[href*="/b/${boardSlug}"]`))
 
       if ((await boardLink.count()) > 0) {

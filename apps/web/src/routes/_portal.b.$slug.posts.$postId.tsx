@@ -3,7 +3,11 @@ import { useIntl } from 'react-intl'
 import { createFileRoute, notFound, useRouteContext } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { BackLink } from '@/components/ui/back-link'
-import { portalDetailQueries, type PublicPostDetailView } from '@/lib/client/queries/portal-detail'
+import {
+  PostNotFoundError,
+  portalDetailQueries,
+  type PublicPostDetailView,
+} from '@/lib/client/queries/portal-detail'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { UnsubscribeBanner } from '@/components/public/unsubscribe-banner'
 import { VoteSidebar, VoteSidebarSkeleton } from '@/components/public/post-detail/vote-sidebar'
@@ -55,7 +59,7 @@ export const Route = createFileRoute('/_portal/b/$slug/posts/$postId')({
     // commentsSectionData and post permissions are warmed here (not fire-and-forget)
     // so the comments section and edit/delete controls render their real values on
     // first paint instead of flashing the undefined defaults (canComment/canEdit/canDelete).
-    const [post] = await Promise.all([
+    const results = await Promise.allSettled([
       queryClient.ensureQueryData(portalDetailQueries.postDetail(postId)),
       queryClient.ensureQueryData(portalQueries.statuses()),
       queryClient.ensureQueryData(portalDetailQueries.votedPosts()),
@@ -66,6 +70,17 @@ export const Route = createFileRoute('/_portal/b/$slug/posts/$postId')({
         staleTime: 30_000,
       }),
     ])
+    // A post that does not exist and a post this viewer may not read get the
+    // same answer: the 404 page (HTTP 404), not an "unexpected error" page.
+    // The post's own result decides this before any sibling failure does.
+    const [postResult] = results
+    if (postResult.status === 'rejected') {
+      if (postResult.reason instanceof PostNotFoundError) throw notFound()
+      throw postResult.reason
+    }
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failed) throw failed.reason
+    const post = postResult.value
 
     if (!post || post.board.slug !== slug) {
       throw notFound()

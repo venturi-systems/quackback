@@ -189,7 +189,7 @@ export function CommentForm({
   if (showStatusSelector) {
     return (
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
+        <form onSubmit={form.handleSubmit(onSubmit)} data-testid="comment-form">
           <div className="rounded-lg border border-border/50 bg-background overflow-hidden focus-within:border-border focus-within:ring-2 focus-within:ring-ring transition-colors">
             {/* Textarea area */}
             <FormField
@@ -462,7 +462,7 @@ export function CommentForm({
   // Default composer for non-team-members / replies
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4" data-testid="comment-form">
         <FormField
           control={form.control}
           name="content"

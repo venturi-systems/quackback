@@ -24,7 +24,6 @@
     "chromium-auth | tests/auth/identity-providers.spec.ts | (1) button-only provider surfaces in the portal OIDC button list",
     "chromium-auth | tests/auth/unified-login.spec.ts | (4) /?prompt=login shows the dialog with OIDC button and recovery-code link",
     "chromium-public | tests/public/auth.spec.ts | Portal Auth Dialog > login dialog shows descriptive text about signing in",
-    "chromium-public | tests/public/board-access-matrix.spec.ts | vote tier — vote affordance + gating > anonymous CAN vote on an all-anonymous board (vote:anonymous)",
     "chromium-public | tests/public/comments.spec.ts | Unauthenticated user — comments section > comment composer is NOT visible to unauthenticated users",
     "chromium-public | tests/public/help-center.spec.ts | Public Help Center > shows categories list when categories exist in seed data",
     "chromium-public | tests/public/help-center.spec.ts | Public Help Center > shows the search bar on the landing page",
