@@ -17,6 +17,28 @@ The portal shares a useful-width shell, visible page introduction, participation
 explanation, and related-site footer. Card titles and board names can wrap.
 Control borders use the control token, separately from decorative dividers.
 
+## Public Shell, Sign-in Page and Status Pages
+
+Every public page (the portal, the sign-in page, password reset and recovery,
+and the 404 and error pages) uses one frame: the Venturi header (lockup named
+"Venturi home", product label, portal navigation) and the footer with the
+Venturi signature, the website's legal row in its published order, and the
+AGPL-3.0 section 13 source link to the exact built commit. Identity lives in
+`lib/shared/venturi-identity.ts`, not in string comparisons on the workspace
+name.
+
+A portal that requires sign-in to read shows a left-aligned sign-in page, not a
+centered card. It says what the portal is, who can read it (from the portal's
+real posture), and who can do what: contributors read, post, vote and comment;
+team members also review posts, set status, move roadmap items, merge
+duplicates, publish the changelog, and create and rename boards;
+administrators also delete boards and change access, sign-in, portal settings
+and members. The `<h1>` still starts with "Sign in", and only the enabled
+providers are offered, so the infrastructure live check keeps its markers.
+
+A missing page, a missing post and a post the viewer may not read all answer
+with the same 404 page, so a 404 never confirms that a post exists.
+
 ## Behavior and Authorization
 
 An authenticated portal user no longer receives administration links when no
@@ -88,28 +110,33 @@ Do not infer public visibility from HTTP 200 on a sign-in page.
 
 ## Verification Scope
 
-Focused checks passed: 31 UI/permission tests; 21 submission-cache, anonymous
-permission, and empty-state tests; and an independent 271-test authorization
-review. These groups overlap and must not be added into a unique total.
-The production build passed after the required widget build. Full lint passed
-with existing warnings, and the full typecheck passed. These checks ran locally
-against the application source published on the review branch.
+The full suite, lint, typecheck and production build passed locally, and CI
+(`portability-gate` with eight end-to-end shards) passed on the merge of pull
+request #126. Each pull request records its exact commands and counts.
 
-The required `bun run test --run` command could not execute its suite because
-PostgreSQL was unavailable locally. A separate all-suite Vitest attempt found
-existing migration tests requiring that database and was stopped. This is not
-a full-suite pass. Run the existing CI workflow with its PostgreSQL service
-before proposing a pull request, as required by AGENTS.md. The available Actions
-dispatch credential returned HTTP 403, so that CI run has not started. Normal
-local user-namespace isolation for PostgreSQL also failed with `Operation not
-permitted`; neither restriction was bypassed.
+Rendered checks use the design suite's typography checker at 320, 390, 768,
+1024, 1440, 1920 and 2560 pixels, each with and without WCAG 1.4.12
+text-spacing overrides, on a local production build seeded with fictional
+`@example.com` data under the live posture (sign-in required to read,
+Google and GitHub only, anonymous sessions refused). Pages: the sign-in page,
+the 404 and missing-post pages, recovery; as a contributor the feed, the
+composer with its review notice open, the roadmap, the changelog, a post and
+account settings; as a team member the feed, a post, the administrators-only
+notice and the statuses page. The sign-in page for a private portal, the
+no-access page and the anonymous feed and post under a public posture were
+checked the same way.
 
-The authorization fixes were verified later with the full suite against a
-disposable PostgreSQL service and a local production build. The pull request
-records the exact commands and results.
+Result: no authored headline or short-copy failure at any width. The sign-in
+page passes with no review items. Remaining review items are user-generated
+text (post titles, bodies, comments, changelog entries, marked
+`data-text-origin="user"`) and authored labels that wrap only under the
+text-spacing overrides, where reflow takes precedence. The 404 pages render
+every text element cleanly; the checker also records their HTTP 404 status,
+which is the intended answer. The infrastructure repository's release probes
+(`validate_gate_explainer`, the gated-surface contract and the board
+enumeration probe) pass against the local sign-in page and RPC.
 
-Synthetic fixtures use the actual new React components and production CSS at
-320, 390, 768, 1024, 1440, 1920, and 2560 pixels. Static role-link checks passed.
-Browser policy blocked local-file navigation; no rendered screenshot, loaded
-font, line-ending, overflow, zoom, or full workflow pass is claimed. Those
-checks and authenticated live behavior remain release acceptance requirements.
+Interactive targets were measured at 390 pixels with touch and at 1280 with a
+mouse: no portal control is below 44 pixels on touch or 24 pixels with a
+mouse. The administration console outside the settings notice was not
+converted to the v6.6 type scale and touch targets.
