@@ -129,11 +129,15 @@ test.describe('Public Roadmap', () => {
       return
     }
 
-    // Vote count is inside .roadmap-card__vote as a <span>
-    const voteCount = roadmapCards.first().locator('.roadmap-card__vote span')
+    // The public roadmap states the count in words ("12 votes") and carries no
+    // voting control: the card is a link, and voting happens on the post page
+    // (v6.6 roadmap template: no decorative voting controls on a static roadmap).
+    const firstCard = roadmapCards.first()
+    const voteCount = firstCard.locator('.roadmap-card__votes')
     await expect(voteCount).toBeVisible()
-    const countText = await voteCount.textContent()
-    expect(countText).toMatch(/^\d+$/)
+    const countText = (await voteCount.textContent())?.trim() ?? ''
+    expect(countText).toMatch(/^\d+ votes?$/)
+    await expect(firstCard.getByRole('button')).toHaveCount(0)
   })
 
   test('roadmap post cards show a board badge', async ({ page }) => {

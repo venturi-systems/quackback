@@ -413,13 +413,13 @@ test.describe('Admin Roadmap - Kanban columns', () => {
       if ((await cards.count()) > 0) {
         const firstCard = cards.first()
 
-        // Cards have a vote count section (ChevronUpIcon + number)
-        // and a board name badge
+        // Cards state the vote count in words ("12 votes") and carry a board
+        // name badge
         await expect(firstCard).toBeVisible({ timeout: 10000 })
 
-        // Vote count: a text-sm font-semibold span inside the vote column
-        const voteCount = firstCard.locator('[class*="font-semibold"]').first()
+        const voteCount = firstCard.locator('.roadmap-card__votes').first()
         await expect(voteCount).toBeVisible()
+        await expect(voteCount).toHaveText(/^\d+ votes?$/)
 
         // Board badge
         const boardBadge = firstCard.locator('[class*="badge"]').or(firstCard.locator('span'))
@@ -532,11 +532,10 @@ test.describe('Admin Roadmap - Kanban Accuracy', () => {
     const limit = Math.min(cardCount, 10)
     for (let i = 0; i < limit; i++) {
       const card = cards.nth(i)
-      // Vote count: text-sm font-semibold span inside the left vote column
-      const voteSpan = card.locator('span.text-sm.font-semibold')
-      const voteText = await voteSpan.first().textContent()
-      const parsed = parseInt(voteText?.trim() ?? '', 10)
-      expect(Number.isNaN(parsed)).toBe(false)
+      // Vote count in words: "12 votes"
+      const voteSpan = card.locator('.roadmap-card__votes')
+      const voteText = (await voteSpan.first().textContent())?.trim() ?? ''
+      expect(voteText).toMatch(/^\d+ votes?$/)
     }
   })
 
@@ -743,11 +742,10 @@ test.describe('Admin Roadmap - Public Roadmap Column Accuracy', () => {
     const limit = Math.min(cardCount, 10)
     for (let i = 0; i < limit; i++) {
       const card = cards.nth(i)
-      // Vote count: text-sm font-semibold span inside .roadmap-card__vote
-      const voteSpan = card.locator('.roadmap-card__vote span.text-sm.font-semibold')
+      // Public cards state the count in words ("12 votes"), never a vote control
+      const voteSpan = card.locator('.roadmap-card__votes')
       const voteText = (await voteSpan.first().textContent())?.trim() ?? ''
-      const parsed = parseInt(voteText, 10)
-      expect(Number.isNaN(parsed)).toBe(false)
+      expect(voteText).toMatch(/^\d+ votes?$/)
     }
   })
 })
@@ -771,9 +769,12 @@ test.describe('Admin Roadmap - Filters bar', () => {
     const noRoadmapMsg = page.getByText('No roadmap selected')
 
     if ((await noRoadmapMsg.count()) === 0) {
-      await expect(page.getByRole('button', { name: 'Votes' })).toBeVisible({ timeout: 10000 })
-      await expect(page.getByRole('button', { name: 'Newest' })).toBeVisible()
-      await expect(page.getByRole('button', { name: 'Oldest' })).toBeVisible()
+      // Exact names: roadmap cards are buttons whose names end in "N votes".
+      await expect(page.getByRole('button', { name: 'Votes', exact: true })).toBeVisible({
+        timeout: 10000,
+      })
+      await expect(page.getByRole('button', { name: 'Newest', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Oldest', exact: true })).toBeVisible()
     }
   })
 

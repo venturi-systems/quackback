@@ -43,6 +43,11 @@ export interface FeedbackHeaderProps {
   workspaceName: string
   boards: BoardOption[]
   defaultBoardId?: string
+  /**
+   * The board whose feed is showing, when the visitor filtered to one board.
+   * The share-an-idea surface then answers for that board alone.
+   */
+  scopeBoardId?: string
   user?: { name: string | null; email: string } | null
   /**
    * Per-board capability for the current viewer, keyed by board id

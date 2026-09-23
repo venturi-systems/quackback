@@ -73,7 +73,7 @@ function CardContent({ post }: { post: RoadmapPostEntry }) {
           <Squares2X2Icon className="h-3 w-3 text-muted-foreground/40" aria-hidden />
           {post.board.name}
         </Badge>
-        <span className="text-xs text-muted-foreground">
+        <span className="roadmap-card__votes text-xs text-muted-foreground">
           {post.voteCount} {post.voteCount === 1 ? 'vote' : 'votes'}
         </span>
       </div>

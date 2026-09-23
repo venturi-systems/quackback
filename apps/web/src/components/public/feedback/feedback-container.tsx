@@ -235,6 +235,7 @@ export function FeedbackContainer({
             workspaceName={workspaceName}
             boards={boards}
             defaultBoardId={boardIdForCreate}
+            scopeBoardId={activeBoard ? currentBoardInfo?.id : undefined}
             user={effectiveUser}
             boardPermissions={boardPermissions}
             onPostCreated={handlePostCreated}

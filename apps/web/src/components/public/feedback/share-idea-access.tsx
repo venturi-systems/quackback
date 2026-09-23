@@ -76,9 +76,12 @@ export function ShareIdeaSignIn() {
 export function ShareIdeaUnavailable({
   signedIn,
   reason = 'restricted',
+  singleBoard = false,
 }: {
   signedIn: boolean
   reason?: 'restricted' | 'no-sign-in'
+  /** True on one board's feed: the note speaks about "this board". */
+  singleBoard?: boolean
 }) {
   return (
     <section id={COMPOSER_ANCHOR} className="share-idea share-idea--unavailable" role="note">
@@ -89,9 +92,21 @@ export function ShareIdeaUnavailable({
             defaultMessage="Posting an idea needs an account, and sign-in is not available here."
           />
         ) : signedIn ? (
+          singleBoard ? (
+            <FormattedMessage
+              id="portal.feedback.shareIdea.noAccessSignedInBoard"
+              defaultMessage="Your account can read this board but cannot post ideas on it."
+            />
+          ) : (
+            <FormattedMessage
+              id="portal.feedback.shareIdea.noAccessSignedIn"
+              defaultMessage="Your account can read these boards but cannot post ideas on them."
+            />
+          )
+        ) : singleBoard ? (
           <FormattedMessage
-            id="portal.feedback.shareIdea.noAccessSignedIn"
-            defaultMessage="Your account can read these boards but cannot post ideas on them."
+            id="portal.feedback.shareIdea.restrictedBoard"
+            defaultMessage="Posting ideas on this board is limited to specific groups or the team."
           />
         ) : (
           <FormattedMessage

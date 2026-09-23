@@ -47,12 +47,13 @@ function setContext({
   }
 }
 
-function renderHeader(permissions: Record<string, Record<string, boolean>>) {
+function renderHeader(permissions: Record<string, Record<string, boolean>>, scopeBoardId?: string) {
   return render(
     <IntlProvider locale="en" messages={{}}>
       <FeedbackHeader
         workspaceName="Acme"
         boards={boards}
+        scopeBoardId={scopeBoardId}
         boardPermissions={permissions as Record<string, { canSubmit: boolean; canVote: boolean }>}
       />
     </IntlProvider>
@@ -148,5 +149,45 @@ describe('FeedbackHeader share-an-idea surface (E-8)', () => {
     expect(
       screen.getByText('Posting an idea needs an account, and sign-in is not available here.')
     ).toBeInTheDocument()
+  })
+
+  describe("on one board's feed", () => {
+    const mixed = {
+      board_ideas: { canSubmit: false, canVote: false, signedInCanSubmit: true },
+      board_roadmap: { canSubmit: true, canVote: true, signedInCanSubmit: true },
+    }
+
+    it('asks a signed-out visitor to sign in when this board needs it, even if another board is open', () => {
+      setContext({})
+      renderHeader(mixed, 'board_ideas')
+      expect(screen.queryByTestId('composer')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Sign in to share an idea' })).toBeInTheDocument()
+    })
+
+    it('shows the composer when the visitor can post on this board', async () => {
+      setContext({})
+      renderHeader(mixed, 'board_roadmap')
+      expect(await screen.findByTestId('composer')).toBeInTheDocument()
+    })
+
+    it('speaks about this board when a signed-in viewer cannot post on it', () => {
+      setContext({ principalType: 'user' })
+      renderHeader(
+        {
+          board_ideas: { canSubmit: false, canVote: true, signedInCanSubmit: false },
+          board_roadmap: { canSubmit: true, canVote: true, signedInCanSubmit: true },
+        },
+        'board_ideas'
+      )
+      expect(
+        screen.getByText('Your account can read this board but cannot post ideas on it.')
+      ).toBeInTheDocument()
+    })
+
+    it('ignores a scope that is not one of the listed boards', async () => {
+      setContext({ principalType: 'user' })
+      renderHeader(mixed, 'board_unknown')
+      expect(await screen.findByTestId('composer')).toBeInTheDocument()
+    })
   })
 })

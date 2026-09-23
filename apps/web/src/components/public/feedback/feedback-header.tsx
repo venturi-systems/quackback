@@ -49,15 +49,20 @@ function FeedbackHeaderFallback() {
  */
 export function FeedbackHeader(props: FeedbackHeaderProps) {
   const { session } = useRouteContext({ from: '__root__' })
+  const boardIds = props.boards.map((b) => b.id)
+  // On one board's feed the surface answers for that board: a visitor who may
+  // post elsewhere but not here is told what posting here needs, instead of
+  // getting a composer that quietly targets a different board.
+  const scoped = !!props.scopeBoardId && boardIds.includes(props.scopeBoardId)
   const mode = resolveComposerMode(
-    props.boards.map((b) => b.id),
+    scoped ? [props.scopeBoardId as string] : boardIds,
     props.boardPermissions,
     session
   )
   if (mode === 'sign-in') return <ShareIdeaSignIn />
   if (mode === 'no-access') {
     const signedIn = !!session?.user && session.user.principalType !== 'anonymous'
-    return <ShareIdeaUnavailable signedIn={signedIn} />
+    return <ShareIdeaUnavailable signedIn={signedIn} singleBoard={scoped} />
   }
   return (
     <Suspense fallback={<FeedbackHeaderFallback />}>
