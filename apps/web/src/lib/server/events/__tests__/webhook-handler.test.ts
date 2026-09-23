@@ -10,7 +10,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import crypto from 'crypto'
 
-const h = vi.hoisted(() => ({ safeFetch: vi.fn(), claim: vi.fn(async () => true) }))
+const h = vi.hoisted(() => ({
+  safeFetch: vi.fn(),
+  claim: vi.fn(async (..._args: unknown[]) => true),
+}))
 
 // Mock the db import before importing the handler
 vi.mock('@/lib/server/db', () => ({
