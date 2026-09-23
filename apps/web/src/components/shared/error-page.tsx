@@ -2,7 +2,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/shared/utils'
 
 interface ErrorPageProps {
-  error: Error
+  // TanStack Router types a caught route error as `unknown`: anything can be thrown.
+  error: unknown
   reset?: () => void
   fullPage?: boolean
 }
@@ -28,7 +29,23 @@ export function FriendlyShell({ children, fullPage = true }: FriendlyShellProps)
   )
 }
 
+/**
+ * The message of a caught route error, if it has one.
+ *
+ * Route errors are typed `unknown`. An Error, or any object carrying a string
+ * `message`, yields that message; anything else (a thrown string, null) yields
+ * undefined, so the caller shows no technical details instead of crashing.
+ */
+export function errorMessage(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const { message } = error as { message: unknown }
+    return typeof message === 'string' ? message : undefined
+  }
+  return undefined
+}
+
 export function DefaultErrorPage({ error, reset, fullPage = true }: ErrorPageProps) {
+  const message = errorMessage(error)
   return (
     <FriendlyShell fullPage={fullPage}>
       <h1 className="text-2xl font-semibold tracking-tight">Something went wrong.</h1>
@@ -36,12 +53,12 @@ export function DefaultErrorPage({ error, reset, fullPage = true }: ErrorPagePro
         An unexpected error got in the way. Try again, or head back to the home page.
       </p>
 
-      {error.message && (
+      {message && (
         <details className="mt-4 rounded-md border bg-muted/40 px-4 py-3 text-left">
           <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
             Technical details
           </summary>
-          <p className="mt-2 break-words text-sm text-muted-foreground">{error.message}</p>
+          <p className="mt-2 break-words text-sm text-muted-foreground">{message}</p>
         </details>
       )}
 
