@@ -136,6 +136,28 @@ which is the intended answer. The infrastructure repository's release probes
 (`validate_gate_explainer`, the gated-surface contract and the board
 enumeration probe) pass against the local sign-in page and RPC.
 
+After you choose a sign-in method, the sign-in page's explanation gives way to
+a shorter lead. That happens at the email step and the two-factor steps.
+Signing in, the lead reads "This portal is private. Sign in or create an
+account to continue." Signing up, it reads "This portal is private. Create an
+account to continue." The local runs above measured only the page's first
+step.
+
+So the leads were measured separately. The same checker ran on the services
+hub against the released build `8ed10c35`. The page was the live sign-in page
+with its markup, stylesheet and fonts, but no scripts. Only the heading and
+lead text were changed to those steps' wording. This change does not touch
+that build's sign-in page styles.
+
+The checker covered every width listed above, each with and without the
+text-spacing overrides. Neither lead left a single word on its last line.
+
+The checker raised one review item. At 320 pixels, under the text-spacing
+overrides, the sign-up heading "Create your Venturi account" takes three lines
+and ends on one word. Two settings leave it no room: the 32-pixel heading size
+for phones and the 20-pixel page margin. The WCAG spacing overrides take
+precedence, so the heading is left to wrap.
+
 Interactive targets were measured at 390 pixels with touch and at 1280 with a
 mouse: no portal control is below 44 pixels on touch or 24 pixels with a
 mouse. The administration console outside the settings notice was not
