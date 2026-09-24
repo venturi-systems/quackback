@@ -37,26 +37,53 @@ export function parseJsonOrNull<T>(json: string | null): T | null {
   }
 }
 
+/**
+ * Keys deepMerge never copies. `JSON.parse('{"__proto__":{...}}')` creates an
+ * ordinary own `__proto__` key, and assigning it onto the merged object would
+ * run the `__proto__` setter and replace that object's prototype, so every key
+ * the payload supplied would read through as an inherited setting.
+ * `constructor` and `prototype` are skipped as defence in depth; no settings
+ * shape uses them.
+ */
+const UNSAFE_MERGE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** A `{}`-style object (including a null-prototype one), never an array or class instance. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
 /** @internal */
 export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target }
-  for (const key in source) {
-    if (source[key] !== undefined) {
-      const srcVal = source[key]
-      const tgtVal = result[key]
-      const isNestedObject =
-        typeof srcVal === 'object' &&
-        srcVal !== null &&
-        !Array.isArray(srcVal) &&
-        typeof tgtVal === 'object' &&
-        tgtVal !== null
+  // Own keys only: `for...in` would also merge keys inherited by `source`.
+  // `?? {}` keeps a stored JSON `null` merging to the defaults, as before.
+  for (const key of Object.keys(source ?? {}) as Array<keyof T & string>) {
+    if (UNSAFE_MERGE_KEYS.has(key)) continue
+    const srcVal = source[key]
+    if (srcVal === undefined) continue
+    // Read only the merged object's own value, never an inherited one.
+    const tgtVal = Object.hasOwn(result, key) ? result[key] : undefined
+    const isNestedObject =
+      typeof srcVal === 'object' &&
+      srcVal !== null &&
+      !Array.isArray(srcVal) &&
+      typeof tgtVal === 'object' &&
+      tgtVal !== null
 
-      result[key] = isNestedObject
-        ? (deepMerge(
-            tgtVal as Record<string, unknown>,
-            srcVal as Record<string, unknown>
-          ) as T[typeof key])
-        : (srcVal as T[typeof key])
+    if (isNestedObject) {
+      result[key] = deepMerge(
+        tgtVal as Record<string, unknown>,
+        srcVal as Record<string, unknown>
+      ) as T[typeof key]
+    } else if (isPlainObject(srcVal)) {
+      // Nothing to merge into: copy the subtree through deepMerge instead of by
+      // reference, so an unsafe key nested at any depth is dropped here rather
+      // than kept and later written to the database by JSON.stringify.
+      result[key] = deepMerge<Record<string, unknown>>({}, srcVal) as T[typeof key]
+    } else {
+      result[key] = srcVal as T[typeof key]
     }
   }
   return result
