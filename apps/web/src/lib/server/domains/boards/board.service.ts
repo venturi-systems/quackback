@@ -31,6 +31,11 @@ import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './boa
 import { slugify } from '@/lib/shared/utils'
 import { type BoardAccess } from '@/lib/server/db'
 import { getTierLimits } from '@/lib/server/domains/settings/tier-limits.service'
+import {
+  assertBoardAccessWithinPolicy,
+  defaultAccessWithinPolicy,
+  isBoardAnonymousAccessPolicyManaged,
+} from './board-access-policy'
 
 /**
  * Legacy API-contract shape — derived from BoardAccess for backward
@@ -72,6 +77,12 @@ import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'boards' })
 
+// Slug base for names that romanize to nothing even after transliteration
+// (emoji- or punctuation-only). The uniqueness loop disambiguates ("board",
+// "board-1", ...). Without it such names yield an empty slug, which breaks
+// the NOT NULL UNIQUE column and crashes slug-keyed <Select.Item> (#285).
+const FALLBACK_BOARD_SLUG = 'board'
+
 /**
  * Create a new board
  */
@@ -86,6 +97,12 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
   }
   if (input.description && input.description.length > 500) {
     throw new ValidationError('VALIDATION_ERROR', 'Description must be 500 characters or less')
+  }
+  // An access matrix the caller chose may not use a tier the deployment's
+  // policy owns (POLICY_MANAGED_SETTINGS `boards.anonymousAccess`): refuse it
+  // before any write rather than let the database rewrite it (DEF-42).
+  if (input.access) {
+    assertBoardAccessWithinPolicy(input.access)
   }
 
   // Tier-limit gate (no-op in OSS).
@@ -103,12 +120,18 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
     },
   })
 
-  // Generate or validate slug
-  const baseSlug = input.slug ? slugify(input.slug) : slugify(input.name)
-
-  // Ensure slug is not empty after slugification
-  if (!baseSlug) {
-    throw new ValidationError('VALIDATION_ERROR', 'Could not generate valid slug from name')
+  // Derive the slug. An explicit slug that slugifies to nothing is a caller
+  // error worth rejecting (mirrors updateBoard, and avoids silently turning
+  // e.g. slug "---" into a generic "board"); only a name-derived slug falls
+  // back to a generic base so any-language name can still create a board.
+  let baseSlug: string
+  if (input.slug) {
+    baseSlug = slugify(input.slug)
+    if (!baseSlug) {
+      throw new ValidationError('VALIDATION_ERROR', 'Could not generate valid slug from name')
+    }
+  } else {
+    baseSlug = slugify(input.name) || FALLBACK_BOARD_SLUG
   }
 
   // Check for slug uniqueness and generate a unique one if needed
@@ -144,6 +167,11 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
   }
   if (input.access) {
     insertValues.access = input.access
+  } else if (isBoardAnonymousAccessPolicyManaged()) {
+    // The column default opens every action to anyone, which the policy does
+    // not allow; start at the most open tier it does allow instead of letting
+    // the database rewrite the row after the fact.
+    insertValues.access = defaultAccessWithinPolicy()
   }
 
   const [board] = await db.insert(boards).values(insertValues).returning()
@@ -206,8 +234,8 @@ export async function updateBoard(id: BoardId, input: UpdateBoardInput): Promise
       }
     }
   } else if (input.name !== undefined) {
-    // Auto-update slug if name changes but slug is not explicitly provided
-    const newSlug = slugify(input.name)
+    // Auto-update slug when the name changes and no slug was given, never empty.
+    const newSlug = slugify(input.name) || FALLBACK_BOARD_SLUG
     if (newSlug !== existingBoard.slug) {
       const existingWithSlug = await db.query.boards.findFirst({
         where: eq(boards.slug, newSlug),

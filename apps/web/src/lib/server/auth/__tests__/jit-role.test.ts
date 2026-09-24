@@ -11,14 +11,21 @@
  * synthesized provider row's domains), so tests drive the "email not at a
  * verified domain" case by supplying a non-matching email rather than
  * mocking a predicate.
+ *
+ * Venturi fork: the verified-domain gate also covers a claim-mapped role
+ * (upstream 59fe3ff6f removed that, and the fork does not take it). The team
+ * identity rule is stubbed here; jit-role-team-identity.test.ts runs the same
+ * handler against the real rule.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockFindFirst = vi.fn()
 const mockAccountFindFirst = vi.fn()
+const mockUserFindFirst = vi.fn()
 const mockSet = vi.fn()
 const mockWhere = vi.fn()
+const mockInsertValues = vi.fn()
 const mockRecordAuditEvent = vi.fn()
 // Recordable so a test can assert `readSsoClaims` queries by the CALLBACK
 // provider id rather than a hardcoded 'sso'.
@@ -29,10 +36,13 @@ vi.mock('@/lib/server/db', () => ({
     query: {
       principal: { findFirst: (...args: unknown[]) => mockFindFirst(...args) },
       account: { findFirst: (...args: unknown[]) => mockAccountFindFirst(...args) },
+      user: { findFirst: (...args: unknown[]) => mockUserFindFirst(...args) },
     },
     update: () => ({ set: mockSet, where: mockWhere }),
+    insert: () => ({ values: (...args: unknown[]) => mockInsertValues(...args) }),
   },
   principal: { userId: 'user_id', role: 'role' },
+  user: { id: 'user.id' },
   account: { userId: 'account.userId', providerId: 'account.providerId' },
   and: vi.fn((...parts: unknown[]) => ({ op: 'and', parts })),
   eq: (...args: unknown[]) => mockEq(...args),
@@ -59,6 +69,8 @@ beforeEach(() => {
   mockChangeTeamRole.mockResolvedValue({ changed: true })
   mockSet.mockReturnValue({ where: mockWhere })
   mockWhere.mockResolvedValue(undefined)
+  mockInsertValues.mockResolvedValue(undefined)
+  mockUserFindFirst.mockResolvedValue({ name: 'Returning User', image: null })
   mockRecordAuditEvent.mockResolvedValue(undefined)
 })
 
@@ -71,7 +83,6 @@ type SsoOidc = {
   attributeMapping?: {
     claimPath: string
     rules: { whenContains: string; role: 'admin' | 'member' | 'user' }[]
-    defaultRole: 'admin' | 'member' | 'user'
     syncOnEverySignIn?: boolean
   }
 }
@@ -158,6 +169,13 @@ describe('handleAutoProvisionAfter -- team identity rule', () => {
   })
 })
 
+// Stub the account row's id_token with a JWT whose payload carries `claims`,
+// so readSsoClaims (which base64url-decodes the middle segment) reads them.
+const mockIdTokenClaims = (claims: Record<string, unknown>) => {
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
+  mockAccountFindFirst.mockResolvedValue({ idToken: `h.${payload}.s` })
+}
+
 describe('handleAutoProvisionAfter -- role assignment', () => {
   it('uses autoProvisionRole=admin from config', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
@@ -235,7 +253,6 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
         attributeMapping: {
           claimPath: 'roles',
           rules: [],
-          defaultRole: 'member',
           syncOnEverySignIn: true,
         },
       },
@@ -253,16 +270,15 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
     mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'admin' })
     mockAccountFindFirst.mockResolvedValue({ idToken: null })
     // With sync on, the resolved-from-claims role is authoritative on
-    // every sign-in. attributeMapping has no rules and defaultRole='user',
-    // so the IdP is effectively saying "this user has no team role". An
-    // existing admin gets demoted to portal-user.
+    // every sign-in. attributeMapping has no matching rules, so the resolver
+    // returns null and falls back to autoProvisionRole='user' — effectively
+    // saying "this user has no team role". An existing admin gets demoted.
     await callHandlerWith({
       ssoOidc: {
         autoProvisionRole: 'user',
         attributeMapping: {
           claimPath: 'roles',
           rules: [],
-          defaultRole: 'user',
           syncOnEverySignIn: true,
         },
       },
@@ -282,7 +298,6 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
         attributeMapping: {
           claimPath: 'roles',
           rules: [],
-          defaultRole: 'user',
           syncOnEverySignIn: true,
         },
       },
@@ -325,7 +340,7 @@ describe('handleAutoProvisionAfter -- audit on role change', () => {
       providerId: 'custom-oidc',
       registeredIds: new Set(['custom-oidc']),
       ssoOidc: {
-        attributeMapping: { claimPath: 'roles', rules: [], defaultRole: 'member' },
+        attributeMapping: { claimPath: 'roles', rules: [] },
       },
     })
     expect(mockEq).toHaveBeenCalledWith('account.providerId', 'custom-oidc')
@@ -341,7 +356,6 @@ describe('handleAutoProvisionAfter -- audit on role change', () => {
         attributeMapping: {
           claimPath: 'roles',
           rules: [],
-          defaultRole: 'member',
         },
       },
     })
@@ -351,5 +365,189 @@ describe('handleAutoProvisionAfter -- audit on role change', () => {
       metadata: Record<string, unknown>
     }
     expect(call.metadata.source).toBe('attribute_mapping')
+  })
+})
+
+describe('handleAutoProvisionAfter -- a claim-mapped role stays gated on the verified domain (Venturi fork)', () => {
+  // Upstream 59fe3ff6f (v0.13.0) provisions a claim-mapped role even when the
+  // email is NOT at one of the provider's verified domains. The Venturi fork
+  // neutralizes that change (landing-page#2309, owner decisions 6 and 7): an
+  // IdP claim never makes an off-domain email a team member. These tests are
+  // the inverse of upstream's "domain-independent" tests.
+  const mapping = {
+    claimPath: 'roles',
+    rules: [
+      { whenContains: 'admin', role: 'admin' as const },
+      { whenContains: 'member', role: 'member' as const },
+    ],
+  }
+
+  it.each(['member', 'admin'] as const)(
+    'gives an off-domain OIDC email no team role even when its claim maps to %s',
+    async (claimed) => {
+      mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'user' })
+      mockIdTokenClaims({ roles: [claimed] })
+      await callHandlerWith({
+        // Not at acme.com (the provider's only verified domain).
+        email: 'james@quackback.io',
+        ssoOidc: { autoProvisionRole: 'user', attributeMapping: mapping },
+      })
+      expect(mockSet).not.toHaveBeenCalled()
+      expect(mockInsertValues).not.toHaveBeenCalled()
+      expect(mockChangeTeamRole).not.toHaveBeenCalled()
+      expect(mockRecordAuditEvent).not.toHaveBeenCalled()
+    }
+  )
+
+  it('gives an off-domain OIDC email no team role under syncOnEverySignIn either', async () => {
+    mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'user' })
+    mockIdTokenClaims({ roles: ['admin'] })
+    await callHandlerWith({
+      email: 'james@quackback.io',
+      ssoOidc: {
+        autoProvisionRole: 'user',
+        attributeMapping: { ...mapping, syncOnEverySignIn: true },
+      },
+    })
+    expect(mockSet).not.toHaveBeenCalled()
+    expect(mockInsertValues).not.toHaveBeenCalled()
+    expect(mockChangeTeamRole).not.toHaveBeenCalled()
+  })
+
+  it('refuses the gate before any claim or identity is read', async () => {
+    // The verified-domain gate runs first, so an off-domain callback never
+    // reads the stored ID token or the principal row.
+    mockIdTokenClaims({ roles: ['admin'] })
+    await callHandlerWith({
+      email: 'james@quackback.io',
+      ssoOidc: { autoProvisionRole: 'user', attributeMapping: mapping },
+    })
+    expect(mockAccountFindFirst).not.toHaveBeenCalled()
+    expect(mockFindFirst).not.toHaveBeenCalled()
+    expect(mockTeamRoleGap).not.toHaveBeenCalled()
+  })
+
+  it('still applies the claim-mapped role to an email at the verified domain', async () => {
+    mockFindFirst.mockResolvedValue({ role: 'user' })
+    mockIdTokenClaims({ roles: ['member'] })
+    await callHandlerWith({
+      ssoOidc: { autoProvisionRole: 'user', attributeMapping: mapping },
+    })
+    expect(mockSet).toHaveBeenCalledWith({ role: 'member' })
+  })
+
+  it('still gates the default-role fallback on the verified domain (no claim match)', async () => {
+    mockFindFirst.mockResolvedValue({ role: 'user' })
+    mockIdTokenClaims({ roles: ['guest'] })
+    await callHandlerWith({
+      email: 'james@quackback.io',
+      ssoOidc: {
+        autoProvisionRole: 'member',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [{ whenContains: 'admin', role: 'admin' }],
+        },
+      },
+    })
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleAutoProvisionAfter -- returning user whose principal was soft-removed', () => {
+  it('recreates the principal with the claim-mapped role when no principal exists', async () => {
+    // "Remove from portal" deletes the principal but keeps the auth user, so a
+    // returning OIDC user has no principal when this hook runs. The resolved
+    // role must still land — create the principal in-band rather than silently
+    // updating zero rows (which would leave the lazy path to recreate 'user').
+    // Venturi fork: the email is at the provider's verified domain (the
+    // default alice@acme.com); an off-domain email is covered below.
+    mockFindFirst.mockResolvedValue(undefined) // principal was soft-removed
+    mockIdTokenClaims({ roles: ['member'] })
+    await callHandlerWith({
+      ssoOidc: {
+        autoProvisionRole: 'user',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [{ whenContains: 'member', role: 'member' }],
+        },
+      },
+    })
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ role: 'member' }))
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it('recreates the principal with the default role for a returning user at a verified domain', async () => {
+    // No claim match → default role; the email is at the provider's verified
+    // domain (acme.com) so the fallback still provisions, and the missing
+    // principal must be created, not updated.
+    mockFindFirst.mockResolvedValue(undefined)
+    mockIdTokenClaims({ roles: ['unmatched'] })
+    await callHandlerWith({
+      ssoOidc: {
+        autoProvisionRole: 'member',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [{ whenContains: 'admin', role: 'admin' }],
+        },
+      },
+    })
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ role: 'member' }))
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it('does not provision a returning user with no claim match and no verified domain', async () => {
+    // Boundary: the default-role fallback stays domain-scoped even for a
+    // missing principal, so an off-domain user with no matching claim is left
+    // untouched (the lazy path recreates them as a plain portal 'user').
+    mockFindFirst.mockResolvedValue(undefined)
+    mockIdTokenClaims({ roles: ['unmatched'] })
+    await callHandlerWith({
+      email: 'james@quackback.io',
+      ssoOidc: {
+        autoProvisionRole: 'member',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [{ whenContains: 'admin', role: 'admin' }],
+        },
+      },
+    })
+    expect(mockInsertValues).not.toHaveBeenCalled()
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it('does not recreate an off-domain returning user with a claim-mapped team role (Venturi fork)', async () => {
+    mockFindFirst.mockResolvedValue(undefined)
+    mockIdTokenClaims({ roles: ['member'] })
+    await callHandlerWith({
+      email: 'james@quackback.io',
+      ssoOidc: {
+        autoProvisionRole: 'user',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [{ whenContains: 'member', role: 'member' }],
+        },
+      },
+    })
+    expect(mockInsertValues).not.toHaveBeenCalled()
+    expect(mockSet).not.toHaveBeenCalled()
+  })
+
+  it('does not recreate a returning user with a team role its identity cannot hold (Venturi fork)', async () => {
+    // At the provider's verified domain, but the team identity rule refuses:
+    // the principal is left for the lazy path to recreate as a plain 'user'.
+    mockFindFirst.mockResolvedValue(undefined)
+    mockTeamRoleGap.mockResolvedValue('email_domain')
+    mockIdTokenClaims({ roles: ['member'] })
+    await callHandlerWith({
+      ssoOidc: {
+        autoProvisionRole: 'user',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [{ whenContains: 'member', role: 'member' }],
+        },
+      },
+    })
+    expect(mockInsertValues).not.toHaveBeenCalled()
+    expect(mockSet).not.toHaveBeenCalled()
   })
 })

@@ -7,7 +7,7 @@
  * server. Each successful call writes the matrix and records a
  * `board.access.changed` audit event.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Handler = (args: { data: Record<string, unknown> }) => Promise<unknown>
 const hoisted = vi.hoisted(() => ({ handlers: [] as Handler[], mockAssertNotManaged: vi.fn() }))
@@ -401,5 +401,84 @@ describe('updateBoardAccessFn — policy-managed board access', () => {
       getUpdateBoardAccessFn()({ data: { boardId: 'missing', access: TIGHTER_ACCESS } })
     ).rejects.toMatchObject({ code: 'BOARD_NOT_FOUND' })
     expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
+  })
+})
+
+describe('updateBoardAccessFn — policy-owned anonymous tier (DEF-42)', () => {
+  // A board outside the policy's allowlist, held to signed-in tiers.
+  const SIGNED_IN = {
+    view: 'authenticated',
+    vote: 'authenticated',
+    comment: 'authenticated',
+    submit: 'authenticated',
+    segments: { view: [], vote: [], comment: [], submit: [] },
+    moderation: { anonPosts: 'inherit', signedPosts: 'inherit', comments: 'inherit' },
+  }
+  const saved = process.env.POLICY_MANAGED_SETTINGS
+
+  beforeEach(() => {
+    process.env.POLICY_MANAGED_SETTINGS = 'portal.access.visibility,boards.anonymousAccess'
+    state.boards = [{ id: 'board_2', slug: 'bug-reports', access: structuredClone(SIGNED_IN) }]
+  })
+
+  afterEach(() => {
+    if (saved === undefined) delete process.env.POLICY_MANAGED_SETTINGS
+    else process.env.POLICY_MANAGED_SETTINGS = saved
+  })
+
+  it("refuses a non-allowlisted board's anonymous change with a clean 403, before writing", async () => {
+    const error = await getUpdateBoardAccessFn()({
+      data: { boardId: 'board_2', access: { ...SIGNED_IN, view: 'anonymous' } },
+    }).catch((e: unknown) => e)
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    expect(error).toBeInstanceOf(ForbiddenError)
+    expect(error).toMatchObject({
+      code: 'FIELD_MANAGED',
+      statusCode: 403,
+      message: expect.stringContaining('boards.anonymousAccess'),
+    })
+    // The board-level lock was still consulted first.
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('boards.bug-reports.access')
+    expect(state.updates).toHaveLength(0)
+    expect(state.auditEvents).toHaveLength(0)
+  })
+
+  it('refuses the anonymous tier on any action, not only view', async () => {
+    const all = {
+      ...SIGNED_IN,
+      view: 'anonymous',
+      vote: 'anonymous',
+      comment: 'anonymous',
+      submit: 'anonymous',
+    }
+    await expect(
+      getUpdateBoardAccessFn()({ data: { boardId: 'board_2', access: all } })
+    ).rejects.toMatchObject({
+      code: 'FIELD_MANAGED',
+      message: expect.stringContaining('(requested for view, vote, comment, submit)'),
+    })
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('lets a change among the tiers the policy allows through', async () => {
+    const teamOnly = { ...SIGNED_IN, view: 'team', vote: 'team', comment: 'team', submit: 'team' }
+    await getUpdateBoardAccessFn()({ data: { boardId: 'board_2', access: teamOnly } })
+    expect(state.updates).toEqual([{ access: teamOnly }])
+    expect(state.auditEvents).toHaveLength(1)
+  })
+
+  it('does not refuse anything when the policy does not own the tier', async () => {
+    process.env.POLICY_MANAGED_SETTINGS = 'portal.access.visibility'
+    const open = { ...SIGNED_IN, view: 'anonymous' }
+    await getUpdateBoardAccessFn()({ data: { boardId: 'board_2', access: open } })
+    expect(state.updates).toEqual([{ access: open }])
+  })
+
+  it('passes a save that keeps a board unchanged, even one that still holds Anyone', async () => {
+    state.boards = [{ ...BOARD_DEFAULT }]
+    await getUpdateBoardAccessFn()({
+      data: { boardId: 'board_1', access: structuredClone(BOARD_DEFAULT.access) },
+    })
+    expect(state.updates).toHaveLength(1)
   })
 })

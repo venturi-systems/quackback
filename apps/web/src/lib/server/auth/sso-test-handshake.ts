@@ -12,6 +12,7 @@
  */
 
 import { jwtVerify, createLocalJWKSet, decodeProtectedHeader, decodeJwt } from 'jose'
+import type { JsonValue } from '@/lib/server/audit/log'
 import { acceptedIssuers, asHttpsUrl } from './custom-oidc-fetch'
 import { explainAuthorizeError, explainTokenError } from './oidc-error-explain'
 
@@ -74,6 +75,11 @@ export type HandshakeResult =
         hasRefreshToken: boolean
         expiresIn?: number
       }
+      /** Full decoded ID-token payload, exactly as the IdP returned it. Lets
+       *  admins see non-standard claims (groups, roles, ...) when debugging
+       *  claim-to-role mapping. The curated `claims` above is for the friendly
+       *  display + identity match; this is the complete set. */
+      allClaims?: Record<string, JsonValue>
     }
   | {
       ok: false
@@ -500,5 +506,6 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
       hasRefreshToken: !!tokens.refresh_token,
       expiresIn: tokens.expires_in,
     },
+    allClaims: verifiedPayload as unknown as Record<string, JsonValue>,
   }
 }

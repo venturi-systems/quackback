@@ -3,6 +3,7 @@ import { isPublicHelpCenterReadable } from '@/lib/server/functions/help-center'
 import { hybridSearch } from '@/lib/server/domains/help-center/help-center-search.service'
 import { logger } from '@/lib/server/logger'
 import { widgetDisabledResponse } from '@/lib/server/widget/widget-enabled'
+import { isMatchableText, searchLimit } from '@/lib/server/widget/search-query'
 
 const log = logger.child({ component: 'widget-kb-search' })
 
@@ -23,9 +24,11 @@ export const Route = createFileRoute('/api/widget/kb-search')({
 
         const url = new URL(request.url)
         const q = url.searchParams.get('q')?.trim()
-        const limit = Math.min(Number(url.searchParams.get('limit')) || 10, 20)
+        const limit = searchLimit(url.searchParams.get('limit'), 10, 20)
 
-        if (!q) {
+        // A term holding a NUL matches nothing, and Postgres would reject it,
+        // so it gets the empty result an absent term gets.
+        if (!q || !isMatchableText(q)) {
           return Response.json({ data: { articles: [] } }, { headers: corsHeaders() })
         }
 
