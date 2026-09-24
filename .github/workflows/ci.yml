@@ -42,6 +42,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+          # The upstream intake ledger check walks every commit for
+          # cherry-pick trailers, which a shallow clone does not contain.
+          fetch-depth: 0
 
       - name: Enforce repository governance
         run: >-
@@ -85,6 +88,11 @@ jobs:
           fi
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Check the upstream intake ledger
+        # REQ-21: every `git cherry-pick -x` of an upstream commit needs a
+        # ledger entry, and every fork commit the ledger names must be in
+        # this history. Uses only git and the Bun runtime, no dependencies.
+        run: bun scripts/check-upstream-intake-ledger.ts
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
