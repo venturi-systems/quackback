@@ -3,8 +3,10 @@
  *
  * Every path that turns a session into an authority decision calls it:
  * requireAuth and getOptionalAuth (server functions), the admin route guard,
- * the SSR bootstrap, the workspace helpers, widget sessions, uploads and MCP
- * OAuth tokens. Keeping the rule in one place is what keeps it consistent.
+ * the SSR bootstrap, the workspace helpers, widget sessions, uploads, MCP
+ * OAuth tokens, the portal-access gate and the chat stream (whose token path
+ * calls resolveTeamRole directly, having no session). Keeping the rule in one
+ * place is what keeps it consistent.
  */
 
 import type { UserId } from '@quackback/ids'

@@ -98,6 +98,16 @@ vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
   segmentIdsForPrincipal: (...args: unknown[]) => mockSegmentIdsForPrincipal(...args),
 }))
 
+// --- Mock: session role resolver (team identity rule) ---
+// Pass-through by default: the stored role is exercised as-is. Individual
+// cases override it to model an identity that fails the team identity rule.
+
+const mockResolveSessionRole = vi.fn()
+
+vi.mock('@/lib/server/domains/principals/session-role', () => ({
+  resolveSessionRole: (...args: unknown[]) => mockResolveSessionRole(...args),
+}))
+
 import { resolvePortalAccessForRequest } from '../portal-access'
 import { NotFoundError } from '@/lib/shared/errors'
 
@@ -111,6 +121,8 @@ beforeEach(() => {
   mockGetWidgetConfig.mockResolvedValue({ identifyVerification: false })
   // Default: no segment memberships.
   mockSegmentIdsForPrincipal.mockResolvedValue(new Set())
+  // Default: the stored role is the exercised role.
+  mockResolveSessionRole.mockImplementation(async (record: { role: string }) => record.role)
 })
 
 describe('resolvePortalAccessForRequest — config-throw contract', () => {
@@ -227,6 +239,42 @@ describe('resolvePortalAccessForRequest — private portal', () => {
     const result = await resolvePortalAccessForRequest()
 
     expect(result).toEqual({ granted: true, reason: 'team' })
+  })
+
+  it('treats a stored admin whose identity fails the team rule as a contributor', async () => {
+    // e.g. a password-only bootstrap administrator: the stored role is admin,
+    // but the resolver caps it at 'user', so the 'team' branch must not grant.
+    const sessionUser = { id: 'user_boot', email: 'boot@acme.com', emailVerified: false }
+    mockGetSession.mockResolvedValue({ user: sessionUser })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_boot', type: 'user', role: 'admin' })
+    mockResolveSessionRole.mockResolvedValue('user')
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result).toEqual({ granted: false, reason: 'unauthorized' })
+    expect(mockResolveSessionRole).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'principal_boot', role: 'admin', type: 'user' }),
+      sessionUser,
+      expect.anything()
+    )
+  })
+
+  it('fails CLOSED when the role resolution throws', async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_admin', email: 'admin@acme.com', emailVerified: true },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ type: 'user', role: 'admin' })
+    mockResolveSessionRole.mockRejectedValue(new Error('DATABASE_ERROR'))
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', allowedDomains: [] },
+    })
+
+    const result = await resolvePortalAccessForRequest()
+
+    expect(result).toEqual({ granted: false, reason: 'unauthenticated' })
   })
 
   it('grants a verified caller whose email domain is on the allowlist', async () => {
