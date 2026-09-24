@@ -49,9 +49,10 @@ const log = logger.child({ component: 'targets' })
  * every authenticated subscriber passes — skip the per-principal
  * actor/segment lookup entirely. This is the common case for most
  * workspaces; only the audience-restricted minority pays the per-row
- * cost.
+ * cost. Each subscriber's role is the one the team identity rule lets it
+ * exercise, never a raw stored team role. Exported for tests.
  */
-async function filterSubscribersByPostAudience(
+export async function filterSubscribersByPostAudience(
   postId: PostId,
   subscribers: Subscriber[]
 ): Promise<Subscriber[]> {
@@ -89,10 +90,18 @@ async function filterSubscribersByPostAudience(
       id: principal.id,
       role: principal.role,
       type: principal.type,
+      userId: principal.userId,
     })
     .from(principal)
     .where(inArray(principal.id, principalIds))
   const principalMap = new Map(principals.map((p) => [String(p.id), p]))
+
+  // The role each subscriber may exercise, under the team identity rule
+  // (landing-page#2309): a stored team role the rule does not accept views a
+  // team-only board as a contributor, so it is not sent that board's posts.
+  const { resolveTeamRole } = await import('@/lib/server/domains/principals/team-identity')
+  const exercisedRole = new Map<string, Actor['role']>()
+  for (const p of principals) exercisedRole.set(String(p.id), await resolveTeamRole(p))
 
   const segmentRows = await db
     .select({
@@ -114,7 +123,7 @@ async function filterSubscribersByPostAudience(
     if (!principalRow) return false
     const actor: Actor = {
       principalId: principalRow.id,
-      role: (principalRow.role ?? null) as Actor['role'],
+      role: exercisedRole.get(String(sub.principalId)) ?? null,
       principalType: principalRow.type as Actor['principalType'],
       segmentIds: segmentsByPrincipal.get(String(sub.principalId)) ?? new Set(),
     }
@@ -317,7 +326,10 @@ async function getIntegrationTargets(
         const secrets = decryptSecrets<{ accessToken?: string }>(m.secrets)
         accessToken = secrets.accessToken
       } catch (error) {
-        log.error({ err: error, integration_type: m.integrationType }, 'failed to decrypt integration secrets')
+        log.error(
+          { err: error, integration_type: m.integrationType },
+          'failed to decrypt integration secrets'
+        )
         continue
       }
     }
@@ -475,19 +487,25 @@ function shouldSendEmail(
 }
 
 /**
- * Filter subscribers to only team members (admin/member roles).
- * Batch queries the principal table for efficiency.
+ * Filter subscribers to the team members who may read team-only content (a
+ * private comment): a stored admin or member role that the team identity rule
+ * accepts (landing-page#2309). A stored team role on an identity that fails
+ * the rule acts as a contributor everywhere else, so it is not sent private
+ * content either. Batch queries the principal table for efficiency.
+ * Exported for tests.
  */
-async function filterToTeamMembers(subscribers: Subscriber[]): Promise<Subscriber[]> {
+export async function filterToTeamMembers(subscribers: Subscriber[]): Promise<Subscriber[]> {
   if (subscribers.length === 0) return []
 
   const principalIds = subscribers.map((s) => s.principalId)
   const principals = await db.query.principal.findMany({
     where: inArray(principal.id, principalIds as PrincipalId[]),
-    columns: { id: true, role: true },
+    columns: { id: true, role: true, type: true, userId: true },
   })
 
-  const teamPrincipalIds = new Set(principals.filter((p) => p.role !== 'user').map((p) => p.id))
+  const { principalsActingAsTeam } = await import('@/lib/server/domains/principals/team-identity')
+  const acting = await principalsActingAsTeam(principals)
+  const teamPrincipalIds = new Set(acting.map((p) => p.id))
 
   return subscribers.filter((s) => teamPrincipalIds.has(s.principalId as PrincipalId))
 }

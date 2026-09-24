@@ -61,11 +61,26 @@ export async function notifyVisitorMessage(opts: {
     // conversation, or when nobody is around to see it live.
     if (!opts.isFirstMessage && agentsOnline) return
 
-    const team = await db
-      .select({ principalId: principal.id, email: user.email, name: user.name })
+    const storedTeam = await db
+      .select({
+        principalId: principal.id,
+        role: principal.role,
+        type: principal.type,
+        userId: principal.userId,
+        email: user.email,
+        name: user.name,
+      })
       .from(principal)
       .leftJoin(user, eq(principal.userId, user.id))
       .where(inArray(principal.role, ['admin', 'member']))
+
+    // Visitor messages are team-only content: send them only to the stored
+    // team roles the team identity rule accepts (landing-page#2309). A stored
+    // role on an identity that fails the rule acts as a contributor.
+    const { principalsActingAsTeam } = await import('@/lib/server/domains/principals/team-identity')
+    const team = await principalsActingAsTeam(
+      storedTeam.map((row) => ({ ...row, id: row.principalId }))
+    )
 
     if (team.length === 0) return
 
@@ -136,10 +151,7 @@ export async function notifyAgentReply(opts: {
     if (!recipient) {
       // The visitor is offline and unreachable — surface it instead of dropping
       // silently (the inbox can flag conversations with no reply-to address).
-      log.warn(
-        { conversation_id: opts.conversationId },
-        'agent reply undeliverable (no email)'
-      )
+      log.warn({ conversation_id: opts.conversationId }, 'agent reply undeliverable (no email)')
       return
     }
 

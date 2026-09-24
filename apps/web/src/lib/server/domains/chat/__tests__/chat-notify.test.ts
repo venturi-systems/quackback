@@ -48,6 +48,17 @@ vi.mock('@/lib/server/domains/settings/settings.support', () => ({
   isPortalSupportEnabled: () => isPortalSupportEnabled(),
 }))
 
+// Team-only recipients go through the team identity rule (team-identity.ts,
+// covered there). Here it accepts every stored team row except the ids a test
+// lists in `rejectedTeam`.
+let rejectedTeam = new Set<string>()
+const principalsActingAsTeam = vi.fn(async (rows: Array<{ id: string }>) =>
+  rows.filter((r) => !rejectedTeam.has(r.id))
+)
+vi.mock('@/lib/server/domains/principals/team-identity', () => ({
+  principalsActingAsTeam: (rows: Array<{ id: string }>) => principalsActingAsTeam(rows),
+}))
+
 vi.mock('@/lib/server/db', () => {
   // A thenable chain. `.where()` resolves to the team rows (so a bare await on
   // the where() builder yields the array); `.limit()` resolves to the single
@@ -83,6 +94,7 @@ const ctx = {
 beforeEach(() => {
   teamRows = []
   visitorRows = []
+  rejectedTeam = new Set()
   vi.clearAllMocks()
   // Silence the fire-and-forget warning logs.
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -159,6 +171,61 @@ describe('notifyVisitorMessage', () => {
       ctaUrl: `https://acme.example.com/admin/inbox?c=${conversationId}`,
       workspaceName: 'Acme',
     })
+  })
+
+  it('leaves out a stored team role the team identity rule does not accept', async () => {
+    isAnyAgentOnline.mockResolvedValue(false)
+    teamRows = [
+      {
+        principalId: 'principal_admin',
+        role: 'admin',
+        type: 'user',
+        userId: 'user_a',
+        email: 'a@x.com',
+        name: 'A',
+      },
+      {
+        principalId: 'principal_bootstrap',
+        role: 'admin',
+        type: 'user',
+        userId: 'user_b',
+        email: 'b@x.com',
+        name: 'B',
+      },
+    ]
+    rejectedTeam = new Set(['principal_bootstrap'])
+
+    await notifyVisitorMessage({
+      conversation,
+      content: 'private question',
+      authorName: 'Jane',
+      isFirstMessage: true,
+    })
+
+    const batch = createNotificationsBatch.mock.calls[0][0] as Array<Record<string, unknown>>
+    expect(batch.map((n) => n.principalId)).toEqual(['principal_admin'])
+    expect(sendChatMessageEmail).toHaveBeenCalledTimes(1)
+    expect(sendChatMessageEmail.mock.calls[0][0]).toMatchObject({ to: 'a@x.com' })
+    expect(principalsActingAsTeam).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'principal_admin', role: 'admin', userId: 'user_a' }),
+      expect.objectContaining({ id: 'principal_bootstrap', role: 'admin', userId: 'user_b' }),
+    ])
+  })
+
+  it('is a no-op when no stored team role is accepted', async () => {
+    isAnyAgentOnline.mockResolvedValue(false)
+    teamRows = [{ principalId: 'principal_bootstrap', email: 'b@x.com', name: 'B' }]
+    rejectedTeam = new Set(['principal_bootstrap'])
+
+    await notifyVisitorMessage({
+      conversation,
+      content: 'anyone there',
+      authorName: 'Visitor',
+      isFirstMessage: true,
+    })
+
+    expect(createNotificationsBatch).not.toHaveBeenCalled()
+    expect(sendChatMessageEmail).not.toHaveBeenCalled()
   })
 
   it('is a no-op when there are no team members', async () => {

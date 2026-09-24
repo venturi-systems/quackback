@@ -57,7 +57,7 @@ export const Route = createFileRoute('/api/v1/comments/$commentId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          const { principalId } = await withApiKeyAuth(request, { role: 'team' })
+          const { principalId, role } = await withApiKeyAuth(request, { role: 'team' })
 
           const commentId = parseTypeId<CommentId>(params.commentId, 'comment', 'comment ID')
 
@@ -74,22 +74,16 @@ export const Route = createFileRoute('/api/v1/comments/$commentId')({
             await import('@/lib/server/domains/comments/comment.permissions')
           const { db, principal, eq } = await import('@/lib/server/db')
 
-          const principalRecord = await db.query.principal.findFirst({
-            where: eq(principal.id, principalId),
-            with: { user: { columns: { name: true } } },
-          })
-
+          // The key's resolved role (its stored role capped by its creator's
+          // current role under the team identity rule), never the service
+          // principal's stored role (landing-page#2309).
           const result = await userEditComment(
             commentId,
             parsed.data.content,
-            {
-              principalId,
-              role: (principalRecord?.role as 'admin' | 'member' | 'user') ?? 'user',
-            },
+            { principalId, role },
             {
               contentJson: (parsed.data.contentJson ?? undefined) as
-                | import('@/lib/shared/db-types').TiptapContent
-                | undefined,
+                import('@/lib/shared/db-types').TiptapContent | undefined,
             }
           )
 
@@ -120,22 +114,15 @@ export const Route = createFileRoute('/api/v1/comments/$commentId')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          const { principalId } = await withApiKeyAuth(request, { role: 'team' })
+          const { principalId, role } = await withApiKeyAuth(request, { role: 'team' })
 
           const commentId = parseTypeId<CommentId>(params.commentId, 'comment', 'comment ID')
 
           const { softDeleteComment } =
             await import('@/lib/server/domains/comments/comment.permissions')
-          const { db, principal, eq } = await import('@/lib/server/db')
 
-          const principalRecord = await db.query.principal.findFirst({
-            where: eq(principal.id, principalId),
-          })
-
-          await softDeleteComment(commentId, {
-            principalId,
-            role: (principalRecord?.role as 'admin' | 'member' | 'user') ?? 'user',
-          })
+          // The key's resolved role, as in PATCH.
+          await softDeleteComment(commentId, { principalId, role })
 
           return noContentResponse()
         } catch (error) {
