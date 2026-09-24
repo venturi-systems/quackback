@@ -42,6 +42,7 @@ import type {
 } from '@quackback/ids'
 import { aggregateReactions } from '@/lib/shared'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
+import { likeText } from '@/lib/server/utils/like-pattern'
 import { truncate } from '@/lib/shared/utils/string'
 import type {
   ChatAuthorDTO,
@@ -772,19 +773,23 @@ export async function listConversationsForAgent(
   const search = filter.search?.trim()
   // Match the visitor's name or any non-deleted message content. EXISTS keeps
   // the select shape (conversations only) — no join row fan-out. The term is
-  // parameter-bound, so `%`/`_` are treated as literals-plus-wildcards, not SQLi.
-  const searchCondition = search
+  // parameter-bound (no SQLi) and escaped by likeText, so `%`, `_` and `\`
+  // match themselves. Unescaped, a term ending in a backslash (`?q=a%5C`) left
+  // the pattern ending in the escape character, which Postgres rejects, and
+  // failed the whole list (DEF-45).
+  const searchPattern = search ? `%${likeText(search)}%` : undefined
+  const searchCondition = searchPattern
     ? sql`(
           EXISTS (
             SELECT 1 FROM ${principal} p
             WHERE p.id = ${conversations.visitorPrincipalId}
-              AND p.display_name ILIKE ${'%' + search + '%'}
+              AND p.display_name ILIKE ${searchPattern}
           )
           OR EXISTS (
             SELECT 1 FROM ${chatMessages} m
             WHERE m.conversation_id = ${conversations.id}
               AND m.deleted_at IS NULL
-              AND m.content ILIKE ${'%' + search + '%'}
+              AND m.content ILIKE ${searchPattern}
           )
         )`
     : undefined

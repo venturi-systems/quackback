@@ -33,6 +33,8 @@ import type { PrincipalId, SegmentId } from '@quackback/ids'
 import type { SQLWrapper } from 'drizzle-orm'
 import { NotFoundError, InternalError } from '@/lib/shared/errors'
 import { realEmail } from '@/lib/shared/anonymous-email'
+import { NUMERIC_ATTR_OPS, isFiniteAttrNumber } from '@/lib/shared/custom-attr-filters'
+import { likeText } from '@/lib/server/utils/like-pattern'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'users' })
@@ -100,6 +102,27 @@ function buildCountCondition(countExpr: ReturnType<typeof sql>, op: string, valu
     default:
       return sql`${countExpr} >= ${value}`
   }
+}
+
+/**
+ * A metadata value that reads as a plain decimal number: an optional sign,
+ * then up to 255 digits with an optional decimal point and up to 255 more
+ * (255 is the largest bound a Postgres regex allows). Every text this matches
+ * is valid `numeric` input. It leaves out exponent notation, so no stored text
+ * can ask the cast for an out-of-range value such as `1e999999`.
+ */
+const NUMERIC_TEXT = '^[-+]?([0-9]{1,255}([.][0-9]{0,255})?|[.][0-9]{1,255})$'
+
+/**
+ * A metadata text value as `numeric`, or NULL when it is not a plain decimal
+ * number. An unchecked `::numeric` cast raised an error for any stored text
+ * such as "gold", and a single such user failed the whole users list (DEF-45).
+ * CASE evaluates the cast only for a row whose text passed the check, and a
+ * NULL satisfies no comparison, so a user whose value is not a number is simply
+ * not matched.
+ */
+function metadataNumber(text: ReturnType<typeof sql>) {
+  return sql`(CASE WHEN ${text} ~ ${NUMERIC_TEXT} THEN (${text})::numeric END)`
 }
 
 /** Activity aggregates are global only when counts affect membership or order. */
@@ -184,7 +207,8 @@ export async function listPortalUsers(
     }
 
     if (search) {
-      conditions.push(or(ilike(user.name, `%${search}%`), ilike(user.email, `%${search}%`))!)
+      const pattern = `%${likeText(search)}%`
+      conditions.push(or(ilike(user.name, pattern), ilike(user.email, pattern))!)
     }
 
     if (verified !== undefined) {
@@ -199,7 +223,7 @@ export async function listPortalUsers(
     }
 
     if (emailDomain) {
-      conditions.push(ilike(user.email, `%@${emailDomain}`))
+      conditions.push(ilike(user.email, `%@${likeText(emailDomain)}`))
     }
 
     if (postCountFilter) {
@@ -221,6 +245,9 @@ export async function listPortalUsers(
     // Custom attribute filters (metadata JSON fields)
     if (customAttrs && customAttrs.length > 0) {
       for (const attr of customAttrs) {
+        // A numeric comparison needs a finite number to compare with. The admin
+        // list already drops one without (parseCustomAttrs); skip any other.
+        if (NUMERIC_ATTR_OPS.has(attr.op) && !isFiniteAttrNumber(attr.value)) continue
         const jsonVal = sql`(${user.metadata}::jsonb->>${attr.key})`
         switch (attr.op) {
           case 'eq':
@@ -230,25 +257,25 @@ export async function listPortalUsers(
             conditions.push(sql`${jsonVal} != ${attr.value}`)
             break
           case 'contains':
-            conditions.push(sql`${jsonVal} ILIKE ${'%' + attr.value + '%'}`)
+            conditions.push(sql`${jsonVal} ILIKE ${'%' + likeText(attr.value) + '%'}`)
             break
           case 'starts_with':
-            conditions.push(sql`${jsonVal} ILIKE ${attr.value + '%'}`)
+            conditions.push(sql`${jsonVal} ILIKE ${likeText(attr.value) + '%'}`)
             break
           case 'ends_with':
-            conditions.push(sql`${jsonVal} ILIKE ${'%' + attr.value}`)
+            conditions.push(sql`${jsonVal} ILIKE ${'%' + likeText(attr.value)}`)
             break
           case 'gt':
-            conditions.push(sql`(${jsonVal})::numeric > ${Number(attr.value)}`)
+            conditions.push(sql`${metadataNumber(jsonVal)} > ${Number(attr.value)}`)
             break
           case 'gte':
-            conditions.push(sql`(${jsonVal})::numeric >= ${Number(attr.value)}`)
+            conditions.push(sql`${metadataNumber(jsonVal)} >= ${Number(attr.value)}`)
             break
           case 'lt':
-            conditions.push(sql`(${jsonVal})::numeric < ${Number(attr.value)}`)
+            conditions.push(sql`${metadataNumber(jsonVal)} < ${Number(attr.value)}`)
             break
           case 'lte':
-            conditions.push(sql`(${jsonVal})::numeric <= ${Number(attr.value)}`)
+            conditions.push(sql`${metadataNumber(jsonVal)} <= ${Number(attr.value)}`)
             break
           case 'is_set':
             conditions.push(sql`${jsonVal} IS NOT NULL`)

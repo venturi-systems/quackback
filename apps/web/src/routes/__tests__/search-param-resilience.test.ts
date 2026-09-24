@@ -224,6 +224,11 @@ const HOSTILE_QUERIES = [
   `?owner=${PRINCIPAL}&selected=${PRINCIPAL}&segments=${SEGMENT},${OTHER_SEGMENT},x`,
   `?category=${CATEGORY}&c=${CONVERSATION}`,
   '?postCount=gte:5&dateFrom=2026-01-31&dateTo=2026-09-24T10:00:00.000Z',
+  '?dateFrom=0000-01-01',
+  '?dateFrom=0001-01-01T00:00%2B01:00&dateTo=0000-12-31&updatedBefore=0000-06-01',
+  '?search=%00',
+  '?board=a%00b',
+  '?status=open%00&tags=%00&customAttrs=plan:eq:%00&emailDomain=%00&c=%00&token=%00',
 ]
 
 const ROUTES: Array<[string, unknown]> = [
@@ -362,10 +367,41 @@ describe('counts and dates the query cannot take read as absent', () => {
     expect(valueOf(adminUsers, '?dateFrom=soon').dateFrom).toBeUndefined()
   })
 
+  it('reads a date in UTC year 0, which Postgres rejects, as absent', () => {
+    expect(valueOf(portalHome, '?dateFrom=0000-01-01').dateFrom).toBeUndefined()
+    expect(valueOf(portalHome, '?dateFrom=0001-01-01')).toMatchObject({ dateFrom: '0001-01-01' })
+    for (const route of [adminFeedback, adminUsers]) {
+      expect(valueOf(route, '?dateFrom=0000-01-01').dateFrom).toBeUndefined()
+      expect(valueOf(route, '?dateTo=0001-01-01T00:00%2B01:00').dateTo).toBeUndefined()
+      expect(valueOf(route, '?dateFrom=0001-01-01')).toMatchObject({ dateFrom: '0001-01-01' })
+    }
+    expect(valueOf(adminFeedback, '?updatedBefore=0000-01-01').updatedBefore).toBeUndefined()
+  })
+
+  it('keeps the portal home date to a calendar date, the form its server function takes', () => {
+    expect(valueOf(portalHome, '?dateFrom=2026-09-24T10:00:00.000Z').dateFrom).toBeUndefined()
+  })
+
   it('keeps users activity filters to a known operator and a whole number', () => {
     expect(valueOf(adminUsers, '?postCount=gte:5')).toMatchObject({ postCount: 'gte:5' })
     for (const bad of ['gte:abc', 'bogus:5', 'gte:1.5', 'gte:-1', 'gte:5:6', 'gte:', 'gte']) {
       expect(valueOf(adminUsers, `?postCount=${bad}`).postCount).toBeUndefined()
     }
+  })
+})
+
+describe('a value holding a NUL, which Postgres rejects in text, reads as absent', () => {
+  it('drops it from free text, slugs and lists', () => {
+    expect(valueOf(portalHome, '?search=%00').search).toBeUndefined()
+    expect(valueOf(portalHome, '?board=a%00b').board).toBeUndefined()
+    expect(valueOf(portalHome, '?status=open%00').status).toBeUndefined()
+    expect(valueOf(portalRoadmap, '?search=a%00').search).toBeUndefined()
+    expect(valueOf(adminFeedback, '?search=%00').search).toBeUndefined()
+    expect(valueOf(adminUsers, '?customAttrs=plan:eq:%00').customAttrs).toBeUndefined()
+    expect(valueOf(adminUsers, '?emailDomain=a%00.example').emailDomain).toBeUndefined()
+  })
+
+  it('keeps the same values without the NUL', () => {
+    expect(valueOf(portalHome, '?search=a&board=ab')).toMatchObject({ search: 'a', board: 'ab' })
   })
 })

@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
+import { generateId } from '@quackback/ids'
 import type { ChatTagId, SegmentId } from '@quackback/ids'
-import { navFromSearch, buildListParams, type InboxNavItem } from './inbox-scope'
+import {
+  navFromSearch,
+  buildListParams,
+  inboxConversationParam,
+  inboxSearchParam,
+  MAX_INBOX_SEARCH_LENGTH,
+  type InboxNavItem,
+} from './inbox-scope'
 
 const tagId = 'chat_tag_x' as ChatTagId
 const segId = 'segment_y' as SegmentId
@@ -81,5 +89,49 @@ describe('buildListParams', () => {
       assignee: 'all',
       search: undefined,
     })
+  })
+
+  it('holds typed search text to the length the list accepts', () => {
+    const long = 'a'.repeat(MAX_INBOX_SEARCH_LENGTH + 50)
+    expect(buildListParams(view('all'), 'all', 'all', long).search).toBe(
+      'a'.repeat(MAX_INBOX_SEARCH_LENGTH)
+    )
+  })
+})
+
+// DEF-45: a hand-typed or shared inbox URL must never feed the list or thread
+// query a value it answers 500 on.
+describe('inboxConversationParam', () => {
+  it('keeps a conversation id', () => {
+    const id = generateId('conversation')
+    expect(inboxConversationParam(id)).toBe(id)
+  })
+
+  it('reads anything else as absent', () => {
+    for (const value of ['foo', 'conversation_foo', generateId('post'), 123, true, null, [], {}]) {
+      expect(inboxConversationParam(value)).toBeUndefined()
+    }
+    expect(inboxConversationParam(undefined)).toBeUndefined()
+  })
+})
+
+describe('inboxSearchParam', () => {
+  it('keeps search text, and reads a number or boolean as its text', () => {
+    expect(inboxSearchParam('refund')).toBe('refund')
+    expect(inboxSearchParam('a\\')).toBe('a\\')
+    expect(inboxSearchParam(123)).toBe('123')
+    expect(inboxSearchParam(true)).toBe('true')
+  })
+
+  it('keeps text up to the length the list accepts and no longer', () => {
+    const max = 'a'.repeat(MAX_INBOX_SEARCH_LENGTH)
+    expect(inboxSearchParam(max)).toBe(max)
+    expect(inboxSearchParam(`${max}a`)).toBeUndefined()
+  })
+
+  it('reads an empty value, a NUL and any other shape as absent', () => {
+    for (const value of ['', 'a\u0000b', '\u0000', null, undefined, ['a'], { a: 1 }]) {
+      expect(inboxSearchParam(value)).toBeUndefined()
+    }
   })
 })
