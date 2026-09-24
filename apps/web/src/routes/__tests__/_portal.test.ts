@@ -202,3 +202,77 @@ describe('_portal loader — portal-visibility gate + access.denied audit', () =
     expect(result?.gate?.locale).toBe('en')
   })
 })
+
+// DEF-47: the anonymous sign-in gate dropped the ?error= code of a refused
+// sign-in, so the visitor saw the bare form and no reason.
+describe('_portal loader — refused sign-in on the gate', () => {
+  it('carries the error code and the requested page into the anonymous gate', async () => {
+    mockEvaluateMyPortalAccessFn.mockResolvedValueOnce({
+      granted: false,
+      reason: 'unauthenticated',
+    })
+
+    const context = makeContext({ id: 'user_anon', email: '', principalType: 'anonymous' })
+    const result = (await getLoader()({
+      context,
+      deps: { auth: 'signin', error: 'not_team_member', callbackUrl: '/admin/settings' },
+    } as never)) as { gate?: { error?: string; callbackUrl?: string } }
+
+    expect(result.gate?.error).toBe('not_team_member')
+    expect(result.gate?.callbackUrl).toBe('/admin/settings')
+  })
+
+  it('leaves the gate without a code when the URL carries none', async () => {
+    mockEvaluateMyPortalAccessFn.mockResolvedValueOnce({
+      granted: false,
+      reason: 'unauthenticated',
+    })
+
+    const context = makeContext({ id: 'user_anon', email: '', principalType: 'anonymous' })
+    const result = (await runLoader(context)) as { gate?: { error?: string } }
+
+    expect(result.gate?.error).toBeUndefined()
+  })
+})
+
+// DEF-44: titles are set in the server-rendered head, not only on the client.
+describe('_portal head', () => {
+  type Head = { meta?: Array<{ title?: string; name?: string; content?: string }> }
+
+  function getHead() {
+    const head = (routeOptions as unknown as { options?: { head?: unknown } }).options?.head
+    if (typeof head !== 'function') throw new Error('Could not find head on route options')
+    return head as (ctx: { loaderData?: unknown; matches: unknown[] }) => Head
+  }
+
+  const titleOf = (head: Head) => head.meta?.find((m) => m.title !== undefined)?.title
+
+  it('titles the sign-in gate and keeps it out of search indexes', () => {
+    const head = getHead()({
+      loaderData: { gate: { workspaceName: 'Venturi', logoUrl: null } },
+      matches: [],
+    })
+    expect(titleOf(head)).toBe('Sign in · Venturi')
+    expect(head.meta).toContainEqual({ name: 'robots', content: 'noindex, nofollow' })
+  })
+
+  it('titles a portal page that was not found', () => {
+    const head = getHead()({
+      loaderData: { gate: null, org: { name: 'Venturi' } },
+      matches: [
+        { routeId: '__root__', status: 'success' },
+        { routeId: '/_portal', status: 'success' },
+        { routeId: '/_portal/b/$slug', status: 'notFound' },
+      ],
+    })
+    expect(titleOf(head)).toBe('Page not found · Venturi Feedback')
+  })
+
+  it('keeps the workspace title on an ordinary portal page', () => {
+    const head = getHead()({
+      loaderData: { gate: null, org: { name: 'Venturi' } },
+      matches: [{ routeId: '/_portal', status: 'success' }],
+    })
+    expect(titleOf(head)).toBe('Venturi')
+  })
+})

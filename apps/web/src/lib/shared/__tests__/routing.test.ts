@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isSafeCallbackUrl, isTeamCallback } from '../routing'
+import { isSafeCallbackUrl, isTeamCallback, teamSigninCallback } from '../routing'
 
 describe('isSafeCallbackUrl', () => {
   // Accepted values
@@ -106,5 +106,50 @@ describe('isTeamCallback', () => {
   })
   it('is false for non-admin lookalikes', () => {
     expect(isTeamCallback('/administrator-handbook')).toBe(false)
+  })
+  it('reads only the path, so a team page keeps its query and fragment', () => {
+    expect(isTeamCallback('/admin?post=post_1')).toBe(true)
+    expect(isTeamCallback('/admin#top')).toBe(true)
+    expect(isTeamCallback('/admin/settings?tab=sign-in')).toBe(true)
+    expect(isTeamCallback('/?next=/admin')).toBe(false)
+    expect(isTeamCallback('/administrator?x=/admin')).toBe(false)
+  })
+})
+
+// DEF-48: a signed-out visitor on /admin/settings was sent to sign in with
+// callbackUrl=/admin, so the deep link was lost.
+describe('teamSigninCallback', () => {
+  it('keeps the team page that was asked for, with its query and fragment', () => {
+    expect(teamSigninCallback('/admin/settings')).toBe('/admin/settings')
+    expect(teamSigninCallback('/admin/settings/security/authentication?tab=sign-in')).toBe(
+      '/admin/settings/security/authentication?tab=sign-in'
+    )
+    expect(teamSigninCallback('/admin/feedback#post')).toBe('/admin/feedback#post')
+    expect(teamSigninCallback('/complete-signup/inv_123')).toBe('/complete-signup/inv_123')
+  })
+
+  it('falls back to /admin when nothing was asked for', () => {
+    expect(teamSigninCallback(undefined)).toBe('/admin')
+    expect(teamSigninCallback('')).toBe('/admin')
+  })
+
+  it.each([
+    '//evil.example/admin',
+    'https://evil.example/admin',
+    '/\\evil.example',
+    '/\t/evil.example',
+    '/admin\u0000',
+    'javascript:alert(1)',
+    '/b/ideas',
+    '/',
+    '/administrator',
+    123,
+    { href: '/admin/settings' },
+  ])('falls back to /admin for %j, which is not a same-origin team page', (requested) => {
+    expect(teamSigninCallback(requested)).toBe('/admin')
+  })
+
+  it('falls back to /admin for a list, which is not text', () => {
+    expect(teamSigninCallback(['/admin/settings'])).toBe('/admin')
   })
 })
