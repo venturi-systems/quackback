@@ -131,6 +131,28 @@ export function projectArticlePreview(article: ArticleInput, baseUrl: string): E
   }
 }
 
+/**
+ * The embed resolver for a Help Center article. An article card is Help
+ * Center content, so it resolves only while the Help Center is switched on and
+ * readable by this viewer: the same gate as every public Help Center read
+ * (`isPublicHelpCenterReadable`). Otherwise, or when the article is absent,
+ * private or unpublished, it yields null (REQ-17, landing-page#2309).
+ */
+export async function resolveEmbedArticle(
+  slug: string,
+  deps: {
+    isHelpCenterReadable: () => Promise<boolean>
+    getPublicArticle: (slug: string) => Promise<ArticleInput>
+  }
+): Promise<ArticleInput | null> {
+  if (!(await deps.isHelpCenterReadable())) return null
+  try {
+    return await deps.getPublicArticle(slug)
+  } catch {
+    return null
+  }
+}
+
 /** Join a base URL and an absolute path, collapsing any trailing slash on the
  *  base so `${base}/path` never doubles up (`config.baseUrl` may or may not
  *  carry one). */
@@ -195,20 +217,23 @@ export const getEmbedPreviewFn = createServerFn({ method: 'GET' })
         { listPublicStatuses },
         { getPublicChangelogMetaById },
         { getPublicArticleBySlug },
+        { isPublicHelpCenterReadable },
       ] = await Promise.all([
         import('@/lib/server/domains/posts/post.public.detail'),
         import('@/lib/server/domains/statuses/status.service'),
         import('@/lib/server/domains/changelog/changelog.public'),
         import('@/lib/server/domains/help-center/help-center.article.service'),
+        import('./help-center'),
       ])
 
       // Canonical portal base for the absolute embed `url` (opened in a new tab
       // by surfaces like the widget). Imported lazily alongside the read paths.
       const { config } = await import('@/lib/server/config')
 
-      // Article resolver: `getPublicArticleBySlug` throws NotFoundError when the
-      // article is absent, private, or unpublished — the catch in `resolveEmbed`
-      // collapses that to `{ unavailable: true }` without leaking the error.
+      // Article resolver: served only while the Help Center is on and readable
+      // (resolveEmbedArticle). `getPublicArticleBySlug` throws NotFoundError when
+      // the article is absent, private, or unpublished; resolveEmbedArticle
+      // turns that into null, which `resolveEmbed` answers `{ unavailable: true }`.
       return await resolveEmbed(
         data.kind,
         data.id,
@@ -217,13 +242,11 @@ export const getEmbedPreviewFn = createServerFn({ method: 'GET' })
           getPostDetail: getPublicPostDetail,
           listStatuses: listPublicStatuses,
           getChangelog: getPublicChangelogMetaById,
-          getArticle: async (slug: string) => {
-            try {
-              return await getPublicArticleBySlug(slug)
-            } catch {
-              return null
-            }
-          },
+          getArticle: (slug: string) =>
+            resolveEmbedArticle(slug, {
+              isHelpCenterReadable: isPublicHelpCenterReadable,
+              getPublicArticle: getPublicArticleBySlug,
+            }),
         },
         config.baseUrl
       )
