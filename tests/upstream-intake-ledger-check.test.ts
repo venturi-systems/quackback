@@ -1,10 +1,14 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   findLedgerViolations,
   parseCherryPicks,
   parseLedger,
+  patchIdOf,
+  PATCH_ID_COMMAND,
   type HistoryProbe,
   type LedgerEntry,
 } from '../scripts/check-upstream-intake-ledger'
@@ -24,6 +28,7 @@ function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
     downstream_head: FORK_PARENT,
     downstream_commit: FORK_PICK,
     patch_id: PATCH_ID,
+    review: { decision: 'accepted' },
     ...overrides,
   }
 }
@@ -90,6 +95,74 @@ describe('REQ-21 upstream intake ledger check', () => {
     )
     expect(problems).toHaveLength(1)
     expect(problems[0]).toContain('does not match')
+  })
+
+  it('fails when the entry for a pick names a different fork commit', () => {
+    const problems = findLedgerViolations(
+      [entry({ downstream_commit: FORK_PARENT, patch_id: PATCH_ID })],
+      [{ commit: FORK_PICK, upstream: UPSTREAM }],
+      history([FORK_PICK, FORK_PARENT, MERGE_BASE], { [FORK_PARENT]: PATCH_ID })
+    )
+    expect(problems).toEqual([
+      `${FORK_PICK} was cherry-picked from upstream ${UPSTREAM}, but no accepted ledger entry for it has downstream_commit ${FORK_PICK}`,
+      `ledger entry 1 (upstream ${UPSTREAM}): downstream_commit ${FORK_PARENT} carries no (cherry picked from commit ${UPSTREAM}) trailer`,
+    ])
+  })
+
+  it('fails when the entry for a pick records no fork commit', () => {
+    const problems = findLedgerViolations(
+      [entry({ downstream_commit: undefined, patch_id: undefined })],
+      [{ commit: FORK_PICK, upstream: UPSTREAM }],
+      FULL_HISTORY
+    )
+    expect(problems).toEqual([
+      `${FORK_PICK} was cherry-picked from upstream ${UPSTREAM}, but no accepted ledger entry for it has downstream_commit ${FORK_PICK}`,
+    ])
+  })
+
+  it('fails when an entry records a fork commit without its patch-id, or the reverse', () => {
+    const picks = [{ commit: FORK_PICK, upstream: UPSTREAM }]
+    for (const partial of [{ patch_id: undefined }, { downstream_commit: undefined }]) {
+      const problems = findLedgerViolations([entry(partial)], picks, FULL_HISTORY)
+      expect(problems).toContain(
+        `ledger entry 1 (upstream ${UPSTREAM}): downstream_commit and patch_id must be recorded together`
+      )
+    }
+  })
+
+  it('fails when the only entry for a pick was rejected or deferred', () => {
+    for (const decision of ['rejected', 'deferred'] as const) {
+      const problems = findLedgerViolations(
+        [entry({ review: { decision } })],
+        [{ commit: FORK_PICK, upstream: UPSTREAM }],
+        FULL_HISTORY
+      )
+      expect(problems).toEqual([
+        `${FORK_PICK} was cherry-picked from upstream ${UPSTREAM}, but no accepted ledger entry for it has downstream_commit ${FORK_PICK}`,
+      ])
+    }
+  })
+
+  it('fails when an entry names a fork commit that carries no trailer for its upstream commit', () => {
+    const problems = findLedgerViolations(
+      [entry()],
+      [{ commit: FORK_PICK, upstream: OTHER_UPSTREAM }],
+      FULL_HISTORY
+    )
+    expect(problems).toContain(
+      `ledger entry 1 (upstream ${UPSTREAM}): downstream_commit ${FORK_PICK} carries no (cherry picked from commit ${UPSTREAM}) trailer`
+    )
+  })
+
+  it('rejects a ledger line without a known review decision', () => {
+    const { review: _review, ...unreviewed } = entry()
+    expect(() => parseLedger(JSON.stringify(unreviewed))).toThrow(
+      'ledger line 1: review.decision must be accepted, rejected or deferred'
+    )
+    const undecided = entry({ review: { decision: 'maybe' as never } })
+    expect(() => parseLedger(JSON.stringify(undecided))).toThrow(
+      'ledger line 1: review.decision must be accepted, rejected or deferred'
+    )
   })
 
   it('rejects a ledger line that is not JSON or carries a malformed SHA', () => {
@@ -187,5 +260,105 @@ describe('upstream intake record builder', () => {
     expect(() => buildUpstreamIntakeRecord({ ...base, intake_pr: 0 })).toThrow(
       'intake_pr must be a positive pull request number'
     )
+  })
+
+  it('rejects a fork commit without its patch-id, and a patch-id without its fork commit', () => {
+    expect(() => buildUpstreamIntakeRecord({ ...base, downstream_commit: FORK_PICK })).toThrow(
+      'downstream_commit and patch_id must be recorded together'
+    )
+    expect(() => buildUpstreamIntakeRecord({ ...base, patch_id: PATCH_ID })).toThrow(
+      'downstream_commit and patch_id must be recorded together'
+    )
+  })
+})
+
+describe('pinned patch-id command', () => {
+  // A throwaway repository with one commit whose diff has two nearby hunks and
+  // blank context lines, so each pinned setting changes the unpinned id.
+  let repo = ''
+  let sha = ''
+  // No caller git config or GIT_* environment reaches the fixture's own commands.
+  const isolated = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
+  )
+
+  function run(args: string[], input?: string): string {
+    return execFileSync('git', args, { cwd: repo, env: isolated, encoding: 'utf8', input })
+  }
+
+  function unpinnedPatchId(): string {
+    return run(['patch-id', '--stable'], run(['show', '--format=', sha])).split(' ')[0] ?? ''
+  }
+
+  beforeAll(() => {
+    const root = mkdtempSync(join(tmpdir(), 'intake-ledger-patch-id-'))
+    repo = join(root, 'repo')
+    mkdirSync(repo)
+    const globalConfig = join(root, 'gitconfig')
+    writeFileSync(globalConfig, '')
+    Object.assign(isolated, {
+      GIT_CONFIG_GLOBAL: globalConfig,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@example.com',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@example.com',
+    })
+    const lines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`)
+    lines[2] = ''
+    lines[15] = ''
+    run(['-c', 'init.defaultBranch=main', 'init', '-q'])
+    writeFileSync(join(repo, 'file.txt'), `${lines.join('\n')}\n`)
+    run(['add', 'file.txt'])
+    run(['commit', '-q', '-m', 'base'])
+    lines[4] = 'line 5 changed'
+    lines[13] = 'line 14 changed'
+    writeFileSync(join(repo, 'file.txt'), `${lines.join('\n')}\n`)
+    run(['commit', '-q', '-a', '-m', 'change'])
+    sha = run(['rev-parse', 'HEAD']).trim()
+  })
+
+  afterAll(() => {
+    if (repo) rmSync(join(repo, '..'), { recursive: true, force: true })
+  })
+
+  it('gives the same id under any diff configuration', () => {
+    const pinned = patchIdOf(sha, repo)
+    const unpinned = unpinnedPatchId()
+    expect(pinned).toMatch(/^[0-9a-f]{40}$/)
+    expect(pinned).toBe(unpinned)
+
+    // Settings every supported git reads; each one changes the unpinned id.
+    const changesTheId: Array<[string, string]> = [
+      ['diff.noprefix', 'true'],
+      ['diff.context', '1'],
+      ['diff.interHunkContext', '10'],
+      ['diff.suppressBlankEmpty', 'true'],
+    ]
+    for (const [key, value] of changesTheId) {
+      run(['config', key, value])
+      expect(unpinnedPatchId(), key).not.toBe(unpinned)
+      expect(patchIdOf(sha, repo), key).toBe(pinned)
+      run(['config', '--unset', key])
+    }
+
+    // Settings only newer git reads, or that leave this diff alone; still pinned.
+    const alsoPinned: Array<[string, string]> = [
+      ['diff.srcPrefix', 'x/'],
+      ['diff.dstPrefix', 'y/'],
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.algorithm', 'patience'],
+      ['diff.indentHeuristic', 'false'],
+    ]
+    for (const [key, value] of alsoPinned) {
+      run(['config', key, value])
+      expect(patchIdOf(sha, repo), key).toBe(pinned)
+      run(['config', '--unset', key])
+    }
+  })
+
+  it('is the command the record builder documents', () => {
+    const builder = readFileSync(join(process.cwd(), 'scripts', 'upstream-intake-ledger.ts'), 'utf8')
+    expect(builder).toContain(PATCH_ID_COMMAND)
   })
 })

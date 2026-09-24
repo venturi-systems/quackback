@@ -7,11 +7,16 @@ const FULL_SHA = /^[0-9a-f]{40}$/
  * One reviewed upstream intake. For a `git cherry-pick -x` intake:
  * - `downstream_head` is the fork commit the pick was applied onto;
  * - `merge_base` is the merge base of `downstream_head` and `upstream_sha`;
- * - `downstream_commit` is the fork commit the pick produced;
+ * - `downstream_commit` is the fork commit the pick produced, which must carry
+ *   the `(cherry picked from commit <upstream_sha>)` trailer;
  * - `patch_id` is that commit's patch-id, computed exactly as
- *   `scripts/check-upstream-intake-ledger.ts` recomputes it:
- *   `git show --no-color --no-ext-diff --no-renames --diff-algorithm=histogram --format= <sha> | git patch-id --stable`.
- *   The diff algorithm is pinned because it changes the patch-id.
+ *   `scripts/check-upstream-intake-ledger.ts` recomputes it (`PATCH_ID_COMMAND`):
+ *   `git -c diff.suppressBlankEmpty=false show --no-color --no-ext-diff --no-renames --no-textconv --submodule=short --diff-algorithm=histogram --indent-heuristic --unified=3 --inter-hunk-context=0 --src-prefix=a/ --dst-prefix=b/ --format= <sha> | git patch-id --stable`.
+ *   The diff settings git config can change (prefixes, context, blank context
+ *   lines, algorithm) are pinned there, because each of them changes the id.
+ * `downstream_commit` and `patch_id` are recorded together or not at all. A
+ * pick is satisfied only by an `accepted` record that names it as
+ * `downstream_commit`.
  *
  * `scripts/check-upstream-intake-ledger.ts` enforces the ledger in CI.
  */
@@ -43,6 +48,9 @@ export function buildUpstreamIntakeRecord(input: UpstreamIntakeInput) {
     if (!FULL_SHA.test(value ?? '')) {
       throw new Error(`${name} must be a lowercase 40-character SHA`)
     }
+  }
+  if ((input.downstream_commit === undefined) !== (input.patch_id === undefined)) {
+    throw new Error('downstream_commit and patch_id must be recorded together')
   }
   if (input.downstream_patches.length === 0) {
     throw new Error('at least one downstream patch disposition is required')
