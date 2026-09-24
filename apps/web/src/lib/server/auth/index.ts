@@ -93,6 +93,7 @@ async function createAuth() {
   const { listIdentityProviders, getIdentityProviderCredentials } =
     await import('@/lib/server/domains/settings/identity-providers.service')
   const { buildGenericOAuthConfigs } = await import('./build-oauth-configs')
+  const { pinCustomOidcFetches } = await import('./custom-oidc-plugin')
 
   // OIDC `locale` claim: shipped by Google, Microsoft, and most generic
   // OIDC IdPs. Pass it through so `user.locale` populates from sign-in
@@ -469,8 +470,12 @@ async function createAuth() {
         },
       }),
 
-      // Generic OAuth plugin for custom OIDC providers (Okta, Auth0, Keycloak, etc.)
-      ...(genericOAuthConfigs.length > 0 ? [genericOAuth({ config: genericOAuthConfigs })] : []),
+      // Generic OAuth plugin for custom OIDC providers (Okta, Auth0, Keycloak, etc.).
+      // Every server-side fetch it makes for them goes through safeFetch; see
+      // custom-oidc-plugin.ts.
+      ...(genericOAuthConfigs.length > 0
+        ? [pinCustomOidcFetches(genericOAuth({ config: genericOAuthConfigs }), genericOAuthConfigs)]
+        : []),
 
       // Anonymous authentication plugin — enables voting without sign-up
       anonymous({
