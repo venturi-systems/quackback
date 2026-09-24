@@ -286,10 +286,36 @@ async function recordZoomTextSpacing(page: Page, testInfo: TestInfo, state: stri
             parts.unshift(`${current.localName}:nth-child(${index})`)
             current = parent
           }
+          const declaredOrigin = element
+            .closest('[data-text-origin]')
+            ?.getAttribute('data-text-origin')
+          const declaredProfile = element
+            .closest('[data-text-profile]')
+            ?.getAttribute('data-text-profile')
+          if (declaredOrigin && !['authored', 'user', 'localized'].includes(declaredOrigin)) {
+            throw new Error('Unknown text origin in zoom evidence')
+          }
+          if (declaredProfile && !['headline', 'short-copy', 'prose'].includes(declaredProfile)) {
+            throw new Error('Unknown text profile in zoom evidence')
+          }
+          const semanticProfile =
+            element.localName !== 'p'
+              ? 'headline'
+              : element.matches('.portal-introduction > p')
+                ? 'short-copy'
+                : 'prose'
           return {
             selector: parts.join(' > '),
             text: element.textContent,
             paragraph: element.localName === 'p',
+            origin: (declaredOrigin ?? 'authored') as 'authored' | 'user' | 'localized',
+            profile: (declaredProfile ?? semanticProfile) as 'headline' | 'short-copy' | 'prose',
+            classification: {
+              declaredOrigin,
+              declaredProfile,
+              fallback:
+                'Unmarked text is authored; headings are headline, introduction is short-copy, other paragraphs prose.',
+            },
           }
         })
     )
@@ -318,10 +344,10 @@ async function recordZoomTextSpacing(page: Page, testInfo: TestInfo, state: stri
   }
   const typography = await measureTypography(
     page,
-    inventory.map(({ selector }) => ({
+    inventory.map(({ selector, profile, origin }) => ({
       selector,
-      profile: 'prose' as const,
-      origin: 'user' as const,
+      profile,
+      origin,
       locale: 'en-US',
     })),
     { artifactRevision: SOURCE, state, stress: 'actual browser zoom and text spacing' }
