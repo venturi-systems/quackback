@@ -70,11 +70,17 @@ async function pinnedFetch(url: string, init: SafeFetchInit): Promise<Response> 
 }
 
 /**
- * The value as an absolute https URL string, or undefined. Endpoints named by
- * a discovery document must be https (OIDC Discovery 1.0 §3, RFC 8414 §2): the
- * token endpoint receives the code, the client secret and refresh tokens.
+ * The value as an absolute https URL string, or undefined. Every endpoint a
+ * provider signs in against must be https (OIDC Discovery 1.0 §3, RFC 8414
+ * §2): the token endpoint receives the code, the client secret and refresh
+ * tokens, and the userinfo endpoint the access token. The rule covers the
+ * discovery URL itself (a document fetched in clear could name any token
+ * endpoint), the endpoints a discovery document names, a manual provider's
+ * stored endpoints and the SSO test's (`sso-test.ts`, `sso-test-handshake.ts`).
+ * Not the zod `httpsUrl` schema in `lib/shared/schemas/auth.ts`, which
+ * validates the same rule on input.
  */
-function httpsUrl(value: unknown): string | undefined {
+export function asHttpsUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value) return undefined
   try {
     return new URL(value).protocol === 'https:' ? value : undefined
@@ -165,10 +171,13 @@ export function clearOidcDiscoveryCache(): void {
 }
 
 async function fetchDiscovery(discoveryUrl: string): Promise<OidcEndpoints> {
+  if (!asHttpsUrl(discoveryUrl)) {
+    throw new OidcFetchError('discovery URL is not an https URL')
+  }
   const res = await pinnedFetch(discoveryUrl, { timeoutMs: DISCOVERY_TIMEOUT_MS })
   const doc = await readJsonObject(res, 'discovery document')
-  const authorizationEndpoint = httpsUrl(doc.authorization_endpoint)
-  const tokenEndpoint = httpsUrl(doc.token_endpoint)
+  const authorizationEndpoint = asHttpsUrl(doc.authorization_endpoint)
+  const tokenEndpoint = asHttpsUrl(doc.token_endpoint)
   if (!authorizationEndpoint || !tokenEndpoint) {
     throw new OidcFetchError(
       'discovery document is missing an https authorization_endpoint or token_endpoint'
@@ -177,7 +186,7 @@ async function fetchDiscovery(discoveryUrl: string): Promise<OidcEndpoints> {
   // A non-https userinfo_endpoint is dropped rather than used: the access
   // token is never sent in clear. Sign-ins whose ID token carries the email
   // do not need it.
-  const userinfoEndpoint = httpsUrl(doc.userinfo_endpoint)
+  const userinfoEndpoint = asHttpsUrl(doc.userinfo_endpoint)
   // The authorization endpoint is never fetched server-side, but it is where
   // the user's browser is sent. The save-time policy refuses a private or
   // loopback authorizationUrl for that reason; hold the discovered one to the
@@ -250,6 +259,16 @@ export interface OidcEndpointSource {
  * handshake uses for a manual install). A provider row that carries both keeps
  * the plugin's old precedence: the discovery document wins, and the stored URLs
  * are the fallback when it cannot be fetched.
+ *
+ * Stored endpoints meet the https rule discovered ones do (`asHttpsUrl`): a
+ * plain-http authorization or token URL leaves the provider with no manual
+ * endpoints, and a plain-http userinfo URL is dropped. A plain-http discovery
+ * URL is never fetched (`fetchDiscovery`), so it resolves like an unreachable
+ * one. The save-time schema
+ * already requires https, but a row can predate it: the startup backfill
+ * (`backfill-custom-oidc-provider.ts`) copies legacy credential values as they
+ * are, and a self-hosted GitLab issuer saved before the save-time https rule
+ * (`auth-provider-credentials.ts`) can still be plain http.
  */
 export function createOidcEndpointSource(provider: {
   discoveryUrl?: string
@@ -258,12 +277,15 @@ export function createOidcEndpointSource(provider: {
   userInfoUrl?: string
   issuer?: string
 }): OidcEndpointSource {
+  const authorizationEndpoint = asHttpsUrl(provider.authorizationUrl)
+  const tokenEndpoint = asHttpsUrl(provider.tokenUrl)
+  const userinfoEndpoint = asHttpsUrl(provider.userInfoUrl)
   const manual: OidcEndpoints | undefined =
-    provider.authorizationUrl && provider.tokenUrl
+    authorizationEndpoint && tokenEndpoint
       ? {
-          authorizationEndpoint: provider.authorizationUrl,
-          tokenEndpoint: provider.tokenUrl,
-          ...(provider.userInfoUrl ? { userinfoEndpoint: provider.userInfoUrl } : {}),
+          authorizationEndpoint,
+          tokenEndpoint,
+          ...(userinfoEndpoint ? { userinfoEndpoint } : {}),
           ...(provider.issuer ? { issuer: provider.issuer } : {}),
         }
       : undefined
@@ -379,9 +401,11 @@ const GOOGLE_ISSUER = 'https://accounts.google.com'
  *   its tenant in `tid`, so the template is filled in from that claim.
  * - Google's ID tokens carry `https://accounts.google.com` or the bare
  *   `accounts.google.com`, and Google says to accept either.
- * Any other issuer must match exactly.
+ * Any other issuer must match exactly. Production sign-in
+ * (`idTokenClaimProblem`) and the SSO test handshake both check `iss` with
+ * this, so a test passes exactly when sign-in would.
  */
-function acceptedIssuers(issuer: string, claims: JWTPayload): string[] {
+export function acceptedIssuers(issuer: string, claims: JWTPayload): string[] {
   const tenant = claims.tid
   if (issuer.includes('{tenantid}') && typeof tenant === 'string' && tenant) {
     return [issuer.replace('{tenantid}', tenant)]

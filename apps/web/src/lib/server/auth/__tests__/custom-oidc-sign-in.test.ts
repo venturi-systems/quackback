@@ -5,8 +5,10 @@
 // methods and the hook directly; these prove the wiring they rely on: the
 // before-hook sees the route template with its params, query and body, the
 // plugin's routes read the pinned getters, and a callback that fails the
-// pinned checks never reaches the code exchange. The node environment gives
-// the undici Request/Response the Better-Auth router is built on.
+// pinned checks never reaches the code exchange. The last block does the same
+// for a self-hosted GitLab social provider pinned by `pinSelfHostedGitlab`.
+// The node environment gives the undici Request/Response the Better-Auth
+// router is built on.
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest'
 import { betterAuth } from 'better-auth'
 import { memoryAdapter } from 'better-auth/adapters/memory'
@@ -22,6 +24,7 @@ import { checkUrlSafety, safeFetch, SsrfError } from '@/lib/server/content/ssrf-
 import { buildGenericOAuthConfigs } from '../build-oauth-configs'
 import { clearOidcDiscoveryCache, DISCOVERY_TTL_MS } from '../custom-oidc-fetch'
 import { pinCustomOidcFetches } from '../custom-oidc-plugin'
+import { pinSelfHostedGitlab } from '../self-hosted-gitlab'
 
 const safeFetchMock = vi.mocked(safeFetch)
 const checkUrlSafetyMock = vi.mocked(checkUrlSafety)
@@ -138,7 +141,7 @@ const fetchSpy = vi.spyOn(globalThis, 'fetch')
 beforeEach(() => {
   safeFetchMock.mockReset()
   checkUrlSafetyMock.mockReset()
-  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '203.0.113.10', family: 4 })
+  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
   clearOidcDiscoveryCache()
   fetchSpy.mockReset()
   fetchSpy.mockImplementation(async () => {
@@ -277,6 +280,82 @@ describe('custom OIDC sign-in through the Better-Auth handler', () => {
     })
     expect(safeFetchMock.mock.calls.map((c) => c[0])).toEqual([metadataUrl, metadataUrl])
     expect(db.user).toHaveLength(0)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('self-hosted GitLab through a real Better-Auth instance', () => {
+  const GITLAB_ISSUER = 'https://gitlab.acme.example'
+
+  /** A Better-Auth instance wired as `createAuth` wires a self-hosted GitLab. */
+  function createGitlabAuth() {
+    const db: Record<string, Record<string, unknown>[]> = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+    }
+    const auth = betterAuth({
+      baseURL: ORIGIN,
+      secret: 'custom-oidc-sign-in-test-secret-0123456789abcdef',
+      database: memoryAdapter(db),
+      telemetry: { enabled: false },
+      socialProviders: {
+        gitlab: { clientId: 'gl-client', clientSecret: 'gl-secret', issuer: GITLAB_ISSUER },
+      },
+      plugins: [pinSelfHostedGitlab()],
+    })
+    return { auth, db }
+  }
+
+  it('registers the pin plugin and sends every GitLab fetch through safeFetch', async () => {
+    safeFetchMock
+      .mockResolvedValueOnce(
+        json({ access_token: 'gl-access-1', refresh_token: 'gl-refresh-1', token_type: 'bearer' })
+      )
+      .mockResolvedValueOnce(
+        json({ id: 42, state: 'active', name: 'Ada', username: 'ada', email: 'ada@acme.example' })
+      )
+      .mockResolvedValueOnce(json({ access_token: 'gl-access-2', expires_in: 3600 }))
+    const { auth, db } = createGitlabAuth()
+
+    const ctx = await auth.$context
+    expect(ctx.hasPlugin('pinned-self-hosted-gitlab')).toBe(true)
+
+    const start = await auth.handler(
+      new Request(`${BASE_URL}/sign-in/social`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: ORIGIN },
+        body: JSON.stringify({ provider: 'gitlab', disableRedirect: true }),
+      })
+    )
+    expect(start.status).toBe(200)
+    const authorize = new URL(((await start.json()) as { url: string }).url)
+    expect(`${authorize.origin}${authorize.pathname}`).toBe(`${GITLAB_ISSUER}/oauth/authorize`)
+    const state = authorize.searchParams.get('state')
+    if (!state) throw new Error('authorization URL has no state')
+
+    const query = new URLSearchParams({ code: 'gl-code-1', state })
+    const done = await auth.handler(
+      new Request(`${BASE_URL}/callback/gitlab?${query}`, {
+        headers: { cookie: cookiesFrom(start) },
+      })
+    )
+    const gitlab = ctx.socialProviders.find((p) => p.id === 'gitlab')
+    if (!gitlab?.refreshAccessToken) throw new Error('gitlab provider has no refresh')
+    const refreshed = await gitlab.refreshAccessToken('gl-refresh-1')
+
+    expect(done.status).toBe(302)
+    expect(done.headers.get('location')).not.toContain('error=')
+    // The code exchange, the user lookup, then the refresh: every one pinned.
+    expect(safeFetchMock.mock.calls.map((c) => c[0])).toEqual([
+      `${GITLAB_ISSUER}/oauth/token`,
+      `${GITLAB_ISSUER}/api/v4/user`,
+      `${GITLAB_ISSUER}/oauth/token`,
+    ])
+    expect(new URLSearchParams(safeFetchMock.mock.calls[0][1]?.body).get('code')).toBe('gl-code-1')
+    expect(db.user.map((u) => u.email)).toEqual(['ada@acme.example'])
+    expect(refreshed.accessToken).toBe('gl-access-2')
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

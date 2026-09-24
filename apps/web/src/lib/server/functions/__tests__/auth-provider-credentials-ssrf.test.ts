@@ -53,7 +53,7 @@ describe('saveAuthProviderCredentialsFn — SSRF URL guard', () => {
   })
 
   it('stores the credentials when the URL passes the guard', async () => {
-    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: true, address: '203.0.113.7', family: 4 })
+    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
 
     await saveAuthProviderCredentialsFn({
       data: { credentialType: 'auth_custom-oidc', credentials: oidcCreds },
@@ -79,6 +79,38 @@ describe('saveAuthProviderCredentialsFn — SSRF URL guard', () => {
     ).rejects.toThrow(/valid public URL/i)
 
     expect(hoisted.mockCheckUrlSafety).toHaveBeenCalledWith(issuer)
+    expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
+  })
+
+  // Sign-in refuses a plain-http issuer or endpoint, so saving one would only
+  // produce a sign-in that fails later. The public-address check alone
+  // accepts http, so this is a separate rule.
+  it('rejects a plain-http self-hosted GitLab issuer, before storing', async () => {
+    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
+
+    await expect(
+      saveAuthProviderCredentialsFn({
+        data: {
+          credentialType: 'auth_gitlab',
+          credentials: { clientId: 'gl', clientSecret: 'gl', issuer: 'http://gitlab.acme.example' },
+        },
+      })
+    ).rejects.toThrow(/https:\/\/ URL/)
+
+    expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
+  })
+
+  it('rejects a plain-http custom-OIDC discovery URL, before storing', async () => {
+    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
+    const credentials = {
+      ...oidcCreds,
+      discoveryUrl: 'http://idp.acme.example/.well-known/openid-configuration',
+    }
+
+    await expect(
+      saveAuthProviderCredentialsFn({ data: { credentialType: 'auth_custom-oidc', credentials } })
+    ).rejects.toThrow(/https:\/\/ URL/)
+
     expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
   })
 

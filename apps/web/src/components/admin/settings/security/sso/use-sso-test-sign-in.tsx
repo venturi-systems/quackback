@@ -464,6 +464,8 @@ function friendlyStartError(error: string): string {
       return 'Add your client secret first.'
     case 'discovery-unreachable':
       return "We couldn't reach your IdP. Check that your discovery URL is correct."
+    case 'insecure-endpoint':
+      return "Your IdP's discovery URL and authorization endpoint must be https:// URLs that resolve to a public address."
     default:
       return error
   }

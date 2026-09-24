@@ -75,7 +75,8 @@ export async function archiveExternalIssue(
   integrationType: string,
   ctx: ArchiveContext
 ): Promise<ArchiveResult> {
-  const fn = archiveFns[integrationType]
+  // Own keys only: an inherited member such as `constructor` is not an archive function.
+  const fn = Object.hasOwn(archiveFns, integrationType) ? archiveFns[integrationType] : undefined
   if (!fn) {
     return { success: false, error: `Unsupported integration type: ${integrationType}` }
   }
