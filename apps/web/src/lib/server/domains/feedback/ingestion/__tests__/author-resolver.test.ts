@@ -2,7 +2,7 @@
  * Tests for author resolution in feedback ingestion.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { PrincipalId } from '@quackback/ids'
 
 // --- Mock tracking ---
@@ -221,5 +221,58 @@ describe('resolveAuthorPrincipal', () => {
     expect(result.principalId).toBe('principal_email')
     // External mapping lookup should not be called
     expect(mockFindFirstExternalMapping).not.toHaveBeenCalled()
+  })
+
+  describe('team-domain addresses', () => {
+    // An account at a team domain is created only by its owner's Google or
+    // GitHub sign-in: an unverified row made from ingested data would block
+    // that sign-in (Better Auth refuses to link onto an unverified account).
+    beforeEach(() => {
+      vi.stubEnv('VENTURI_TEAM_EMAIL_DOMAINS', 'venturi.systems')
+    })
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('still resolves a team-domain author who already has an account', async () => {
+      mockSelect.mockReturnValue(createSelectChain([{ principalId: 'principal_teammate' }]))
+
+      const result = await resolveAuthorPrincipal(
+        { email: 'teammate@venturi.systems', name: 'Teammate' },
+        'intercom'
+      )
+
+      expect(result).toEqual({ principalId: 'principal_teammate', method: 'email' })
+    })
+
+    it('never creates an account at a team domain; without an external id it is unresolvable', async () => {
+      mockSelect.mockReturnValue(createSelectChain([]))
+
+      const result = await resolveAuthorPrincipal(
+        { email: 'NewHire@Venturi.Systems', name: 'New Hire' },
+        'intercom'
+      )
+
+      expect(result).toEqual({ principalId: null, method: 'unresolvable' })
+      expect(mockInsertValues).not.toHaveBeenCalled()
+    })
+
+    it('gives a team-domain author with an external id an account without the address', async () => {
+      mockFindFirstExternalMapping.mockResolvedValue(null)
+      mockSelect.mockReturnValue(createSelectChain([]))
+
+      const result = await resolveAuthorPrincipal(
+        { email: 'newhire@venturi.systems', externalUserId: 'U777', name: 'New Hire' },
+        'slack'
+      )
+
+      expect(result.method).toBe('created_new')
+      const userRow = mockInsertValues.mock.calls[0][0] as { email: unknown; name: unknown }
+      expect(userRow.email).toBeNull()
+      expect(userRow.name).toBe('New Hire')
+      // The mapping still records the address the source reported.
+      const mappingRow = mockInsertValues.mock.calls.at(-1)?.[0] as { externalEmail?: unknown }
+      expect(mappingRow.externalEmail).toBe('newhire@venturi.systems')
+    })
   })
 })

@@ -686,6 +686,10 @@ export const getPortalUserFn = createServerFn({ method: 'GET' })
     }
   })
 
+/** Refusal text when an administrator types a team-domain address onto a portal user. */
+const TEAM_ADDRESS_ADMIN_MESSAGE =
+  'An address at a team domain gets its account only from its owner signing in with Google or GitHub. Leave the email empty, or invite the person from Admin > Team.'
+
 /**
  * Update a portal user's details (admin-only).
  */
@@ -719,6 +723,26 @@ export const updatePortalUserFn = createServerFn({ method: 'POST' })
           'TEAM_EMAIL_LOCKED',
           "A team member's email address comes from their Google or GitHub account and cannot be edited here."
         )
+      }
+
+      // An address at a team domain gets its account only from its owner's
+      // Google or GitHub sign-in. Typing one onto a contributor here would
+      // leave an unverified row on that address, which Better Auth then
+      // refuses to link the owner's own Google or GitHub sign-in to. Keeping
+      // the address the account already has is fine.
+      if (data.email) {
+        const normalized = data.email.toLowerCase().trim()
+        const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+        if (isTeamDomainEmail(normalized)) {
+          const current = await db.query.user.findFirst({
+            where: eq(user.id, p.userId),
+            columns: { email: true },
+          })
+          if ((current?.email ?? null) !== normalized) {
+            const { ForbiddenError } = await import('@/lib/shared/errors')
+            throw new ForbiddenError('TEAM_IDENTITY_LOCKED', TEAM_ADDRESS_ADMIN_MESSAGE)
+          }
+        }
       }
 
       // Build update set
@@ -777,6 +801,7 @@ export const updatePortalUserFn = createServerFn({ method: 'POST' })
 /**
  * Create a new portal user (admin-only).
  * Used by the AuthorSelector when the admin wants to attribute feedback to someone not yet in the system.
+ * An address at a team domain is refused (TEAM_IDENTITY_LOCKED): the author can be created without one.
  */
 const createPortalUserSchema = z.object({
   name: z.string().min(1).max(200),
@@ -793,6 +818,11 @@ export const createPortalUserFn = createServerFn({ method: 'POST' })
       // Check email uniqueness if provided
       if (data.email) {
         const normalized = data.email.toLowerCase().trim()
+        const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+        if (isTeamDomainEmail(normalized)) {
+          const { ForbiddenError } = await import('@/lib/shared/errors')
+          throw new ForbiddenError('TEAM_IDENTITY_LOCKED', TEAM_ADDRESS_ADMIN_MESSAGE)
+        }
         const existing = await db
           .select({ id: user.id })
           .from(user)

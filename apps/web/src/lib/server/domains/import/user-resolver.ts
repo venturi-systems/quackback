@@ -10,6 +10,7 @@
 
 import { db, eq, user, principal } from '@/lib/server/db'
 import { createId, type PrincipalId, type UserId } from '@quackback/ids'
+import { isTeamDomainEmail } from '@/lib/server/domains/principals/team-identity'
 
 interface PendingUser {
   principalId: PrincipalId
@@ -35,6 +36,9 @@ export class ImportUserResolver {
    * If the email has an existing user+member, returns the principalId.
    * If not, queues a new user+member for creation and returns a pre-generated principalId.
    * If email is null/empty, returns the fallbackPrincipalId.
+   * An address at a team domain with no account also returns the
+   * fallbackPrincipalId: that account is created only by its owner's Google or
+   * GitHub sign-in, and an unverified row made here would block it.
    */
   async resolve(
     email: string | null | undefined,
@@ -62,6 +66,11 @@ export class ImportUserResolver {
       const principalId = existing[0].principalId as PrincipalId
       this.cache.set(normalizedEmail, principalId)
       return principalId
+    }
+
+    if (isTeamDomainEmail(normalizedEmail)) {
+      this.cache.set(normalizedEmail, fallbackPrincipalId)
+      return fallbackPrincipalId
     }
 
     // Queue for creation

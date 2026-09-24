@@ -33,6 +33,13 @@ What rule 2 reads is the account's own verified flag. These keep it honest:
   and cannot create an account at a team domain (`user.identify.ts`,
   `TEAM_IDENTITY_LOCKED`). That account is created by its owner's first Google
   or GitHub sign-in.
+- Nothing else creates an account at a team domain either: Admin > Users
+  refuses a team-domain address on a new or edited portal user (leave the email
+  empty, or invite the person), a CSV import attributes an unknown team-domain
+  author to the importer, and feedback ingestion leaves such an author
+  unresolved or keyed by its external id. An unverified row on that address
+  would otherwise block the owner's own Google or GitHub sign-in, because
+  Better Auth links only onto a verified account.
 - The admin UI cannot edit a team member's address (`TEAM_EMAIL_LOCKED`).
 - A sign-in method the workspace has switched off (password, magic link) is
   refused for brand-new addresses as well as known ones, so nobody can create a
