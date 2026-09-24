@@ -465,18 +465,21 @@ test.describe('Voting — independence and persistence', () => {
 
       // Use post 15 to avoid conflicts
       const card = page.locator('a.post-card[href*="/posts/"]').nth(15)
+      await card.scrollIntoViewIfNeeded()
       await expect(card).toBeVisible({ timeout: 10000 })
+
+      const href = await card.getAttribute('href')
+      expect(href).toBeTruthy()
 
       const listCountSpan = card.getByTestId('vote-count')
       const listCount = await listCountSpan.textContent()
 
-      // Click the post title to navigate to this exact post
-      await card.locator('h3').click()
-      await page.waitForURL(/\/posts\//)
+      // Navigate directly to this exact post
+      await page.goto(href!)
       await page.waitForLoadState('networkidle')
 
       // Detail page vote button — use first vote button (VoteSidebar, in DOM order)
-      const detailVoteButton = page.getByTestId('vote-button').first()
+      const detailVoteButton = page.locator('[data-testid="post-detail"] [data-testid="vote-button"]').first()
       await expect(detailVoteButton).toBeVisible({ timeout: 10000 })
 
       const detailCount = await detailVoteButton.getByTestId('vote-count').textContent()
