@@ -12,7 +12,7 @@
  */
 
 import { jwtVerify, createLocalJWKSet, decodeProtectedHeader, decodeJwt } from 'jose'
-import { acceptedIssuers, httpsUrl } from './custom-oidc-fetch'
+import { acceptedIssuers, asHttpsUrl } from './custom-oidc-fetch'
 import { explainAuthorizeError, explainTokenError } from './oidc-error-explain'
 
 export type HandshakeStage =
@@ -84,6 +84,11 @@ export type HandshakeResult =
       steps: DiagnosticStep[]
     }
 
+/** A parsed JSON value that is a plain object, not null, an array or a scalar. */
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /** An untrusted endpoint or claim value, printable in a hint. */
 function shown(value: unknown): string {
   return typeof value === 'string' && value ? value : 'missing'
@@ -139,6 +144,16 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
     userinfo_endpoint?: string
   }
   if (input.discoveryUrl) {
+    // Sign-in never fetches a plain-http discovery URL: a document read in
+    // clear could name any token endpoint (`fetchDiscovery`).
+    if (!asHttpsUrl(input.discoveryUrl)) {
+      return {
+        ok: false,
+        stage: 'discovery-fetch',
+        hint: `Discovery URL (${input.discoveryUrl}) must be an https:// URL. Sign-in refuses any other.`,
+        steps,
+      }
+    }
     let discoveryRes: Response
     try {
       discoveryRes = await safeFetch(input.discoveryUrl, { timeoutMs: 5000 })
@@ -166,8 +181,9 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
         steps,
       }
     }
+    let discoveryJson: unknown
     try {
-      discovery = (await discoveryRes.json()) as typeof discovery
+      discoveryJson = await discoveryRes.json()
     } catch (err) {
       return {
         ok: false,
@@ -176,6 +192,17 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
         steps,
       }
     }
+    // `null`, an array or a scalar is valid JSON but not a document; reading
+    // its fields below would throw outside any handler.
+    if (!isJsonObject(discoveryJson)) {
+      return {
+        ok: false,
+        stage: 'discovery-fetch',
+        hint: 'Discovery URL returned JSON that is not an object. Check that the URL points at a valid OIDC discovery document.',
+        steps,
+      }
+    }
+    discovery = discoveryJson as typeof discovery
     steps.push({ ok: true, stage: 'discovery-fetch', label: 'Discovery doc fetched' })
   } else if (input.tokenEndpoint && input.jwksUri && input.issuer) {
     discovery = {
@@ -194,29 +221,30 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
     }
   }
 
-  // Hold every endpoint to the https rule production sign-in applies
-  // (`httpsUrl` in custom-oidc-fetch.ts), so the test never passes a
+  // Hold the endpoints to the https rule production sign-in applies
+  // (`asHttpsUrl` in custom-oidc-fetch.ts), so the test never passes a
   // configuration sign-in would refuse. The token endpoint receives the code
-  // and client secret and the JWKS decides which signing keys are trusted, so
-  // either being plain http fails the test. A plain-http userinfo endpoint is
-  // skipped below, as sign-in drops it rather than send the access token.
-  const tokenEndpoint = httpsUrl(discovery.token_endpoint)
-  const jwksUri = httpsUrl(discovery.jwks_uri)
+  // and client secret, and sign-in refuses a plain-http one. Sign-in never
+  // reads the JWKS, but here it decides which signing keys the test trusts,
+  // so it must be https too. A plain-http userinfo endpoint is skipped below,
+  // as sign-in drops it rather than send the access token.
+  const tokenEndpoint = asHttpsUrl(discovery.token_endpoint)
+  const jwksUri = asHttpsUrl(discovery.jwks_uri)
   if (!tokenEndpoint || !jwksUri) {
     return {
       ok: false,
       stage: 'discovery-fetch',
-      hint: `The token endpoint (${shown(discovery.token_endpoint)}) and JWKS URI (${shown(discovery.jwks_uri)}) must both be https:// URLs. Sign-in refuses any other endpoint.`,
+      hint: `The token endpoint (${shown(discovery.token_endpoint)}) and JWKS URI (${shown(discovery.jwks_uri)}) must both be https:// URLs. Sign-in refuses a plain-http token endpoint, and the test only trusts signing keys fetched over https.`,
       steps,
     }
   }
-  const userinfoEndpoint = httpsUrl(discovery.userinfo_endpoint)
+  const userinfoEndpoint = asHttpsUrl(discovery.userinfo_endpoint)
   if (input.discoveryUrl) {
     // Sign-in sends the browser to the discovered authorization endpoint only
     // when it is https and resolves to a public address (`fetchDiscovery` in
     // custom-oidc-fetch.ts). A test that skipped the check could pass for a
     // provider every real sign-in refuses.
-    const authorizationEndpoint = httpsUrl(discovery.authorization_endpoint)
+    const authorizationEndpoint = asHttpsUrl(discovery.authorization_endpoint)
     const verdict = authorizationEndpoint
       ? await checkUrlSafety(authorizationEndpoint)
       : undefined
@@ -287,8 +315,9 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
     expires_in?: number
     token_type?: string
   }
+  let tokenJson: unknown
   try {
-    tokens = (await tokenRes.json()) as typeof tokens
+    tokenJson = await tokenRes.json()
   } catch (err) {
     return {
       ok: false,
@@ -297,6 +326,15 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
       steps,
     }
   }
+  if (!isJsonObject(tokenJson)) {
+    return {
+      ok: false,
+      stage: 'token-exchange',
+      hint: 'Token endpoint returned JSON that is not an object. The IdP responded 2xx without a token response.',
+      steps,
+    }
+  }
+  tokens = tokenJson as typeof tokens
   if (!tokens.id_token) {
     return {
       ok: false,

@@ -235,6 +235,18 @@ describe('runHandshake https rule', () => {
     expect(safeFetchMock.mock.calls.map((c) => c[0])).toEqual([baseInput.discoveryUrl])
   })
 
+  it('refuses a plain-http discovery URL without fetching it', async () => {
+    const result = await runHandshake({
+      ...baseInput,
+      discoveryUrl: 'http://idp.example/.well-known/openid-configuration',
+    })
+
+    if (result.ok) throw new Error('expected failure')
+    expect(result.stage).toBe('discovery-fetch')
+    expect(result.hint).toMatch(/https/)
+    expect(safeFetchMock).not.toHaveBeenCalled()
+  })
+
   it('fails a manual-endpoint provider whose stored token endpoint is plain http', async () => {
     const result = await runHandshake({
       ...baseInput,
@@ -289,5 +301,32 @@ describe('runHandshake https rule', () => {
       IDP.token_endpoint,
       IDP.jwks_uri,
     ])
+  })
+})
+
+// JSON that parses but is not an object must fail its stage, not throw out of
+// the handshake: the callback route has no handler around it, and the test
+// session is already consumed, so the admin would never see a result.
+describe('runHandshake non-object JSON bodies', () => {
+  it.each([['null'], ['[]'], ['"text"']])('fails discovery on a %s document', async (body) => {
+    safeFetchMock.mockResolvedValueOnce(new Response(body, { status: 200 }))
+
+    const result = await runHandshake(baseInput)
+
+    if (result.ok) throw new Error('expected failure')
+    expect(result.stage).toBe('discovery-fetch')
+    expect(result.hint).toMatch(/not an object/)
+  })
+
+  it('fails the token exchange on a null token response', async () => {
+    safeFetchMock
+      .mockResolvedValueOnce(json({ ...IDP, issuer: 'https://idp.example' }))
+      .mockResolvedValueOnce(new Response('null', { status: 200 }))
+
+    const result = await runHandshake(baseInput)
+
+    if (result.ok) throw new Error('expected failure')
+    expect(result.stage).toBe('token-exchange')
+    expect(result.hint).toMatch(/not an object/)
   })
 })

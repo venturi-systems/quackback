@@ -82,6 +82,38 @@ describe('saveAuthProviderCredentialsFn — SSRF URL guard', () => {
     expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
   })
 
+  // Sign-in refuses a plain-http issuer or endpoint, so saving one would only
+  // produce a sign-in that fails later. The public-address check alone
+  // accepts http, so this is a separate rule.
+  it('rejects a plain-http self-hosted GitLab issuer, before storing', async () => {
+    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: true, address: '203.0.113.7', family: 4 })
+
+    await expect(
+      saveAuthProviderCredentialsFn({
+        data: {
+          credentialType: 'auth_gitlab',
+          credentials: { clientId: 'gl', clientSecret: 'gl', issuer: 'http://gitlab.acme.example' },
+        },
+      })
+    ).rejects.toThrow(/https:\/\/ URL/)
+
+    expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
+  })
+
+  it('rejects a plain-http custom-OIDC discovery URL, before storing', async () => {
+    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: true, address: '203.0.113.7', family: 4 })
+    const credentials = {
+      ...oidcCreds,
+      discoveryUrl: 'http://idp.acme.example/.well-known/openid-configuration',
+    }
+
+    await expect(
+      saveAuthProviderCredentialsFn({ data: { credentialType: 'auth_custom-oidc', credentials } })
+    ).rejects.toThrow(/https:\/\/ URL/)
+
+    expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
+  })
+
   it('skips the guard for GitLab when no self-hosted issuer is set', async () => {
     await saveAuthProviderCredentialsFn({
       data: { credentialType: 'auth_gitlab', credentials: { clientId: 'gl', clientSecret: 'gl' } },

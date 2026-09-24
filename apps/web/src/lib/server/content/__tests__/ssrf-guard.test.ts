@@ -270,6 +270,9 @@ const BLOCKED_ADDRESSES: ReadonlyArray<[string, string]> = [
   ['::ffff:999.0.0.1', 'invalid embedded IPv4'],
   ['1::2::3', 'two :: compressions'],
   ['gggg::1', 'non-hex group'],
+  ['2606:4700::1%', 'public address with an empty zone index'],
+  ['2606:4700::1%a%b', 'public address with a malformed zone index'],
+  ['2606:4700::1% x', 'public address with a zone index containing a space'],
 ]
 
 // The ranges that stay reachable, including each blocked range's neighbours,

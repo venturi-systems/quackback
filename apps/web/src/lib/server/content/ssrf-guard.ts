@@ -52,6 +52,8 @@ function parseIpv4(addr: string): number | null {
  * which is dropped.
  */
 function parseIpv6(addr: string): number[] | null {
+  // Validate the whole string, zone included, so a malformed zone fails closed.
+  if (isIP(addr) !== 6) return null
   const zone = addr.indexOf('%')
   let text = (zone === -1 ? addr : addr.slice(0, zone)).toLowerCase()
   if (isIP(text) !== 6) return null

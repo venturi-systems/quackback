@@ -648,6 +648,27 @@ describe('custom OIDC runtime fetches', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  // A discovery document read in clear could name any token endpoint, and the
+  // code and client secret would follow it there.
+  it('never fetches a plain-http discovery URL', async () => {
+    const httpDiscovery = 'http://idp.example.com/.well-known/openid-configuration'
+    const withManual = createOidcEndpointSource({
+      discoveryUrl: httpDiscovery,
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+    })
+
+    await expect(resolveOidcDiscovery(httpDiscovery)).rejects.toThrow(/https/)
+    // As with an unreachable document, the stored https endpoints are the fallback.
+    await expect(withManual.resolve()).resolves.toMatchObject({
+      tokenEndpoint: 'https://manual.example.com/token',
+    })
+    const discoveryOnly = createOidcEndpointSource({ discoveryUrl: httpDiscovery })
+    await expect(discoveryOnly.resolve()).rejects.toThrow(/https/)
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   // `backfill-custom-oidc-provider.ts` copies a legacy credential's endpoint
   // URLs as they are, without the save-time https schema. A row it wrote must
   // not become a way to send the code and client secret in clear.
