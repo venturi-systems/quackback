@@ -5,8 +5,11 @@
 import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
 import { requireAuth } from './auth-helpers'
+import { ValidationError } from '@/lib/shared/errors'
 import type { ApiKeyId } from '@/lib/server/domains/api-keys/api-key.service'
 import { logger } from '@/lib/server/logger'
+import { recordAuditSafely, sessionAuditActor } from '@/lib/server/audit/audit-safe'
+import { API_KEY_MAX_EXPIRY_DAYS, API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
 
 const log = logger.child({ component: 'api-keys' })
 
@@ -16,7 +19,10 @@ const log = logger.child({ component: 'api-keys' })
 
 const createApiKeySchema = z.object({
   name: z.string().min(1, 'Name is required').max(255, 'Name must be 255 characters or less'),
-  expiresAt: z.string().datetime().optional().nullable(),
+  // Every new key is scoped and expires (landing-page#2309): a key's scopes
+  // bound what it may do, and its expiry bounds how long a leaked key works.
+  scopes: z.array(z.enum(API_KEY_SCOPES)).min(1, 'Choose at least one scope'),
+  expiresAt: z.string().datetime(),
 })
 
 const getApiKeySchema = z.object({
@@ -35,6 +41,41 @@ const rotateApiKeySchema = z.object({
 const revokeApiKeySchema = z.object({
   id: z.string(),
 })
+
+/** The key fields an audit row records: never the key or its hash. */
+function keyAuditView(key: {
+  name: string
+  keyPrefix: string
+  scopes: readonly string[] | null
+  expiresAt: Date | null
+}) {
+  return {
+    name: key.name,
+    keyPrefix: key.keyPrefix,
+    scopes: key.scopes ?? 'legacy-full-access',
+    expiresAt: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
+  }
+}
+
+/** Slack for clock skew between the browser that computed the expiry and the server. */
+const EXPIRY_SKEW_MS = 24 * 60 * 60 * 1000
+
+/**
+ * A new key must expire in the future and within API_KEY_MAX_EXPIRY_DAYS.
+ * Exported for tests.
+ */
+export function assertApiKeyExpiry(expiresAt: Date, now: number = Date.now()): void {
+  const max = now + API_KEY_MAX_EXPIRY_DAYS * 24 * 60 * 60 * 1000 + EXPIRY_SKEW_MS
+  if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= now) {
+    throw new ValidationError('VALIDATION_ERROR', 'An API key must expire in the future')
+  }
+  if (expiresAt.getTime() > max) {
+    throw new ValidationError(
+      'VALIDATION_ERROR',
+      `An API key can live at most ${API_KEY_MAX_EXPIRY_DAYS} days`
+    )
+  }
+}
 
 // ============================================
 // Type Exports
@@ -104,15 +145,24 @@ export const createApiKeyFn = createServerFn({ method: 'POST' })
     try {
       const auth = await requireAuth({ roles: ['admin'] })
 
+      const expiresAt = new Date(data.expiresAt)
+      assertApiKeyExpiry(expiresAt)
+
       const { createApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
       const result = await createApiKey(
-        {
-          name: data.name,
-          expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
-        },
+        { name: data.name, scopes: data.scopes, expiresAt },
         auth.principal.id
       )
       log.info({ api_key_id: result.apiKey.id }, 'api key created')
+      await recordAuditSafely(
+        {
+          event: 'api_key.created',
+          actor: sessionAuditActor(auth),
+          target: { type: 'api_key', id: result.apiKey.id },
+          after: keyAuditView(result.apiKey),
+        },
+        'request'
+      )
       return result
     } catch (error) {
       log.error({ err: error }, 'create api key failed')
@@ -128,11 +178,23 @@ export const updateApiKeyFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ api_key_id: data.id }, 'update api key')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
 
-      const { updateApiKeyName } = await import('@/lib/server/domains/api-keys/api-key.service')
+      const { updateApiKeyName, getApiKeyById } =
+        await import('@/lib/server/domains/api-keys/api-key.service')
+      const before = await getApiKeyById(data.id as ApiKeyId).catch(() => null)
       const key = await updateApiKeyName(data.id as ApiKeyId, data.name)
       log.info({ api_key_id: key.id }, 'api key updated')
+      await recordAuditSafely(
+        {
+          event: 'api_key.renamed',
+          actor: sessionAuditActor(auth),
+          target: { type: 'api_key', id: key.id },
+          before: before ? { name: before.name } : null,
+          after: { name: key.name },
+        },
+        'request'
+      )
       return key
     } catch (error) {
       log.error({ err: error }, 'update api key failed')
@@ -149,11 +211,20 @@ export const rotateApiKeyFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ api_key_id: data.id }, 'rotate api key')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
 
       const { rotateApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
       const result = await rotateApiKey(data.id as ApiKeyId)
       log.info({ api_key_id: result.apiKey.id }, 'api key rotated')
+      await recordAuditSafely(
+        {
+          event: 'api_key.rotated',
+          actor: sessionAuditActor(auth),
+          target: { type: 'api_key', id: result.apiKey.id },
+          after: keyAuditView(result.apiKey),
+        },
+        'request'
+      )
       return result
     } catch (error) {
       log.error({ err: error }, 'rotate api key failed')
@@ -169,11 +240,22 @@ export const revokeApiKeyFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ api_key_id: data.id }, 'revoke api key')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
 
-      const { revokeApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      const { revokeApiKey, getApiKeyById } =
+        await import('@/lib/server/domains/api-keys/api-key.service')
+      const before = await getApiKeyById(data.id as ApiKeyId).catch(() => null)
       await revokeApiKey(data.id as ApiKeyId)
       log.info({ api_key_id: data.id }, 'api key revoked')
+      await recordAuditSafely(
+        {
+          event: 'api_key.revoked',
+          actor: sessionAuditActor(auth),
+          target: { type: 'api_key', id: data.id },
+          before: before ? keyAuditView(before) : null,
+        },
+        'request'
+      )
       return { id: data.id as ApiKeyId }
     } catch (error) {
       log.error({ err: error }, 'revoke api key failed')

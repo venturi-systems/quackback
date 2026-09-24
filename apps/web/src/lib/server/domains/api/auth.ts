@@ -32,6 +32,15 @@ export interface ApiAuthContext {
   importMode: boolean
 }
 
+/** Pathname of a request URL, or '' when the URL cannot be parsed. */
+function requestPath(request: Request): string {
+  try {
+    return new URL(request.url).pathname
+  } catch {
+    return ''
+  }
+}
+
 /**
  * The scope a REST call needs. Administrator-only routes need
  * `admin:workspace`; other routes need the read or write scope of their
@@ -39,12 +48,7 @@ export interface ApiAuthContext {
  */
 export function requiredRestScope(request: Request, level: AuthLevel): ApiKeyScope {
   if (level === 'admin') return 'admin:workspace'
-  let path = ''
-  try {
-    path = new URL(request.url).pathname
-  } catch {
-    path = ''
-  }
+  const path = requestPath(request)
   const read = request.method === 'GET' || request.method === 'HEAD'
   if (path.startsWith('/api/v1/help-center')) return read ? 'read:article' : 'write:article'
   if (path.startsWith('/api/v1/conversations')) return read ? 'read:chat' : 'write:chat'

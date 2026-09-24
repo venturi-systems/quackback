@@ -2,9 +2,9 @@
 /**
  * The MCP setup guide must not recommend an OAuth config the server refuses.
  * Claude Code and Claude Desktop sign in with OAuth by registering a client
- * before any account exists, which this deployment allows only when
- * OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true. With registration
- * closed, the guide offers API-key configs only and says why.
+ * before any account exists, which this fork never allows (the server always
+ * reports registration closed). With registration closed, the guide offers
+ * API-key configs only and says why.
  */
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'

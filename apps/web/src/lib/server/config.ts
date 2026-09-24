@@ -345,14 +345,6 @@ export const config = {
     return process.env.HELP_CENTER_DEV === 'true'
   },
 
-  // OAuth dynamic client registration without a signed-in session. Off by
-  // default: when off, only a signed-in human account can register an OAuth
-  // client (auth/index.ts, auth/hooks.ts). Direct process.env read like
-  // helpCenterDev; only the literal string 'true' enables it.
-  get oauthAllowUnauthenticatedClientRegistration(): boolean {
-    return process.env.OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION === 'true'
-  },
-
   // Settings that an external policy process owns (for Venturi, the feedback
   // infrastructure repository's reconciler, which rewrites them in the
   // database). Comma-separated dot-paths from POLICY_MANAGED_PATH_OPTIONS plus

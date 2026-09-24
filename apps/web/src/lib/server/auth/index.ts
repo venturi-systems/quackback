@@ -1,4 +1,8 @@
 import { betterAuth } from 'better-auth'
+import {
+  ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION,
+  OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES,
+} from './oauth-client-defaults'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import {
   anonymous,
@@ -406,14 +410,13 @@ async function createAuth() {
         consentPage: '/oauth/consent',
 
         // MCP clients may register themselves, but only from a signed-in
-        // human session by default (anonymous sessions are refused in
-        // hooks.before). Unauthenticated registration lets any internet
-        // caller create oauth_client rows, so it is opt-in per deployment:
-        // OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true restores it for
-        // MCP clients that register before sign-in. API keys (qb_...) remain
-        // the supported agent/service identity for /api/mcp.
+        // human session (anonymous sessions are refused in hooks.before).
+        // Registration without a session would let any internet caller create
+        // oauth_client rows, so this fork never allows it and offers no switch
+        // to allow it (landing-page#2309). API keys (qb_...) remain the
+        // supported agent/service identity for /api/mcp.
         allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: config.oauthAllowUnauthenticatedClientRegistration,
+        allowUnauthenticatedClientRegistration: ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION,
 
         // Quackback-specific scopes
         scopes: [
@@ -430,20 +433,10 @@ async function createAuth() {
           'write:chat',
         ],
 
-        // Default scopes for dynamically registered clients
-        clientRegistrationDefaultScopes: [
-          'openid',
-          'profile',
-          'email',
-          'read:feedback',
-          'offline_access',
-          'write:feedback',
-          'write:changelog',
-          'read:article',
-          'write:article',
-          'read:chat',
-          'write:chat',
-        ],
+        // Default scopes for dynamically registered clients: read-only. A
+        // client that needs a write scope must ask for it at registration or
+        // authorization, and the user consents to it explicitly.
+        clientRegistrationDefaultScopes: [...OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES],
 
         // MCP endpoint is a valid token audience
         validAudiences: [`${baseURL}/api/mcp`],
