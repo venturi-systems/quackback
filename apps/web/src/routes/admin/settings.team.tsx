@@ -34,6 +34,10 @@ import {
   InviteLinkRow,
 } from '@/components/admin/settings/team/pending-invitations'
 import { MemberActions } from '@/components/admin/settings/team/member-actions'
+import {
+  TeamDesignationPanel,
+  TEAM_IDENTITY_GAP_LABELS,
+} from '@/components/admin/settings/team/team-designation-panel'
 import type { UserId, PrincipalId } from '@quackback/ids'
 import { isAdmin } from '@/lib/shared/roles'
 
@@ -51,6 +55,8 @@ type TeamRow =
        *  signed in (or all sessions have aged out). Rendered as
        *  "2 hours ago" / "Never" in the table. */
       lastSignInAt: string | null
+      /** Team identity rule gap: the stored role cannot act (null when it can). */
+      identityGap: string | null
     }
   | {
       type: 'invitation'
@@ -90,7 +96,7 @@ export const Route = createFileRoute('/admin/settings/team')({
 function TeamPage() {
   const { settings, currentMember } = Route.useLoaderData()
   const teamDataQuery = useSuspenseQuery(settingsQueries.teamMembersAndInvitations())
-  const { members, avatarMap, formattedInvitations } = teamDataQuery.data
+  const { members, avatarMap, formattedInvitations, teamPolicy, candidates } = teamDataQuery.data
 
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -102,7 +108,9 @@ function TeamPage() {
     setInvitations(formattedInvitations)
   }, [formattedInvitations])
 
-  const adminCount = members.filter((m) => isAdmin(m.role)).length
+  // Only administrators whose identity satisfies the team identity rule can
+  // act, so only they count towards "the last administrator".
+  const adminCount = members.filter((m) => isAdmin(m.role) && !m.identityGap).length
   const isLastAdmin = adminCount <= 1
   const isCurrentUserAdmin = isAdmin(currentMember.role)
 
@@ -117,6 +125,7 @@ function TeamPage() {
       userId: m.userId,
       principalId: m.id,
       lastSignInAt: m.lastSignInAt,
+      identityGap: m.identityGap,
     }))
     const invitationRows: TeamRow[] = invitations.map((inv) => ({
       type: 'invitation' as const,
@@ -166,6 +175,12 @@ function TeamPage() {
                     )}
                   </p>
                   {r.email && <p className="text-sm text-muted-foreground truncate">{r.email}</p>}
+                  {r.identityGap && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Inactive: acts as a Contributor.{' '}
+                      {TEAM_IDENTITY_GAP_LABELS[r.identityGap] ?? ''}
+                    </p>
+                  )}
                 </div>
               </div>
             )
@@ -274,7 +289,8 @@ function TeamPage() {
                 userId={r.userId}
                 memberName={r.name || r.email || 'Unnamed'}
                 memberRole={r.role as 'admin' | 'member'}
-                isLastAdmin={isLastAdmin && isAdmin(r.role)}
+                isLastAdmin={isLastAdmin && isAdmin(r.role) && !r.identityGap}
+                canPromote={!r.identityGap}
               />
             </div>
           )
@@ -301,6 +317,12 @@ function TeamPage() {
         <BackLink to="/admin/settings">Settings</BackLink>
       </div>
       <TeamHeader workspaceName={settings!.name} />
+
+      <TeamDesignationPanel
+        policy={teamPolicy}
+        candidates={candidates}
+        isCurrentUserAdmin={isCurrentUserAdmin}
+      />
 
       {error && <FormError message={error} />}
 
@@ -417,6 +439,12 @@ function TeamPage() {
                           {r.email && (
                             <p className="text-xs text-muted-foreground truncate">{r.email}</p>
                           )}
+                          {r.type === 'member' && r.identityGap && (
+                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                              Inactive: acts as a Contributor.{' '}
+                              {TEAM_IDENTITY_GAP_LABELS[r.identityGap] ?? ''}
+                            </p>
+                          )}
                         </div>
                       </div>
                       <Badge
@@ -480,7 +508,8 @@ function TeamPage() {
                             userId={r.userId}
                             memberName={r.name || r.email || 'Unnamed'}
                             memberRole={r.role as 'admin' | 'member'}
-                            isLastAdmin={isLastAdmin && isAdmin(r.role)}
+                            isLastAdmin={isLastAdmin && isAdmin(r.role) && !r.identityGap}
+                            canPromote={!r.identityGap}
                           />
                         )}
                       </div>
