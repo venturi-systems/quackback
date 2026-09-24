@@ -44,6 +44,7 @@ const {
   teamIdentityGap,
   loadTeamIdentity,
   resolveTeamRole,
+  principalsActingAsTeam,
   _resetTeamIdentityLogForTests,
 } = await import('../team-identity')
 const { parseTeamEmailDomains, parseTeamAdminEmails, DEFAULT_TEAM_EMAIL_DOMAINS } =
@@ -230,5 +231,41 @@ describe('resolveTeamRole (read-side cap)', () => {
 
   it('costs no identity read for a contributor', async () => {
     expect(await resolveTeamRole(human('user'))).toBe('user')
+  })
+})
+
+describe('principalsActingAsTeam (team-only recipients)', () => {
+  const row = (id: string, role: string, userId: string | null, type = 'user') => ({
+    id,
+    role,
+    type,
+    userId,
+  })
+
+  it('keeps only stored team roles the team identity rule accepts', async () => {
+    hoisted.users.push(
+      { id: 'user_ok', email: 'ops@venturi.systems', emailVerified: true },
+      { id: 'user_password', email: 'bootstrap@venturi.systems', emailVerified: false },
+      { id: 'user_gmail', email: 'x@gmail.com', emailVerified: true }
+    )
+    hoisted.accounts.push(
+      { userId: 'user_ok', providerId: 'github' },
+      { userId: 'user_password', providerId: 'credential' },
+      { userId: 'user_gmail', providerId: 'google' }
+    )
+
+    const acting = await principalsActingAsTeam([
+      row('principal_ok', 'admin', 'user_ok'),
+      row('principal_password', 'admin', 'user_password'),
+      row('principal_gmail', 'member', 'user_gmail'),
+      row('principal_contributor', 'user', 'user_ok'),
+      row('principal_service', 'admin', null, 'service'),
+    ])
+
+    expect(acting.map((p) => p.id)).toEqual(['principal_ok'])
+  })
+
+  it('returns an empty list for no rows', async () => {
+    expect(await principalsActingAsTeam([])).toEqual([])
   })
 })

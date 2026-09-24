@@ -158,13 +158,27 @@ export const Route = createFileRoute('/api/v1/posts/$postId/comments')({
             segmentIds: callerSegmentIds,
           }
 
+          // The author's role as the team identity rule resolves it
+          // (landing-page#2309): the caller's own resolved key role, or for an
+          // attributed author the role that person may exercise now. A stored
+          // team role the rule does not accept is a contributor here too, so it
+          // never marks the comment as a team reply.
+          const { resolveTeamRole } = await import('@/lib/server/domains/principals/team-identity')
+          const authorRole: Role = overridePrincipalId
+            ? await resolveTeamRole({
+                id: principalRecord.id,
+                role: principalRecord.role,
+                type: principalRecord.type,
+                userId: principalRecord.user?.id ?? null,
+              })
+            : auth.role
+
           const result = await createComment(
             {
               postId,
               content: parsed.data.content,
               contentJson: (parsed.data.contentJson ?? undefined) as
-                | import('@/lib/shared/db-types').TiptapContent
-                | undefined,
+                import('@/lib/shared/db-types').TiptapContent | undefined,
               parentId,
               isPrivate: parsed.data.isPrivate,
               createdAt,
@@ -175,7 +189,7 @@ export const Route = createFileRoute('/api/v1/posts/$postId/comments')({
               displayName: principalRecord.displayName ?? undefined,
               name: principalRecord.user?.name,
               email: principalRecord.user?.email ?? undefined,
-              role: principalRecord.role as Role,
+              role: authorRole,
             },
             callerActor,
             { skipDispatch: auth.importMode }
