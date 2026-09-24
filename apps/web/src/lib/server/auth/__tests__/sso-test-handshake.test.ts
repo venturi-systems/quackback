@@ -149,6 +149,38 @@ describe('runHandshake', () => {
     expect(result.errorCode).toBe('invalid_grant')
     expect(result.hint).toMatch(/PKCE|code reuse|expired|redirect URI/i)
   })
+
+  it('surfaces the full ID token payload (allClaims) on success, including non-standard claims', async () => {
+    // Upstream v0.13.0 test, rewritten onto this file's IdP helpers: the fork's
+    // handshake also requires the discovered authorization endpoint to be an
+    // https URL on a public address, which the helpers' discovery document has.
+    const issuer = 'https://idp.example'
+    idpResponds(
+      { issuer },
+      await signedIdToken({
+        iss: issuer,
+        sub: 'user-sub-123',
+        email: 'alice@idp.example',
+        name: 'Alice Example',
+        // The non-standard claim the curated `claims` view drops but admins need.
+        groups: ['11111111-2222-3333-4444-555555555555', 'feedback-admins'],
+      })
+    )
+
+    const result = await runHandshake(baseInput)
+    if (!result.ok) throw new Error(`expected success, got ${result.stage}: ${result.hint}`)
+
+    // The curated subset still works for the friendly display + identity match.
+    expect(result.claims.email).toBe('alice@idp.example')
+    // ...and the full payload is surfaced verbatim, including `groups`.
+    expect(result.allClaims).toBeDefined()
+    expect(result.allClaims?.groups).toEqual([
+      '11111111-2222-3333-4444-555555555555',
+      'feedback-admins',
+    ])
+    expect(result.allClaims?.iss).toBe(issuer)
+    expect(result.allClaims?.sub).toBe('user-sub-123')
+  })
 })
 
 // The admin test must pass exactly when production sign-in would, so it checks

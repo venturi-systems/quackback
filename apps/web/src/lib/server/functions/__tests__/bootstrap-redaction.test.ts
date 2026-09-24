@@ -25,6 +25,9 @@ vi.mock('@tanstack/react-start', () => ({
 }))
 vi.mock('@tanstack/react-start/server', () => ({
   getRequestHeaders: () => new Headers(hoisted.cookie ? { cookie: hoisted.cookie } : {}),
+  // Upstream v0.13.1 (80f392a69, 1df60426a): bootstrap sends Accept-CH,
+  // Critical-CH and Vary on the document response.
+  setResponseHeader: () => undefined,
 }))
 vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   getTenantSettings: async () => hoisted.tenant,
