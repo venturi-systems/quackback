@@ -137,8 +137,13 @@ jobs:
           restore-keys: ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun run --filter @quackback/widget build
+      # Each database setup step has its own cap, far above its normal
+      # duration, so a hang fails in minutes instead of holding the runner
+      # until the job cap. See the e2e_tests job for the measurements.
       - run: bun run db:migrate
+        timeout-minutes: 5
       - name: Apply and verify online performance indexes
+        timeout-minutes: 5
         run: bun run db:indexes
       - run: bun run test --run
 
@@ -426,8 +431,21 @@ jobs:
           EOF
 
       - run: bun run --filter @quackback/widget build
+
+      # The database setup steps each get their own cap. The job cap alone
+      # (90 minutes) let a hung step hold the runner for an hour: on run
+      # 35980940017, shard 8 attempt 1, `bun run db:migrate` printed its
+      # `bun run src/migrate.ts` line at 09:24:29Z, then nothing more, and
+      # sat until the run was cancelled at 10:26:33Z. Across 95 successful
+      # shard jobs in 11 recent runs, db:migrate took at most 1 s and db:seed
+      # at most 5 s (the database_tests job's db:migrate and db:indexes: at
+      # most 1 s each, over 12 jobs). Five minutes is at least 60 times the
+      # slowest observed duration, so a slow runner still passes and a hang
+      # fails within five minutes. Raise it only with a measured reason.
       - run: bun run db:migrate
+        timeout-minutes: 5
       - run: bun run db:seed
+        timeout-minutes: 5
 
       - name: Install the Playwright browser
         working-directory: apps/web
