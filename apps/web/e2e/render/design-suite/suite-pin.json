@@ -1,0 +1,40 @@
+{
+  "$comment": [
+    "Pin for the Venturi design suite v6.6.0 rendered text-quality checker.",
+    "",
+    "The three files beside this pin are unmodified, byte-for-byte copies of the",
+    "suite release. Each sha256 and byte count below equals that file's entry in",
+    "the suite's own index (manifest.json, release 6.6.0, whose sha256 is",
+    "`suiteIndex.sha256`). The signed-in render job in .github/workflows/ci.yml",
+    "refuses to run unless the files on disk are exactly these files with exactly",
+    "these digests, and tests/ci-contract.test.ts asserts the same.",
+    "",
+    "Never edit these files, reformat them or run them through a formatter:",
+    ".prettierignore and eslint.config.js exclude this directory for that reason.",
+    "To move to a new suite release, copy the three files from that release",
+    "without editing them and update every sha256, byte count and the index",
+    "digest in one change."
+  ],
+  "release": "6.6.0",
+  "suiteIndex": {
+    "path": "manifest.json",
+    "sha256": "0a3c7a8e3dde16bb6bdcc9bb8dc2a584dd82b5076bfaf9cba9fc59a9bc11b4f4"
+  },
+  "files": [
+    {
+      "path": "SOURCE/quality-policy.json",
+      "bytes": 6627,
+      "sha256": "1af2461d0f2b5182c89de4e2bbb117af5b8a969496982a1dba334f7cc3ef1796"
+    },
+    {
+      "path": "scripts/text-quality-browser.mjs",
+      "bytes": 10362,
+      "sha256": "180f61b14d860266bed5d912212a12419b92539793a2bcda9ce469b5a2da5e36"
+    },
+    {
+      "path": "scripts/text-quality-check.mjs",
+      "bytes": 14103,
+      "sha256": "ea7b55efcbe5934bb311d766da971346da055d4cd480e096d7cdbefb90cf5899"
+    }
+  ]
+}

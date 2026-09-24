@@ -33,11 +33,13 @@ export function AdminOnlyNotice() {
       </div>
       <div className="space-y-2 text-sm">
         <p className="font-medium">Team members can change</p>
+        {/* Each link is at least 44px both ways on a touch screen
+            (--ds-component-touch-minimum); "Tags" alone is 30px wide. */}
         <ul className="flex flex-wrap gap-x-6 gap-y-1">
           <li>
             <Link
               to="/admin/settings/statuses"
-              className="inline-flex min-h-11 items-center underline underline-offset-4"
+              className="inline-flex min-h-11 items-center underline underline-offset-4 pointer-coarse:min-w-(--ds-component-touch-minimum)"
             >
               Statuses
             </Link>
@@ -45,7 +47,7 @@ export function AdminOnlyNotice() {
           <li>
             <Link
               to="/admin/settings/tags"
-              className="inline-flex min-h-11 items-center underline underline-offset-4"
+              className="inline-flex min-h-11 items-center underline underline-offset-4 pointer-coarse:min-w-(--ds-component-touch-minimum)"
             >
               Tags
             </Link>

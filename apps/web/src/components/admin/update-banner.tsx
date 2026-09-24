@@ -51,6 +51,9 @@ export function UpdateBanner({ latestVersion }: UpdateBannerProps) {
     <div
       className="grid transition-[grid-template-rows] duration-300 ease-out"
       style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+      // Closed, the banner stays mounted for the grid animation; inert keeps
+      // its link and dismiss button out of the tab order while it is hidden.
+      inert={!open}
     >
       <div className="overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm bg-primary/5 border-b border-primary/10">
