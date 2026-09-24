@@ -5,10 +5,11 @@ import { test, expect, type APIResponse } from '@playwright/test'
  * (landing-page#2309).
  *
  * DEF-55: `/auth/login?error=123`, `/auth/login?callbackUrl=123`,
- * `/admin/login?error=123` and `/auth/signup?callbackUrl=123` answered HTTP
- * 500 on feedback.venturi.systems and printed the raw zod issue ("Invalid
- * input: expected string, received number") into the page. TanStack Router
- * reads `123` as a number, and those routes demanded a string.
+ * `/admin/login?error=123`, `/auth/signup?callbackUrl=123`, `/oauth/consent`,
+ * `/oauth/consent?client_id=123` and `/auth/widget-handoff?ott=123` answered
+ * HTTP 500 on feedback.venturi.systems and printed the raw zod issue
+ * ("Invalid input: expected string, received number") into the page.
+ * TanStack Router reads `123` as a number, and those routes demanded a string.
  *
  * DEF-48: a signed-out visitor on an admin settings page was sent to sign in
  * with `callbackUrl=/admin`, so the page they asked for was lost.
@@ -31,9 +32,15 @@ const HOSTILE_PATHS = [
   '/auth/signup?error=123',
   '/auth/reset-password?token=123&error=%5B1%5D',
   '/verify-magic-link?token=%7B%7D&callbackURL=123&errorCallbackURL=%5B%5D',
+  '/oauth/consent?client_id=123',
   '/oauth/consent?client_id=123&state=12345',
   '/oauth/consent?client_id=%5B1%5D&scope=%7B%7D',
   '/oauth/consent',
+  // The handoff validates its query before its loader decides whether the
+  // widget is on, so these reach validateSearch either way.
+  '/auth/widget-handoff?ott=123',
+  '/auth/widget-handoff?ott=123&returnTo=123',
+  '/auth/widget-handoff?ott=%5B%22a%22%5D&returnTo=%7B%7D',
   '/admin/settings/security/authentication?tab=bogus',
   '/admin/settings/security/authentication?tab=123',
 ]
