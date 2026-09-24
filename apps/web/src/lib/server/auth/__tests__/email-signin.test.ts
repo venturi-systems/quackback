@@ -51,3 +51,23 @@ describe('requestEmailSignin — failed-verify redirect', () => {
     )
   })
 })
+
+describe('requestEmailSignin — refused send', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('mints no magic link and sends no email when the sign-in hooks refuse the OTP send', async () => {
+    // e.g. magic link is off and the address is new: the per-method gate in
+    // hooks.before refuses sendVerificationOTP. mintMagicLinkUrl bypasses the
+    // hooks, so it must not run first and leave an undelivered token row.
+    hoisted.mockSendVerificationOTP.mockRejectedValueOnce(
+      new Error('magic_link_method_not_allowed')
+    )
+
+    await expect(
+      requestEmailSignin({ email: 'newcomer@example.com', callbackURL: '/' })
+    ).rejects.toThrow('magic_link_method_not_allowed')
+
+    expect(hoisted.mockMintMagicLinkUrl).not.toHaveBeenCalled()
+    expect(hoisted.mockSendMagicLinkEmail).not.toHaveBeenCalled()
+  })
+})
