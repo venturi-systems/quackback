@@ -386,10 +386,12 @@ export const updateAuthConfigSchema = z.object({
       // Server-owned timestamps. `updateAuthConfig` stamps
       // `detailsChangedAt` itself when discoveryUrl/clientId change and
       // the SSO test callback stamps `lastSuccessfulTestAt`. They stay
-      // in the schema (rather than `.strict()` rejecting them) so reads
-      // that round-trip the whole config back through updateAuthConfig
-      // — the config-file reconciler, the admin UI's draft save — don't
-      // strip the values. UI callers never set them directly.
+      // in the schema (rather than `.strict()` rejecting them) so a
+      // caller that round-trips a stored `ssoOidc` block back through
+      // updateAuthConfig does not strip the values. No in-app caller
+      // sends `ssoOidc` today: the admin UI edits SSO through the
+      // identity-provider functions, and the config-file reconciler
+      // ignores the deprecated `auth` key.
       detailsChangedAt: z.string().optional(),
       lastSuccessfulTestAt: z.string().optional(),
       attributeMapping: z

@@ -54,6 +54,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null
 }
 
+/**
+ * Copy an array for the merged result. Arrays still replace the target's
+ * array wholesale and are never merged element by element (the office-hours
+ * and canned-reply editors rely on that), but a plain-object element is
+ * rebuilt through deepMerge and a nested array is copied the same way, so an
+ * unsafe key inside an array is dropped at any depth instead of being kept
+ * and later written to the database by JSON.stringify. Primitives, null and
+ * non-plain objects such as a Date are kept as given.
+ */
+function copyArrayWithoutUnsafeKeys(values: readonly unknown[]): unknown[] {
+  return values.map((item) => {
+    if (Array.isArray(item)) return copyArrayWithoutUnsafeKeys(item)
+    if (isPlainObject(item)) return deepMerge<Record<string, unknown>>({}, item)
+    return item
+  })
+}
+
 /** @internal */
 export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target }
@@ -83,7 +100,9 @@ export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
       // than kept and later written to the database by JSON.stringify.
       result[key] = deepMerge<Record<string, unknown>>({}, srcVal) as T[typeof key]
     } else {
-      result[key] = srcVal as T[typeof key]
+      // An array replaces the target's value wholesale, as a guarded copy.
+      const value = Array.isArray(srcVal) ? copyArrayWithoutUnsafeKeys(srcVal) : srcVal
+      result[key] = value as T[typeof key]
     }
   }
   return result
