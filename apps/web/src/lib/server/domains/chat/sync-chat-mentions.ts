@@ -47,17 +47,25 @@ export async function syncChatMessageMentions(input: SyncChatMentionsInput): Pro
   try {
     // Server-side eligibility: only teammates (admin/member) can be mentioned in
     // an internal note. Filter in code (not just the WHERE) as defense-in-depth.
+    // A teammate is a human principal whose stored team role the team identity
+    // rule accepts (landing-page#2309): a stored role on an identity that fails
+    // the rule acts as a contributor and is not sent internal-note content.
     const rows = await db
-      .select({ id: principal.id, type: principal.type, role: principal.role })
+      .select({
+        id: principal.id,
+        type: principal.type,
+        role: principal.role,
+        userId: principal.userId,
+      })
       .from(principal)
       .where(inArray(principal.id, Array.from(mentionedIds)))
 
-    const eligibleIds: PrincipalId[] = []
-    for (const r of rows) {
-      if (r.type === 'user' && (r.role === 'admin' || r.role === 'member')) {
-        eligibleIds.push(r.id as PrincipalId)
-      }
-    }
+    const { principalsActingAsTeam } = await import('@/lib/server/domains/principals/team-identity')
+    const eligibleIds: PrincipalId[] = (
+      await principalsActingAsTeam(
+        rows.filter((r) => r.type === 'user' && (r.role === 'admin' || r.role === 'member'))
+      )
+    ).map((r) => r.id as PrincipalId)
     if (eligibleIds.length === 0) return
 
     const inserted = (await db

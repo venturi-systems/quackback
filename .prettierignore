@@ -1,0 +1,3 @@
+# Byte-for-byte copy of the Venturi design suite's checker, pinned by sha256 in
+# its suite-pin.json. A formatter must never rewrite it.
+apps/web/e2e/render/design-suite/

@@ -19,7 +19,7 @@
  *     method gate applies to it too)
  *   - oauth toggles: password on/off / magic-link on/off
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeAuthConfig, makeTenant, makeVerifiedDomain } from './_helpers'
 
 const mockUserFindFirst = vi.fn()
@@ -349,6 +349,48 @@ describe('handleSignInPreCheck — isAuthMethodAllowed gate', () => {
 
     await handleSignInPreCheck(ctx)
     expect(ctx.redirect).not.toHaveBeenCalled()
+  })
+
+  // Team identity rule (landing-page#2309): a password sign-up at a team
+  // domain is refused even while password sign-in is on. Its unverified row
+  // would block the owner's first Google or GitHub sign-in, and after the
+  // owner verified the address by magic link and linked Google or GitHub,
+  // the creator's password would open an account holding a team role.
+  describe('password sign-up at a team domain', () => {
+    beforeEach(() => {
+      vi.stubEnv('VENTURI_TEAM_EMAIL_DOMAINS', 'venturi.systems')
+    })
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it.each(['newhire@venturi.systems', ' NewHire@Venturi.Systems '])(
+      'refuses /sign-up/email for %s while password sign-in is on',
+      async (email) => {
+        mockGetTenantSettings.mockResolvedValue(tenant({ passwordEnabled: true }))
+        const ctx = ctxFor('/sign-up/email', { email })
+
+        await expect(handleSignInPreCheck(ctx)).rejects.toThrow(
+          'REDIRECT:/?auth=signin&error=team_identity_required'
+        )
+      }
+    )
+
+    it('keeps password sign-up open outside the team domains', async () => {
+      mockGetTenantSettings.mockResolvedValue(tenant({ passwordEnabled: true }))
+      const ctx = ctxFor('/sign-up/email', { email: 'someone@venturi.systems.example' })
+
+      await handleSignInPreCheck(ctx)
+      expect(ctx.redirect).not.toHaveBeenCalled()
+    })
+
+    it('does not refuse a magic-link send to a team-domain address (it proves the inbox)', async () => {
+      mockGetTenantSettings.mockResolvedValue(tenant({ magicLinkEnabled: true }))
+      const ctx = ctxFor('/sign-in/magic-link', { email: 'newhire@venturi.systems' })
+
+      await handleSignInPreCheck(ctx)
+      expect(ctx.redirect).not.toHaveBeenCalled()
+    })
   })
 
   it('magic-link is allowed for team when oauth.magicLink toggle is true (verified-domain check separately gates)', async () => {

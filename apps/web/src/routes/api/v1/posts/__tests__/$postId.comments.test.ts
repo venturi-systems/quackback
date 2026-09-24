@@ -28,6 +28,15 @@ vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
   segmentIdsForPrincipal: vi.fn().mockResolvedValue(new Set()),
 }))
 
+// The team identity rule is team-identity.ts (covered there). Here an
+// attributed author keeps a stored team role only when the test says so.
+const mockResolveTeamRole = vi.fn(async (row: { role: string | null }) =>
+  row.role === 'admin' || row.role === 'member' ? row.role : 'user'
+)
+vi.mock('@/lib/server/domains/principals/team-identity', () => ({
+  resolveTeamRole: (row: { role: string | null }) => mockResolveTeamRole(row),
+}))
+
 import { Route } from '../$postId.comments'
 
 type RouteOpts = { server: { handlers: { POST: (...args: unknown[]) => Promise<Response> } } }
@@ -133,7 +142,36 @@ describe('POST /api/v1/posts/:postId/comments authorPrincipalId override', () =>
     })
     const author = mockCreateComment.mock.calls[0][1]
     expect(author.principalId).toBe(ADMIN_KEY_PRINCIPAL)
-    expect(author.role).toBe('admin')
+    // The key's resolved role (member), not its service principal's stored
+    // role (admin): landing-page#2309.
+    expect(author.role).toBe('member')
+  })
+
+  it('attributes a stored team role the team identity rule rejects as a contributor', async () => {
+    mockWithApiKeyAuth.mockResolvedValue(adminAuth)
+    const bootstrapAdminRecord = {
+      ...userPrincipalRecord,
+      role: 'admin',
+      user: { id: 'user_bootstrap', name: 'Bootstrap', email: 'bootstrap@example.com' },
+    }
+    mockPrincipalFindFirst
+      .mockResolvedValueOnce(bootstrapAdminRecord)
+      .mockResolvedValueOnce(apiKeyHolderRecord)
+    mockResolveTeamRole.mockResolvedValueOnce('user')
+
+    const res = await POST({
+      request: makeRequest({ content: 'Hello', authorPrincipalId: OVERRIDE_PRINCIPAL }),
+      params: { postId: POST_ID },
+    })
+
+    expect(res.status).toBe(201)
+    expect(mockResolveTeamRole).toHaveBeenCalledWith({
+      id: OVERRIDE_PRINCIPAL,
+      role: 'admin',
+      type: 'user',
+      userId: 'user_bootstrap',
+    })
+    expect(mockCreateComment.mock.calls[0][1].role).toBe('user')
   })
 
   it('returns 404 when authorPrincipalId does not exist', async () => {

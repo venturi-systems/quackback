@@ -203,9 +203,13 @@ function presetUsesAnonymous(meta: PresetMeta): boolean {
   return ACTIONS.some((a) => meta.tiers[a.id] === 'anonymous')
 }
 
+// The policy owns the Anyone tier on every board whose access it does not
+// manage outright: in the public posture the boards it publishes keep Anyone
+// for viewing, so the copy must not claim every board requires sign-in.
 const POLICY_ANON_TOOLTIP =
-  "This deployment's access policy requires sign-in on every board, so the Anyone tier is unavailable."
-const POLICY_ANON_PRESET_NOTE = 'Unavailable: this deployment requires sign-in on every board.'
+  "This deployment's access policy requires sign-in on every board it does not manage, so the Anyone tier is unavailable."
+const POLICY_ANON_PRESET_NOTE =
+  'Unavailable: this deployment requires sign-in on every board it does not manage.'
 
 /** Match the current grid against the preset table. Returns 'custom' when
  *  no preset matches — including any non-empty segment list, since presets
@@ -421,7 +425,7 @@ export function BoardAccessForm({
       {anonBlocked && (
         <ManagedSettingNote
           what="The Anyone (no sign-in) tier"
-          detail="Every board requires sign-in: choose Signed-in, Segments or Team only."
+          detail="Sign-in is required on every board this deployment does not manage: choose Signed-in, Segments or Team only."
         />
       )}
 

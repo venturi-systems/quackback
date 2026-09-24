@@ -345,7 +345,11 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
           <SheetContent side="left" className="w-72 p-0">
             <SheetHeader className="px-5 pt-6 pb-4">
               <SheetTitle className="flex items-center gap-3">
-                <Link to="/admin/feedback" onClick={() => setMobileMenuOpen(false)}>
+                <Link
+                  to="/admin/feedback"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="-m-2 inline-flex size-(--ds-component-touch-minimum) shrink-0 items-center justify-center rounded-md"
+                >
                   <img
                     src={orgLogo}
                     alt={orgName}
@@ -437,7 +441,12 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
           </SheetContent>
         </Sheet>
 
-        <Link to="/admin/feedback" className="absolute left-1/2 -translate-x-1/2">
+        {/* The 28px logo sits in a 44px target (--ds-component-touch-minimum):
+            this header only shows on small, usually touch, screens. */}
+        <Link
+          to="/admin/feedback"
+          className="absolute left-1/2 -translate-x-1/2 inline-flex size-(--ds-component-touch-minimum) items-center justify-center rounded-md"
+        >
           <img
             src={orgLogo}
             alt={orgName}

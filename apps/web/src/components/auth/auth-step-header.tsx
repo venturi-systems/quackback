@@ -16,15 +16,21 @@ interface HeaderOptions {
   surface?: AuthSurface
   /** Workspace name woven into the private-portal base-step copy. */
   workspaceName?: string
+  /**
+   * The gated portal's read posture. `authenticated` means anyone who signs in
+   * can read it, so the base-step copy must not call it private. Anything else
+   * (or nothing) keeps the private copy.
+   */
+  visibility?: 'public' | 'authenticated' | 'private'
 }
 
 /**
  * Title + description for the auth form's current step, shared by the public
  * sign-in dialog and the private-portal gate so both read identically.
  *
- * Only the base step (`credentials`, plus the 2FA fallback) differs by surface;
- * the `code` / `forgot` / `reset` steps are step-specific and read the same
- * everywhere.
+ * Only the base step (`credentials`, plus the `email` and 2FA steps that fall
+ * back to it) differs by surface; the `code` / `forgot` / `reset` steps are
+ * step-specific and read the same everywhere.
  */
 export function headerForStep(
   mode: 'login' | 'signup',
@@ -104,8 +110,22 @@ export function headerForStep(
             defaultMessage="Create an account to continue"
           />
         ),
+      // An authenticated portal is open to anyone who signs in: say that, as
+      // the gate's own lead does, instead of calling it private.
       description:
-        mode === 'login' ? (
+        opts.visibility === 'authenticated' ? (
+          mode === 'login' ? (
+            <FormattedMessage
+              id="portal.auth.open.loginTagline"
+              defaultMessage="Anyone who signs in can read and take part. Sign in or create an account to continue."
+            />
+          ) : (
+            <FormattedMessage
+              id="portal.auth.open.signupTagline"
+              defaultMessage="Anyone who signs in can read and take part. Create an account to continue."
+            />
+          )
+        ) : mode === 'login' ? (
           <FormattedMessage
             id="portal.auth.private.loginTagline"
             defaultMessage="This portal is private. Sign in or create an account to continue."

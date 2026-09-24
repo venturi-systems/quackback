@@ -19,6 +19,7 @@ import {
   searchList,
   searchText,
 } from '@/lib/shared/search-params'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 const FeedbackContainer = lazy(() =>
   import('@/components/public/feedback/feedback-container').then((module) => ({
@@ -111,8 +112,12 @@ export const Route = createFileRoute('/_portal/')({
       accessGated: false,
     }
   },
-  head: ({ loaderData }) => {
-    // Let the authenticated parent gate own title, metadata, and indexing.
+  head: ({ loaderData, matches }) => {
+    // Let the parent gate own title, metadata, and indexing. The gate can
+    // apply when this loader did not stop early (a signed-in account outside
+    // the access list), so check the parent's decision too (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData || loaderData.accessGated) return {}
     const workspaceName = loaderData.org.name
     const { baseUrl } = loaderData

@@ -455,19 +455,12 @@ async function createAuth() {
         // path (matching the official Better Auth demo pattern — see #7453)
         silenceWarnings: { oauthAuthServerConfig: true },
 
-        // Embed principal info in the JWT so MCP handler can avoid extra DB lookups
+        // Embed principal info in the JWT. The role claim is the resolved role
+        // under the team identity rule, never the stored one; the MCP handler
+        // re-resolves it on every call anyway (access-token-claims.ts).
         customAccessTokenClaims: async ({ user }) => {
-          if (!user?.id) return {}
-          const p = await db.query.principal.findFirst({
-            where: eq(principalTable.userId, user.id as ReturnType<typeof generateId<'user'>>),
-            columns: { id: true, role: true },
-          })
-          return {
-            principalId: p?.id,
-            role: p?.role ?? 'user',
-            name: user.name,
-            email: user.email,
-          }
+          const { accessTokenClaims } = await import('./access-token-claims')
+          return accessTokenClaims(user)
         },
       }),
 
@@ -523,6 +516,8 @@ async function createAuth() {
             // This preserves sessions, principal, votes, comments on the same userId.
             const newImage =
               ((newUser.user as Record<string, unknown>).image as string | null) ?? null
+            const { absorbedSignUpIdentity, absorbedSignUpPrincipal } =
+              await import('./merge-anonymous')
 
             await db.transaction(async (tx) => {
               // Move account+session refs to anon user (before deleting new user)
@@ -541,25 +536,25 @@ async function createAuth() {
                 await tx.delete(principalTable).where(eq(principalTable.id, existingPrincipal.id))
               }
               await tx.delete(userTable).where(eq(userTable.id, newUserId))
-              // Update the anon user with real identity + upgrade principal
+              // Update the anon user with real identity + upgrade principal.
+              // The new account's own verification flag carries over, never a
+              // blanket `true` (see absorbedSignUpIdentity), and the principal
+              // becomes a contributor, never a stored team role
+              // (see absorbedSignUpPrincipal).
               await Promise.all([
                 tx
                   .update(userTable)
-                  .set({
-                    name: newUser.user.name,
-                    email: newUser.user.email,
-                    emailVerified: true,
-                    isAnonymous: false,
-                    image: newImage,
-                  })
+                  .set({ ...absorbedSignUpIdentity(newUser.user), image: newImage })
                   .where(eq(userTable.id, anonUserId)),
                 tx
                   .update(principalTable)
-                  .set({
-                    type: 'user',
-                    displayName: newUser.user.name || anonymousUser.user.name,
-                    avatarUrl: newImage,
-                  })
+                  .set(
+                    absorbedSignUpPrincipal({
+                      newName: newUser.user.name,
+                      anonName: anonymousUser.user.name,
+                      image: newImage,
+                    })
+                  )
                   .where(eq(principalTable.userId, anonUserId)),
               ])
             })

@@ -78,6 +78,15 @@ vi.mock('@/lib/server/domains/notifications/notification.service', () => ({
   createNotificationsBatch: (...args: unknown[]) => createNotificationsBatch(...args),
 }))
 
+// Team-only recipients go through the team identity rule (team-identity.ts,
+// covered there). Here every stored team row passes except the ids a test puts
+// in `rejectedTeam`.
+let rejectedTeam = new Set<string>()
+vi.mock('@/lib/server/domains/principals/team-identity', () => ({
+  principalsActingAsTeam: async (rows: Array<{ id: string }>) =>
+    rows.filter((r) => !rejectedTeam.has(r.id)),
+}))
+
 const { syncChatMessageMentions } = await import('../sync-chat-mentions')
 
 const MESSAGE_ID = 'chat_msg_test' as ChatMessageId
@@ -111,6 +120,20 @@ describe('syncChatMessageMentions', () => {
     insertCalls.length = 0
     updateNotifiedCalls.length = 0
     createNotificationsBatch.mockClear()
+    rejectedTeam = new Set()
+  })
+
+  it('drops a stored team role the team identity rule does not accept', async () => {
+    eligibilityRows = [teamRow(P1), { id: P2, type: 'user', role: 'admin' }]
+    rejectedTeam = new Set([P2])
+    insertReturning = [{ principalId: P1 }]
+
+    await syncChatMessageMentions(defaultInput({ mentionedIds: new Set([P1, P2]) }))
+
+    expect(insertCalls).toHaveLength(1)
+    expect(insertCalls[0].rows).toEqual([{ chatMessageId: MESSAGE_ID, principalId: P1 }])
+    const batch = createNotificationsBatch.mock.calls[0][0] as Array<Record<string, unknown>>
+    expect(batch.map((n) => n.principalId)).toEqual([P1])
   })
 
   it('persists and notifies newly-mentioned teammates', async () => {

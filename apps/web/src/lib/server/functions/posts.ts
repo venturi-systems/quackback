@@ -15,6 +15,7 @@ import {
   type UserId,
 } from '@quackback/ids'
 import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
+import { listInboxPostsSchema } from '@/lib/shared/schemas/list-filters'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { requireAuth, policyActorFromAuth } from './auth-helpers'
 import { db, eq, posts } from '@/lib/server/db'
@@ -69,26 +70,8 @@ function serializePostDates<
 
 // tiptapContentSchema imported from @/lib/shared/schemas/posts
 
-const listInboxPostsSchema = z.object({
-  boardIds: z.array(z.string()).optional(),
-  statusIds: z.array(z.string()).optional(),
-  statusSlugs: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  segmentIds: z.array(z.string()).optional(),
-  ownerId: z.union([z.string(), z.null()]).optional(),
-  search: z.string().optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  minVotes: z.number().int().min(0).optional(),
-  minComments: z.number().int().min(0).optional(),
-  hasDuplicates: z.boolean().optional(),
-  responded: z.enum(['all', 'responded', 'unresponded']).optional(),
-  updatedBefore: z.string().optional(),
-  sort: z.enum(['newest', 'oldest', 'votes']).optional().default('newest'),
-  showDeleted: z.boolean().optional(),
-  cursor: z.string().optional(),
-  limit: z.number().int().min(1).max(100).optional().default(20),
-})
+// listInboxPostsSchema lives in lib/shared/schemas/list-filters.ts, which
+// holds each filter to what the inbox query accepts.
 
 const createPostSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),

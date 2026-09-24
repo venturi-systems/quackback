@@ -38,6 +38,12 @@ export interface PortalAccessGateError {
   callbackUrl?: string
   /** When set, the gate opens the sign-in dialog automatically on mount. */
   autoOpenSignin?: 'login' | 'signup'
+  /**
+   * The `?error=` code of a refused sign-in or access redirect, such as
+   * `not_team_member`. The gate shows its message only for a known code
+   * (`authBlockMessage`, own keys only); anything else shows nothing.
+   */
+  error?: string
   authConfig: {
     found: boolean
     oauth: Record<string, boolean | undefined>

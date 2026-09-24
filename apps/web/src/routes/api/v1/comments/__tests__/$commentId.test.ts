@@ -234,3 +234,38 @@ describe('DELETE /api/v1/comments/:commentId', () => {
     expect(response.status).toBe(403)
   })
 })
+
+// ── Role source (landing-page#2309) ───────────────────────────────────────────
+//
+// The actor role is the key's resolved role (withApiKeyAuth: the stored role
+// capped by the creator's current role under the team identity rule), never
+// the service principal's stored role.
+
+describe('comment actor role comes from the resolved API key role', () => {
+  beforeEach(() => {
+    mockWithApiKeyAuth.mockResolvedValue({ principalId: PRINCIPAL_ID, role: 'member' })
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'admin', user: { name: 'Test User' } })
+  })
+
+  it('PATCH passes the resolved role, not the stored one', async () => {
+    const request = makeRequest('PATCH', { content: 'Updated comment' })
+    await handlers.PATCH({ request, params: { commentId: COMMENT_ID_STR } })
+
+    expect(mockUserEditComment).toHaveBeenCalledWith(
+      COMMENT_ID_STR,
+      'Updated comment',
+      { principalId: PRINCIPAL_ID, role: 'member' },
+      expect.anything()
+    )
+  })
+
+  it('DELETE passes the resolved role, not the stored one', async () => {
+    const request = makeRequest('DELETE')
+    await handlers.DELETE({ request, params: { commentId: COMMENT_ID_STR } })
+
+    expect(mockSoftDeleteComment).toHaveBeenCalledWith(COMMENT_ID_STR, {
+      principalId: PRINCIPAL_ID,
+      role: 'member',
+    })
+  })
+})

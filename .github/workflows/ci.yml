@@ -162,6 +162,10 @@ jobs:
       pull-requests: read
     outputs:
       e2e: ${{ steps.filter.outputs.e2e }}
+      # true when the signed-in render lane has something to measure: the web
+      # app, or this workflow (the lane's own definition). Same fail-closed
+      # rules as `e2e`.
+      render: ${{ steps.filter.outputs.render }}
       # true ONLY when the probe proved this merge-queue entry's git tree is
       # byte-identical to the recorded checkout on which all 8 e2e shards
       # succeeded. Every other outcome -- not a merge_group event, multi-PR
@@ -191,11 +195,13 @@ jobs:
           # wave it through.
           if [ "$EVENT_NAME" != pull_request ] || [ -z "$BASE_SHA" ]; then
             echo "e2e=true" >> "$GITHUB_OUTPUT"
+            echo "render=true" >> "$GITHUB_OUTPUT"
             echo "$EVENT_NAME: running the end-to-end lane with no path filter."
             exit 0
           fi
           if ! changed="$(git diff --name-only "$BASE_SHA" HEAD)"; then
             echo "e2e=true" >> "$GITHUB_OUTPUT"
+            echo "render=true" >> "$GITHUB_OUTPUT"
             echo "Could not diff against $BASE_SHA: running the end-to-end lane."
             exit 0
           fi
@@ -205,6 +211,11 @@ jobs:
             echo "e2e=true" >> "$GITHUB_OUTPUT"
           else
             echo "e2e=false" >> "$GITHUB_OUTPUT"
+          fi
+          if printf '%s\n' "$changed" | grep -E '^(apps/web/|\.github/workflows/ci\.yml$)' >/dev/null; then
+            echo "render=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "render=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Reuse exact-tree PR evidence for a merge-queue entry
@@ -616,6 +627,177 @@ jobs:
             apps/web/e2e-plan.json
           retention-days: 7
           if-no-files-found: ignore
+
+  signed_in_render:
+    # REQ-31 (venturi-systems/landing-page#2309). Renders the built portal as
+    # its seeded fixture identities -- a signed-in administrator, a signed-in
+    # team member, and a signed-out visitor -- and runs the UNMODIFIED Venturi
+    # design suite v6.6.0 text-quality checker on each route at every width its
+    # policy lists, as rendered and under text spacing, plus a keyboard walk
+    # (visible focus, document order, no traps, 44px coarse / 24px fine
+    # targets). e2e/render/README.md documents the lane.
+    #
+    # WHAT IT REPLACES. Until this job, the signed-in portal surfaces had no
+    # rendered design check at all, and the checker's only runs were manual
+    # sweeps on the services hub over SSM. On 2026-09-24 those sweeps drove the
+    # hub to load 112 and starved memory recall for every agent session. The
+    # check now runs here, on a GitHub-hosted runner, and nowhere else.
+    #
+    # COST. Pull requests that touch apps/web or this workflow, plus
+    # workflow_dispatch; never push, merge_group or the nightly schedule. It
+    # is not a `needs` of portability-gate, so it adds no time to the required
+    # gate, and it runs beside the end-to-end shards rather than after them.
+    # This repository is public, so GitHub-hosted Linux minutes are not
+    # billed. The PR that added the job records the measured minutes per run.
+    name: Signed-in render check
+    needs: [changed_paths]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg17@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: quackback_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d quackback_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SECRET_KEY: test-secret-for-ci-only-must-be-at-least-32-characters
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+
+      - name: Verify the vendored design suite against its pin
+        # The checker must be the suite release, byte for byte. Refuse to run
+        # on any other bytes, and on any file the pin does not list.
+        working-directory: apps/web/e2e/render/design-suite
+        run: |
+          set -euo pipefail
+          listed=$(jq -r '.files[].path' suite-pin.json | LC_ALL=C sort)
+          present=$(find . -type f ! -name suite-pin.json | sed 's#^\./##' | LC_ALL=C sort)
+          if [ "$listed" != "$present" ]; then
+            echo "::error::the vendored suite holds files its pin does not list, or misses listed ones"
+            diff <(printf '%s\n' "$listed") <(printf '%s\n' "$present") || true
+            exit 1
+          fi
+          jq -r '.files[] | "\(.sha256)  \(.path)"' suite-pin.json > "$RUNNER_TEMP/suite.sha256"
+          sha256sum --check --strict "$RUNNER_TEMP/suite.sha256"
+          echo "RENDER_OUT_DIR=$RUNNER_TEMP/render" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/render"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: ${{ runner.os }}-bun-
+      - run: bun install --frozen-lockfile
+
+      - name: Resolve the seeded tenant subdomain to loopback
+        run: echo '127.0.0.1 acme.localhost' | sudo tee -a /etc/hosts
+
+      - name: Write the .env the server and the e2e helpers read
+        run: |
+          cat > .env <<EOF
+          DATABASE_URL=$DATABASE_URL
+          BASE_URL=$BASE_URL
+          TRUSTED_ORIGINS=http://acme.localhost:3000
+          PORT=3000
+          SECRET_KEY=$SECRET_KEY
+          REDIS_URL=$REDIS_URL
+          VENTURI_TEAM_EMAIL_DOMAINS=example.com
+          EOF
+
+      # The app under test is the production image itself, built from this
+      # commit by apps/web/Dockerfile: its Bun runtime, its NODE_ENV=production
+      # build and its server patches. A host `bun run build` + `bun run start`
+      # is NOT that artifact -- on run 36051099160 the host runtime could not
+      # even parse the bundle ("Cannot find scope for the label 'a'") that the
+      # image's pinned Bun serves in production.
+      - name: Build the production image
+        run: >-
+          docker build --file apps/web/Dockerfile
+          --build-arg SOURCE_COMMIT=${{ github.sha }}
+          --tag quackback-render:ci .
+
+      - run: bun run db:migrate
+        timeout-minutes: 5
+      - run: bun run db:seed
+        timeout-minutes: 5
+
+      - name: Install the Playwright browser
+        working-directory: apps/web
+        run: bunx playwright install --with-deps chromium
+
+      - name: Start the production image
+        id: app
+        run: |
+          set -euo pipefail
+          # Host networking: the image reaches the Postgres and Redis service
+          # containers on localhost, and serves :3000 on the runner. The host
+          # already migrated and seeded the database.
+          docker run --detach --name quackback-render --network host \
+            --env-file .env --env SKIP_MIGRATIONS=true quackback-render:ci
+          for _attempt in $(seq 1 90); do
+            if curl -fsS -o /dev/null http://acme.localhost:3000/; then
+              echo "The production image is serving http://acme.localhost:3000/"
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' quackback-render)" != true ]; then
+              break
+            fi
+            sleep 2
+          done
+          echo "::error::the production image did not start serving"
+          docker logs quackback-render 2>&1 | tail -100
+          exit 1
+
+      - name: Sign in the fixture identities and walk each route with the keyboard
+        working-directory: apps/web
+        run: bun run test:render
+
+      # The walk above failing must not stop the checker: both reports are
+      # written before the summary decides the job. Neither runs without an app.
+      - name: Run the design suite checker at every policy width
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        working-directory: apps/web
+        run: bun e2e/render/run-checker.ts
+
+      - name: Summarize the render check
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
+        working-directory: apps/web
+        run: bun e2e/render/summarize.ts
+
+      - name: Collect the app log
+        if: ${{ !cancelled() }}
+        run: docker logs quackback-render > "$RUNNER_TEMP/render/server.log" 2>&1 || true
+
+      - name: Upload the render reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-in-render-reports
+          path: ${{ runner.temp }}/render
+          retention-days: 14
+          if-no-files-found: warn
 
   portability_gate:
     name: ${{ github.event_name == 'workflow_dispatch' && 'portability-gate (manual diagnostic)' || 'portability-gate' }}

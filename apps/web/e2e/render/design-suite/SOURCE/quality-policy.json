@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "id": "venturi-professional-output-quality",
+  "version": "6.6.0",
+  "authority": "SOURCE/typography-quality.md",
+  "scope": ["editorial", "operational", "documentation", "presentation", "document", "social", "email", "print"],
+  "thresholdBasis": "Design-system acceptance rules; not universal typographic laws or measurements of another website.",
+  "policies": {
+    "noStrandedFinalLines": {"required": true, "appliesTo": "authored multiline text", "singleLineExempt": true},
+    "useAvailableCanvas": {"required": true, "defaultAlignment": "reading-start", "rejectUnnecessaryWholePageCaps": true, "preserveLocalProseMeasure": true},
+    "actualRenderedEvidence": {"required": true, "fontsLoadedAndVerified": true, "automatedFindingsNeedVisualReview": true},
+    "accessibleReflowPrecedence": {"required": true, "reviewRecordRequiredForRetainedFinding": true},
+    "completeTaskBehavior": {"required": true, "staticRestingFrameInsufficient": true},
+    "honestValidationScope": {"required": true, "unrunIsNotPass": true, "blanketQualityGuarantee": false}
+  },
+  "profiles": {
+    "headline": {
+      "minimumLastLineRatio": 0.6,
+      "forbidSingleWordFinalLine": true,
+      "disposition": "fail",
+      "appliesTo": ["page title", "hero heading", "section heading", "panel heading", "card title", "slide takeaway", "social headline", "prominent statement quote"]
+    },
+    "short-copy": {
+      "minimumLastLineRatio": 0.45,
+      "forbidSingleWordFinalLine": true,
+      "disposition": "fail",
+      "appliesTo": ["lead", "short supporting copy", "card description", "concise callout", "caption", "action label", "navigation label", "compact instruction"]
+    },
+    "prose": {
+      "minimumLastLineRatio": 0.25,
+      "forbidSingleWordFinalLine": true,
+      "disposition": "review",
+      "preserveLocalReadingMeasure": true,
+      "appliesTo": ["sustained article prose", "technical explanation", "legal paragraph", "long verbatim quotation"]
+    }
+  },
+  "measurement": {
+    "minimumLineCount": 2,
+    "ratio": "last rendered text-line span / widest preceding rendered text-line span",
+    "lineSpan": "first to last visible text fragment; omit trailing whitespace, decoration and container padding",
+    "wordSegmentation": "locale-aware Intl.Segmenter or equivalent; punctuation alone is not a word",
+    "includeInlineTextFragments": true,
+    "excludeDecorativeIcons": true,
+    "requiredEnvironment": ["final authored content", "declared locale", "loaded intended font", "stable layout", "actual container size", "active density", "supported theme"],
+    "manualReviewWhenUnsupported": ["vertical writing", "unreliable word segmentation", "complex bidirectional shaping", "canvas text", "column-spanning text"],
+    "notOrdinaryCopy": ["approved logo artwork", "literal code listing", "identifier", "equation", "intentionally listed value", "poetry"]
+  },
+  "markers": {
+    "profile": "data-text-profile",
+    "origin": "data-text-origin",
+    "reviewReason": "data-text-review-reason",
+    "origins": ["authored", "user", "localized"],
+    "missingMarkerDoesNotExcludeText": true,
+    "reasonAloneDoesNotApproveException": true
+  },
+  "viewports": {
+    "responsiveWidthsCssPx": [320, 390, 768, 1024, 1440, 1920, 2560],
+    "breakpointBoundaryChecks": "Inspect each used breakpoint and neighboring widths; add any intermediate width where a suspicious wrap occurs.",
+    "containerWidthsRequired": true,
+    "actualBrowserZoomPercent": [200, 400],
+    "narrowViewportDoesNotReplaceZoom": true,
+    "textSpacingOverridesRequired": true,
+    "fixedFormat": "Inspect native canvas, each requested aspect ratio, normal viewing size and final export."
+  },
+  "remediation": {
+    "orderedSteps": ["reclaim useful width", "reallocate or recompose regions", "shorten authorized authored copy without changing meaning", "use semantic balance or pretty with inspected fallback", "choose an allowed responsive type step", "rerender all affected cases"],
+    "preserve": ["meaning", "qualifications", "exact supplied text unless editing authorized", "reading order", "local prose measure", "media legibility", "task completion", "accessibility"],
+    "prohibited": ["global nowrap", "blanket line-count quota", "unnecessary manual line breaks", "ellipsis or line clamp to hide the defect", "overflow hiding or clipping", "tiny type", "glyph distortion", "arbitrary tracking", "nonbreaking-space phrase chains", "filler words", "required meaning moved to hover-only disclosure", "unauthorized rewriting of user data", "changing profile to evade finding", "suppressing visible text from the checker"]
+  },
+  "exceptions": {
+    "automaticBlanketWaivers": false,
+    "accessibilityTakesPrecedence": true,
+    "reviewRequiredFor": ["immutable supplied text", "user-generated content", "locale-specific line breaking", "zoom or text-spacing constraint", "unsupported measurement"],
+    "outcomes": ["pass", "fail", "review-required", "reviewed-resolution", "not-run"],
+    "requiredRecordFields": ["artifactRevision", "routeOrPage", "elementOrRegion", "profile", "textOrigin", "locale", "viewportOrCanvas", "font", "evidence", "attemptedRemedies", "retainedConstraint", "outcome", "reviewer"],
+    "recordMeasurementsWhenSupported": true,
+    "recheckAfterChangesTo": ["text", "font", "layout", "locale", "target"],
+    "insufficientReasons": ["mobile", "browser wrapping", "looks okay", "uses balance", "the template did it"]
+  },
+  "professionalAcceptance": {
+    "required": ["authority and user outcome", "page-family-specific composition", "immediately legible value", "purposeful canvas and alignment", "approved brand and tokens", "coherent factual or labeled synthetic content", "purposeful media and fallback", "complete interaction and recovery", "font-loaded render inspection", "typography and layout findings resolved", "accessibility and resilience evidence", "visual finish", "reviewable artifact and evidence record"],
+    "contentStress": ["final copy", "short valid copy", "long names", "30-50 percent label expansion", "larger body expansion", "right-to-left", "supported non-Latin line breaking", "empty", "loading", "error", "restricted", "partial", "success"],
+    "functionalChecks": ["navigation destinations", "menus and disclosures", "validation and submission", "asynchronous outcomes", "keyboard and focus", "error and recovery", "truthful simulated-prototype labeling"],
+    "completion": "No unresolved applicable authored headline or short-copy failures. Prose and unavoidable constraints require a specific reviewed resolution. Unrun checks remain not-run."
+  }
+}

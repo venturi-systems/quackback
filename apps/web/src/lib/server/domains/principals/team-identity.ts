@@ -12,12 +12,17 @@
  *      subdomains never match).
  *
  * What rule 2 reads is the account's own flag, not the provider's claim at the
- * moment of each sign-in. Three things keep that flag honest: Google and
+ * moment of each sign-in. Five things keep that flag honest: Google and
  * GitHub are not trusted providers (auth/index.ts), so Better Auth links one of
  * them to an existing account only when the provider itself reports the
- * address verified; the flag of a team account or team-domain address cannot
- * be written through REST identify or user update (user.identify.ts); and the
- * admin UI cannot edit a team member's address (admin.ts, TEAM_EMAIL_LOCKED).
+ * address verified; a social sign-in that would create or open a team-domain
+ * account whose address is unverified is refused, so no provider account that
+ * never proved the address stays linked to it (auth/hooks.ts,
+ * team_email_unverified); an anonymous user absorbing a sign-up keeps the new
+ * account's own flag (merge-anonymous.ts, absorbedSignUpIdentity); the flag of
+ * a team account or team-domain address cannot be written through REST
+ * identify or user update (user.identify.ts); and the admin UI cannot edit a
+ * team member's address (admin.ts, TEAM_EMAIL_LOCKED).
  *
  * The rule is enforced twice: every write that assigns a team role refuses an
  * identity that does not qualify (team-designation.ts), and every read that
@@ -215,6 +220,29 @@ export async function resolveTeamRole(
     )
   }
   return 'user'
+}
+
+/**
+ * The principals, among rows that may hold a stored team role, that may
+ * exercise it now (resolveTeamRole). For choosing who receives team-only
+ * content, such as a private comment or a support conversation: a stored
+ * team role on an identity that fails the team identity rule acts as a
+ * contributor, so it must not receive what only the team may read either.
+ * Only rows with a stored team role cost an identity read.
+ */
+export async function principalsActingAsTeam<
+  T extends {
+    id: string
+    role: string | null | undefined
+    type: string | null | undefined
+    userId: string | null | undefined
+  },
+>(rows: readonly T[]): Promise<T[]> {
+  const acting: T[] = []
+  for (const row of rows) {
+    if (isTeamMember(await resolveTeamRole(row))) acting.push(row)
+  }
+  return acting
 }
 
 /** Test hook: forget which principals were already logged. */

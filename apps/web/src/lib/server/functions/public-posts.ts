@@ -14,6 +14,7 @@ import {
   type UserId,
 } from '@quackback/ids'
 import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
+import { filterId, filterText, listPublicPostsSchema } from '@/lib/shared/schemas/list-filters'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import {
@@ -50,27 +51,14 @@ const log = logger.child({ component: 'public-posts' })
 
 // tiptapContentSchema imported from shared schemas
 
-const listPublicPostsSchema = z.object({
-  boardSlug: z.string().optional(),
-  search: z.string().optional(),
-  statusIds: z.array(z.string()).optional(),
-  statusSlugs: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  sort: z.enum(['top', 'new', 'trending']).optional().default('top'),
-  page: z.number().int().min(1).optional().default(1),
-  cursor: z.string().max(512).nullable().optional(),
-  limit: z.number().int().min(1).max(100).optional().default(20),
-  minVotes: z.number().int().min(1).optional(),
-  dateFrom: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid calendar date')
-    .optional(),
-  responded: z.enum(['responded', 'unresponded']).optional(),
-})
+// listPublicPostsSchema lives in lib/shared/schemas/list-filters.ts, which
+// holds each filter to what the list query accepts. The other GET inputs here
+// (post permissions, roadmap columns, vote sidebar, similar posts) use its
+// field helpers for the same reason: an id must be a TypeID of its entity and
+// text must hold no NUL, or the query fails instead of the validator (DEF-45).
 
 const getPostPermissionsSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const userEditPostSchema = z.object({
@@ -97,20 +85,20 @@ const createPublicPostSchema = z.object({
 })
 
 const getPublicRoadmapPostsSchema = z.object({
-  roadmapId: z.string(),
-  statusId: z.string().optional(),
+  roadmapId: filterId('roadmap'),
+  statusId: filterId('status').optional(),
   limit: z.number().int().min(1).max(100).optional().default(20),
   offset: z.number().int().min(0).optional().default(0),
 })
 
 const getRoadmapPostsByStatusSchema = z.object({
-  statusId: z.string(),
+  statusId: filterId('status'),
   page: z.number().int().min(1).optional().default(1),
   limit: z.number().int().min(1).max(100).optional().default(10),
 })
 
 const getVoteSidebarDataSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 // ============================================
@@ -825,7 +813,8 @@ export const getVoteSidebarDataFn = createServerFn({ method: 'GET' })
 // ============================================
 
 const findSimilarPostsSchema = z.object({
-  title: z.string().min(3).max(200),
+  // The title feeds a full-text query, and Postgres rejects a NUL in text.
+  title: filterText().min(3).max(200),
   limit: z.number().int().min(1).max(10).optional().default(5),
 })
 
