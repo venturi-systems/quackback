@@ -25,7 +25,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
-const MARKER = '(cherry picked from commit '
+const MARKER = '(cherry picked from commit'
 /** A trailer line as `git cherry-pick -x` writes it, optionally indented. */
 const TRAILER = /^[ \t]*\(cherry picked from commit ([0-9a-f]{7,40})\)[ \t\r]*$/gm
 /** The trailer text followed by a hex digit in any case: a reference to a commit. */
@@ -55,10 +55,11 @@ export const GIT_CONFIG_PINS = ['-c', 'core.quotePath=true', '-c', 'diff.suppres
  *   `diff.dstPrefix` (`--src-prefix`, `--dst-prefix`);
  * - `diff.context` and `diff.interHunkContext` (`--unified`,
  *   `--inter-hunk-context`);
- * - `diff.algorithm` and `diff.indentHeuristic` (`--diff-algorithm`,
- *   `--indent-heuristic`). The algorithm alone changes the id of f22b51b26
- *   (histogram 0a6cd43f..., myers 5075068b...);
- * - `diff.renames` (`--no-renames`), `diff.external` (`--no-ext-diff`) and
+ * - `diff.algorithm`, `diff.<driver>.algorithm` and `diff.indentHeuristic`
+ *   (`--diff-algorithm`, `--indent-heuristic`). The algorithm alone changes
+ *   the id of f22b51b26 (histogram 0a6cd43f..., myers 5075068b...);
+ * - `diff.renames` (`--no-renames`), `diff.external` and the
+ *   `GIT_EXTERNAL_DIFF` environment variable (`--no-ext-diff`), and
  *   `diff.<driver>.textconv` (`--no-textconv`);
  * - binary detection by `core.bigFileThreshold`, `diff.<driver>.binary` and
  *   the `diff` and `binary` attributes, including those from
@@ -71,7 +72,9 @@ export const GIT_CONFIG_PINS = ['-c', 'core.quotePath=true', '-c', 'diff.suppres
  * `GIT_DIFF_OPTS` overrides `--unified`, so `git()` removes it from the
  * environment. `git patch-id --stable` ignores `patchid.stable` and
  * `patchid.verbatim`, and sums per-file hashes, so the file order
- * (`diff.orderFile`) does not matter. Settings not named here are not pinned.
+ * (`diff.orderFile`) does not matter. This list makes no claim about any
+ * setting it does not name. Replace refs (`git replace`) are not pinned: a
+ * replaced commit shows its replacement's diff.
  */
 export const PATCH_ID_SHOW_ARGS = [
   'show',
@@ -98,9 +101,10 @@ export const PATCH_ID_COMMAND = `env -u GIT_DIFF_OPTS git ${[...GIT_CONFIG_PINS,
 
 /**
  * The `git log` arguments that print, as `%H%x00%B%x1e` records, every commit
- * in `HEAD`'s history whose message contains the trailer text in any case.
- * `--no-show-signature` keeps `log.showSignature` from printing verification
- * lines in front of each record.
+ * in `HEAD`'s history whose message contains `(cherry picked from commit` in
+ * any case, whatever follows it. `--no-show-signature` keeps
+ * `log.showSignature` from printing verification lines in front of each
+ * record.
  */
 export const CHERRY_PICK_LOG_ARGS = [
   'log',
@@ -178,10 +182,11 @@ export function parseLedger(text: string): LedgerEntry[] {
 /**
  * Parses `git log` output in the `CHERRY_PICK_LOG_ARGS` format. A trailer is a
  * line of its own, optionally indented, holding a lowercase 7- to
- * 40-character id. Every other mention of the trailer text followed by a hex
- * digit (an uppercase id, text after the closing parenthesis, a quote or list
- * marker in front, a short id) is reported, because the check cannot tell
- * which upstream commit it names. A mention followed by a placeholder such as
+ * 40-character id after one space. Every other mention of the trailer text
+ * followed by spaces or tabs, or nothing, and then a hex digit (an uppercase
+ * id, a tab or no space before the id, text after the closing parenthesis, a
+ * quote or list marker in front, a short id) is reported, because the check
+ * cannot tell which upstream commit it names. A mention followed by a placeholder such as
  * `X` or `<sha>` is prose and is not reported. A record that does not start
  * with a full commit id, such as signature output, is reported too.
  */
@@ -205,7 +210,7 @@ export function parseCherryPicks(log: string): CherryPickLog {
     const unreadable = (body.match(REFERENCE)?.length ?? 0) - trailers.length
     if (unreadable > 0) {
       problems.push(
-        `${commit}: ${unreadable} cherry-pick reference(s) in its message are not a trailer line "${MARKER}<sha>)" with a lowercase 7- to 40-character sha`
+        `${commit}: ${unreadable} cherry-pick reference(s) in its message are not a trailer line "${MARKER} <sha>)" with a lowercase 7- to 40-character sha`
       )
     }
   }

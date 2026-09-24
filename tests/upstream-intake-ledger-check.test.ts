@@ -90,6 +90,8 @@ describe('REQ-21 upstream intake ledger check', () => {
       `> (cherry picked from commit ${UPSTREAM})`,
       `- (cherry picked from commit ${UPSTREAM})`,
       `(cherry picked from commit  ${UPSTREAM})`,
+      `(cherry picked from commit\t${UPSTREAM})`,
+      `(cherry picked from commit${UPSTREAM})`,
       '(cherry picked from commit abc12)',
       `(Cherry picked from commit ${UPSTREAM})`,
     ]) {
@@ -393,6 +395,8 @@ describe('pinned patch-id command', () => {
     Object.assign(isolated, {
       GIT_CONFIG_GLOBAL: globalConfig,
       GIT_CONFIG_NOSYSTEM: '1',
+      // Also keeps out the default attributes file, $XDG_CONFIG_HOME/git/attributes.
+      XDG_CONFIG_HOME: root,
       GIT_AUTHOR_NAME: 'Fixture',
       GIT_AUTHOR_EMAIL: 'fixture@example.com',
       GIT_COMMITTER_NAME: 'Fixture',
@@ -439,18 +443,24 @@ describe('pinned patch-id command', () => {
     ]
     for (const [key, value] of changesTheId) {
       run(['config', key, value])
-      expect(unpinnedPatchId(), key).not.toBe(unpinned)
-      expect(patchIdOf(sha, repo), key).toBe(pinned)
-      run(['config', '--unset', key])
+      try {
+        expect(unpinnedPatchId(), key).not.toBe(unpinned)
+        expect(patchIdOf(sha, repo), key).toBe(pinned)
+      } finally {
+        run(['config', '--unset', key])
+      }
     }
 
     // An attribute that marks a file binary changes the unpinned id too.
     const attributes = join(repo, '.git', 'info', 'attributes')
     mkdirSync(join(repo, '.git', 'info'), { recursive: true })
     writeFileSync(attributes, 'file.txt -diff\n')
-    expect(unpinnedPatchId(), 'file.txt -diff').not.toBe(unpinned)
-    expect(patchIdOf(sha, repo), 'file.txt -diff').toBe(pinned)
-    rmSync(attributes)
+    try {
+      expect(unpinnedPatchId(), 'file.txt -diff').not.toBe(unpinned)
+      expect(patchIdOf(sha, repo), 'file.txt -diff').toBe(pinned)
+    } finally {
+      rmSync(attributes)
+    }
 
     // Settings only newer git reads, or that leave this diff alone; still pinned.
     const alsoPinned: Array<[string, string]> = [
@@ -465,8 +475,11 @@ describe('pinned patch-id command', () => {
     ]
     for (const [key, value] of alsoPinned) {
       run(['config', key, value])
-      expect(patchIdOf(sha, repo), key).toBe(pinned)
-      run(['config', '--unset', key])
+      try {
+        expect(patchIdOf(sha, repo), key).toBe(pinned)
+      } finally {
+        run(['config', '--unset', key])
+      }
     }
   })
 
@@ -516,11 +529,15 @@ describe('pinned patch-id command', () => {
 })
 
 describe('cherry-pick log reading', () => {
-  // A throwaway repository whose one pick commit is SSH-signed, with
+  // A throwaway repository whose pick commit is SSH-signed, with
   // log.showSignature=true and a signer file, so plain `git log` prints a
-  // verification line in front of the commit id.
+  // verification line in front of its commit id. Two later commits carry
+  // references that only a search ignoring case and the space after "commit"
+  // finds: one with a tab before the id, one capitalized.
   let repo = ''
   let pick = ''
+  let tabbed = ''
+  let capitalized = ''
   const isolated: NodeJS.ProcessEnv = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
   )
@@ -538,6 +555,8 @@ describe('cherry-pick log reading', () => {
     Object.assign(isolated, {
       GIT_CONFIG_GLOBAL: globalConfig,
       GIT_CONFIG_NOSYSTEM: '1',
+      // Also keeps out the default attributes file, $XDG_CONFIG_HOME/git/attributes.
+      XDG_CONFIG_HOME: root,
       GIT_AUTHOR_NAME: 'Fixture',
       GIT_AUTHOR_EMAIL: 'fixture@example.com',
       GIT_COMMITTER_NAME: 'Fixture',
@@ -555,6 +574,12 @@ describe('cherry-pick log reading', () => {
     const message = `fix: a pick\n\n(cherry picked from commit ${UPSTREAM})`
     run(['commit', '-q', '--allow-empty', '-S', '-m', message])
     pick = run(['rev-parse', 'HEAD']).trim()
+    const tab = `fix: tab\n\n(cherry picked from commit\t${UPSTREAM})`
+    run(['commit', '-q', '--allow-empty', '-m', tab])
+    tabbed = run(['rev-parse', 'HEAD']).trim()
+    const capitals = `fix: case\n\n(Cherry picked from commit ${UPSTREAM})`
+    run(['commit', '-q', '--allow-empty', '-m', capitals])
+    capitalized = run(['rev-parse', 'HEAD']).trim()
     run(['config', 'log.showSignature', 'true'])
   })
 
@@ -569,11 +594,16 @@ describe('cherry-pick log reading', () => {
     expect(shown).toContain('signature')
     const unpinned = parseCherryPicks(shown)
     expect(unpinned.picks).toEqual([])
-    expect(unpinned.problems).toHaveLength(1)
+    expect(
+      unpinned.problems.filter((problem) => problem.includes('does not start with a commit id'))
+    ).toHaveLength(1)
 
-    expect(readCherryPicks(repo)).toEqual({
-      picks: [{ commit: pick, upstream: UPSTREAM }],
-      problems: [],
-    })
+    expect(readCherryPicks(repo).picks).toEqual([{ commit: pick, upstream: UPSTREAM }])
+  })
+
+  it('finds a reference with a tab before the id or in another case, and reports it', () => {
+    const unreadable = (commit: string) =>
+      `${commit}: 1 cherry-pick reference(s) in its message are not a trailer line "(cherry picked from commit <sha>)" with a lowercase 7- to 40-character sha`
+    expect(readCherryPicks(repo).problems).toEqual([unreadable(capitalized), unreadable(tabbed)])
   })
 })
