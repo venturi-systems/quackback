@@ -125,9 +125,9 @@ describe('self-hosted GitLab fetches', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  // The issuer is saved with a public-address check only, so it can be plain
-  // http. The pinned methods then refuse every fetch instead of sending the
-  // client secret or the access token in clear.
+  // An issuer saved before the save-time https rule can still be plain http.
+  // The pinned methods then refuse every fetch instead of sending the client
+  // secret or the access token in clear.
   it('refuses every fetch for a plain-http issuer', async () => {
     const provider = selfHosted({ issuer: 'http://gitlab.acme.example' })
 

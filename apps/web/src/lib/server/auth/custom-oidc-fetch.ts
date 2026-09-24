@@ -267,7 +267,8 @@ export interface OidcEndpointSource {
  * one. The save-time schema
  * already requires https, but a row can predate it: the startup backfill
  * (`backfill-custom-oidc-provider.ts`) copies legacy credential values as they
- * are, and a self-hosted GitLab issuer is only checked for a public address.
+ * are, and a self-hosted GitLab issuer saved before the save-time https rule
+ * (`auth-provider-credentials.ts`) can still be plain http.
  */
 export function createOidcEndpointSource(provider: {
   discoveryUrl?: string

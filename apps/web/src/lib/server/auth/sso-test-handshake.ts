@@ -295,7 +295,9 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
     }
   }
   if (!tokenRes.ok) {
-    const errBody = (await tokenRes.json().catch(() => ({}))) as {
+    // A body of `null` parses; reading `.error` off it would throw.
+    const parsedError: unknown = await tokenRes.json().catch(() => ({}))
+    const errBody = (isJsonObject(parsedError) ? parsedError : {}) as {
       error?: string
       error_description?: string
     }
@@ -307,13 +309,6 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
       raw: errBody,
       steps,
     }
-  }
-  let tokens: {
-    id_token?: string
-    access_token?: string
-    refresh_token?: string
-    expires_in?: number
-    token_type?: string
   }
   let tokenJson: unknown
   try {
@@ -334,7 +329,13 @@ export async function runHandshake(input: HandshakeInput): Promise<HandshakeResu
       steps,
     }
   }
-  tokens = tokenJson as typeof tokens
+  const tokens = tokenJson as {
+    id_token?: string
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+    token_type?: string
+  }
   if (!tokens.id_token) {
     return {
       ok: false,

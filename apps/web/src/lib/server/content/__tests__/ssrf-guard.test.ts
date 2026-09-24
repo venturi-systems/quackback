@@ -298,6 +298,7 @@ const ALLOWED_ADDRESSES: ReadonlyArray<[string, string]> = [
   ['3fff:1000::1', 'just above 3fff::/20'],
   ['::ffff:8.8.8.8', 'IPv4-mapped public, dotted'],
   ['::ffff:0808:0808', 'IPv4-mapped public, hextets'],
+  ['2606:4700::1%eth0', 'public IPv6 with a well-formed zone index'],
 ]
 
 describe('isPrivateAddress address forms', () => {

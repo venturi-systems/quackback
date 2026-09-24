@@ -141,7 +141,7 @@ const fetchSpy = vi.spyOn(globalThis, 'fetch')
 beforeEach(() => {
   safeFetchMock.mockReset()
   checkUrlSafetyMock.mockReset()
-  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '203.0.113.10', family: 4 })
+  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
   clearOidcDiscoveryCache()
   fetchSpy.mockReset()
   fetchSpy.mockImplementation(async () => {

@@ -318,6 +318,18 @@ describe('runHandshake non-object JSON bodies', () => {
     expect(result.hint).toMatch(/not an object/)
   })
 
+  it('fails the token exchange on a null error body', async () => {
+    safeFetchMock
+      .mockResolvedValueOnce(json({ ...IDP, issuer: 'https://idp.example' }))
+      .mockResolvedValueOnce(new Response('null', { status: 400 }))
+
+    const result = await runHandshake(baseInput)
+
+    if (result.ok) throw new Error('expected failure')
+    expect(result.stage).toBe('token-exchange')
+    expect(result.errorCode).toBeUndefined()
+  })
+
   it('fails the token exchange on a null token response', async () => {
     safeFetchMock
       .mockResolvedValueOnce(json({ ...IDP, issuer: 'https://idp.example' }))

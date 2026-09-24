@@ -341,6 +341,25 @@ describe('startSsoTestFn endpoint rules', () => {
     expect(hoisted.cacheSet).not.toHaveBeenCalled()
   })
 
+  it('refuses a discovery document with no authorization endpoint', async () => {
+    hoisted.listIdentityProviders.mockResolvedValue([ssoProvider])
+    hoisted.safeFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          issuer: 'https://idp',
+          token_endpoint: 'https://idp/token',
+          jwks_uri: 'https://idp/jwks',
+        }),
+        { status: 200 }
+      )
+    )
+
+    const result = await startSsoTest({ data: { registrationId: 'sso' } })
+
+    expect(result).toEqual({ error: 'insecure-endpoint' })
+    expect(hoisted.cacheSet).not.toHaveBeenCalled()
+  })
+
   it('refuses a discovered authorization endpoint on a private address', async () => {
     hoisted.listIdentityProviders.mockResolvedValue([ssoProvider])
     hoisted.safeFetch.mockResolvedValue(discovered('https://idp/auth'))
