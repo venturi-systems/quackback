@@ -4,6 +4,7 @@ import { RssIcon } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/button'
 import { ChangelogListPublic } from '@/components/portal/changelog'
 import { publicChangelogQueries } from '@/lib/client/queries/changelog'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 export const Route = createFileRoute('/_portal/changelog/')({
   loader: async ({ context }) => {
@@ -15,7 +16,11 @@ export const Route = createFileRoute('/_portal/changelog/')({
       baseUrl: context.baseUrl ?? '',
     }
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, matches }) => {
+    // Behind the sign-in gate the page shows only the gate, so it takes the
+    // gate's title and indexing instead of describing this page (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData) return {}
     const { workspaceName, baseUrl } = loaderData
     const title = `Changelog - ${workspaceName}`

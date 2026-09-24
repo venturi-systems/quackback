@@ -5,6 +5,7 @@ import {
   listPublicCategoriesFn,
 } from '@/lib/server/functions/help-center'
 import { getSubcategories } from '@/components/help-center/help-center-utils'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 export const Route = createFileRoute('/_portal/hc/categories/$categorySlug')({
   loader: async ({ params }) => {
@@ -31,7 +32,11 @@ export const Route = createFileRoute('/_portal/hc/categories/$categorySlug')({
 
     return { category, articles, subcategories: subcategoryArticles, allCategories }
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, matches }) => {
+    // Behind the sign-in gate the page shows only the gate, so it takes the
+    // gate's title and indexing instead of describing this page (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData) return {}
     const { category } = loaderData
     return {

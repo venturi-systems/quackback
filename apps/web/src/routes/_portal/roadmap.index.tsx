@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { RoadmapBoard } from '@/components/public/roadmap-board'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { searchChoice, searchId, searchIdList, searchText } from '@/lib/shared/search-params'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 // Every field falls back instead of throwing: this page is public, and a
 // hand-written `?board=ideas` used to fail validation and answer 500 with the
@@ -41,7 +42,11 @@ export const Route = createFileRoute('/_portal/roadmap/')({
       isAuthenticated: !!session?.user && session.user.principalType !== 'anonymous',
     }
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, matches }) => {
+    // Behind the sign-in gate the page shows only the gate, so it takes the
+    // gate's title and indexing instead of describing this page (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData) return {}
     const { workspaceName, baseUrl } = loaderData
     const title = `Roadmap - ${workspaceName}`

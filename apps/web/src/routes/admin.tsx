@@ -23,10 +23,12 @@ export const Route = createFileRoute('/admin')({
     }
 
     // Only team members (admin, member roles) can access admin dashboard
-    // Portal users (role='user') don't have access to this
+    // Portal users (role='user') don't have access to this. A signed-out
+    // visitor is sent to sign in with the page they asked for as the
+    // callback, so a deep link such as /admin/settings survives sign-in.
     const { requireWorkspaceRole } = await import('@/lib/server/functions/workspace-utils')
     const { user, principal } = await requireWorkspaceRole({
-      data: { allowedRoles: ['admin', 'member'] },
+      data: { allowedRoles: ['admin', 'member'], callbackUrl: location.href },
     })
 
     return {
