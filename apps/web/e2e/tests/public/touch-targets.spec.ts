@@ -75,7 +75,7 @@ test.describe('Portal coarse-pointer action targets', () => {
     // mandatory coverage, without creating content for a layout assertion.
     const post = page
       .locator('a[href*="/posts/"]:has(h3)')
-      .filter({ has: page.locator('span.ms-auto').filter({ hasText: /^[1-9]\\d*$/ }) })
+      .filter({ has: page.locator('span.ms-auto').filter({ hasText: /^[1-9]\d*$/ }) })
       .first()
     await expect(post).toBeVisible()
     await post.click()
