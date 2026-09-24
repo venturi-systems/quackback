@@ -52,7 +52,6 @@
     "chromium-public | tests/public/post-list.spec.ts | Public Post List > displays filtered posts when navigating with board param in URL",
     "chromium-public | tests/public/post-list.spec.ts | Public Post List > shows post details on cards",
     "chromium-public | tests/public/post-list.spec.ts | Public Post List > sort persists with board filter",
-    "chromium-public | tests/public/post-submission.spec.ts | Public Post Submission > shows error when submitting without description",
-    "chromium-public | tests/public/voting.spec.ts | Public Voting > displays vote count on posts"
+    "chromium-public | tests/public/post-submission.spec.ts | Public Post Submission > shows error when submitting without description"
   ]
 }

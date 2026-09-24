@@ -295,6 +295,7 @@ async function seed() {
       slug: DEMO_ORG.slug,
       createdAt: new Date(),
       setupState: JSON.stringify(setupState),
+      portalConfig: JSON.stringify({ features: { allowAnonymous: true } }),
     })
     console.log('Created settings: Acme Corp (onboarding complete)')
   } else {
