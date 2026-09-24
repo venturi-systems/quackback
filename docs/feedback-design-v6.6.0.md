@@ -152,8 +152,9 @@ that build's sign-in page styles.
 The checker covered every width listed above, each with and without the
 text-spacing overrides. Neither lead left a single word on its last line.
 
-The checker raised one review item. At 320 pixels, under the text-spacing
-overrides, the sign-up heading "Create your Venturi account" takes three lines
+The checker raised one review item. From 320 to 325 pixels (an independent
+1-pixel sweep), under the text-spacing overrides only, the sign-up heading
+"Create your Venturi account" takes three lines
 and ends on one word. Two settings leave it no room: the 32-pixel heading size
 for phones and the 20-pixel page margin. The WCAG spacing overrides take
 precedence, so the heading is left to wrap.
