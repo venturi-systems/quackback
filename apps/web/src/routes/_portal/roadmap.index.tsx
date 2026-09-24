@@ -4,14 +4,18 @@ import { FormattedMessage } from 'react-intl'
 import { z } from 'zod'
 import { RoadmapBoard } from '@/components/public/roadmap-board'
 import { portalQueries } from '@/lib/client/queries/portal'
+import { searchChoice, searchList, searchText } from '@/lib/shared/search-params'
 
+// Every field falls back instead of throwing: this page is public, and a
+// hand-written `?board=ideas` used to fail validation and answer 500 with the
+// raw zod issue in the page (DEF-45). See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  roadmap: z.string().optional(),
-  search: z.string().optional(),
-  board: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-  segments: z.array(z.string()).optional(),
-  sort: z.enum(['votes', 'newest', 'oldest']).optional(),
+  roadmap: searchText(),
+  search: searchText(),
+  board: searchList(),
+  tags: searchList(),
+  segments: searchList(),
+  sort: searchChoice(['votes', 'newest', 'oldest']),
 })
 
 export const Route = createFileRoute('/_portal/roadmap/')({

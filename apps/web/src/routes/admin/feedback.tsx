@@ -4,31 +4,35 @@ import { useQuery } from '@tanstack/react-query'
 import { feedbackQueries } from '@/lib/client/queries/feedback'
 import { TabStrip, type TabStripItem } from '@/components/admin/tab-strip'
 import type { FeatureFlags } from '@/lib/shared/types/settings'
+import { searchChoice, searchList, searchText } from '@/lib/shared/search-params'
 
+// Every field falls back instead of throwing, so a hand-edited or pasted
+// filter URL (`?board=ideas`, `?minVotes=5`) opens the page instead of
+// failing with a 500 (DEF-45). See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  board: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-  status: z.array(z.string()).optional(),
-  segments: z.array(z.string()).optional(),
-  owner: z.string().optional(),
-  search: z.string().optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  minVotes: z.string().optional(),
-  minComments: z.string().optional(),
-  responded: z.enum(['all', 'responded', 'unresponded']).optional(),
-  updatedBefore: z.string().optional(),
-  sort: z.enum(['newest', 'oldest', 'votes']).optional().default('newest'),
-  hasDuplicates: z.boolean().optional(),
-  deleted: z.boolean().optional(),
-  post: z.string().optional(),
+  board: searchList(),
+  tags: searchList(),
+  status: searchList(),
+  segments: searchList(),
+  owner: searchText(),
+  search: searchText(),
+  dateFrom: searchText(),
+  dateTo: searchText(),
+  minVotes: searchText(),
+  minComments: searchText(),
+  responded: searchChoice(['all', 'responded', 'unresponded']),
+  updatedBefore: searchText(),
+  sort: z.enum(['newest', 'oldest', 'votes']).optional().default('newest').catch('newest'),
+  hasDuplicates: z.boolean().optional().catch(undefined),
+  deleted: z.boolean().optional().catch(undefined),
+  post: searchText(),
   // Roadmap-specific
-  roadmap: z.string().optional(),
+  roadmap: searchText(),
   // Suggestion filters (for incoming sub-route)
-  source: z.string().optional(),
-  suggestionSort: z.enum(['newest', 'relevance']).optional(),
-  suggestionSearch: z.string().optional(),
-  suggestionStatus: z.enum(['pending', 'dismissed']).optional(),
+  source: searchText(),
+  suggestionSort: searchChoice(['newest', 'relevance']),
+  suggestionSearch: searchText(),
+  suggestionStatus: searchChoice(['pending', 'dismissed']),
 })
 
 export const Route = createFileRoute('/admin/feedback')({

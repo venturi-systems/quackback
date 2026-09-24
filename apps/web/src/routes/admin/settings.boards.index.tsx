@@ -21,6 +21,7 @@ import { BoardExportSection } from '@/components/admin/settings/boards/board-exp
 import { DeleteBoardForm } from '@/components/admin/settings/boards/delete-board-form'
 import { useIsManagedSetting } from '@/components/admin/settings/managed-setting-note'
 import { boardAccessManagedPath } from '@/lib/client/config-file'
+import { searchChoice, searchText } from '@/lib/shared/search-params'
 import {
   useBoardSelection,
   type BoardTab,
@@ -36,9 +37,10 @@ interface BoardForSettings {
   access: import('@/lib/shared/db-types').BoardAccess
 }
 
+// Fields fall back instead of throwing. See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  board: z.string().optional(),
-  tab: z.enum(['general', 'access', 'moderation', 'import', 'export']).optional(),
+  board: searchText(),
+  tab: searchChoice(['general', 'access', 'moderation', 'import', 'export']),
 })
 
 export const Route = createFileRoute('/admin/settings/boards/')({

@@ -8,29 +8,34 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/components/shared/error-page'
+import { searchChoice, searchText } from '@/lib/shared/search-params'
 
+// Fields fall back instead of throwing, so a hand-edited filter URL
+// (`?verified=true`, which the router parses as a boolean) opens the list
+// instead of failing with a 500. See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  search: z.string().optional(),
-  verified: z.enum(['true', 'false']).optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  emailDomain: z.string().optional(),
-  postCount: z.string().optional(),
-  voteCount: z.string().optional(),
-  commentCount: z.string().optional(),
-  customAttrs: z.string().optional(),
-  includeAnonymous: z.enum(['true']).optional(),
+  search: searchText(),
+  verified: searchChoice(['true', 'false']),
+  dateFrom: searchText(),
+  dateTo: searchText(),
+  emailDomain: searchText(),
+  postCount: searchText(),
+  voteCount: searchText(),
+  commentCount: searchText(),
+  customAttrs: searchText(),
+  includeAnonymous: searchChoice(['true']),
   sort: z
     .enum(['newest', 'oldest', 'most_active', 'most_posts', 'most_comments', 'most_votes', 'name'])
     .optional()
-    .default('newest'),
-  selected: z.string().optional(),
-  segments: z.string().optional(),
+    .default('newest')
+    .catch('newest'),
+  selected: searchText(),
+  segments: searchText(),
   // When set, /admin/users renders the Invitations view instead of the
   // signed-up users list. 'pending' is the deep-link target from the
   // Portal settings page; the view itself lets admins flip between
   // statuses without leaving the page.
-  invites: z.enum(['pending', 'accepted', 'expired', 'all']).optional(),
+  invites: searchChoice(['pending', 'accepted', 'expired', 'all']),
 })
 
 type SearchParams = z.infer<typeof searchSchema>

@@ -11,6 +11,7 @@ import { hasAnyPortalAuthMethod } from '@/components/auth/oauth-buttons'
 import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
+import { searchChoice, searchList, searchText } from '@/lib/shared/search-params'
 
 const FeedbackContainer = lazy(() =>
   import('@/components/public/feedback/feedback-container').then((module) => ({
@@ -18,19 +19,24 @@ const FeedbackContainer = lazy(() =>
   }))
 )
 
+// Every field falls back instead of throwing: this is the public home page, and
+// a malformed filter in a pasted URL (`?status=open`, `?sort=hot`,
+// `?minVotes=many`) used to answer 500 with the raw zod issue in the page.
+// See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  board: z.string().optional(),
-  search: z.string().optional(),
-  sort: z.enum(['top', 'new', 'trending']).optional().default('trending'),
-  status: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  minVotes: z.coerce.number().int().min(1).optional(),
+  board: searchText(),
+  search: searchText(),
+  sort: z.enum(['top', 'new', 'trending']).optional().default('trending').catch('trending'),
+  status: searchList(),
+  tagIds: searchList(),
+  minVotes: z.coerce.number().int().min(1).optional().catch(undefined),
   dateFrom: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid calendar date')
-    .optional(),
-  responded: z.enum(['responded', 'unresponded']).optional(),
+    .optional()
+    .catch(undefined),
+  responded: searchChoice(['responded', 'unresponded']),
 })
 
 export const Route = createFileRoute('/_portal/')({

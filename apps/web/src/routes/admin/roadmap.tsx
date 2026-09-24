@@ -4,15 +4,18 @@ import { z } from 'zod'
 import { adminQueries } from '@/lib/client/queries/admin'
 import { RoadmapAdmin } from '@/components/admin/roadmap-admin'
 import { RoadmapModal } from '@/components/admin/roadmap-modal'
+import { searchChoice, searchList, searchText } from '@/lib/shared/search-params'
 
+// Every field falls back instead of throwing, so `?board=ideas` opens the
+// board instead of failing with a 500 (DEF-45). See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  roadmap: z.string().optional(),
-  post: z.string().optional(),
-  search: z.string().optional(),
-  board: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-  segments: z.array(z.string()).optional(),
-  sort: z.enum(['votes', 'newest', 'oldest']).optional(),
+  roadmap: searchText(),
+  post: searchText(),
+  search: searchText(),
+  board: searchList(),
+  tags: searchList(),
+  segments: searchList(),
+  sort: searchChoice(['votes', 'newest', 'oldest']),
 })
 
 export const Route = createFileRoute('/admin/roadmap')({
