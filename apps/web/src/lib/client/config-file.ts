@@ -15,7 +15,8 @@ export const MANAGED_PATHS = {
   // Declared by POLICY_MANAGED_SETTINGS when an external policy process owns
   // them (lib/shared/policy-managed-paths.ts). One board's access is
   // boardAccessManagedPath(slug); one sign-in method is
-  // authOauthManagedPath(id).
+  // authOauthManagedPath(id); the Anyone tier on boards is
+  // BOARD_ANONYMOUS_ACCESS_PATH in that file.
   PORTAL_VISIBILITY: 'portal.access.visibility',
   ALLOW_ANONYMOUS: 'portal.features.allowAnonymous',
   AUTH_OAUTH: 'auth.oauth',

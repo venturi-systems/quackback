@@ -94,6 +94,8 @@ import {
 import { isFeatureEnabled } from '@/lib/server/domains/settings/settings.service'
 import { DomainException } from '@/lib/shared/errors'
 import { parseOptionalTypeId } from '@/lib/server/domains/api/validation'
+import { contentJsonToMarkdown } from '@/lib/server/markdown-tiptap'
+import type { TiptapContent } from '@/lib/server/db'
 import { realEmail } from '@/lib/shared/anonymous-email'
 import type { McpAuthContext, McpScope } from './types'
 import type {
@@ -215,6 +217,7 @@ function articleResult(article: {
   slug: string
   title: string
   content: string
+  contentJson: TiptapContent | null
   description: string | null
   position: number | null
   category: { id: string; slug: string; name: string }
@@ -230,7 +233,7 @@ function articleResult(article: {
     id: article.id,
     slug: article.slug,
     title: article.title,
-    content: article.content,
+    content: contentJsonToMarkdown(article.contentJson, article.content),
     description: article.description,
     position: article.position,
     category: article.category,
@@ -446,7 +449,14 @@ const updateChangelogSchema = {
     .string()
     .optional()
     .describe(
-      'ISO 8601 datetime to set as publish date (e.g. "2025-03-15T12:00:00Z"). Overrides publish flag. Past dates backdate, future dates schedule, null reverts to draft.'
+      'ISO 8601 datetime for publish/schedule lifecycle (e.g. "2025-03-15T12:00:00Z"). Future dates schedule; past dates publish immediately. For display-only backdating on published entries, use displayDate instead.'
+    ),
+  displayDate: z
+    .string()
+    .nullable()
+    .optional()
+    .describe(
+      'ISO 8601 portal display override for published entries. Null clears the override. Must not be in the future.'
     ),
   linkedPostIds: z
     .array(z.string())
@@ -678,6 +688,7 @@ type UpdateChangelogArgs = {
   content?: string
   publish?: boolean
   publishedAt?: string
+  displayDate?: string | null
   linkedPostIds?: string[]
 }
 
@@ -1237,7 +1248,8 @@ Examples:
 Examples:
 - Update title: update_changelog({ changelogId: "changelog_01abc...", title: "v2.0 Release" })
 - Publish: update_changelog({ changelogId: "changelog_01abc...", publish: true })
-- Backdate: update_changelog({ changelogId: "changelog_01abc...", publishedAt: "2025-03-15T12:00:00Z" })
+- Backdate display: update_changelog({ changelogId: "changelog_01abc...", displayDate: "2025-03-15T12:00:00Z" })
+- Clear display override: update_changelog({ changelogId: "changelog_01abc...", displayDate: null })
 - Link posts: update_changelog({ changelogId: "changelog_01abc...", linkedPostIds: ["post_01a...", "post_01b..."] })${CONTENT_FORMAT_BLOCK}`,
     updateChangelogSchema,
     WRITE,
@@ -1261,6 +1273,9 @@ Examples:
           content: args.content,
           linkedPostIds: args.linkedPostIds as PostId[] | undefined,
           publishState,
+          ...(args.displayDate !== undefined && {
+            displayDate: args.displayDate === null ? null : new Date(args.displayDate),
+          }),
         })
 
         return jsonResult({
@@ -1268,6 +1283,7 @@ Examples:
           title: result.title,
           status: result.status,
           publishedAt: result.publishedAt,
+          displayDate: result.displayDate,
           updatedAt: result.updatedAt,
         })
       } catch (err) {
@@ -2390,6 +2406,7 @@ async function searchChangelogs(args: SearchArgs): Promise<CallToolResult> {
         voteCount: p.voteCount,
       })),
       publishedAt: c.publishedAt,
+      displayDate: c.displayDate,
       createdAt: c.createdAt,
     })),
     nextCursor,
@@ -2457,7 +2474,7 @@ async function getPostDetails(postId: PostId): Promise<CallToolResult> {
   return jsonResult({
     id: post.id,
     title: post.title,
-    content: post.content,
+    content: contentJsonToMarkdown(post.contentJson, post.content),
     voteCount: post.voteCount,
     commentCount: post.commentCount,
     boardId: post.boardId,
@@ -2501,7 +2518,7 @@ async function getChangelogDetails(changelogId: ChangelogId): Promise<CallToolRe
   return jsonResult({
     id: entry.id,
     title: entry.title,
-    content: entry.content,
+    content: contentJsonToMarkdown(entry.contentJson, entry.content),
     status: entry.status,
     authorName: entry.author?.name ?? null,
     linkedPosts: entry.linkedPosts.map((p) => ({
@@ -2511,6 +2528,7 @@ async function getChangelogDetails(changelogId: ChangelogId): Promise<CallToolRe
       status: p.status,
     })),
     publishedAt: entry.publishedAt,
+    displayDate: entry.displayDate,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt,
   })

@@ -8,6 +8,9 @@
  *   - Submit calls the mutation with { name, description, preset }.
  *   - "Customize after create" routes to the Access tab on success.
  *   - "Customize after create" stays opt-in (off by default routes plain).
+ *   - When the deployment's policy owns the Anyone tier
+ *     (POLICY_MANAGED_SETTINGS `boards.anonymousAccess`), Public is disabled
+ *     and explained, and Private is the default.
  *
  * The mutation and navigation primitives are mocked so the test stays
  * focused on the modal's preset/customize wiring without spinning up a
@@ -32,9 +35,12 @@ vi.mock('@/lib/client/mutations', () => ({
 
 const navigate = vi.fn()
 const invalidate = vi.fn()
+// The root route context carries the deployment's managed paths.
+const routeContext = { managedFieldPaths: [] as string[] }
 vi.mock('@tanstack/react-router', () => ({
   useRouter: () => ({ invalidate }),
   useNavigate: () => navigate,
+  useRouteContext: () => routeContext,
 }))
 
 import { CreateBoardDialog } from '../create-board-dialog'
@@ -44,6 +50,7 @@ beforeEach(() => {
   reset.mockReset()
   navigate.mockReset()
   invalidate.mockReset()
+  routeContext.managedFieldPaths = []
 })
 
 function renderModal() {
@@ -155,5 +162,44 @@ describe('<CreateBoardDialog> submit', () => {
       to: '/admin/settings/boards',
       search: { board: 'locked-board', tab: 'access' },
     })
+  })
+})
+
+describe('<CreateBoardDialog> policy-owned Anyone tier', () => {
+  beforeEach(() => {
+    routeContext.managedFieldPaths = ['portal.access.visibility', 'boards.anonymousAccess']
+  })
+
+  it('disables Public, explains why, and defaults to Private', () => {
+    renderModal()
+    expect(getPublicTile()).toBeDisabled()
+    expect(getPublicTile()).toHaveAttribute('data-disabled-reason', 'policy')
+    expect(getPublicTile()).toHaveTextContent('requires sign-in on every board')
+    expect(getPrivateTile()).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('anonymous-policy-note')).toHaveTextContent(
+      'choose Signed-in on its Access tab'
+    )
+  })
+
+  it('submits Private, never the refused Public preset', async () => {
+    renderModal()
+    fireEvent.click(getPublicTile())
+    fireEvent.change(screen.getByLabelText('Board name'), {
+      target: { value: 'Ideas' },
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Create board' }))
+    })
+    expect(mutate).toHaveBeenCalledTimes(1)
+    const [payload] = mutate.mock.calls[0]!
+    expect(payload).toMatchObject({ name: 'Ideas', preset: 'private' })
+  })
+
+  it('keeps Public available when the policy owns only named boards', () => {
+    routeContext.managedFieldPaths = ['boards.feature-requests.access']
+    renderModal()
+    expect(getPublicTile()).not.toBeDisabled()
+    expect(getPublicTile()).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByTestId('anonymous-policy-note')).not.toBeInTheDocument()
   })
 })
