@@ -14,6 +14,7 @@ import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
 import {
   MAX_SEARCH_COUNT,
   searchChoice,
+  searchDay,
   searchIdList,
   searchList,
   searchText,
@@ -30,8 +31,9 @@ const FeedbackContainer = lazy(() =>
 // `?minVotes=many`) used to answer 500 with the raw zod issue in the page.
 // Values that feed the feed query are also held to what the query accepts:
 // tag ids must be tag TypeIDs (the tag column throws on anything else, which
-// failed the SSR loader), and the vote threshold must fit the integer column.
-// See lib/shared/search-params.ts.
+// failed the SSR loader), the vote threshold must fit the integer column, and
+// the date must be a calendar date in a year Postgres accepts (`0000-01-01`
+// failed the query). See lib/shared/search-params.ts.
 const searchSchema = z.object({
   board: searchText(), // board slug, compared as text
   search: searchText(),
@@ -39,12 +41,7 @@ const searchSchema = z.object({
   status: searchList(), // status slugs, compared as text
   tagIds: searchIdList('tag'),
   minVotes: z.coerce.number().int().min(1).max(MAX_SEARCH_COUNT).optional().catch(undefined),
-  dateFrom: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid calendar date')
-    .optional()
-    .catch(undefined),
+  dateFrom: searchDay(),
   responded: searchChoice(['responded', 'unresponded']),
 })
 

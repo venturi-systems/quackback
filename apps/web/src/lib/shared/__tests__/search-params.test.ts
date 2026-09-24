@@ -1,13 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { defaultParseSearch } from '@tanstack/react-router'
 import { generateId } from '@quackback/ids'
 import {
   MAX_SEARCH_COUNT,
   isSearchCount,
+  isSearchDate,
   searchChoice,
   searchCount,
   searchDate,
+  searchDay,
   searchId,
   searchIdCsv,
   searchIdList,
@@ -50,6 +52,12 @@ describe('searchText', () => {
   it('leaves an absent key absent', () => {
     expect(fromUrl(schema, '').q).toBeUndefined()
   })
+
+  it('reads a value holding a NUL as absent: Postgres rejects NUL in text', () => {
+    expect(fromUrl(schema, '?q=%00').q).toBeUndefined()
+    expect(fromUrl(schema, '?q=a%00b').q).toBeUndefined()
+    expect(fromUrl(schema, '?q=%22a%5Cu0000b%22').q).toBeUndefined()
+  })
 })
 
 describe('searchList', () => {
@@ -80,6 +88,11 @@ describe('searchList', () => {
     expect(fromUrl(schema, '?board=%7B%22a%22%3A1%7D').board).toBeUndefined()
     expect(fromUrl(schema, '?board=%5B%5B%22a%22%5D%5D').board).toBeUndefined()
     expect(fromUrl(schema, '?board=null').board).toBeUndefined()
+  })
+
+  it('reads a value or a list holding a NUL as absent', () => {
+    expect(fromUrl(schema, '?board=a%00b').board).toBeUndefined()
+    expect(fromUrl(schema, '?board=a&board=%00').board).toBeUndefined()
   })
 })
 
@@ -112,6 +125,15 @@ describe('searchWhere', () => {
     expect(fromUrl(schema, '?code=ABC').code).toBeUndefined()
     expect(fromUrl(schema, '?code=123').code).toBeUndefined()
     expect(fromUrl(schema, '?code=%5B%22abc%22%5D').code).toBeUndefined()
+  })
+
+  it('never hands the predicate a value holding a NUL', () => {
+    const accept = vi.fn((value: string) => value.length > 0)
+    const anything = z.object({ code: searchWhere(accept) })
+    expect(fromUrl(anything, '?code=ab%00c').code).toBeUndefined()
+    expect(accept).not.toHaveBeenCalled()
+    expect(fromUrl(anything, '?code=abc')).toEqual({ code: 'abc' })
+    expect(accept).toHaveBeenCalledWith('abc')
   })
 })
 
@@ -220,6 +242,72 @@ describe('searchDate', () => {
 
   it('reads anything else as absent instead of throwing', () => {
     for (const bad of ['yesterday', '2026-13-45', '2026', '1700000000000', '26-01-31', '']) {
+      expect(fromUrl(schema, `?dateFrom=${bad}`).dateFrom).toBeUndefined()
+    }
+  })
+
+  it('reads a date in UTC year 0 as absent: Postgres has no year 0', () => {
+    expect(fromUrl(schema, '?dateFrom=0000-01-01').dateFrom).toBeUndefined()
+    // Year 1 at +01:00 is 0000-12-31T23:00Z, the instant the query would send.
+    expect(fromUrl(schema, '?dateFrom=0001-01-01T00:00%2B01:00').dateFrom).toBeUndefined()
+    expect(fromUrl(schema, '?dateFrom=0000-12-31T23:59:59.999Z').dateFrom).toBeUndefined()
+  })
+
+  it('keeps the first and last instants of years 1 to 9999 in UTC', () => {
+    expect(fromUrl(schema, '?dateFrom=0001-01-01')).toEqual({ dateFrom: '0001-01-01' })
+    expect(fromUrl(schema, '?dateFrom=0001-01-01T00:00Z')).toEqual({
+      dateFrom: '0001-01-01T00:00Z',
+    })
+    expect(fromUrl(schema, '?dateFrom=0001-01-01T00:00-01:00')).toEqual({
+      dateFrom: '0001-01-01T00:00-01:00',
+    })
+    expect(fromUrl(schema, '?dateFrom=9999-12-31T23:59:59.999Z')).toEqual({
+      dateFrom: '9999-12-31T23:59:59.999Z',
+    })
+  })
+
+  it('reads an instant past 9999 in UTC as absent', () => {
+    // 10000-01-01T00:59Z, which toISOString writes as +010000-01-01T00:59:00.000Z.
+    expect(fromUrl(schema, '?dateFrom=9999-12-31T23:59-01:00').dateFrom).toBeUndefined()
+  })
+
+  it('keeps a timestamp without an offset only when every time zone keeps it in range', () => {
+    // Local time is read in the zone of whoever parses it, and the browser and
+    // the server can differ, so the answer must not depend on either zone.
+    expect(fromUrl(schema, '?dateFrom=2026-09-24T10:00')).toEqual({ dateFrom: '2026-09-24T10:00' })
+    expect(fromUrl(schema, '?dateFrom=0001-01-01T14:00')).toEqual({ dateFrom: '0001-01-01T14:00' })
+    for (const bad of ['0000-12-31T23:30', '0001-01-01T10:00', '9999-12-31T10:00']) {
+      expect(fromUrl(schema, `?dateFrom=${bad}`).dateFrom).toBeUndefined()
+    }
+  })
+
+  it('agrees with isSearchDate', () => {
+    expect(isSearchDate('0001-01-01')).toBe(true)
+    expect(isSearchDate('0000-01-01')).toBe(false)
+    expect(isSearchDate('0001-01-01T00:00+01:00')).toBe(false)
+    expect(isSearchDate('9999-12-31')).toBe(true)
+    expect(isSearchDate('9999-12-31T09:59:59.999')).toBe(true)
+    expect(isSearchDate('2026-13-45')).toBe(false)
+  })
+})
+
+describe('searchDay', () => {
+  const schema = z.object({ dateFrom: searchDay() })
+
+  it('keeps a calendar date as its text', () => {
+    expect(fromUrl(schema, '?dateFrom=2026-01-31')).toEqual({ dateFrom: '2026-01-31' })
+    expect(fromUrl(schema, '?dateFrom=0001-01-01')).toEqual({ dateFrom: '0001-01-01' })
+  })
+
+  it('reads a timestamp, year 0 or anything else as absent', () => {
+    for (const bad of [
+      '0000-01-01',
+      '2026-09-24T10:00:00.000Z',
+      '2026-13-45',
+      'yesterday',
+      '2026-01-31%00',
+      '',
+    ]) {
       expect(fromUrl(schema, `?dateFrom=${bad}`).dateFrom).toBeUndefined()
     }
   })

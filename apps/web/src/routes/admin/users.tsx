@@ -17,6 +17,7 @@ import {
   searchText,
   searchWhere,
 } from '@/lib/shared/search-params'
+import { parseCustomAttrs } from '@/lib/shared/custom-attr-filters'
 
 /**
  * An activity-count filter in its URL form, `op:value` (`gte:5`). The list
@@ -84,18 +85,6 @@ function parseSearchToQueryParams(deps: SearchParams) {
     return { op: op as 'gt' | 'gte' | 'lt' | 'lte' | 'eq', value: Number(val) }
   }
 
-  // Parse custom attrs "key:op:value,key2:op:value2" format
-  function parseCustomAttrs(raw?: string) {
-    if (!raw) return undefined
-    return raw
-      .split(',')
-      .map((part) => {
-        const [key, op, ...rest] = part.split(':')
-        return key && op ? { key, op, value: rest.join(':') } : null
-      })
-      .filter(Boolean) as { key: string; op: string; value: string }[]
-  }
-
   return {
     search: deps.search,
     verified,
@@ -105,6 +94,7 @@ function parseSearchToQueryParams(deps: SearchParams) {
     postCount: parseActivityFilter(deps.postCount),
     voteCount: parseActivityFilter(deps.voteCount),
     commentCount: parseActivityFilter(deps.commentCount),
+    // "key:op:value,…"; a numeric comparison with a non-numeric value is dropped
     customAttrs: parseCustomAttrs(deps.customAttrs),
     sort: deps.sort,
     page: 1,
