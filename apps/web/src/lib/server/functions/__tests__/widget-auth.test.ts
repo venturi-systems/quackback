@@ -34,8 +34,9 @@ vi.mock('@/lib/server/db', () => ({
 // The role rule (human principal + team identity rule) is session-role.ts,
 // covered by session-role.test.ts. Here it passes the stored role through
 // (human cap only) so the suite stays about widget-session plumbing.
-const mockResolveSessionRole = vi.fn(async (record: { role: string; type?: string | null }) =>
-  record.type && record.type !== 'user' ? 'user' : record.role
+const mockResolveSessionRole = vi.fn(
+  async (record: { role: string; type?: string | null }, _user?: unknown) =>
+    record.type && record.type !== 'user' ? 'user' : record.role
 )
 vi.mock('@/lib/server/domains/principals/session-role', () => ({
   resolveSessionRole: (record: { role: string; type?: string | null }, user: unknown) =>

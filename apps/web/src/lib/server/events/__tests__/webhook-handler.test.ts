@@ -193,7 +193,7 @@ describe('Webhook Handler', () => {
 
     it.each([
       ['a 4xx response', () => h.safeFetch.mockResolvedValue(resp(404))],
-      ['an SSRF block', () => h.safeFetch.mockRejectedValue(new SsrfError('blocked'))],
+      ['an SSRF block', () => h.safeFetch.mockRejectedValue(new SsrfError('ssrf-rejected'))],
     ])('fails the lease after %s (no retry)', async (_label, arrange) => {
       arrange()
       await webhookHook.run!(event, target, config, ctx)

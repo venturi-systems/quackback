@@ -29,8 +29,9 @@ vi.mock('@/lib/server/db', () => {
     account: { userId: 'account.userId', providerId: 'account.providerId' },
     principal: {},
     user: {},
-    and: (...parts: Array<{ userIds?: string[] }>) => ({
-      userIds: parts.find((p) => p.userIds)?.userIds ?? [],
+    // eq/or/ilike are stubs that return undefined, so a part may be missing.
+    and: (...parts: Array<{ userIds?: string[] } | undefined>) => ({
+      userIds: parts.find((p) => p?.userIds)?.userIds ?? [],
     }),
     inArray: (col: string, vals: string[]) => (col === 'account.userId' ? { userIds: vals } : {}),
     eq: vi.fn(),

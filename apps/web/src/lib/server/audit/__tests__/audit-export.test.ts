@@ -107,13 +107,53 @@ describe('auditExportPages', () => {
   })
 })
 
+/**
+ * Split one CSV line into cells (RFC 4180 quoting: a quoted cell may hold
+ * commas and doubled quotes; an empty cell is written unquoted).
+ */
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = []
+  let i = 0
+  while (i <= line.length) {
+    if (line[i] === '"') {
+      let j = i + 1
+      let text = ''
+      while (j < line.length) {
+        if (line[j] === '"' && line[j + 1] === '"') {
+          text += '"'
+          j += 2
+        } else if (line[j] === '"') {
+          j += 1
+          break
+        } else {
+          text += line[j]
+          j += 1
+        }
+      }
+      cells.push(text)
+      i = j + 1
+    } else {
+      const comma = line.indexOf(',', i)
+      const end = comma === -1 ? line.length : comma
+      cells.push(line.slice(i, end))
+      i = end + 1
+    }
+  }
+  return cells
+}
+
 describe('auditRowToCsv', () => {
   it('writes every column, before and after values included', () => {
-    const line = auditRowToCsv(row(1))
-    expect(line.split('","')).toHaveLength(AUDIT_EXPORT_COLUMNS.length - 1)
-    expect(line).toContain('""role"":""member""')
-    expect(line).toContain('""role"":""admin""')
-    expect(line).toContain('Mozilla/5.0')
+    const cells = parseCsvLine(auditRowToCsv(row(1)))
+    expect(cells).toHaveLength(AUDIT_EXPORT_COLUMNS.length)
+    const cell = (name: (typeof AUDIT_EXPORT_COLUMNS)[number]) =>
+      cells[AUDIT_EXPORT_COLUMNS.indexOf(name)]
+    expect(cell('id')).toBe('audit_1')
+    expect(cell('actor_user_agent')).toBe('Mozilla/5.0')
+    expect(cell('request_id')).toBe('')
+    expect(JSON.parse(cell('before_value'))).toEqual({ role: 'member' })
+    expect(JSON.parse(cell('after_value'))).toEqual({ role: 'admin' })
+    expect(cell('metadata')).toBe('')
   })
 
   it('neutralises formula injection from externally supplied values', () => {
