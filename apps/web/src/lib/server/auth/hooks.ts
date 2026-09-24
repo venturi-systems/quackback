@@ -237,11 +237,10 @@ export async function handleSignInPreCheck(ctx: {
 
   const { isHardBound, isAuthMethodAllowed } = await import('./auth-restrictions')
 
-  // Look up the principal early — `isAuthMethodAllowed` below needs the
-  // role to pick the right per-audience method gate. Brand-new sign-ups
-  // (no user row yet) get role='user' so the per-domain branch still
-  // gates them via email lookup — `isHardBound` does not depend on
-  // role anymore.
+  // Look up the principal early — the redirect below is shaped by role
+  // (team roles land on the break-glass login). Brand-new sign-ups (no
+  // user row yet) get role='user': both the per-domain branch and the
+  // per-method gate apply to them exactly as to an existing contributor.
   const { db, user: userTable, principal: principalTable, eq } = await import('@/lib/server/db')
   type UserId = `user_${string}`
   const userRow = await db.query.user.findFirst({
@@ -275,8 +274,17 @@ export async function handleSignInPreCheck(ctx: {
     throw ctx.redirect('/?auth=signin&callbackUrl=/admin&error=verified_domain_requires_sso')
   }
 
-  if (!principalRow) return
-
+  // The per-method gate covers brand-new identities too. It used to return
+  // early when no principal existed, which let `POST /sign-up/email` (and a
+  // magic-link or email-OTP send for an unknown address, including the one
+  // /api/auth/portal-signin makes) through while the workspace had that
+  // method switched off: `emailAndPassword.enabled` stays true for the team
+  // break-glass form, and Better Auth's own sign-up check knows nothing about
+  // `authConfig`. Measured on production 2026-09-24 with password sign-in off:
+  // a sign-up for an unused address reached Better Auth's password-length
+  // check, i.e. past its disabled-sign-up check. It also closes an account
+  // enumeration oracle: a known and an unknown address now get the same
+  // refusal when the method is off.
   const result = await isAuthMethodAllowed(provider, role, registeredOidcIds, tenant)
   if (!result.allowed) {
     const isTeamRole = role === 'admin' || role === 'member'
