@@ -34,6 +34,7 @@ import type { SQLWrapper } from 'drizzle-orm'
 import { NotFoundError, InternalError } from '@/lib/shared/errors'
 import { realEmail } from '@/lib/shared/anonymous-email'
 import { NUMERIC_ATTR_OPS, isFiniteAttrNumber } from '@/lib/shared/custom-attr-filters'
+import { likeText } from '@/lib/server/utils/like-pattern'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'users' })
@@ -122,16 +123,6 @@ const NUMERIC_TEXT = '^[-+]?([0-9]{1,255}([.][0-9]{0,255})?|[.][0-9]{1,255})$'
  */
 function metadataNumber(text: ReturnType<typeof sql>) {
   return sql`(CASE WHEN ${text} ~ ${NUMERIC_TEXT} THEN (${text})::numeric END)`
-}
-
-/**
- * `value` as a literal inside an ILIKE pattern: the pattern characters `%` and
- * `_` and the escape character `\` are escaped. A value that ended in a
- * backslash (`?emailDomain=example.com%5C`) left the pattern ending in the
- * escape character, which Postgres rejects, and failed the users list.
- */
-function likeText(value: string): string {
-  return value.replace(/[\\%_]/g, '\\$&')
 }
 
 /** Activity aggregates are global only when counts affect membership or order. */
