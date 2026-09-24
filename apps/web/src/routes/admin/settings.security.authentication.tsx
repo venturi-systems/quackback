@@ -1,14 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { z } from 'zod'
 import { settingsQueries } from '@/lib/client/queries/settings'
 import { adminQueries } from '@/lib/client/queries/admin'
 import { ShieldCheckIcon } from '@heroicons/react/24/solid'
 import { BackLink } from '@/components/ui/back-link'
 import { PageHeader } from '@/components/shared/page-header'
 import { AuthSettings, type AuthTab } from '@/components/admin/settings/security/auth-settings'
+import { authSettingsSearch } from '@/lib/shared/auth-route-search'
 
-const searchSchema = z.object({
+export const Route = createFileRoute('/admin/settings/security/authentication')({
   // The Security/authentication page splits by CONCERN, not by surface:
   //   - portal-access: who can view the portal (visibility, domains,
   //                    invites, segments, widget sign-in)
@@ -16,16 +16,10 @@ const searchSchema = z.object({
   //                    place (password + 2FA, magic link, social, OIDC)
   //                    with per-surface toggles inline.
   //
-  // Backward compat: the old `team-access` tab is coerced to `sign-in`
-  // so stale bookmarks don't crash.
-  tab: z.preprocess(
-    (v) => (v === 'team-access' ? 'sign-in' : v),
-    z.enum(['portal-access', 'sign-in']).optional()
-  ),
-})
-
-export const Route = createFileRoute('/admin/settings/security/authentication')({
-  validateSearch: searchSchema,
+  // `tab` is a closed choice: the old `team-access` tab reads as `sign-in` so
+  // stale bookmarks still open it, and any other value opens the default tab
+  // instead of failing validation.
+  validateSearch: authSettingsSearch,
   loader: async ({ context }) => {
     const { requireWorkspaceRole } = await import('@/lib/server/functions/workspace-utils')
     await requireWorkspaceRole({ data: { allowedRoles: ['admin'] } })
