@@ -292,10 +292,16 @@ async function recordZoomTextSpacing(page: Page, testInfo: TestInfo, state: stri
           const declaredProfile = element
             .closest('[data-text-profile]')
             ?.getAttribute('data-text-profile')
-          if (declaredOrigin && !['authored', 'user', 'localized'].includes(declaredOrigin)) {
+          if (
+            declaredOrigin != null &&
+            !['authored', 'user', 'localized'].includes(declaredOrigin)
+          ) {
             throw new Error('Unknown text origin in zoom evidence')
           }
-          if (declaredProfile && !['headline', 'short-copy', 'prose'].includes(declaredProfile)) {
+          if (
+            declaredProfile != null &&
+            !['headline', 'short-copy', 'prose'].includes(declaredProfile)
+          ) {
             throw new Error('Unknown text profile in zoom evidence')
           }
           const semanticProfile =
