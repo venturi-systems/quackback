@@ -16,6 +16,16 @@ function objectPrototypeIsClean(): boolean {
   return !Object.prototype.hasOwnProperty.call(Object.prototype, PROBE) && !(PROBE in {})
 }
 
+/** Paths of every object, at any depth, that owns a `__proto__` key. */
+function ownProtoKeyPaths(value: unknown, path = '$'): string[] {
+  if (typeof value !== 'object' || value === null) return []
+  const found = Object.prototype.hasOwnProperty.call(value, '__proto__') ? [path] : []
+  for (const key of Object.keys(value)) {
+    found.push(...ownProtoKeyPaths((value as Record<string, unknown>)[key], `${path}.${key}`))
+  }
+  return found
+}
+
 afterEach(() => {
   // If a guard ever regresses, keep the damage out of every later test.
   delete (Object.prototype as Record<string, unknown>)[PROBE]
@@ -90,6 +100,47 @@ describe('deepMerge prototype guard', () => {
     expect(target).toEqual({ oauth: { google: true } })
     expect(Object.getPrototypeOf(target.oauth)).toBe(Object.prototype)
   })
+
+  // None of these targets owns an object at `a`, so the source subtree is copied.
+  const copyTargets: Array<[string, Record<string, unknown>]> = [
+    ['an empty target', {}],
+    ['a target holding null at that key', { a: null }],
+    ['a target holding a string at that key', { a: 'text' }],
+  ]
+
+  it.each(copyTargets)('drops a nested __proto__ when copying into %s', (_label, target) => {
+    const source = { a: { b: JSON.parse(`{"__proto__":{"${PROBE}":1}}`) } }
+    expect(ownProtoKeyPaths(source)).toEqual(['$.a.b'])
+
+    const merged = deepMerge<Record<string, unknown>>(target, source)
+
+    expect(objectPrototypeIsClean()).toBe(true)
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype)
+    expect(ownProtoKeyPaths(merged)).toEqual([])
+    expect(JSON.stringify(merged)).toBe('{"a":{"b":{}}}')
+    const b = (merged.a as Record<string, unknown>).b as object
+    expect(Object.getPrototypeOf(b)).toBe(Object.prototype)
+    expect(PROBE in b).toBe(false)
+  })
+
+  it('copies a subtree the target lacks by value, and arrays and primitives as given', () => {
+    const list = [{ id: 1 }]
+    const source = {
+      nested: { a: 1, deeper: { b: 'two', flag: false, none: null } },
+      list,
+      count: 3,
+      label: 'x',
+      empty: null,
+    }
+
+    const merged = deepMerge<Record<string, unknown>>({}, source)
+
+    expect(merged).toEqual(source)
+    // A plain subtree is rebuilt, so the merge never hands back the caller's object.
+    expect(merged.nested).not.toBe(source.nested)
+    // Arrays are still assigned as-is, exactly as before.
+    expect(merged.list).toBe(list)
+  })
 })
 
 describe('parseJsonConfig prototype guard', () => {
@@ -105,6 +156,17 @@ describe('parseJsonConfig prototype guard', () => {
     expect(PROBE in (config.features as object)).toBe(false)
     expect(config.features?.allowAnonymous).toBe(false)
     expect(config.features?.allowEditAfterEngagement).toBe(false)
+  })
+
+  it('drops a stored __proto__ nested under a key the defaults lack', () => {
+    const stored = `{"extra":{"inner":{"__proto__":{"${PROBE}":true},"kept":1}}}`
+
+    const config = parseJsonConfig<Record<string, unknown>>(stored, {})
+
+    expect(objectPrototypeIsClean()).toBe(true)
+    expect(ownProtoKeyPaths(config)).toEqual([])
+    expect(JSON.stringify(config)).toBe('{"extra":{"inner":{"kept":1}}}')
+    expect(config.extra).toEqual({ inner: { kept: 1 } })
   })
 
   it('still returns the defaults for a stored JSON null', () => {

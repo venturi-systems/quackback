@@ -42,10 +42,17 @@ export function parseJsonOrNull<T>(json: string | null): T | null {
  * ordinary own `__proto__` key, and assigning it onto the merged object would
  * run the `__proto__` setter and replace that object's prototype, so every key
  * the payload supplied would read through as an inherited setting.
- * `constructor` and `prototype` are the other route to a shared prototype.
- * No settings shape uses any of these names.
+ * `constructor` and `prototype` are skipped as defence in depth; no settings
+ * shape uses them.
  */
 const UNSAFE_MERGE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** A `{}`-style object (including a null-prototype one), never an array or class instance. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
 
 /** @internal */
 export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
@@ -65,12 +72,19 @@ export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
       typeof tgtVal === 'object' &&
       tgtVal !== null
 
-    result[key] = isNestedObject
-      ? (deepMerge(
-          tgtVal as Record<string, unknown>,
-          srcVal as Record<string, unknown>
-        ) as T[typeof key])
-      : (srcVal as T[typeof key])
+    if (isNestedObject) {
+      result[key] = deepMerge(
+        tgtVal as Record<string, unknown>,
+        srcVal as Record<string, unknown>
+      ) as T[typeof key]
+    } else if (isPlainObject(srcVal)) {
+      // Nothing to merge into: copy the subtree through deepMerge instead of by
+      // reference, so an unsafe key nested at any depth is dropped here rather
+      // than kept and later written to the database by JSON.stringify.
+      result[key] = deepMerge<Record<string, unknown>>({}, srcVal) as T[typeof key]
+    } else {
+      result[key] = srcVal as T[typeof key]
+    }
   }
   return result
 }
