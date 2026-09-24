@@ -20,6 +20,7 @@ import { generateId } from '@quackback/ids'
 import { config } from '@/lib/server/config'
 import { logger } from '@/lib/server/logger'
 import type { GenericOAuthConfig } from './build-oauth-configs'
+import { linkingTrustedProviderIds } from './linking-trust'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 
 const log = logger.child({ component: 'auth-config' })
@@ -123,7 +124,6 @@ async function createAuth() {
 
   // Build socialProviders config from DB-stored credentials
   const socialProviders: Record<string, Record<string, unknown>> = {}
-  const trustedProviders: string[] = []
   const genericOAuthConfigs: GenericOAuthConfig[] = []
 
   // Tier limits + tenant settings are independent reads — fire them
@@ -148,7 +148,6 @@ async function createAuth() {
     buildLoginHintParams,
   })
   genericOAuthConfigs.push(...oidcConfigs)
-  for (const c of oidcConfigs) trustedProviders.push(c.providerId)
 
   // Layer A registration filter: an OAuth provider is registered on
   // the Better-Auth instance only if creds exist AND `authConfig.oauth`
@@ -187,8 +186,16 @@ async function createAuth() {
       }
     }
     socialProviders[provider.id] = providerConfig
-    trustedProviders.push(provider.id)
   }
+
+  // Built-in social providers (Google, GitHub, ...) are deliberately NOT
+  // trusted for account linking; only administrator-registered OIDC providers
+  // are. See linking-trust.ts for why a trusted social provider would let an
+  // unverified address sign in as an existing (administrator) account.
+  const trustedProviders = linkingTrustedProviderIds({
+    oidcProviderIds: oidcConfigs.map((c) => c.providerId),
+    socialProviderIds: Object.keys(socialProviders),
+  })
 
   // BASE_URL is required for auth callbacks and redirects
   const baseURL = config.baseUrl
@@ -285,7 +292,9 @@ async function createAuth() {
     },
 
     // Account linking - allow users to link multiple OAuth providers to their account
-    // This is needed when a user signs up with email OTP, then later signs in with GitHub/Google
+    // This is needed when a user signs up with email OTP, then later signs in with GitHub/Google.
+    // Only administrator-registered OIDC providers are trusted; Google and GitHub
+    // link only when they report the address verified (linking-trust.ts).
     account: {
       accountLinking: {
         enabled: true,
