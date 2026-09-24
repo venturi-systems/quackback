@@ -158,7 +158,6 @@ function storedBrandingJson(): string {
 // (use-branding-state.ts): themeMode plus light and dark variable sets that
 // carry the font stack and radius.
 const ORDINARY_BRANDING: Record<string, unknown> = {
-  preset: 'default',
   themeMode: 'user',
   light: {
     background: 'oklch(1 0 0)',
@@ -288,9 +287,12 @@ describe('branding config read guard for stored rows', () => {
     expect(objectPrototypeIsClean()).toBe(true)
   })
 
-  it('getTenantSettings returns and caches the stored row without them', async () => {
+  it('getTenantSettings returns and caches the parsed config without them', async () => {
     mockFindFirst.mockResolvedValue(makeSettingsRow({ brandingConfig: STORED }))
 
+    // Only the parsed `brandingConfig` is checked. TenantSettings also carries
+    // the raw row as `settings`, where every JSON column stays the unparsed
+    // text it was stored as; nothing parses the raw branding text.
     const result = await getTenantSettings()
 
     expect(result?.brandingConfig).toEqual(CLEAN)
@@ -333,11 +335,12 @@ describe('ordinary branding values round-trip unchanged', () => {
 
     const tenant = await getTenantSettings()
     expect(tenant?.brandingConfig).toEqual(ORDINARY_BRANDING)
+    expect(JSON.stringify(tenant?.brandingConfig)).toBe(JSON.stringify(ORDINARY_BRANDING))
   })
 
-  it('keeps a themeMode-only save as sent', async () => {
-    await updateBrandingConfig({ themeMode: 'dark' })
-    expect(storedBrandingJson()).toBe('{"themeMode":"dark"}')
+  it('keeps a preset and themeMode save as sent', async () => {
+    await updateBrandingConfig({ preset: 'custom', themeMode: 'dark' })
+    expect(storedBrandingJson()).toBe('{"preset":"custom","themeMode":"dark"}')
     // No light/dark overrides, so the custom-colours gate is not consulted.
     expect(mockAssertTierFeature).not.toHaveBeenCalled()
   })
