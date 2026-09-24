@@ -183,6 +183,10 @@ interface BoardAccessFormProps {
   /** Board access is owned by the deployment configuration
    *  (POLICY_MANAGED_SETTINGS `boards.<slug>.access`): render read-only. */
   managed?: boolean
+  /** The deployment's policy owns the "Anyone" tier on boards
+   *  (POLICY_MANAGED_SETTINGS `boards.anonymousAccess`): the server refuses
+   *  it with 403 FIELD_MANAGED, so the form never offers it. */
+  anonymousManaged?: boolean
 }
 
 type FormShape = BoardAccess
@@ -193,6 +197,15 @@ interface SegmentItem {
   count: number
   description?: string | null
 }
+
+/** A preset the anonymous-tier policy rules out: it opens an action to anyone. */
+function presetUsesAnonymous(meta: PresetMeta): boolean {
+  return ACTIONS.some((a) => meta.tiers[a.id] === 'anonymous')
+}
+
+const POLICY_ANON_TOOLTIP =
+  "This deployment's access policy requires sign-in on every board, so the Anyone tier is unavailable."
+const POLICY_ANON_PRESET_NOTE = 'Unavailable: this deployment requires sign-in on every board.'
 
 /** Match the current grid against the preset table. Returns 'custom' when
  *  no preset matches — including any non-empty segment list, since presets
@@ -208,8 +221,16 @@ function deriveActivePreset(values: FormShape): PresetName {
 
 // ─── Main form ────────────────────────────────────────────────────────
 
-export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps) {
+export function BoardAccessForm({
+  board,
+  managed = false,
+  anonymousManaged = false,
+}: BoardAccessFormProps) {
   const mutation = useUpdateBoardAccess()
+  // A board the policy owns outright is read-only as a whole, and its matrix
+  // must show what the policy wrote (which may include Anyone), so the
+  // per-tier policy block applies only to boards the admin may edit.
+  const anonBlocked = anonymousManaged && !managed
   const segmentsQuery = useSegments()
   const segments: SegmentItem[] = useMemo(
     () =>
@@ -263,6 +284,20 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
     })
   }, [wsAllowAnonymous, form])
 
+  // The same for the deployment policy, on every action including view: a
+  // board that still holds Anyone (the policy was declared after it was set)
+  // is bumped to Signed-in and left dirty, so the admin sees the save dock
+  // and saves a value the server accepts.
+  useEffect(() => {
+    if (!anonBlocked) return
+    ACTIONS.forEach(({ id }) => {
+      if (form.getValues(id) === 'anonymous') {
+        form.setValue(id, 'authenticated', { shouldDirty: true })
+        form.setValue(`segments.${id}`, [], { shouldDirty: true })
+      }
+    })
+  }, [anonBlocked, accessKey, form])
+
   const activePreset = useMemo(() => deriveActivePreset(values), [values])
 
   // Validate: any action on the 'segments' tier needs ≥1 segment selected.
@@ -293,6 +328,7 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
     (id: Exclude<PresetName, 'custom'>) => {
       const meta = PRESET_META.find((p) => p.id === id)
       if (!meta) return
+      if (anonBlocked && presetUsesAnonymous(meta)) return
       // Apply via setValue (not form.reset) so the change is tracked as
       // dirty and the save bar appears. reset() re-baselines defaultValues,
       // leaving isDirty false — which silently hides the save dock after a
@@ -304,11 +340,13 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
       form.setValue('segments', { view: [], vote: [], comment: [], submit: [] }, opts)
       setOpenPicker(null)
     },
-    [form]
+    [form, anonBlocked]
   )
 
   const handleTierClick = useCallback(
     (actionId: ActionId, tierId: AccessTier) => {
+      // Deployment policy: the Anyone tier is refused on every action.
+      if (tierId === 'anonymous' && anonBlocked) return
       // Tier hierarchy: comment/vote/submit can't be more open than view.
       if (actionId !== 'view' && ACCESS_TIER_RANK[tierId] < ACCESS_TIER_RANK[values.view]) {
         return
@@ -352,7 +390,7 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
         setOpenPicker(null)
       }
     },
-    [form, openPicker, values, wsAllowAnonymous]
+    [form, openPicker, values, wsAllowAnonymous, anonBlocked]
   )
 
   const handleSegsChange = useCallback(
@@ -380,6 +418,12 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 pb-24">
       {mutation.isError && <FormError message={mutation.error?.message ?? 'An error occurred'} />}
       {managed && <ManagedSettingNote what="Board access" />}
+      {anonBlocked && (
+        <ManagedSettingNote
+          what="The Anyone (no sign-in) tier"
+          detail="Every board requires sign-in: choose Signed-in, Segments or Team only."
+        />
+      )}
 
       {/* A disabled fieldset makes every preset and matrix control inert
           when the deployment configuration owns board access. */}
@@ -390,7 +434,11 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
             configuration doesn&apos;t match a preset.
           </p>
 
-          <PresetGrid active={activePreset} onSelect={handlePresetClick} />
+          <PresetGrid
+            active={activePreset}
+            onSelect={handlePresetClick}
+            anonBlocked={anonBlocked}
+          />
         </div>
 
         <div className="space-y-4">
@@ -414,6 +462,7 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
           <Matrix
             values={values}
             wsAllowAnonymous={wsAllowAnonymous}
+            anonBlocked={anonBlocked}
             segments={segments}
             segmentsLoading={segmentsQuery.isLoading}
             openPicker={openPicker}
@@ -466,21 +515,27 @@ export function BoardAccessForm({ board, managed = false }: BoardAccessFormProps
 interface PresetGridProps {
   active: PresetName
   onSelect: (id: Exclude<PresetName, 'custom'>) => void
+  /** The deployment's policy refuses the Anyone tier. */
+  anonBlocked?: boolean
 }
 
-function PresetGrid({ active, onSelect }: PresetGridProps) {
+function PresetGrid({ active, onSelect, anonBlocked = false }: PresetGridProps) {
   return (
     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-      {PRESET_META.map((p) => (
-        <PresetCard
-          key={p.id}
-          active={active === p.id}
-          label={p.label}
-          description={p.description}
-          icon={<p.icon className="h-3 w-3" />}
-          onClick={() => onSelect(p.id)}
-        />
-      ))}
+      {PRESET_META.map((p) => {
+        const blocked = anonBlocked && presetUsesAnonymous(p)
+        return (
+          <PresetCard
+            key={p.id}
+            active={active === p.id}
+            label={p.label}
+            description={blocked ? POLICY_ANON_PRESET_NOTE : p.description}
+            icon={<p.icon className="h-3 w-3" />}
+            onClick={() => onSelect(p.id)}
+            disabled={blocked}
+          />
+        )
+      })}
       {/* Custom is derived — not interactive. Lights up when no preset matches. */}
       <CustomStatusCard active={active === 'custom'} />
     </div>
@@ -493,20 +548,32 @@ interface PresetCardProps {
   description: string
   icon: React.ReactNode
   onClick: () => void
+  disabled?: boolean
 }
 
-function PresetCard({ active, label, description, icon, onClick }: PresetCardProps) {
+function PresetCard({
+  active,
+  label,
+  description,
+  icon,
+  onClick,
+  disabled = false,
+}: PresetCardProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
       aria-pressed={active}
+      disabled={disabled}
+      data-disabled-reason={disabled ? 'policy' : undefined}
       className={cn(
         'flex flex-col items-stretch gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors',
-        active
-          ? 'border-primary bg-primary/10'
-          : 'border-border bg-muted/30 hover:bg-muted/60 cursor-pointer'
+        disabled
+          ? 'cursor-not-allowed border-border bg-muted/30 opacity-60'
+          : active
+            ? 'border-primary bg-primary/10'
+            : 'border-border bg-muted/30 hover:bg-muted/60 cursor-pointer'
       )}
     >
       <div className="flex items-center gap-1.5">
@@ -554,6 +621,8 @@ function CustomStatusCard({ active }: CustomStatusCardProps) {
 interface MatrixProps {
   values: FormShape
   wsAllowAnonymous: boolean
+  /** The deployment's policy refuses the Anyone tier on every action. */
+  anonBlocked: boolean
   segments: ReadonlyArray<SegmentItem>
   segmentsLoading: boolean
   openPicker: ActionId | null
@@ -566,6 +635,7 @@ interface MatrixProps {
 function Matrix({
   values,
   wsAllowAnonymous,
+  anonBlocked,
   segments,
   segmentsLoading,
   openPicker,
@@ -611,6 +681,7 @@ function Matrix({
             action={action}
             values={values}
             wsAllowAnonymous={wsAllowAnonymous}
+            anonBlocked={anonBlocked}
             isLast={idx === ACTIONS.length - 1}
             segments={segments}
             segmentsLoading={segmentsLoading}
@@ -630,6 +701,7 @@ interface MatrixRowProps {
   action: ActionMeta
   values: FormShape
   wsAllowAnonymous: boolean
+  anonBlocked: boolean
   isLast: boolean
   segments: MatrixProps['segments']
   segmentsLoading: boolean
@@ -644,6 +716,7 @@ function MatrixRow({
   action,
   values,
   wsAllowAnonymous,
+  anonBlocked,
   isLast,
   segments,
   segmentsLoading,
@@ -687,14 +760,19 @@ function MatrixRow({
         // View has no ceiling.
         const isAnonCeilingAction = ANON_CEILING_ACTIONS.includes(action.id as AnonCeilingAction)
         const wsBlocked = tier.id === 'anonymous' && isAnonCeilingAction && !wsAllowAnonymous
-        const disabled = hierarchyBlocked || wsBlocked
+        // Deployment policy (`boards.anonymousAccess`): Anyone is refused on
+        // every action, view included, and outranks the workspace ceiling.
+        const policyBlocked = tier.id === 'anonymous' && anonBlocked
+        const disabled = hierarchyBlocked || wsBlocked || policyBlocked
         const isSegmentsCell = tier.id === 'segments'
 
-        const tooltip = wsBlocked
-          ? 'Anonymous interaction is disabled workspace-wide. Manage in Workspace → Access.'
-          : hierarchyBlocked
-            ? `Can't be more open than View (${TIERS.find((x) => ACCESS_TIER_RANK[x.id] === minRank)?.label}).`
-            : undefined
+        const tooltip = policyBlocked
+          ? POLICY_ANON_TOOLTIP
+          : wsBlocked
+            ? 'Anonymous interaction is disabled workspace-wide. Manage in Workspace → Access.'
+            : hierarchyBlocked
+              ? `Can't be more open than View (${TIERS.find((x) => ACCESS_TIER_RANK[x.id] === minRank)?.label}).`
+              : undefined
 
         const disabledStyle: CSSProperties = disabled
           ? {
@@ -703,7 +781,7 @@ function MatrixRow({
             }
           : {}
 
-        const BlockIcon = wsBlocked ? GlobeAltIcon : LockClosedIcon
+        const BlockIcon = wsBlocked && !policyBlocked ? GlobeAltIcon : LockClosedIcon
 
         return (
           <button
@@ -723,7 +801,13 @@ function MatrixRow({
             aria-label={`${action.label}: ${tier.label}`}
             aria-pressed={isSelected}
             data-disabled-reason={
-              wsBlocked ? 'workspace' : hierarchyBlocked ? 'hierarchy' : undefined
+              policyBlocked
+                ? 'policy'
+                : wsBlocked
+                  ? 'workspace'
+                  : hierarchyBlocked
+                    ? 'hierarchy'
+                    : undefined
             }
             className={cn(
               'flex min-h-[58px] items-center justify-center border-l px-2 py-3 transition-colors',

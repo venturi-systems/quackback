@@ -31,6 +31,11 @@ import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './boa
 import { slugify } from '@/lib/shared/utils'
 import { type BoardAccess } from '@/lib/server/db'
 import { getTierLimits } from '@/lib/server/domains/settings/tier-limits.service'
+import {
+  assertBoardAccessWithinPolicy,
+  defaultAccessWithinPolicy,
+  isBoardAnonymousAccessPolicyManaged,
+} from './board-access-policy'
 
 /**
  * Legacy API-contract shape — derived from BoardAccess for backward
@@ -86,6 +91,12 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
   }
   if (input.description && input.description.length > 500) {
     throw new ValidationError('VALIDATION_ERROR', 'Description must be 500 characters or less')
+  }
+  // An access matrix the caller chose may not use a tier the deployment's
+  // policy owns (POLICY_MANAGED_SETTINGS `boards.anonymousAccess`): refuse it
+  // before any write rather than let the database rewrite it (DEF-42).
+  if (input.access) {
+    assertBoardAccessWithinPolicy(input.access)
   }
 
   // Tier-limit gate (no-op in OSS).
@@ -144,6 +155,11 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
   }
   if (input.access) {
     insertValues.access = input.access
+  } else if (isBoardAnonymousAccessPolicyManaged()) {
+    // The column default opens every action to anyone, which the policy does
+    // not allow; start at the most open tier it does allow instead of letting
+    // the database rewrite the row after the fact.
+    insertValues.access = defaultAccessWithinPolicy()
   }
 
   const [board] = await db.insert(boards).values(insertValues).returning()

@@ -21,6 +21,7 @@ import { BoardExportSection } from '@/components/admin/settings/boards/board-exp
 import { DeleteBoardForm } from '@/components/admin/settings/boards/delete-board-form'
 import { useIsManagedSetting } from '@/components/admin/settings/managed-setting-note'
 import { boardAccessManagedPath } from '@/lib/client/config-file'
+import { BOARD_ANONYMOUS_ACCESS_PATH } from '@/lib/shared/policy-managed-paths'
 import { searchChoice, searchText } from '@/lib/shared/search-params'
 import {
   useBoardSelection,
@@ -110,6 +111,8 @@ function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
   // A policy process may own this board's access (moderation included) through
   // POLICY_MANAGED_SETTINGS `boards.<slug>.access`; other boards stay editable.
   const boardAccessManaged = useIsManagedSetting(boardAccessManagedPath(board.slug))
+  // It may also own the Anyone tier on every board (`boards.anonymousAccess`).
+  const anonymousAccessManaged = useIsManagedSetting(BOARD_ANONYMOUS_ACCESS_PATH)
   switch (tab) {
     case 'general':
       return (
@@ -127,7 +130,12 @@ function BoardTabContent({ board, tab }: BoardTabContentProps): ReactNode {
     case 'access':
       return (
         <SettingsCard title="Access Control">
-          <BoardAccessForm key={board.id} board={board} managed={boardAccessManaged} />
+          <BoardAccessForm
+            key={board.id}
+            board={board}
+            managed={boardAccessManaged}
+            anonymousManaged={anonymousAccessManaged}
+          />
         </SettingsCard>
       )
 
