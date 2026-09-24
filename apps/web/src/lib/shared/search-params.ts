@@ -24,12 +24,13 @@ import { isValidTypeId, type IdPrefix } from '@quackback/ids'
  *
  * Parsing is only half of it. A value can pass the schema and still break the
  * query it feeds: an id column encodes its value as a TypeID and throws on
- * anything else, a count is compared with a 32-bit integer column, and a date
- * becomes a `Date` that must be valid. So an id parameter keeps only
- * well-formed TypeIDs of its own prefix (`searchId`, `searchIdList`,
- * `searchIdCsv`), a count only whole numbers the column can hold
- * (`searchCount`), and a date only an ISO date that `Date` can read
- * (`searchDate`).
+ * anything else, a count is compared with a 32-bit integer column, a date
+ * becomes a `Date` that Postgres must accept, and Postgres rejects a NUL
+ * character in any text. So an id parameter keeps only well-formed TypeIDs of
+ * its own prefix (`searchId`, `searchIdList`, `searchIdCsv`), a count only
+ * whole numbers the column can hold (`searchCount`), a date only an ISO date
+ * in years 1 to 9999 UTC (`searchDate`, `searchDay`), and no helper keeps a
+ * value that holds a NUL.
  *
  * Coercing a number or boolean back to text is exact for everything this app
  * puts in a URL: ids are prefixed TypeIDs, which never parse as JSON. Only
@@ -40,10 +41,18 @@ import { isValidTypeId, type IdPrefix } from '@quackback/ids'
 /** The largest value a Postgres `integer` column, or a `count(*)::int`, can hold. */
 export const MAX_SEARCH_COUNT = 2_147_483_647
 
-/** One query value as TanStack's JSON-first parser can deliver it. */
+/**
+ * One query value as TanStack's JSON-first parser can deliver it. A value that
+ * holds a NUL character (a decoded `%00`) is refused, so every helper below
+ * reads it as absent: Postgres rejects NUL in text, and the value would
+ * otherwise reach a full-text search, an equality compare or a pattern match
+ * and fail the request. The refusal aborts, so no later check (a `searchWhere`
+ * predicate) ever sees such a value.
+ */
 const queryValue = z
   .union([z.string(), z.number(), z.boolean()])
   .transform((value) => String(value))
+  .refine((value) => !value.includes('\u0000'), { abort: true })
 
 /**
  * An optional text parameter. A number or boolean reads as its text; any other
@@ -156,11 +165,55 @@ export function searchCount() {
 const ISO_DATE =
   /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?)?$/
 
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+/** The first and last instants whose UTC year is 1 to 9999. */
+const FIRST_INSTANT = Date.parse('0001-01-01T00:00:00.000Z')
+const LAST_INSTANT = Date.parse('9999-12-31T23:59:59.999Z')
+
+/** The widest UTC offset a time zone uses (UTC+14), in milliseconds. */
+const MAX_ZONE_OFFSET = 14 * 60 * 60 * 1000
+
+/**
+ * Whether `value` is an ISO date (`2026-01-31`) or ISO timestamp that `Date`
+ * can read and whose instant falls in years 1 to 9999 in UTC.
+ *
+ * The UTC year is what the query sees: the value reaches the query as a
+ * `Date`, serialized with `toISOString()`. Postgres has no year 0, so
+ * `0000-01-01` fails the query, and so does `0001-01-01T00:00+01:00`, which is
+ * `0000-12-31T23:00Z`. Past 9999, `toISOString()` writes a six-digit year
+ * (`+010000-01-01T…`), a form no app link produces, so it is refused as well.
+ *
+ * A timestamp without an offset is local time, and the browser that checks it
+ * and the server that queries it can be in different zones. Such a value is
+ * read as UTC and kept only when it stays inside those years in every zone
+ * (UTC-12 to UTC+14), so the answer never depends on where it is checked.
+ */
+export function isSearchDate(value: string): boolean {
+  if (!ISO_DATE.test(value)) return false
+  const time = value.indexOf('T')
+  const localTime = time !== -1 && !/[Z+-]/.test(value.slice(time))
+  const instant = Date.parse(localTime ? `${value}Z` : value)
+  if (Number.isNaN(instant)) return false
+  const slack = localTime ? MAX_ZONE_OFFSET : 0
+  return instant >= FIRST_INSTANT + slack && instant <= LAST_INSTANT - slack
+}
+
 /**
  * An optional date, kept as its text: an ISO date (`2026-01-31`) or an ISO
- * timestamp. Anything else, or a value `Date` cannot turn into a time
- * (`2026-13-45`), reads as absent.
+ * timestamp that `isSearchDate` accepts. Anything else, such as a value `Date`
+ * cannot turn into a time (`2026-13-45`) or a year Postgres rejects
+ * (`0000-01-01`), reads as absent.
  */
 export function searchDate() {
-  return searchWhere((value) => ISO_DATE.test(value) && !Number.isNaN(new Date(value).getTime()))
+  return searchWhere(isSearchDate)
+}
+
+/**
+ * An optional calendar date without a time (`2026-01-31`), kept as its text,
+ * for a filter whose server function takes only that form. It is held to the
+ * same years as `searchDate`; anything else reads as absent.
+ */
+export function searchDay() {
+  return searchWhere((value) => ISO_DAY.test(value) && isSearchDate(value))
 }

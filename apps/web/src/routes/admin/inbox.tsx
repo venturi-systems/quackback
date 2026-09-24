@@ -62,7 +62,9 @@ import {
   useInboxSegmentsWithCounts,
 } from '@/components/admin/chat/inbox-nav-sidebar'
 import {
+  inboxConversationParam,
   inboxNavKey,
+  inboxSearchParam,
   navFromSearch,
   PRIORITY_VALUES,
   type InboxNavItem,
@@ -94,7 +96,9 @@ export const Route = createFileRoute('/admin/inbox')({
   // Everything that defines the current view lives in the URL so a refresh
   // restores the exact open conversation + filters, and links are shareable.
   validateSearch: (search: Record<string, unknown>): InboxSearch => ({
-    c: typeof search.c === 'string' ? search.c : undefined,
+    // Only a well-formed conversation id: anything else would reach the
+    // conversation id column and 500 the thread fetch.
+    c: inboxConversationParam(search.c),
     // Only accept a well-formed chat-message id — a stray `?m=` is harmless
     // (the thread just won't find it), but validating keeps it tidy.
     m: typeof search.m === 'string' && isValidTypeId(search.m, 'chat_msg') ? search.m : undefined,
@@ -123,7 +127,8 @@ export const Route = createFileRoute('/admin/inbox')({
     priority: PRIORITY_VALUES.includes(search.priority as ConversationPriority | 'all')
       ? (search.priority as ConversationPriority | 'all')
       : undefined,
-    q: typeof search.q === 'string' && search.q ? search.q : undefined,
+    // Search text the conversation list can take (see inboxSearchParam).
+    q: inboxSearchParam(search.q),
     // Carries the shared `?post=` modal target (the admin layout mounts the
     // modal) so clicking an embedded post in a chat opens it without leaving the
     // inbox. Validated to a real post id; a junk value is dropped.
