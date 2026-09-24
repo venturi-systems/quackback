@@ -86,6 +86,25 @@ describe('htmlToText', () => {
     expect(text).toBe('Line one\nLine & two')
   })
 
+  it('drops style and script bodies whose tags carry whitespace or attributes', () => {
+    // Venturi fork (landing-page#2309, CodeQL js/bad-tag-filter): HTML ends the
+    // element at each of these end tags, so none of the body is message text.
+    for (const html of [
+      '<p>Kept</p><script>evil()</script >',
+      '<p>Kept</p><script>evil()</script \t\n bar>',
+      '<p>Kept</p><SCRIPT type="text/javascript">evil()</SCRIPT>',
+      '<p>Kept</p><script\nsrc="x.js">evil()</script>',
+      '<p>Kept</p><style media="all">.x{color:red}</style >',
+      '<p>Kept</p><STYLE>.x{color:red}</Style foo="bar">',
+    ]) {
+      expect(htmlToText(html), html).toBe('Kept')
+    }
+  })
+
+  it('keeps text next to a tag whose name only starts with script or style', () => {
+    expect(htmlToText('<p>Kept<scripture>verse</scripture></p>')).toBe('Kept verse')
+  })
+
   it('produces text that extractReplyText can strip quoted history from', () => {
     const text = htmlToText('<p>Fresh reply</p><p>On Mon wrote:</p><p>&gt; old quoted</p>')
     expect(extractReplyText(text)).toBe('Fresh reply')
