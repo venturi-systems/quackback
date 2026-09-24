@@ -60,7 +60,7 @@ describe('Autocomplete', () => {
     fireEvent.change(screen.getByPlaceholderText('Search or type…'), {
       target: { value: 'realm_access.roles' },
     })
-    fireEvent.click(screen.getByText(/Use [""]realm_access\.roles[""]/))
+    fireEvent.click(screen.getByText(/Use "realm_access\.roles"/))
     expect(onValueChange).toHaveBeenCalledWith('realm_access.roles')
   })
 

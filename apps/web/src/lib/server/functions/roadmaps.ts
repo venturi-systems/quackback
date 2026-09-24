@@ -25,6 +25,7 @@ import {
 } from '@/lib/server/domains/roadmaps/roadmap.service'
 import { getRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
 import { logger } from '@/lib/server/logger'
+import { roadmapPostListSchema } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'roadmaps' })
 
@@ -68,17 +69,9 @@ const reorderRoadmapsSchema = z.object({
   roadmapIds: z.array(z.string()),
 })
 
-const getRoadmapPostsSchema = z.object({
-  roadmapId: z.string(),
-  statusId: z.string().optional(),
-  limit: z.number().int().min(1).max(100).default(20),
-  offset: z.number().int().min(0).default(0),
-  search: z.string().optional(),
-  boardIds: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  segmentIds: z.array(z.string()).optional(),
-  sort: z.enum(['votes', 'newest', 'oldest']).optional(),
-})
+// Lives in lib/shared/schemas/list-filters.ts, which holds each filter to what
+// the roadmap column query accepts (DEF-45).
+const getRoadmapPostsSchema = roadmapPostListSchema
 
 // ============================================
 // Type Exports

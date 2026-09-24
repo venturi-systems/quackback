@@ -12,6 +12,10 @@
  */
 import { createStart, createCsrfMiddleware } from '@tanstack/react-start'
 import { requestContextMiddleware } from '@/lib/server/middleware/request-context'
+import {
+  serverFnDecodeGuardMiddleware,
+  serverFnDispatchMarker,
+} from '@/lib/server/middleware/serverfn-decode-guard'
 
 /**
  * Same-origin protection for server functions, matching the framework default.
@@ -29,7 +33,12 @@ const csrfMiddleware = createCsrfMiddleware({
 export const startInstance = createStart(() => {
   return {
     // Request-context/logging first so even CSRF-rejected requests get a
-    // request_id and an access log; CSRF second.
-    requestMiddleware: [requestContextMiddleware, csrfMiddleware],
+    // request_id and an access log; CSRF second. The decode guard runs last:
+    // it answers 400, not the framework's 500, when a server-function payload
+    // cannot be decoded (DEF-59).
+    requestMiddleware: [requestContextMiddleware, csrfMiddleware, serverFnDecodeGuardMiddleware],
+    // Must stay first: it tells the decode guard that the function started,
+    // i.e. that the payload decoded. It adds no context.
+    functionMiddleware: [serverFnDispatchMarker],
   }
 })

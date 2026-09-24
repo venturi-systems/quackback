@@ -210,10 +210,18 @@ export function searchDate() {
 }
 
 /**
+ * Whether `value` is a calendar date without a time (`2026-01-31`) that
+ * `isSearchDate` accepts, so its year is 1 to 9999.
+ */
+export function isSearchDay(value: string): boolean {
+  return ISO_DAY.test(value) && isSearchDate(value)
+}
+
+/**
  * An optional calendar date without a time (`2026-01-31`), kept as its text,
  * for a filter whose server function takes only that form. It is held to the
  * same years as `searchDate`; anything else reads as absent.
  */
 export function searchDay() {
-  return searchWhere((value) => ISO_DAY.test(value) && isSearchDate(value))
+  return searchWhere(isSearchDay)
 }
