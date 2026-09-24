@@ -5,7 +5,7 @@
  * They should ONLY be used in test environments.
  */
 
-import { execSync } from 'child_process'
+import { execFileSync, execSync } from 'child_process'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -137,5 +137,28 @@ export function getMentionTarget(excludeEmail: string = 'demo@example.com'): {
   } catch (error) {
     const err = error as { stderr?: string; message: string }
     throw new Error(`Failed to get mention target: ${err.stderr || err.message}`, { cause: error })
+  }
+}
+
+/**
+ * Find a seeded post and the current user's visible root comment without
+ * creating content or relying on the seed's denormalized comment counts.
+ */
+export function getPostWithOwnComment(email: string): { path: string; commentId: string } {
+  const scriptPath = resolve(__dirname, '../scripts/get-post-with-own-comment.ts')
+
+  try {
+    const result = execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, email], {
+      encoding: 'utf-8',
+      cwd: resolve(__dirname, '../..'),
+      timeout: E2E_SCRIPT_TIMEOUT_MS,
+      killSignal: E2E_SCRIPT_KILL_SIGNAL,
+    })
+    return JSON.parse(result.trim()) as { path: string; commentId: string }
+  } catch (error) {
+    const err = error as { stderr?: string; message: string }
+    throw new Error(`Failed to get post with own comment: ${err.stderr || err.message}`, {
+      cause: error,
+    })
   }
 }

@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
+import { getPostWithOwnComment } from '../../utils/db-helpers'
 
 // Exercise the actual portal and composed Radix triggers, rather than a button
 // fixture: Tooltip/Popover/DropdownMenu can replace a Button's data-slot.
@@ -70,22 +71,17 @@ test.describe('Portal coarse-pointer action targets', () => {
   }
 
   test('post detail actions fit the mobile page at a 14px root', async ({ page }) => {
-    await page.goto('/')
-    // Choose a seeded post with comments so reply/edit/delete rows are
-    // mandatory coverage, without creating content for a layout assertion.
-    const post = page
-      .locator('a[href*="/posts/"]:has(h3)')
-      .filter({ has: page.locator('span.ms-auto').filter({ hasText: /^[1-9]\d*$/ }) })
-      .first()
-    await expect(post).toBeVisible()
-    await post.click()
-    await expect(page).toHaveURL(/\/posts\//)
+    const post = getPostWithOwnComment('demo@example.com')
+    await page.goto(post.path)
+    await expect(page).toHaveURL((url) => url.pathname === post.path)
     await useSmallRoot(page)
     const detail = page.getByTestId('post-detail')
     await expect(detail).toBeVisible()
     await expectTouchTarget(detail.getByTestId('vote-button').first())
+    const ownComment = detail.locator(`[id="comment-${post.commentId}"]`)
+    await expect(ownComment).toBeVisible()
     for (const name of ['Reply', 'Edit', 'Delete']) {
-      await expectTouchTarget(detail.getByRole('button', { name, exact: true }).first())
+      await expectTouchTarget(ownComment.getByRole('button', { name, exact: true }).first())
     }
     const buttons = detail.locator(
       "button:not([role='checkbox']):not([role='switch']):not([role='radio'])"
