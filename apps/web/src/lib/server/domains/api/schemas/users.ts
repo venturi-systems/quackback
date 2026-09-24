@@ -11,6 +11,22 @@ import {
   ValidationErrorSchema,
 } from './common'
 
+// A team account or team-domain address is created and verified only by a
+// Google or GitHub sign-in (team-identity.ts, TEAM_IDENTITY_LOCKED).
+const TeamIdentityLockedErrorSchema = z
+  .object({
+    error: z.object({
+      code: z.string(),
+      message: z.string(),
+    }),
+  })
+  .meta({ description: 'Forbidden error' })
+
+const TEAM_IDENTITY_LOCKED_NOTE =
+  ' An address at a team domain cannot be created here, and the emailVerified flag of a team ' +
+  'account or team-domain address cannot be changed here: both come only from a Google or ' +
+  'GitHub sign-in (403).'
+
 // Shared attributes schema
 const UserAttributesSchema = z
   .record(z.string(), z.unknown())
@@ -177,7 +193,8 @@ registerPath('/users/identify', {
     summary: 'Identify (create or update) a user',
     description:
       'Create a new portal user or update an existing one by email. ' +
-      'User attributes must be configured in Settings > User Attributes before they can be set.',
+      'User attributes must be configured in Settings > User Attributes before they can be set.' +
+      TEAM_IDENTITY_LOCKED_NOTE,
     requestBody: {
       required: true,
       content: {
@@ -229,6 +246,10 @@ registerPath('/users/identify', {
         description: 'Unauthorized',
         content: { 'application/json': { schema: UnauthorizedErrorSchema } },
       },
+      403: {
+        description: 'Team account or team-domain address (TEAM_IDENTITY_LOCKED)',
+        content: { 'application/json': { schema: TeamIdentityLockedErrorSchema } },
+      },
     },
   },
 })
@@ -276,7 +297,8 @@ registerPath('/users/{principalId}', {
     summary: 'Update a portal user',
     description:
       "Update a portal user's profile and attributes. " +
-      'User attributes must be configured in Settings > User Attributes before they can be set.',
+      'User attributes must be configured in Settings > User Attributes before they can be set.' +
+      TEAM_IDENTITY_LOCKED_NOTE,
     parameters: [
       {
         name: 'principalId',
@@ -330,6 +352,10 @@ registerPath('/users/{principalId}', {
       401: {
         description: 'Unauthorized',
         content: { 'application/json': { schema: UnauthorizedErrorSchema } },
+      },
+      403: {
+        description: 'Team-domain address (TEAM_IDENTITY_LOCKED)',
+        content: { 'application/json': { schema: TeamIdentityLockedErrorSchema } },
       },
       404: {
         description: 'Portal user not found',

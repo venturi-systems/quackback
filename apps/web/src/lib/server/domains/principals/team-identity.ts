@@ -7,9 +7,17 @@
  *
  *   1. has a Google or GitHub account linked (never the password credential
  *      alone, never a magic link, a widget identify or an OIDC provider),
- *   2. carries an email address the provider reported as verified, and
+ *   2. has its email address marked verified (`user.emailVerified`), and
  *   3. whose address is at one of VENTURI_TEAM_EMAIL_DOMAINS (exact hostname;
  *      subdomains never match).
+ *
+ * What rule 2 reads is the account's own flag, not the provider's claim at the
+ * moment of each sign-in. Three things keep that flag honest: Google and
+ * GitHub are not trusted providers (auth/index.ts), so Better Auth links one of
+ * them to an existing account only when the provider itself reports the
+ * address verified; the flag of a team account or team-domain address cannot
+ * be written through REST identify or user update (user.identify.ts); and the
+ * admin UI cannot edit a team member's address (admin.ts, TEAM_EMAIL_LOCKED).
  *
  * The rule is enforced twice: every write that assigns a team role refuses an
  * identity that does not qualify (team-designation.ts), and every read that
@@ -48,6 +56,20 @@ export const TEAM_IDENTITY_GAP_MESSAGES: Record<TeamIdentityGap, string> = {
   email_unverified: 'Google or GitHub has not verified the email address.',
   provider_missing: 'The account has not signed in with Google or GitHub.',
 }
+
+/**
+ * Refusal text for a write that would create an account at a team domain, or
+ * change the verification flag of a team account, anywhere but a Google or
+ * GitHub sign-in (REST identify, REST user update).
+ *
+ * Better Auth links a later Google or GitHub sign-in to an existing account
+ * only while that account's address is already marked verified. An unverified
+ * row created elsewhere would therefore block the person's own first sign-in,
+ * and a flag written elsewhere would either stand in for a verification no
+ * provider made or switch off a working administrator's team access.
+ */
+export const TEAM_IDENTITY_LOCKED_MESSAGE =
+  'Team accounts and addresses at a team domain are created and verified only by signing in with Google or GitHub.'
 
 /** Configured team domains; the Venturi default if the value is unavailable. */
 export function configuredTeamDomains(): readonly string[] {
