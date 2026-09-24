@@ -318,14 +318,22 @@ export const updateBoardAccessFn = createServerFn({ method: 'POST' })
     if (!isAdmin(auth.principal.role)) {
       throw new ForbiddenError('FORBIDDEN', 'Admin only')
     }
-    // Board access may be owned by an external policy process
-    // (POLICY_MANAGED_SETTINGS: `boards.access`).
-    const { assertNotManaged } = await import('@/lib/server/config-file/managed-guard')
-    await assertNotManaged('boards.access')
     const before = await db.query.boards.findFirst({
       where: eq(boards.id, data.boardId as BoardId),
     })
     if (!before) throw new NotFoundError('BOARD_NOT_FOUND', `Board ${data.boardId} not found`)
+    // One board's access may be owned by an external policy process
+    // (POLICY_MANAGED_SETTINGS: `boards.<slug>.access`). Refuse a change to
+    // that board instead of saving a value the policy would refuse or
+    // revert; a save that keeps its access, and every other board, pass.
+    const { isDeepStrictEqual } = await import('node:util')
+    if (!isDeepStrictEqual(data.access, before.access)) {
+      const [{ assertNotManaged }, { boardAccessManagedPath }] = await Promise.all([
+        import('@/lib/server/config-file/managed-guard'),
+        import('@/lib/shared/policy-managed-paths'),
+      ])
+      await assertNotManaged(boardAccessManagedPath(before.slug))
+    }
 
     await db
       .update(boards)

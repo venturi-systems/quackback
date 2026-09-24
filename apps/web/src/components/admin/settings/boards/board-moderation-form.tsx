@@ -9,6 +9,7 @@ import {
   UserIcon,
 } from '@heroicons/react/24/solid'
 import { FormError } from '@/components/shared/form-error'
+import { ManagedSettingNote } from '@/components/admin/settings/managed-setting-note'
 import { BoardSettingsSaveDock } from './board-settings-save-dock'
 import { useUpdateBoardAccess } from '@/lib/client/mutations'
 import { settingsQueries } from '@/lib/client/queries/settings'
@@ -77,11 +78,15 @@ interface Board {
 
 interface BoardModerationFormProps {
   board: Board
+  /** The board's access policy, moderation included, is owned by the
+   *  deployment configuration (POLICY_MANAGED_SETTINGS
+   *  `boards.<slug>.access`): render read-only. */
+  managed?: boolean
 }
 
 type ModerationShape = BoardAccess['moderation']
 
-export function BoardModerationForm({ board }: BoardModerationFormProps) {
+export function BoardModerationForm({ board, managed = false }: BoardModerationFormProps) {
   const mutation = useUpdateBoardAccess()
 
   // Non-suspense so the form keeps rendering when the portalConfig cache
@@ -137,6 +142,7 @@ export function BoardModerationForm({ board }: BoardModerationFormProps) {
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pb-24">
       {mutation.isError && <FormError message={mutation.error?.message ?? 'An error occurred'} />}
+      {managed && <ManagedSettingNote what="Board moderation" />}
 
       {/* Inheritance banner */}
       <div className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
@@ -161,8 +167,9 @@ export function BoardModerationForm({ board }: BoardModerationFormProps) {
         </Link>
       </div>
 
-      {/* Rules */}
-      <div className="flex flex-col">
+      {/* Rules. A disabled fieldset makes every rule control inert when the
+          deployment configuration owns this board's access. */}
+      <fieldset disabled={managed} className="m-0 flex min-w-0 flex-col border-0 p-0">
         {MOD_RULES.map((r, idx) => (
           <ModerationRuleRow
             key={r.id}
@@ -175,7 +182,7 @@ export function BoardModerationForm({ board }: BoardModerationFormProps) {
             isLast={idx === MOD_RULES.length - 1}
           />
         ))}
-      </div>
+      </fieldset>
 
       <p className="flex items-center gap-2 text-xs text-muted-foreground">
         <InformationCircleIcon className="h-3 w-3" />
