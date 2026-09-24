@@ -597,18 +597,18 @@ export function shouldBootstrapPromote(
  * in `hooksBefore` so it never reaches this path, and password/social
  * callbacks are likewise blocked.
  *
- * Two trust paths decide the role, each with its own scoping:
- *  - CLAIM-MATCHED: when the provider has `attributeMapping` and a rule
- *    matches the user's claim, the IdP is attesting THIS user's role — a
- *    per-user signal — so the role is assigned regardless of the email's
- *    domain. This is the primary path for enterprise IdPs that emit group/
- *    role claims (mirrors how WorkOS et al. assign roles).
- *  - DEFAULT-ROLE FALLBACK: when no rule matches (or no mapping is set), the
- *    role falls back to the provider's `autoProvisionRole` (default
- *    `'member'`). That is NOT a per-user attestation, so it stays scoped to
- *    the CALLBACK provider's own verified domains — a sign-in via provider X
- *    only provisions when the email is at one of X's verified domains. Mere
- *    inbox control isn't enough to claim team membership.
+ * Every role this hook assigns is scoped to the CALLBACK provider's own
+ * verified domains: a sign-in via provider X only provisions when the email is
+ * at one of X's verified domains. Within that gate, a matching
+ * `attributeMapping` rule decides the role; otherwise the provider's
+ * `autoProvisionRole` (default `'member'`) applies.
+ *
+ * Venturi fork (landing-page#2309): upstream 59fe3ff6f (v0.13.0) let a
+ * claim-matched role bypass the verified-domain gate. The fork keeps the gate
+ * for claim-matched roles too, and any team role (`member`, `admin`) further
+ * needs the team identity rule (team-identity.ts): a verified team-domain
+ * address from a linked Google or GitHub account. An off-domain OIDC email
+ * therefore never gets a team role here, whatever its IdP claims say.
  *
  * Provisioning config is read from the MATCHED PROVIDER ROW (`autoCreateUsers`
  * / `autoProvisionRole` / `attributeMapping`), never another provider's.
@@ -661,23 +661,23 @@ export async function handleAutoProvisionAfter(
   type UserId = `user_${string}`
   const userIdTyped = userId as UserId
 
-  // Resolve the role from IdP claims FIRST, independent of any verified-domain
-  // check. An explicit claim match is the IdP attesting THIS user's role — a
-  // per-user signal stronger than domain ownership — so it provisions even when
-  // the email is not at one of the provider's verified domains.
+  // Venturi fork (landing-page#2309): the verified-domain gate applies to EVERY
+  // role this hook assigns, a claim-matched role included. Upstream 59fe3ff6f
+  // (v0.13.0) let a matching IdP role claim provision an email that is not at
+  // any of the callback provider's verified domains; the fork does not take
+  // that change. An IdP claim is the IdP's statement, not the owner's
+  // designation, and a team role here also needs the team identity rule below
+  // (a verified team-domain address from a linked Google or GitHub account).
+  if (findProviderForDomainEmail(email, [provider]) === null) return
+
+  // Resolve the target role: a matching attribute-mapping rule takes
+  // precedence over the provider's autoProvisionRole (default 'member').
   let claimRole: 'admin' | 'member' | 'user' | null = null
   if (provider.attributeMapping) {
     const claims = await readSsoClaims(userIdTyped, providerId)
     const { resolveSsoRole } = await import('./resolve-sso-role')
     claimRole = resolveSsoRole(claims, provider.attributeMapping)
   }
-
-  // The default role (no claim matched) is NOT a per-user attestation, so it
-  // stays scoped to the CALLBACK provider's own verified domains: without the
-  // IdP asserting this user's role, mere inbox control isn't enough to claim
-  // team membership. A claim-matched role bypasses this gate.
-  if (claimRole === null && findProviderForDomainEmail(email, [provider]) === null) return
-
   const targetRole: 'admin' | 'member' | 'user' =
     claimRole ?? provider.autoProvisionRole ?? 'member'
 
