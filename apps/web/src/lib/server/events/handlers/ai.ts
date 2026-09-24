@@ -11,7 +11,7 @@ import { analyzeSentiment, saveSentiment } from '@/lib/server/domains/sentiment/
 import { generatePostEmbedding } from '@/lib/server/domains/embeddings/embedding.service'
 import type { PostId } from '@quackback/ids'
 import { db, postTags, tags, eq } from '@/lib/server/db'
-import { claimHookDelivery } from '../hook-idempotency'
+import { claimHookDelivery, completeHookDelivery } from '../hook-idempotency'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'ai' })
@@ -64,6 +64,9 @@ export const aiHook: HookHandler = {
       'post analysis complete'
     )
 
+    // Close the lease so a later replay of this job id is a duplicate, not a
+    // stale lease another worker may take over.
+    await completeHookDelivery(ctx?.jobId)
     return { success: true }
   },
 }
@@ -106,7 +109,10 @@ async function processEmbedding(postId: PostId, title: string, content: string):
   // Fetch tags to include in embedding for better semantic matching
   const tagNames = await getPostTagNames(postId)
   if (tagNames.length > 0) {
-    log.debug({ post_id: postId, tag_count: tagNames.length, tags: tagNames }, 'including tags in embedding')
+    log.debug(
+      { post_id: postId, tag_count: tagNames.length, tags: tagNames },
+      'including tags in embedding'
+    )
   }
 
   const success = await generatePostEmbedding(postId, title, content, tagNames)

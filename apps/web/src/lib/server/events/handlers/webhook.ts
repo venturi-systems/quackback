@@ -13,7 +13,12 @@ import type { WebhookTarget, WebhookConfig } from '../integrations/webhook/const
 import type { WebhookId } from '@quackback/ids'
 import { safeFetch, SsrfError, TimeoutError } from '@/lib/server/content/ssrf-guard'
 import { isRetryableError } from '../hook-utils'
-import { claimHookDelivery } from '../hook-idempotency'
+import {
+  claimHookDelivery,
+  completeHookDelivery,
+  failHookDelivery,
+  releaseHookDelivery,
+} from '../hook-idempotency'
 import { logger } from '@/lib/server/logger'
 
 export type { WebhookTarget, WebhookConfig }
@@ -36,7 +41,9 @@ export const webhookHook: HookHandler = {
     // Idempotency: if BullMQ is re-running this job after a worker crash,
     // skip the delivery — the previous attempt already POSTed (and the
     // remote saw it). Without this, customers see duplicate webhook
-    // deliveries on every rolling restart that interrupts a worker.
+    // deliveries on every rolling restart that interrupts a worker. A
+    // retryable failure releases the claim below, so a BullMQ retry of the
+    // same job id is NOT treated as a duplicate.
     const claimed = await claimHookDelivery(ctx?.jobId, 'webhook')
     if (!claimed) {
       log.debug({ job_id: ctx?.jobId, url }, 'skipping duplicate delivery')
@@ -47,7 +54,9 @@ export const webhookHook: HookHandler = {
 
     // Build payload
     const payload = JSON.stringify({
-      id: `evt_${crypto.randomUUID().replace(/-/g, '')}`,
+      // Stable across BullMQ attempts, so a receiver can also deduplicate the
+      // narrow crash-after-POST-before-ack window.
+      id: event.id.startsWith('evt_') ? event.id : `evt_${event.id.replace(/-/g, '')}`,
       type: event.type,
       createdAt: event.timestamp,
       data: event.data,
@@ -80,6 +89,7 @@ export const webhookHook: HookHandler = {
 
       if (response.ok) {
         log.info({ event_type: event.type, url }, 'webhook delivered')
+        await completeHookDelivery(ctx?.jobId)
         await updateWebhookSuccess(webhookId)
         return { success: true }
       }
@@ -88,23 +98,29 @@ export const webhookHook: HookHandler = {
       const error = `HTTP ${response.status}`
       log.warn({ url, status: response.status }, 'webhook delivery failed')
       const retryable = response.status >= 500 || response.status === 429
+      if (retryable) await releaseHookDelivery(ctx?.jobId)
+      else await failHookDelivery(ctx?.jobId)
       return { success: false, error, shouldRetry: retryable }
     } catch (error) {
       // An SSRF-blocked target (private/internal IP, bad scheme) never becomes
       // valid on retry — fail permanently, as the old pre-check did.
       if (error instanceof SsrfError) {
         log.error({ url, reason: error.message }, 'ssrf blocked')
+        await failHookDelivery(ctx?.jobId)
         return { success: false, error: error.message, shouldRetry: false }
       }
       // A timeout is transient — retry.
       if (error instanceof TimeoutError) {
         log.warn({ url }, 'webhook delivery timed out')
+        await releaseHookDelivery(ctx?.jobId)
         return { success: false, error: 'Request timeout', shouldRetry: true }
       }
 
       const errorMsg = error instanceof Error ? error.message : 'Unknown error'
       log.error({ err: error, url }, 'webhook delivery failed')
       const retryable = isRetryableError(error)
+      if (retryable) await releaseHookDelivery(ctx?.jobId)
+      else await failHookDelivery(ctx?.jobId)
       return { success: false, error: errorMsg, shouldRetry: retryable }
     }
   },
