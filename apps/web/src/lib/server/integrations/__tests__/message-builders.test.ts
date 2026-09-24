@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import type { PostCreatedEvent, EventData } from '../../events/types'
+import type { PostCreatedEvent, PostStatusChangedEvent, EventData } from '../../events/types'
 import { buildLinearIssueBody } from '../linear/message'
 import { buildGitHubIssueBody } from '../github/message'
 import { buildJiraIssueBody } from '../jira/message'
@@ -15,6 +15,7 @@ import { buildShortcutStoryBody } from '../shortcut/message'
 import { buildAsanaTaskBody } from '../asana/message'
 import { buildAzureDevOpsWorkItemBody } from '../azure-devops/message'
 import { buildZapierPayload } from '../zapier/message'
+import { buildDiscordMessage } from '../discord/message'
 
 // ---------------------------------------------------------------------------
 // Shared test event factory
@@ -219,4 +220,35 @@ describe('non post.created fallbacks', () => {
     const title = result.title ?? result.name
     expect(title).toBe('Feedback')
   })
+})
+
+describe('Discord status change embed', () => {
+  function statusChanged(newStatus: string): PostStatusChangedEvent {
+    return {
+      id: 'evt-2',
+      type: 'post.status_changed',
+      timestamp: '2025-01-01T00:00:00Z',
+      actor: { type: 'user', userId: 'user_1', email: 'actor@test.com' },
+      data: {
+        post: { id: 'post_1', title: 'Dark mode', boardId: 'board_1', boardSlug: 'features' },
+        previousStatus: 'open',
+        newStatus,
+      },
+    }
+  }
+
+  it('uses the colour and emoji of a known status', () => {
+    const embed = buildDiscordMessage(statusChanged('complete'), ROOT).embeds?.[0]
+    expect(embed?.color).toBe(0x57f287)
+    expect(embed?.author?.name).toBe('\u2705 Status changed by actor@test.com')
+  })
+
+  it.each(['Constructor', '__proto__'])(
+    'falls back to the default colour and emoji for a status named %s',
+    (status) => {
+      const embed = buildDiscordMessage(statusChanged(status), ROOT).embeds?.[0]
+      expect(embed?.color).toBe(0x5865f2)
+      expect(embed?.author?.name).toBe('\ud83d\udccc Status changed by actor@test.com')
+    }
+  )
 })

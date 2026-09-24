@@ -50,6 +50,20 @@ describe('archiveExternalIssue', () => {
     expect(result.error).toContain('Unsupported integration type')
   })
 
+  it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+    'treats the inherited Object.prototype member %s as an unsupported type',
+    async (integrationType) => {
+      const fetchFn = mockFetch(200)
+      vi.stubGlobal('fetch', fetchFn)
+      const result = await archiveExternalIssue(integrationType, baseCtx())
+      expect(result).toEqual({
+        success: false,
+        error: `Unsupported integration type: ${integrationType}`,
+      })
+      expect(fetchFn).not.toHaveBeenCalled()
+    }
+  )
+
   it('catches thrown errors and returns failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')))
     const result = await archiveExternalIssue('linear', baseCtx())
