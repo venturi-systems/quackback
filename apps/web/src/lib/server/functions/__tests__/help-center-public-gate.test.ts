@@ -20,11 +20,23 @@ const hoisted = vi.hoisted(() => ({
   },
   getPublicCategoryBySlug: vi.fn(),
   hybridSearch: vi.fn(),
+  // The validator each handler was registered with. Handlers run unvalidated.
+  inputs: new Map<unknown, { safeParse(value: unknown): { success: boolean } } | undefined>(),
 }))
 
 vi.mock('@tanstack/react-start', () => ({
   createServerFn: () => {
-    const chain = { validator: () => chain, handler: (fn: unknown) => fn }
+    let input: { safeParse(value: unknown): { success: boolean } } | undefined
+    const chain = {
+      validator(schema: { safeParse(value: unknown): { success: boolean } }) {
+        input = schema
+        return chain
+      },
+      handler(fn: unknown) {
+        hoisted.inputs.set(fn, input)
+        return fn
+      },
+    }
     return chain
   },
   createServerOnlyFn: <T>(fn: T) => fn,
@@ -170,5 +182,18 @@ describe('help center public reads when enabled and the caller is granted', () =
     expect(await fn('searchPublicArticlesFn')({ data: { query: 'start' } })).toHaveLength(1)
     await fn('recordArticleFeedbackFn')({ data: { articleId: 'article_1', helpful: true } })
     expect(hoisted.service.recordArticleFeedback).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('public help-center search input (DEF-45)', () => {
+  // The query feeds a full-text search, and Postgres rejects a NUL in text, so
+  // a hand-made call with one fails at the validator instead of the query.
+  it('takes a search term and refuses a NUL', () => {
+    const input = hoisted.inputs.get(hc.searchPublicArticlesFn)
+    if (!input) throw new Error('searchPublicArticlesFn has no validator')
+    expect(input.safeParse({ query: 'getting started', limit: 5 }).success).toBe(true)
+    expect(input.safeParse({ query: 'getting\u0000started' }).success).toBe(false)
+    expect(input.safeParse({ query: '\u0000' }).success).toBe(false)
+    expect(input.safeParse({ query: '' }).success).toBe(false)
   })
 })

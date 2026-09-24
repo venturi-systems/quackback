@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { generateId } from '@quackback/ids'
 
 type Input = { data: Record<string, unknown> }
 
@@ -40,6 +41,10 @@ vi.mock('@quackback/db/client', () => ({
 import { fetchInboxPosts } from '../admin'
 import { fetchInboxPostsForAdmin } from '../posts'
 
+// The inbox schemas take only ids the id columns accept: TypeIDs of the entity.
+const BOARD_ID = generateId('board')
+const CURSOR_POST_ID = generateId('post')
+
 beforeEach(() => {
   vi.clearAllMocks()
   requireAuth.mockResolvedValue({})
@@ -54,11 +59,11 @@ describe.each([
     await fetchPosts({
       data: {
         hasDuplicates: value,
-        boardIds: ['board_test'],
+        boardIds: [BOARD_ID],
         statusSlugs: ['open'],
         minVotes: 5,
         sort: 'votes',
-        cursor: 'post_cursor',
+        cursor: CURSOR_POST_ID,
         limit: 2,
       },
     })
@@ -67,11 +72,11 @@ describe.each([
     expect(listInboxPosts).toHaveBeenCalledWith(
       expect.objectContaining({
         hasDuplicates: value,
-        boardIds: ['board_test'],
+        boardIds: [BOARD_ID],
         statusSlugs: ['open'],
         minVotes: 5,
         sort: 'votes',
-        cursor: 'post_cursor',
+        cursor: CURSOR_POST_ID,
         limit: 2,
       }),
       { preview: true }

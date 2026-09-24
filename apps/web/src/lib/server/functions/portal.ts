@@ -40,33 +40,22 @@ import { listPublicRoadmaps } from '@/lib/server/domains/roadmaps/roadmap.servic
 import { getPublicRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
 import { resolvePortalAccessForRequest } from './portal-access'
 import { logger } from '@/lib/server/logger'
+import {
+  fetchPortalDataSchema,
+  fetchPublicPostsSchema,
+  filterId,
+  filterIdList,
+  filterText,
+  publicRoadmapPostListSchema,
+} from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'portal' })
 
-// Schemas
-const sortSchema = z.enum(['top', 'new', 'trending'])
-
-const fetchPublicPostsSchema = z.object({
-  boardSlug: z.string().optional(),
-  search: z.string().optional(),
-  sort: sortSchema,
-})
-
-const fetchPortalDataSchema = z.object({
-  boardSlug: z.string().optional(),
-  search: z.string().optional(),
-  sort: sortSchema,
-  statusSlugs: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  userId: z.string().optional(),
-  minVotes: z.number().int().min(1).optional(),
-  dateFrom: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid calendar date')
-    .optional(),
-  responded: z.enum(['responded', 'unresponded']).optional(),
-})
+// Schemas: the list inputs (fetchPublicPostsSchema, fetchPortalDataSchema,
+// publicRoadmapPostListSchema) live in lib/shared/schemas/list-filters.ts, which
+// holds each filter to what the list query accepts. The lookups below use its
+// field helpers for the same reason: an id must be a TypeID of its entity and
+// text must hold no NUL, or the query fails instead of the validator (DEF-45).
 
 /**
  * Per-board capability entry sent to the portal and widget.
@@ -170,7 +159,7 @@ async function callerMayReadUserIdentity(userId: string): Promise<boolean> {
 }
 
 export const getPrincipalIdForUser = createServerFn({ method: 'GET' })
-  .validator(z.object({ userId: z.string() }))
+  .validator(z.object({ userId: filterId('user') }))
   .handler(async ({ data }): Promise<PrincipalId | null> => {
     log.debug({ user_id: data.userId }, 'get principal id for user')
     try {
@@ -217,12 +206,18 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
     // boards + their own pending posts.
     const auth = await getOptionalAuth()
     const actor = await policyActorFromAuth(auth)
+    // The viewer whose votes and principal id this returns is always the
+    // signed-in caller. The request once named a userId and the handler read
+    // that user's votes, across every board, and their principal id, so any
+    // caller could ask about anyone; getPrincipalIdForUser already refuses
+    // that lookup.
+    const viewerUserId = auth?.user.id
+    const principalId = auth?.principal.id ?? null
 
     // Run ALL queries in parallel for maximum performance — including the
     // (fail-closed) anonymous-ceiling read so buildBoardPermissions doesn't
     // serialize an extra round-trip onto this (highest-traffic) loader.
     const [
-      memberResult,
       boardsRaw,
       postsResult,
       statuses,
@@ -231,13 +226,6 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
       allowAnonymous,
       workspaceApproval,
     ] = await Promise.all([
-      // Principal lookup (needed for principalId in response)
-      data.userId
-        ? db.query.principal.findFirst({
-            where: eq(principalTable.userId, data.userId as UserId),
-            columns: { id: true },
-          })
-        : null,
       listPublicBoardsWithStats(actor),
       // Posts WITHOUT embedded vote check (we get votes separately for parallelism)
       listPublicPostsWithVotesAndAvatars({
@@ -256,14 +244,11 @@ export const fetchPortalData = createServerFn({ method: 'GET' })
       }),
       listPublicStatuses(),
       listPublicTags(),
-      // Get ALL voted post IDs for this user (runs in parallel, we'll filter to displayed posts)
-      data.userId
-        ? getVotedPostIdsByUserId(data.userId as UserId)
-        : Promise.resolve(new Set<PostId>()),
+      // Get ALL voted post IDs for the viewer (runs in parallel, we'll filter to displayed posts)
+      viewerUserId ? getVotedPostIdsByUserId(viewerUserId) : Promise.resolve(new Set<PostId>()),
       loadAllowAnonymous(),
       loadWorkspaceApproval(),
     ])
-    const principalId = memberResult?.id ?? null
 
     // Per-board submit/vote capability for THIS viewer, composed with the
     // workspace anonymous switch. The UI uses these booleans to decide whether
@@ -345,7 +330,7 @@ export const fetchPublicBoards = createServerFn({ method: 'GET' }).handler(async
 })
 
 export const fetchPublicBoardBySlug = createServerFn({ method: 'GET' })
-  .validator(z.object({ slug: z.string() }))
+  .validator(z.object({ slug: filterText() }))
   .handler(async ({ data }) => {
     log.debug({ slug: data.slug }, 'fetch public board by slug')
     try {
@@ -375,7 +360,7 @@ export const fetchPublicBoardBySlug = createServerFn({ method: 'GET' })
   })
 
 export const fetchPublicPostDetail = createServerFn({ method: 'GET' })
-  .validator(z.object({ postId: z.string() }))
+  .validator(z.object({ postId: filterId('post') }))
   .handler(async ({ data }) => {
     log.debug({ post_id: data.postId }, 'fetch public post detail')
 
@@ -527,7 +512,9 @@ export const fetchPublicTags = createServerFn({ method: 'GET' }).handler(async (
 })
 
 export const fetchUserAvatar = createServerFn({ method: 'GET' })
-  .validator(z.object({ userId: z.string(), fallbackImageUrl: z.string().nullable().optional() }))
+  .validator(
+    z.object({ userId: filterId('user'), fallbackImageUrl: z.string().nullable().optional() })
+  )
   .handler(async ({ data }) => {
     log.debug({ user_id: data.userId }, 'fetch user avatar')
     try {
@@ -558,7 +545,7 @@ export const fetchUserAvatar = createServerFn({ method: 'GET' })
   })
 
 export const fetchAvatars = createServerFn({ method: 'GET' })
-  .validator(z.array(z.string()))
+  .validator(filterIdList('principal'))
   .handler(async ({ data }) => {
     log.debug({ count: data.length }, 'fetch avatars')
     try {
@@ -601,7 +588,7 @@ export const fetchAvatars = createServerFn({ method: 'GET' })
   })
 
 export const fetchSubscriptionStatus = createServerFn({ method: 'GET' })
-  .validator(z.object({ principalId: z.string(), postId: z.string() }))
+  .validator(z.object({ principalId: filterId('principal'), postId: filterId('post') }))
   .handler(async ({ data }) => {
     log.debug({ principal_id: data.principalId, post_id: data.postId }, 'fetch subscription status')
     try {
@@ -662,19 +649,7 @@ export const fetchPublicRoadmaps = createServerFn({ method: 'GET' }).handler(asy
 })
 
 export const fetchPublicRoadmapPosts = createServerFn({ method: 'GET' })
-  .validator(
-    z.object({
-      roadmapId: z.string(),
-      statusId: z.string().optional(),
-      limit: z.number().int().min(1).max(100).optional(),
-      offset: z.number().int().min(0).optional(),
-      search: z.string().optional(),
-      boardIds: z.array(z.string()).optional(),
-      tagIds: z.array(z.string()).optional(),
-      segmentIds: z.array(z.string()).optional(),
-      sort: z.enum(['votes', 'newest', 'oldest']).optional(),
-    })
-  )
+  .validator(publicRoadmapPostListSchema)
   .handler(async ({ data }) => {
     log.debug(
       { roadmap_id: data.roadmapId, limit: data.limit, offset: data.offset },
@@ -737,7 +712,7 @@ export const fetchPublicRoadmapPosts = createServerFn({ method: 'GET' })
     }
   })
 
-const getCommentsSectionDataSchema = z.object({ postId: z.string() })
+const getCommentsSectionDataSchema = z.object({ postId: filterId('post') })
 
 export const getCommentsSectionDataFn = createServerFn({ method: 'GET' })
   .validator(getCommentsSectionDataSchema)
