@@ -14,7 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test as setup, expect } from '@playwright/test'
-import { loginViaMagicLink, setPortalVisibility } from '../utils/access-helpers'
+import { loginViaMagicLink, setPortalVisibility, setWorkspaceAnon } from '../utils/access-helpers'
 import { E2E_SCRIPT_KILL_SIGNAL, E2E_SCRIPT_TIMEOUT_MS } from '../utils/db-helpers'
 import {
   BASE_URL,
@@ -43,9 +43,13 @@ function findRenderPost(adminEmail: string): { path: string; ownComment: boolean
 
 setup('sign in the render identities and write the route plan', async ({ browser }) => {
   // The signed-out surfaces (the share-idea note, the comment sign-in prompt)
-  // exist only on a portal anyone can read. Set that posture explicitly rather
-  // than inheriting whatever the seed left.
+  // exist only on a portal anyone can read that still asks visitors to sign in
+  // before they post or comment: the live posture refuses anonymous sessions.
+  // Set both explicitly rather than inheriting whatever the seed left (since
+  // quackback #129 the seed allows anonymous participation, which replaces
+  // both surfaces with anonymous posting).
   setPortalVisibility('public')
+  setWorkspaceAnon(false)
 
   const memberState = STORAGE_STATES.member
   if (!memberState) throw new Error('The member identity needs a storage-state path')
