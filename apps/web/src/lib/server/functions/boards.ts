@@ -16,6 +16,10 @@ import {
   updateBoard,
   deleteBoard,
 } from '@/lib/server/domains/boards/board.service'
+import {
+  assertBoardAccessWithinPolicy,
+  defaultAccessWithinPolicy,
+} from '@/lib/server/domains/boards/board-access-policy'
 import { invalidateSettingsCache } from '@/lib/server/domains/settings/settings.helpers'
 import { boardAccessSchema, boardPresetSchema, accessForPreset } from '@/lib/shared/schemas/boards'
 import { logger } from '@/lib/server/logger'
@@ -304,8 +308,10 @@ export const createBoardsBatchFn = createServerFn({ method: 'POST' })
         // (view=anonymous, vote/comment/submit=authenticated). Admins can
         // lock them down later via updateBoardAccessFn. Without this the
         // column default (all 'anonymous') would apply, which is more
-        // permissive than the create-modal's Public tile.
-        access: accessForPreset('public'),
+        // permissive than the create-modal's Public tile. The wizard never
+        // offers a choice, so when the deployment's policy owns the anonymous
+        // tier the default starts at signed-in instead (DEF-42).
+        access: defaultAccessWithinPolicy(accessForPreset('public')),
       })
       createdBoards.push(serializeBoard(board))
     }
@@ -393,6 +399,10 @@ export const updateBoardAccessFn = createServerFn({ method: 'POST' })
         import('@/lib/shared/policy-managed-paths'),
       ])
       await assertNotManaged(boardAccessManagedPath(before.slug))
+      // The policy may own the anonymous tier on every board
+      // (`boards.anonymousAccess`). Refuse it here with a clean 403 instead
+      // of letting the database guard reject the write as a server error.
+      assertBoardAccessWithinPolicy(data.access)
     }
 
     await db
