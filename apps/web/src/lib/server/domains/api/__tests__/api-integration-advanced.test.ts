@@ -79,7 +79,9 @@ describe.skipIf(SKIP_INTEGRATION || !API_KEY)('API Integration Tests - Advanced'
       const { status, data } = await api('POST', '/users/identify', {
         externalId: `proxy-vote-test-${stamp}`,
         name: 'Proxy Vote Test User',
-        email: `proxy-test-${stamp}@example.com`,
+        // Not example.com: that is the team domain of the dev and CI .env, and
+        // identify refuses to create an account at a team domain.
+        email: `proxy-test-${stamp}@example.org`,
       })
       if (status !== 200 && status !== 201) {
         throw new Error(`Proxy-voting setup failed: POST /users/identify returned ${status}.`)

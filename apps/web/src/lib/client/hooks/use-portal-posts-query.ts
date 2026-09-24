@@ -13,7 +13,7 @@ import {
 } from '@/lib/server/functions/public-posts'
 import type { PublicFeedbackFilters } from '@/lib/shared/types'
 import type { PublicPostListItem } from '@/lib/shared/types'
-import type { PostId, StatusId, TagId } from '@quackback/ids'
+import { isValidTypeId, type PostId, type StatusId, type TagId } from '@quackback/ids'
 
 // ============================================================================
 // Types
@@ -78,11 +78,14 @@ async function fetchPublicPosts(
   filters: PublicFeedbackFilters,
   page: PublicPostPageParam
 ): Promise<PublicPostListResult> {
-  // Parse status filters - can be TypeIDs or slugs
+  // Status filters hold status TypeIDs or slugs. Only a well-formed status
+  // TypeID is sent as an id: the status id column throws on anything else, so a
+  // hand-typed `?status=status_foo` failed the whole list. Every other value,
+  // that one included, is matched as a slug, which is compared as text.
   const statusIds: string[] = []
   const statusSlugs: string[] = []
   for (const s of filters.status || []) {
-    if (s.startsWith('status_')) {
+    if (isValidTypeId(s, 'status')) {
       statusIds.push(s)
     } else {
       statusSlugs.push(s)

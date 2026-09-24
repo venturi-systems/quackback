@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
@@ -48,7 +49,7 @@ export const Route = createFileRoute('/api/v1/webhooks/$webhookId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'admin' })
+          const auth = await withApiKeyAuth(request, { role: 'admin' })
 
           const webhookId = parseTypeId<WebhookId>(params.webhookId, 'webhook', 'webhook ID')
 
@@ -61,17 +62,43 @@ export const Route = createFileRoute('/api/v1/webhooks/$webhookId')({
             })
           }
 
-          const boardIds = parsed.data.boardIds != null
-            ? parseTypeIdArray<BoardId>(parsed.data.boardIds, 'board', 'board IDs')
-            : parsed.data.boardIds
+          const boardIds =
+            parsed.data.boardIds != null
+              ? parseTypeIdArray<BoardId>(parsed.data.boardIds, 'board', 'board IDs')
+              : parsed.data.boardIds
 
-          const { updateWebhook } = await import('@/lib/server/domains/webhooks/webhook.service')
+          const { updateWebhook, getWebhookById } =
+            await import('@/lib/server/domains/webhooks/webhook.service')
+          const before = await getWebhookById(webhookId).catch(() => null)
           const webhook = await updateWebhook(webhookId, {
             url: parsed.data.url,
             events: parsed.data.events,
             boardIds,
             status: parsed.data.status,
           })
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'webhook.updated',
+              target: { type: 'webhook', id: webhook.id },
+              before: before
+                ? {
+                    url: before.url,
+                    events: before.events,
+                    boardIds: before.boardIds,
+                    status: before.status,
+                  }
+                : null,
+              after: {
+                url: webhook.url,
+                events: webhook.events,
+                boardIds: webhook.boardIds,
+                status: webhook.status,
+              },
+            },
+            request.headers
+          )
 
           return successResponse(toWebhookResponse(webhook))
         } catch (error) {
@@ -85,12 +112,18 @@ export const Route = createFileRoute('/api/v1/webhooks/$webhookId')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'admin' })
+          const auth = await withApiKeyAuth(request, { role: 'admin' })
 
           const webhookId = parseTypeId<WebhookId>(params.webhookId, 'webhook', 'webhook ID')
 
           const { deleteWebhook } = await import('@/lib/server/domains/webhooks/webhook.service')
           await deleteWebhook(webhookId)
+
+          await recordApiKeyAuditSafely(
+            auth,
+            { event: 'webhook.deleted', target: { type: 'webhook', id: webhookId } },
+            request.headers
+          )
 
           return noContentResponse()
         } catch (error) {

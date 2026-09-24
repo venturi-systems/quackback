@@ -15,7 +15,8 @@
  *   - path: gated / NO_EMAIL_BEFORE_PATH / unrecognised
  *   - email: present / missing
  *   - per-domain: verified-enforced / verified-routing-only / none
- *   - principal: admin / member / user / missing (brand-new sign-up)
+ *   - principal: admin / member / user / missing (brand-new sign-up; the
+ *     method gate applies to it too)
  *   - oauth toggles: password on/off / magic-link on/off
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
@@ -304,6 +305,52 @@ describe('handleSignInPreCheck — isAuthMethodAllowed gate', () => {
     expect(ctx.redirect).not.toHaveBeenCalled()
   })
 
+  // A brand-new identity (no user or principal row) used to skip this gate,
+  // so a disabled method still accepted sign-ups: production on 2026-09-24,
+  // with password sign-in off, answered POST /sign-up/email for an unused
+  // address with Better Auth's PASSWORD_TOO_SHORT, i.e. past every gate.
+  it('refuses /sign-up/email for a brand-new identity when oauth.password=false', async () => {
+    mockGetTenantSettings.mockResolvedValue(tenant({ passwordEnabled: false }))
+    mockUserFindFirst.mockResolvedValue(null)
+    mockPrincipalFindFirst.mockResolvedValue(null)
+    const ctx = ctxFor('/sign-up/email', { email: 'squatter@anywhere.com' })
+
+    await expect(handleSignInPreCheck(ctx)).rejects.toThrow(
+      'REDIRECT:/?auth=signin&error=password_method_not_allowed'
+    )
+  })
+
+  it('refuses /sign-in/email for an unknown address the same way as a known one', async () => {
+    mockGetTenantSettings.mockResolvedValue(tenant({ passwordEnabled: false }))
+    const ctx = ctxFor('/sign-in/email', { email: 'nobody@anywhere.com' })
+
+    await expect(handleSignInPreCheck(ctx)).rejects.toThrow(/password_method_not_allowed/)
+  })
+
+  it.each(['/sign-in/magic-link', '/email-otp/send-verification-otp', '/sign-in/email-otp'])(
+    'refuses %s for a brand-new identity while magic link is off',
+    async (path) => {
+      mockGetTenantSettings.mockResolvedValue(tenant({ magicLinkEnabled: false }))
+      mockUserFindFirst.mockResolvedValue(null)
+      mockPrincipalFindFirst.mockResolvedValue(null)
+      const ctx = ctxFor(path, { email: 'newcomer@anywhere.com' })
+
+      await expect(handleSignInPreCheck(ctx)).rejects.toThrow(
+        'REDIRECT:/?auth=signin&error=magic_link_method_not_allowed'
+      )
+    }
+  )
+
+  it('lets a brand-new identity through while magic link is on', async () => {
+    mockGetTenantSettings.mockResolvedValue(tenant({ magicLinkEnabled: true }))
+    mockUserFindFirst.mockResolvedValue(null)
+    mockPrincipalFindFirst.mockResolvedValue(null)
+    const ctx = ctxFor('/email-otp/send-verification-otp', { email: 'newcomer@anywhere.com' })
+
+    await handleSignInPreCheck(ctx)
+    expect(ctx.redirect).not.toHaveBeenCalled()
+  })
+
   it('magic-link is allowed for team when oauth.magicLink toggle is true (verified-domain check separately gates)', async () => {
     // Per the `isAuthMethodAllowed` code: magic-link for team is now
     // gated by `authConfig.oauth.magicLink`. When the toggle is on,
@@ -504,6 +551,9 @@ describe('handleSignInPreCheck — sign-in rate-limit', () => {
   })
 
   it('dispatches the magic-link limiter on /sign-in/magic-link (not the credential limiter)', async () => {
+    // Magic link is opt-in; switch it on so the brand-new address passes the
+    // method gate and this case stays about limiter dispatch.
+    mockGetTenantSettings.mockResolvedValue(tenant({ magicLinkEnabled: true }))
     const ctx = ctxFor('/sign-in/magic-link', { email: 'a@b.com' })
     await handleSignInPreCheck(ctx)
     expect(mockCheckMagicLinkRateLimit).toHaveBeenCalledWith(expect.any(String), 'a@b.com')

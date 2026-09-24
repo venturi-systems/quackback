@@ -665,6 +665,52 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     await deleteEntryByTitle(page, title)
   })
 
+  test('display date override appears on public /changelog', async ({ page }) => {
+    const title = `Display Date Test ${Date.now()}`
+
+    const published = await createAndPublishEntry(page, title)
+    if (!published) return
+
+    await page.waitForLoadState('networkidle')
+
+    await entryCard(page, title).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 10000 })
+
+    const displayDateLabel = dialog.getByText('Published date', { exact: true })
+    await expect(displayDateLabel).toBeVisible({ timeout: 5000 })
+
+    const displayDateRow = dialog.locator('div').filter({
+      has: page.getByText('Published date', { exact: true }),
+    })
+    await displayDateRow.getByRole('button').first().click()
+
+    const prevMonth = page.getByRole('button', { name: /previous month/i })
+    for (let i = 0; i < 24; i++) {
+      const caption = page.locator('[class*="CaptionLabel"]')
+      const text = (await caption.textContent()) ?? ''
+      if (/january 2024/i.test(text)) break
+      if ((await prevMonth.count()) === 0) break
+      await prevMonth.click()
+    }
+
+    await page.getByRole('button', { name: /^15$/ }).first().click()
+
+    await dialog.getByRole('button', { name: /update & publish/i }).click()
+    await expect(dialog).toBeHidden({ timeout: 15000 })
+    await page.waitForLoadState('networkidle')
+
+    await page.goto('/changelog')
+    await page.waitForLoadState('networkidle')
+
+    const entry = page.locator('article').filter({ hasText: title })
+    await expect(entry.locator('time').first()).toContainText('January 15, 2024', {
+      timeout: 10000,
+    })
+
+    await deleteEntryByTitle(page, title)
+  })
+
   test('entry content on public page matches what was entered in admin', async ({ page }) => {
     const title = `Content Match Test ${Date.now()}`
     const body = `Unique body text for content match ${Date.now()}`

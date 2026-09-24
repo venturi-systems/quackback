@@ -8,6 +8,7 @@
 import { db, eq, sql, user, principal, externalUserMappings } from '@/lib/server/db'
 import { createId, type PrincipalId } from '@quackback/ids'
 import type { FeedbackSourceType } from '@/lib/server/integrations/feedback-source-types'
+import { isTeamDomainEmail } from '@/lib/server/domains/principals/team-identity'
 
 export type AuthorResolutionMethod =
   | 'pre_resolved'
@@ -29,6 +30,12 @@ export interface AuthorResolutionResult {
  * 2. If email present, look up existing user or create new one.
  * 3. If only externalUserId, resolve via external_user_mappings table.
  * 4. Returns null if no resolution is possible.
+ *
+ * An address at a team domain that has no account is never given one here:
+ * that account is created only by its owner's Google or GitHub sign-in, and an
+ * unverified row made from ingested data would block it. Such an author falls
+ * through to the external id (an account without the address) or stays
+ * unresolvable.
  */
 export async function resolveAuthorPrincipal(
   author: {
@@ -49,7 +56,9 @@ export async function resolveAuthorPrincipal(
     const normalizedEmail = author.email.toLowerCase().trim()
     if (normalizedEmail) {
       const result = await resolveByEmail(normalizedEmail, author.name)
-      return { principalId: result.principalId, method: result.created ? 'created_new' : 'email' }
+      if (result) {
+        return { principalId: result.principalId, method: result.created ? 'created_new' : 'email' }
+      }
     }
   }
 
@@ -73,7 +82,7 @@ export async function resolveAuthorPrincipal(
 async function resolveByEmail(
   email: string,
   name?: string
-): Promise<{ principalId: PrincipalId; created: boolean }> {
+): Promise<{ principalId: PrincipalId; created: boolean } | null> {
   // Look up existing principal by email. Lower-fold both sides so a
   // user signed up via Better-Auth as 'Alice@example.com' is matched
   // by a follow-up ingest of 'alice@example.com' (we'd otherwise
@@ -89,6 +98,9 @@ async function resolveByEmail(
   if (existing.length > 0) {
     return { principalId: existing[0].principalId as PrincipalId, created: false }
   }
+
+  // Never create an account at a team domain (see resolveAuthorPrincipal).
+  if (isTeamDomainEmail(email)) return null
 
   // Create new user + principal
   const userId = createId('user')
@@ -132,9 +144,8 @@ async function resolveByExternalId(
   }
 
   // If we also have an email, resolve by email first
-  if (email) {
-    const result = await resolveByEmail(email.toLowerCase().trim(), name)
-
+  const result = email ? await resolveByEmail(email.toLowerCase().trim(), name) : null
+  if (result) {
     // Create the external mapping for future lookups
     await db
       .insert(externalUserMappings)

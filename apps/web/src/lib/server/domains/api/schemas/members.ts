@@ -53,8 +53,8 @@ const ForbiddenErrorSchema = z
   })
   .meta({ description: 'Forbidden error' })
 
-// Register GET /members
-registerPath('/members', {
+// Register GET /principals (the spec said /members, which the server never served)
+registerPath('/principals', {
   get: {
     tags: ['Members'],
     summary: 'List team members',
@@ -76,8 +76,8 @@ registerPath('/members', {
   },
 })
 
-// Register GET /members/{principalId}
-registerPath('/members/{principalId}', {
+// Register GET /principals/{principalId}
+registerPath('/principals/{principalId}', {
   get: {
     tags: ['Members'],
     summary: 'Get a team member',
@@ -112,12 +112,13 @@ registerPath('/members/{principalId}', {
   },
 })
 
-// Register PATCH /members/{principalId}
-registerPath('/members/{principalId}', {
+// Register PATCH /principals/{principalId}
+registerPath('/principals/{principalId}', {
   patch: {
     tags: ['Members'],
-    summary: 'Update a team member',
-    description: "Update a team member's role. Cannot modify your own role.",
+    summary: 'Update a team member (refused)',
+    description:
+      'Always refused with 403 ROLE_DESIGNATION_REQUIRES_ADMIN_SESSION. Team roles are designated by a signed-in administrator in Admin > Team, where the team identity rule is checked; an API key cannot give, change or remove a team role.',
     parameters: [
       {
         name: 'principalId',
@@ -153,7 +154,7 @@ registerPath('/members/{principalId}', {
         content: { 'application/json': { schema: UnauthorizedErrorSchema } },
       },
       403: {
-        description: 'Cannot modify own role or last admin',
+        description: 'Role changes are made in Admin > Team, never with an API key',
         content: { 'application/json': { schema: ForbiddenErrorSchema } },
       },
       404: {
@@ -164,13 +165,13 @@ registerPath('/members/{principalId}', {
   },
 })
 
-// Register DELETE /members/{principalId}
-registerPath('/members/{principalId}', {
+// Register DELETE /principals/{principalId}
+registerPath('/principals/{principalId}', {
   delete: {
     tags: ['Members'],
-    summary: 'Remove a team member',
+    summary: 'Remove a team member (refused)',
     description:
-      'Remove a team member from the workspace (converts them to a portal user). Cannot remove yourself or the last admin.',
+      'Always refused with 403 ROLE_DESIGNATION_REQUIRES_ADMIN_SESSION, for the same reason as PATCH.',
     parameters: [
       {
         name: 'principalId',
@@ -187,7 +188,7 @@ registerPath('/members/{principalId}', {
         content: { 'application/json': { schema: UnauthorizedErrorSchema } },
       },
       403: {
-        description: 'Cannot remove self or last admin',
+        description: 'Team removals are made in Admin > Team, never with an API key',
         content: { 'application/json': { schema: ForbiddenErrorSchema } },
       },
       404: {

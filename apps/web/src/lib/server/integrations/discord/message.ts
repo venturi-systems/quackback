@@ -41,7 +41,9 @@ function getStatusColor(status: string): number {
     complete: COLORS.green,
     closed: COLORS.grey,
   }
-  return map[status.toLowerCase().replace(/\s+/g, '_')] ?? COLORS.blue
+  // Own keys only: a status named "Constructor" must not resolve to Object.prototype.constructor.
+  const key = status.toLowerCase().replace(/\s+/g, '_')
+  return Object.hasOwn(map, key) ? map[key] : COLORS.blue
 }
 
 /**

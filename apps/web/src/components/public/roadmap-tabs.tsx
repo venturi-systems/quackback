@@ -40,7 +40,7 @@ export function RoadmapTabs({ roadmaps, selectedId, onSelect }: RoadmapTabsProps
               aria-selected={isActive}
               onClick={() => onSelect(roadmap.id)}
               className={cn(
-                'rounded-full text-sm px-3 py-1 whitespace-nowrap transition-colors shrink-0',
+                'inline-flex items-center rounded-full text-sm px-3 py-1 pointer-coarse:min-h-(--ds-component-touch-minimum) whitespace-nowrap transition-colors shrink-0',
                 isActive
                   ? 'bg-foreground/10 text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'

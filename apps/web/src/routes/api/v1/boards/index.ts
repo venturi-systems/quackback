@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
@@ -66,7 +67,7 @@ export const Route = createFileRoute('/api/v1/boards/')({
        */
       POST: async ({ request }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           // Parse and validate body
           const body = await request.json()
@@ -87,6 +88,16 @@ export const Route = createFileRoute('/api/v1/boards/')({
             slug: parsed.data.slug,
             description: parsed.data.description,
           })
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'board.created',
+              target: { type: 'board', id: board.id },
+              after: board,
+            },
+            request.headers
+          )
 
           return createdResponse({
             id: board.id,

@@ -8,6 +8,7 @@ import {
   SsrfError,
   ResponseTooLargeError,
   TimeoutError,
+  InvalidResponseStatusError,
 } from '../ssrf-guard'
 
 vi.mock('node:dns/promises', () => ({
@@ -177,6 +178,139 @@ describe('isPrivateAddress', () => {
   })
 })
 
+// Every address form the guard refuses, one row per form with the reason it
+// is never a fetch target. A new bypass form is one more row.
+const BLOCKED_ADDRESSES: ReadonlyArray<[string, string]> = [
+  // IPv4 special-purpose ranges the IANA registry marks not globally reachable
+  ['0.0.0.0', 'this host, 0.0.0.0/32'],
+  ['0.255.255.255', 'this network, 0.0.0.0/8'],
+  ['10.0.0.1', 'private use, 10.0.0.0/8'],
+  ['100.64.0.1', 'shared address space (CGNAT), 100.64.0.0/10'],
+  ['100.127.255.254', 'top of shared address space, 100.64.0.0/10'],
+  ['127.0.0.1', 'loopback, 127.0.0.0/8'],
+  ['169.254.169.254', 'link-local cloud metadata, 169.254.0.0/16'],
+  ['172.16.0.1', 'private use, 172.16.0.0/12'],
+  ['172.31.255.254', 'top of private use, 172.16.0.0/12'],
+  ['192.0.0.1', 'IETF protocol assignments, 192.0.0.0/24'],
+  ['192.0.0.8', 'IPv4 dummy address, 192.0.0.8/32'],
+  ['192.0.0.170', 'NAT64/DNS64 discovery, 192.0.0.170/32'],
+  ['192.0.2.1', 'documentation TEST-NET-1, 192.0.2.0/24'],
+  ['192.88.99.1', 'deprecated 6to4 relay anycast, 192.88.99.0/24'],
+  ['192.168.1.1', 'private use, 192.168.0.0/16'],
+  ['198.18.0.1', 'benchmarking, 198.18.0.0/15'],
+  ['198.19.255.254', 'top of benchmarking, 198.18.0.0/15'],
+  ['198.51.100.1', 'documentation TEST-NET-2, 198.51.100.0/24'],
+  ['203.0.113.1', 'documentation TEST-NET-3, 203.0.113.0/24'],
+  ['224.0.0.1', 'multicast, 224.0.0.0/4'],
+  ['239.255.255.250', 'top of multicast, 224.0.0.0/4'],
+  ['240.0.0.1', 'reserved, 240.0.0.0/4'],
+  ['255.255.255.255', 'limited broadcast, 255.255.255.255/32'],
+  // IPv4-mapped IPv6 (::ffff:0:0/96) carrying a blocked IPv4 address
+  ['::ffff:127.0.0.1', 'IPv4-mapped loopback, dotted'],
+  ['::ffff:7f00:1', 'IPv4-mapped loopback, hextets'],
+  ['0:0:0:0:0:ffff:7f00:1', 'IPv4-mapped loopback, fully expanded'],
+  ['::FFFF:7F00:1', 'IPv4-mapped loopback, upper case'],
+  ['::ffff:a9fe:a9fe', 'IPv4-mapped cloud metadata'],
+  ['::ffff:c000:1', 'IPv4-mapped 192.0.0.1'],
+  ['::ffff:6440:1', 'IPv4-mapped 100.64.0.1'],
+  ['::ffff:c612:1', 'IPv4-mapped 198.18.0.1'],
+  ['::ffff:ffff:ffff', 'IPv4-mapped 255.255.255.255'],
+  // IPv4-compatible IPv6, ::/96 (deprecated, RFC 4291 2.5.5.1)
+  ['::7f00:1', 'IPv4-compatible loopback, hextets'],
+  ['::127.0.0.1', 'IPv4-compatible loopback, dotted'],
+  ['::a9fe:a9fe', 'IPv4-compatible cloud metadata'],
+  ['::8.8.8.8', 'IPv4-compatible form, even of a public IPv4'],
+  // IPv4-translated IPv6, ::ffff:0:0:0/96 (RFC 2765)
+  ['::ffff:0:7f00:1', 'IPv4-translated loopback, hextets'],
+  ['::ffff:0:127.0.0.1', 'IPv4-translated loopback, dotted'],
+  ['::ffff:0:a9fe:a9fe', 'IPv4-translated cloud metadata'],
+  ['::ffff:0:808:808', 'IPv4-translated form, even of a public IPv4'],
+  // NAT64
+  ['64:ff9b::7f00:1', 'NAT64 64:ff9b::/96 embedding loopback'],
+  ['64:ff9b::127.0.0.1', 'NAT64 64:ff9b::/96, dotted'],
+  ['64:ff9b:1::1', 'local-use NAT64, 64:ff9b:1::/48'],
+  // Unspecified, loopback, unique-local, link-local
+  ['::', 'unspecified'],
+  ['::1', 'loopback'],
+  ['0:0:0:0:0:0:0:1', 'loopback, fully expanded'],
+  ['fc00::1', 'unique local, fc00::/7'],
+  ['fd12:3456:789a::1', 'unique local, fd00::/8'],
+  ['fe80::1', 'link-local, fe80::/10'],
+  ['FE80::1%eth0', 'link-local with a zone index, upper case'],
+  ['febf::1', 'top of link-local, fe80::/10'],
+  // Site-local fec0::/10 (deprecated, RFC 3879)
+  ['fec0::1', 'site-local, fec0::/10'],
+  ['feff::1', 'top of site-local, fec0::/10'],
+  // Multicast ff00::/8
+  ['ff02::1', 'link-local all-nodes multicast'],
+  ['ff05::2', 'site-local all-routers multicast'],
+  ['ff0e::101', 'global-scope multicast'],
+  // Outside global unicast 2000::/3
+  ['100::1', 'discard-only, 100::/64'],
+  ['5f00::1', 'SRv6 SIDs, 5f00::/16'],
+  ['4000::1', 'unallocated, outside 2000::/3'],
+  ['1::1', 'reserved, ::/8'],
+  // Special-purpose prefixes inside 2000::/3
+  ['2001::1', 'Teredo, 2001::/32'],
+  ['2001:0000:4136:e378::1', 'Teredo, uncompressed second group'],
+  ['2001:2::1', 'benchmarking, 2001:2::/48'],
+  ['2001:20::1', 'ORCHIDv2, 2001:20::/28'],
+  ['2001:1ff::1', 'top of IETF protocol assignments, 2001::/23'],
+  ['2001:db8::1', 'documentation, 2001:db8::/32'],
+  ['2001:0db8:1234::1', 'documentation, leading zero'],
+  ['2002:a00:1::', '6to4 embedding 10.0.0.1, 2002::/16'],
+  ['3fff::1', 'documentation, 3fff::/20'],
+  ['3fff:fff::1', 'top of documentation, 3fff::/20'],
+  // Anything that is not an IP address fails closed
+  ['example.com', 'a hostname, not an address'],
+  ['', 'empty string'],
+  ['1.2.3', 'three-octet IPv4'],
+  ['01.2.3.4', 'IPv4 octet with a leading zero'],
+  ['256.1.1.1', 'IPv4 octet over 255'],
+  ['::ffff:999.0.0.1', 'invalid embedded IPv4'],
+  ['1::2::3', 'two :: compressions'],
+  ['gggg::1', 'non-hex group'],
+  ['2606:4700::1%', 'public address with an empty zone index'],
+  ['2606:4700::1%a%b', 'public address with a malformed zone index'],
+  ['2606:4700::1% x', 'public address with a zone index containing a space'],
+]
+
+// The ranges that stay reachable, including each blocked range's neighbours,
+// so a block can never grow past the range it names.
+const ALLOWED_ADDRESSES: ReadonlyArray<[string, string]> = [
+  ['8.8.8.8', 'public IPv4'],
+  ['1.1.1.1', 'public IPv4'],
+  ['9.255.255.255', 'just below 10.0.0.0/8'],
+  ['11.0.0.1', 'just above 10.0.0.0/8'],
+  ['100.63.255.255', 'just below 100.64.0.0/10'],
+  ['100.128.0.1', 'just above 100.64.0.0/10'],
+  ['172.15.255.255', 'just below 172.16.0.0/12'],
+  ['172.32.0.1', 'just above 172.16.0.0/12'],
+  ['192.0.1.1', 'between 192.0.0.0/24 and 192.0.2.0/24'],
+  ['192.0.3.1', 'just above 192.0.2.0/24'],
+  ['198.17.255.255', 'just below 198.18.0.0/15'],
+  ['198.20.0.1', 'just above 198.18.0.0/15'],
+  ['223.255.255.254', 'just below multicast 224.0.0.0/4'],
+  ['2606:4700:4700::1111', 'public IPv6'],
+  ['2001:4860:4860::8888', 'public IPv6 in 2001::/16'],
+  ['2001:200::1', 'just above 2001::/23'],
+  ['2003::1', 'just above 2002::/16'],
+  ['3fff:1000::1', 'just above 3fff::/20'],
+  ['::ffff:8.8.8.8', 'IPv4-mapped public, dotted'],
+  ['::ffff:0808:0808', 'IPv4-mapped public, hextets'],
+  ['2606:4700::1%eth0', 'public IPv6 with a well-formed zone index'],
+]
+
+describe('isPrivateAddress address forms', () => {
+  it.each(BLOCKED_ADDRESSES)('blocks %s (%s)', (address) => {
+    expect(isPrivateAddress(address)).toBe(true)
+  })
+
+  it.each(ALLOWED_ADDRESSES)('allows %s (%s)', (address) => {
+    expect(isPrivateAddress(address)).toBe(false)
+  })
+})
+
 describe('checkUrlSafety', () => {
   beforeEach(() => {
     lookupMock.mockReset()
@@ -203,6 +337,21 @@ describe('checkUrlSafety', () => {
     ])
 
     const result = await checkUrlSafety('https://evil.example.com/img.png')
+    expect(result).toEqual({ safe: false, reason: 'ssrf-rejected' })
+  })
+
+  it.each([
+    ['::7f00:1', 'IPv4-compatible loopback'],
+    ['::ffff:0:7f00:1', 'IPv4-translated loopback'],
+    ['fec0::1', 'site-local'],
+    ['ff02::1', 'multicast'],
+  ])('rejects a host whose AAAA answer is %s (%s)', async (address) => {
+    lookupMock.mockResolvedValueOnce([
+      { address: '2606:4700:4700::1111', family: 6 },
+      { address, family: 6 },
+    ])
+
+    const result = await checkUrlSafety('https://rebind.example.com/hook')
     expect(result).toEqual({ safe: false, reason: 'ssrf-rejected' })
   })
 
@@ -368,6 +517,38 @@ describe('safeFetch', () => {
 
     const res = await safeFetch('https://idp.example.com/jwks')
     expect(res.status).toBe(304)
+    expect(await res.text()).toBe('')
+  })
+
+  // The Response constructor throws on these. Thrown inside the response's
+  // 'end' listener, that was an uncaught exception and a promise that never
+  // settled; each must reject instead.
+  it('rejects a status above 599 instead of throwing from the listener', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    httpsRequestMock.mockImplementation(requestImpl({ status: 600, chunks: ['{}'] }))
+
+    const err = await safeFetch('https://idp.example.com/.well-known/openid-configuration').catch(
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(InvalidResponseStatusError)
+    expect((err as InvalidResponseStatusError).status).toBe(600)
+  })
+
+  it('rejects an informational status delivered as the final status', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    httpsRequestMock.mockImplementation(requestImpl({ status: 101 }))
+
+    await expect(safeFetch('https://idp.example.com/token')).rejects.toBeInstanceOf(
+      InvalidResponseStatusError
+    )
+  })
+
+  it('returns a null-body Response for a 205 that carried a body', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    httpsRequestMock.mockImplementation(requestImpl({ status: 205, chunks: ['unexpected'] }))
+
+    const res = await safeFetch('https://idp.example.com/token')
+    expect(res.status).toBe(205)
     expect(await res.text()).toBe('')
   })
 

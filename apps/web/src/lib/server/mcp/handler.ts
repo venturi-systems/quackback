@@ -17,7 +17,8 @@ import { DomainException, RateLimitError } from '@/lib/shared/errors'
 import { getDeveloperConfig } from '@/lib/server/domains/settings/settings.service'
 import { db, principal, eq } from '@/lib/server/db'
 import { config } from '@/lib/server/config'
-import { effectiveRole } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
+import { hasApiKeyScope } from '@/lib/shared/api-key-scopes'
 import { createMcpServer } from './server'
 import type { PrincipalId } from '@quackback/ids'
 import type { McpAuthContext, McpScope } from './types'
@@ -81,13 +82,16 @@ async function resolveOAuthContext(token: string): Promise<McpAuthContext | null
     // If the principal no longer exists (deleted/revoked), reject the token.
     const principalRecord = await db.query.principal.findFirst({
       where: eq(principal.id, principalId as PrincipalId),
-      columns: { role: true, type: true },
+      columns: { id: true, role: true, type: true, userId: true },
+      with: { user: { columns: { id: true, email: true, emailVerified: true } } },
     })
     if (!principalRecord) return null
 
-    // A team role only counts on a human principal: an anonymous principal
-    // that authorized an OAuth client acts as a portal user.
-    const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
+    // Same rule as a browser session: a team role counts only on a human
+    // principal whose identity satisfies the team identity rule.
+    const role = principalRecord.user
+      ? await resolveSessionRole(principalRecord, principalRecord.user)
+      : 'user'
 
     // Parse granted scopes from space-separated string
     const scopeStr = (payload.scope as string) ?? ''
@@ -126,7 +130,9 @@ export async function resolveAuthContext(request: Request): Promise<McpAuthConte
   if (token?.startsWith(API_KEY_PREFIX)) {
     let authResult
     try {
-      authResult = await withApiKeyAuth(request, { role: 'team' })
+      // Scopes are enforced per tool (tools.ts requireScope), so the REST
+      // method-based scope check does not apply to the MCP endpoint.
+      authResult = await withApiKeyAuth(request, { role: 'team', scope: null })
     } catch (err) {
       if (!(err instanceof DomainException)) throw err
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -153,6 +159,10 @@ export async function resolveAuthContext(request: Request): Promise<McpAuthConte
       })
     }
 
+    // The key's own scopes, mapped onto the MCP vocabulary (a write scope
+    // implies its read scope). A legacy key without scopes keeps every scope.
+    const scopes = ALL_SCOPES.filter((scope) => hasApiKeyScope(authResult.scopes, scope))
+
     // Service principals (API keys) use displayName; human principals use user.name
     if (principalRecord.type === 'service') {
       return {
@@ -160,7 +170,7 @@ export async function resolveAuthContext(request: Request): Promise<McpAuthConte
         name: principalRecord.displayName ?? authResult.apiKey.name,
         role: authResult.role as 'admin' | 'member' | 'user',
         authMethod: 'api-key',
-        scopes: ALL_SCOPES,
+        scopes,
       }
     }
 
@@ -172,7 +182,7 @@ export async function resolveAuthContext(request: Request): Promise<McpAuthConte
       email: principalRecord.user?.email ?? undefined,
       role: authResult.role as 'admin' | 'member' | 'user',
       authMethod: 'api-key',
-      scopes: ALL_SCOPES,
+      scopes,
     }
   }
 

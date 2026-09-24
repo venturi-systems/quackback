@@ -10,6 +10,7 @@ import { dispatchPostStatusChanged, buildEventActor } from '@/lib/server/events/
 import { NotFoundError } from '@/lib/shared/errors'
 import { createActivity } from '@/lib/server/domains/activity/activity.service'
 import type { ChangeStatusResult } from './post.types'
+import { recordPostStatusAudit } from './post.status-audit'
 
 /**
  * Change the status of a post
@@ -84,6 +85,13 @@ export async function changeStatus(
     previousStatusName,
     newStatus.name
   )
+
+  await recordPostStatusAudit({
+    postId,
+    actor,
+    from: { id: existingPost.statusId ?? null, name: previousStatusName },
+    to: { id: newStatus.id, name: newStatus.name, slug: newStatus.slug },
+  })
 
   createActivity({
     postId,

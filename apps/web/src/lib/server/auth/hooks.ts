@@ -20,6 +20,7 @@
  */
 
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import { generateId } from '@quackback/ids'
 import {
   findProviderForDomainEmail,
   isRegisteredOidcProvider,
@@ -237,11 +238,10 @@ export async function handleSignInPreCheck(ctx: {
 
   const { isHardBound, isAuthMethodAllowed } = await import('./auth-restrictions')
 
-  // Look up the principal early — `isAuthMethodAllowed` below needs the
-  // role to pick the right per-audience method gate. Brand-new sign-ups
-  // (no user row yet) get role='user' so the per-domain branch still
-  // gates them via email lookup — `isHardBound` does not depend on
-  // role anymore.
+  // Look up the principal early — the redirect below is shaped by role
+  // (team roles land on the break-glass login). Brand-new sign-ups (no
+  // user row yet) get role='user': both the per-domain branch and the
+  // per-method gate apply to them exactly as to an existing contributor.
   const { db, user: userTable, principal: principalTable, eq } = await import('@/lib/server/db')
   type UserId = `user_${string}`
   const userRow = await db.query.user.findFirst({
@@ -275,8 +275,17 @@ export async function handleSignInPreCheck(ctx: {
     throw ctx.redirect('/?auth=signin&callbackUrl=/admin&error=verified_domain_requires_sso')
   }
 
-  if (!principalRow) return
-
+  // The per-method gate covers brand-new identities too. It used to return
+  // early when no principal existed, which let `POST /sign-up/email` (and a
+  // magic-link or email-OTP send for an unknown address, including the one
+  // /api/auth/portal-signin makes) through while the workspace had that
+  // method switched off: `emailAndPassword.enabled` stays true for the team
+  // break-glass form, and Better Auth's own sign-up check knows nothing about
+  // `authConfig`. Measured on production 2026-09-24 with password sign-in off:
+  // a sign-up for an unused address reached Better Auth's password-length
+  // check, i.e. past its disabled-sign-up check. It also closes an account
+  // enumeration oracle: a known and an unknown address now get the same
+  // refusal when the method is off.
   const result = await isAuthMethodAllowed(provider, role, registeredOidcIds, tenant)
   if (!result.allowed) {
     const isTeamRole = role === 'admin' || role === 'member'
@@ -341,11 +350,11 @@ type SessionResolver = (ctx: never) => Promise<{ user?: { id?: string } } | null
 /**
  * OAuth dynamic client registration gate (`POST /oauth2/register`).
  *
- * Unauthenticated registration is off unless the operator opts in (see
- * `allowUnauthenticatedClientRegistration` in auth/index.ts). An anonymous
- * Better Auth session is not an authenticated identity either, so it must not
- * be able to register clients in place of a real account. Callers with no
- * session fall through to the OAuth provider, which applies the opt-in.
+ * Registration without a session is always refused
+ * (`allowUnauthenticatedClientRegistration: false` in auth/index.ts). An
+ * anonymous Better Auth session is not an authenticated identity either, so
+ * it must not be able to register clients in place of a real account. Callers
+ * with no session fall through to the OAuth provider, which refuses them.
  */
 export async function handleClientRegistrationGate(
   ctx: { path?: string },
@@ -380,6 +389,64 @@ export async function handleClientRegistrationGate(
   }
 }
 
+/**
+ * Unlinking the last Google or GitHub account of the only administrator would
+ * leave the workspace with no administrator who satisfies the team identity
+ * rule. Refuse it; unlinking is allowed once another eligible administrator
+ * exists, or while the account keeps another Google or GitHub link.
+ */
+export async function handleUnlinkAccountGate(
+  ctx: { path?: string; body?: Record<string, unknown> },
+  resolveSession: SessionResolver = getSessionFromCtx as unknown as SessionResolver
+): Promise<void> {
+  if (ctx.path !== '/unlink-account') return
+  const providerId = ctx.body?.providerId
+  if (providerId !== 'google' && providerId !== 'github') return
+  const accountId = typeof ctx.body?.accountId === 'string' ? ctx.body.accountId : null
+
+  const session = await resolveSession(ctx as never).catch(() => null)
+  const userId = session?.user?.id
+  if (!userId) return
+
+  const {
+    db,
+    principal: principalTable,
+    account: accountTable,
+    eq,
+  } = await import('@/lib/server/db')
+  type UserId = `user_${string}`
+  const principalRow = await db.query.principal.findFirst({
+    where: eq(principalTable.userId, userId as UserId),
+    columns: { id: true, role: true, type: true },
+  })
+  if (!principalRow || principalRow.role !== 'admin' || principalRow.type !== 'user') return
+
+  const links = await db.query.account.findMany({
+    where: eq(accountTable.userId, userId as UserId),
+    columns: { providerId: true, accountId: true },
+  })
+  const keepsTeamLink = links.some(
+    (link) =>
+      (link.providerId === 'google' || link.providerId === 'github') &&
+      !(link.providerId === providerId && (accountId === null || link.accountId === accountId))
+  )
+  if (keepsTeamLink) return
+
+  const { withTeamRoleLock, countEligibleAdmins } =
+    await import('@/lib/server/domains/principals/team-designation')
+  type PrincipalId = `principal_${string}`
+  const others = await withTeamRoleLock((tx) =>
+    countEligibleAdmins(tx, principalRow.id as PrincipalId)
+  )
+  if (others < 1) {
+    throw new APIError('FORBIDDEN', {
+      code: 'last_admin_identity',
+      message:
+        'This Google or GitHub account is what makes you an administrator, and you are the only one. Designate another administrator in Admin > Team before unlinking it.',
+    })
+  }
+}
+
 export const hooksBefore = createAuthMiddleware(async (ctx) => {
   // Disjoint path matchers: grace heal only touches /oauth2/token,
   // sign-in pre-check only touches sign-in/OTP paths, the anonymous gate
@@ -388,6 +455,7 @@ export const hooksBefore = createAuthMiddleware(async (ctx) => {
   await handleRefreshGraceHeal(ctx)
   await handleAnonymousSignInGate(ctx)
   await handleClientRegistrationGate(ctx)
+  await handleUnlinkAccountGate(ctx)
   await handleSignInPreCheck(ctx as Parameters<typeof handleSignInPreCheck>[0])
 })
 
@@ -472,11 +540,23 @@ export async function handleSsoCallbackAfter(
         columns: { id: true },
       })
       if (!existingAdmin) {
-        await tx
-          .update(principalTable)
-          .set({ role: 'admin' })
-          .where(eq(principalTable.userId, userIdTyped))
-        log.info({ user_id: userId }, 'sso bootstrap admin promotion')
+        // Team identity rule: an OIDC sign-in is never a Google or GitHub
+        // identity, so this refuses unless the account also carries one.
+        const { teamRoleGapForUser } =
+          await import('@/lib/server/domains/principals/team-designation')
+        const gap = await teamRoleGapForUser(userIdTyped, tx)
+        if (gap === null) {
+          await tx
+            .update(principalTable)
+            .set({ role: 'admin' })
+            .where(eq(principalTable.userId, userIdTyped))
+          log.info({ user_id: userId }, 'sso bootstrap admin promotion')
+        } else {
+          log.warn(
+            { user_id: userId, gap },
+            'sso bootstrap admin promotion refused: team identity rule'
+          )
+        }
       }
     }
 
@@ -509,28 +589,38 @@ export function shouldBootstrapPromote(
 }
 
 /**
- * Auto-provision verified-domain users to a configurable role on first
- * OIDC sign-in (defaults to `member`).
+ * Auto-provision SSO users to a role on first OIDC sign-in.
  *
  * Fires on any registered OIDC provider's callback
  * (`/oauth2/callback/:providerId`). The IdP's assertion of email + identity
  * is the trust source; magic-link to a verified-domain email is hard-bound
  * in `hooksBefore` so it never reaches this path, and password/social
- * callbacks are likewise blocked. Without the IdP attestation, mere inbox
- * control isn't enough to claim team membership.
+ * callbacks are likewise blocked.
  *
- * Task 13: provisioning config is read from the MATCHED PROVIDER ROW
- * (`autoCreateUsers` / `autoProvisionRole` / `attributeMapping`), not the
- * legacy workspace `ssoOidc` blob, and the verified-domain check is scoped
- * to the CALLBACK provider's own domains — a sign-in via provider X only
- * provisions when the email is at one of X's verified domains, never
- * another provider's.
+ * Every role this hook assigns is scoped to the CALLBACK provider's own
+ * verified domains: a sign-in via provider X only provisions when the email is
+ * at one of X's verified domains. Within that gate, a matching
+ * `attributeMapping` rule decides the role; otherwise the provider's
+ * `autoProvisionRole` (default `'member'`) applies.
+ *
+ * Venturi fork (landing-page#2309): upstream 59fe3ff6f (v0.13.0) let a
+ * claim-matched role bypass the verified-domain gate. The fork keeps the gate
+ * for claim-matched roles too, and any team role (`member`, `admin`) further
+ * needs the team identity rule (team-identity.ts): a verified team-domain
+ * address from a linked Google or GitHub account. An off-domain OIDC email
+ * therefore never gets a team role here, whatever its IdP claims say.
+ *
+ * Provisioning config is read from the MATCHED PROVIDER ROW (`autoCreateUsers`
+ * / `autoProvisionRole` / `attributeMapping`), never another provider's.
  *
  * Invariants:
  *  - Only upgrades from `role='user'`; `admin` and `member` are left
- *    alone. The target role is the provider's `autoProvisionRole`
- *    (default `'member'`), and the special value `'user'` disables
- *    promotion entirely.
+ *    alone unless `attributeMapping.syncOnEverySignIn` is set. The special
+ *    `autoProvisionRole='user'` disables default-role promotion entirely.
+ *  - A returning user with no principal row (soft-removed via "Remove from
+ *    portal", which keeps the auth identity) is treated as a fresh sign-in:
+ *    the principal is recreated in-band with the provisioned role rather than
+ *    updating zero rows and falling back to a plain `'user'`.
  *  - `autoCreateUsers=false` short-circuits — the admin opted out.
  *  - Bootstrap-admin from `handleSsoCallbackAfter` runs first; if
  *    that promoted the user to `admin`, the role-check here skips.
@@ -567,50 +657,116 @@ export async function handleAutoProvisionAfter(
   if (!provider) return
   if (!provider.autoCreateUsers) return
 
-  // Scope the verified-domain check to the CALLBACK provider's own domains:
-  // the email must be at one of THIS provider's verified domains, not any
-  // workspace domain. Without the IdP attestation at the owning domain,
-  // mere inbox control isn't enough to claim team membership.
-  if (findProviderForDomainEmail(email, [provider]) === null) return
-
-  const { db, principal: principalTable, eq } = await import('@/lib/server/db')
+  const { db, principal: principalTable, user: userTable, eq } = await import('@/lib/server/db')
   type UserId = `user_${string}`
   const userIdTyped = userId as UserId
 
-  const p = await db.query.principal.findFirst({
-    where: eq(principalTable.userId, userIdTyped),
-    columns: { role: true },
-  })
+  // Venturi fork (landing-page#2309): the verified-domain gate applies to EVERY
+  // role this hook assigns, a claim-matched role included. Upstream 59fe3ff6f
+  // (v0.13.0) let a matching IdP role claim provision an email that is not at
+  // any of the callback provider's verified domains; the fork does not take
+  // that change. An IdP claim is the IdP's statement, not the owner's
+  // designation, and a team role here also needs the team identity rule below
+  // (a verified team-domain address from a linked Google or GitHub account).
+  if (findProviderForDomainEmail(email, [provider]) === null) return
 
-  // Resolve target role: attribute mapping takes precedence over the
-  // legacy autoProvisionRole field. When mapping returns null, fall
-  // back to the legacy field.
-  let targetRole: 'admin' | 'member' | 'user'
+  // Resolve the target role: a matching attribute-mapping rule takes
+  // precedence over the provider's autoProvisionRole (default 'member').
+  let claimRole: 'admin' | 'member' | 'user' | null = null
   if (provider.attributeMapping) {
     const claims = await readSsoClaims(userIdTyped, providerId)
     const { resolveSsoRole } = await import('./resolve-sso-role')
-    targetRole =
-      resolveSsoRole(claims, provider.attributeMapping) ?? provider.autoProvisionRole ?? 'member'
-  } else {
-    targetRole = provider.autoProvisionRole ?? 'member'
+    claimRole = resolveSsoRole(claims, provider.attributeMapping)
   }
+  const targetRole: 'admin' | 'member' | 'user' =
+    claimRole ?? provider.autoProvisionRole ?? 'member'
+
+  const p = await db.query.principal.findFirst({
+    where: eq(principalTable.userId, userIdTyped),
+    columns: { id: true, role: true },
+  })
+
+  // A missing principal is a returning user whose row was soft-removed
+  // ("Remove from portal" deletes the principal, not the auth identity, so the
+  // user.create hook never re-fires). Treat it as a fresh first sign-in so the
+  // role still applies — otherwise the UPDATE below would touch zero rows and
+  // the lazy getOptionalAuth path would recreate them as a plain 'user'.
+  const currentRole = p?.role ?? 'user'
 
   // Sync mode: re-apply on every sign-in, including for existing
-  // admin/member users. Without sync, JIT semantics — only first
-  // sign-in (role='user') gets touched.
+  // admin/member users. Without sync, JIT semantics — only a fresh
+  // first sign-in (role='user') gets touched.
   const syncOnEverySignIn = provider.attributeMapping?.syncOnEverySignIn === true
-  if (!syncOnEverySignIn && p?.role !== 'user') return
+  if (!syncOnEverySignIn && currentRole !== 'user') return
 
   // 'user' as the target is the explicit no-promote choice — only
   // demote an existing team-role user to 'user' under sync mode.
   if (targetRole === 'user' && !syncOnEverySignIn) return
 
-  if (p?.role === targetRole) return // no-op, save the update
+  if (currentRole === targetRole) return // no-op, save the write
 
-  await db
-    .update(principalTable)
-    .set({ role: targetRole })
-    .where(eq(principalTable.userId, userIdTyped))
+  const designation = await import('@/lib/server/domains/principals/team-designation')
+
+  if (p?.role === 'admin' && p.id) {
+    // Sync mode taking admin away: go through the team-role writer, which
+    // refuses to leave the workspace without an administrator who can act.
+    try {
+      await designation.changeTeamRole({
+        principalId: p.id as `principal_${string}`,
+        newRole: targetRole,
+        requireTeamTarget: false,
+      })
+    } catch (error) {
+      log.warn(
+        { user_id: userId, role: targetRole, err: error },
+        'sso sync demotion refused by the team-role writer'
+      )
+      return
+    }
+  } else {
+    // Team identity rule: a team role needs a verified team-domain address
+    // from a linked Google or GitHub account, which an OIDC callback alone
+    // never is. A demotion to 'user' always proceeds. This also covers a
+    // soft-removed principal recreated below: it is never rebuilt with a team
+    // role the identity cannot hold.
+    if (targetRole === 'admin' || targetRole === 'member') {
+      const gap = await designation.teamRoleGapForUser(userIdTyped)
+      if (gap !== null) {
+        log.warn(
+          { user_id: userId, role: targetRole, gap },
+          'sso auto-provision refused: team identity rule'
+        )
+        return
+      }
+    }
+
+    if (p) {
+      await db
+        .update(principalTable)
+        .set({ role: targetRole })
+        .where(eq(principalTable.userId, userIdTyped))
+    } else {
+      // Recreate the soft-removed principal in-band with the provisioned role.
+      // Display fields come from the auth user so the rebuilt principal matches
+      // what the lazy creation path would have produced.
+      const u = await db.query.user.findFirst({
+        where: eq(userTable.id, userIdTyped),
+        columns: { name: true, image: true },
+      })
+      await db.insert(principalTable).values({
+        id: generateId('principal'),
+        userId: userIdTyped,
+        role: targetRole,
+        displayName: u?.name ?? null,
+        avatarUrl: u?.image ?? null,
+        // This runs in the OIDC callback, so the user is signing in via SSO right
+        // now. Stamp lastSsoSignInAt on the rebuilt row — handleSsoCallbackAfter's
+        // UPDATE ran first and missed it while the principal didn't exist.
+        lastSsoSignInAt: new Date(),
+        createdAt: new Date(),
+      })
+    }
+  }
 
   if (p?.role && p.role !== targetRole) {
     const { recordAuditEvent } = await import('@/lib/server/audit/log')
@@ -828,6 +984,49 @@ export async function handleCallbackPolicyCleanup(
   if (result.allowed) return
 
   await blockSignIn(result.error ?? 'auth_method_blocked')
+}
+
+/**
+ * Team designation at sign-in (owner decisions 6 and 7, landing-page#2309).
+ *
+ * After a successful Google or GitHub callback, apply the configured
+ * designation to the signed-in account: an address in
+ * VENTURI_TEAM_ADMIN_EMAILS becomes admin, and a pending team invitation for
+ * the address is accepted. Both need the team identity rule to hold, which
+ * applyTeamDesignation checks. Runs after the policy cleanup, so a sign-in the
+ * policy revoked (newSession nulled) is skipped. Best-effort: a failure is
+ * logged and the sign-in proceeds as a contributor; the next authenticated
+ * request retries the admin designation.
+ */
+export async function handleTeamDesignationAfter(ctx: {
+  path?: string
+  params?: Record<string, unknown>
+  body?: Record<string, unknown>
+  context?: {
+    newSession?: {
+      user?: { id?: string; email?: string; emailVerified?: boolean }
+    } | null
+  }
+}): Promise<void> {
+  if (ctx.path !== '/callback/:id' && ctx.path !== '/sign-in/social') return
+  const provider = inferProvider(ctx as Parameters<typeof inferProvider>[0])
+  if (provider !== 'google' && provider !== 'github') return
+  const user = ctx.context?.newSession?.user
+  if (typeof user?.id !== 'string' || user.id.length === 0) return
+
+  try {
+    const { applyTeamDesignation } =
+      await import('@/lib/server/domains/principals/team-designation')
+    await applyTeamDesignation({
+      userId: user.id as `user_${string}`,
+      email: user.email,
+      includeInvitations: true,
+      source: 'sign_in',
+      headers: getRequestHeaders(),
+    })
+  } catch (error) {
+    log.error({ err: error, user_id: user.id }, 'team designation at sign-in failed')
+  }
 }
 
 /**
@@ -1205,6 +1404,9 @@ export const hooksAfter = createAuthMiddleware(async (ctx) => {
     providers,
     registeredOidcIds
   )
+  // Designation (VENTURI_TEAM_ADMIN_EMAILS, pending team invitations) after a
+  // Google or GitHub sign-in the policy above let through.
+  await handleTeamDesignationAfter(ctx as Parameters<typeof handleTeamDesignationAfter>[0])
   // SOC2 trail for user-initiated 2FA lifecycle (`two_factor.enabled`
   // and `two_factor.disabled`). Independent of sign-in success audit;
   // both can fire on the same request only for the verify-totp

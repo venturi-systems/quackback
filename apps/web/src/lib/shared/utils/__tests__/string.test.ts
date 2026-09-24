@@ -246,6 +246,26 @@ describe('slugify', () => {
   it('collapses multiple hyphens', () => {
     expect(slugify('a---b')).toBe('a-b')
   })
+
+  it('transliterates Chinese to pinyin', () => {
+    expect(slugify('反馈')).toBe('fan-kui')
+  })
+
+  it('transliterates mixed Chinese and Latin', () => {
+    expect(slugify('北京 Feature')).toBe('bei-jing-feature')
+  })
+
+  it('transliterates Japanese and Korean', () => {
+    expect(slugify('日本語')).toBe('ri-ben-yu')
+    expect(slugify('한국어')).toBe('hangugeo')
+  })
+
+  it('returns empty string for input that romanizes to nothing', () => {
+    // Emoji- or punctuation-only names have no ASCII form; callers add a
+    // fallback. The slugifier itself stays honest and returns ''.
+    expect(slugify('🎉🎉')).toBe('')
+    expect(slugify('...')).toBe('')
+  })
 })
 
 describe('truncate', () => {
@@ -302,6 +322,13 @@ describe('getStatusEmoji', () => {
   it('returns fallback emoji for unknown status', () => {
     expect(getStatusEmoji('unknown')).toBe('\ud83d\udccc')
   })
+
+  it.each(['Constructor', 'constructor', '__proto__'])(
+    'returns fallback emoji for a status named %s, not an inherited Object.prototype member',
+    (status) => {
+      expect(getStatusEmoji(status)).toBe('\ud83d\udccc')
+    }
+  )
 })
 
 describe('contentPreview', () => {

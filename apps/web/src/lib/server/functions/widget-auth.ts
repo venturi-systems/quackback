@@ -5,7 +5,7 @@ import type { Role } from '@/lib/server/auth'
 import { auth } from '@/lib/server/auth'
 import { db, session, principal, eq, and, gt } from '@/lib/server/db'
 import { shouldRollSession, WIDGET_SESSION_TTL_MS } from './widget-session-roll'
-import { effectiveRole } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'widget-auth' })
@@ -107,8 +107,9 @@ export async function getWidgetSession(opts?: {
       },
       principal: {
         id: principalRecord.id as PrincipalId,
-        // A team role only counts on a human principal (see effectiveRole).
-        role: (effectiveRole(principalRecord.role, principalRecord.type) ?? 'user') as Role,
+        // Same rule as requireAuth: a team role counts only on a human
+        // principal whose identity satisfies the team identity rule.
+        role: (await resolveSessionRole(principalRecord, sessionRecord.user)) as Role,
         type: principalRecord.type ?? 'user',
       },
     }

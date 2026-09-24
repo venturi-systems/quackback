@@ -14,6 +14,7 @@ import type {
 } from '@/lib/shared/types'
 import type { PrincipalId } from '@quackback/ids'
 import { listPortalUsersFn, getPortalUserFn } from '@/lib/server/functions/admin'
+import { parseCustomAttrs } from '@/lib/shared/custom-attr-filters'
 
 // ============================================================================
 // Query Key Factory
@@ -38,18 +39,6 @@ function parseActivityFilter(raw?: string) {
   const [op, val] = raw.split(':')
   if (!op || val === undefined) return undefined
   return { op: op as 'gt' | 'gte' | 'lt' | 'lte' | 'eq', value: Number(val) }
-}
-
-/** Parse "key:op:value,key2:op:value2" into CustomAttrFilter[] */
-function parseCustomAttrs(raw?: string) {
-  if (!raw) return undefined
-  return raw
-    .split(',')
-    .map((part) => {
-      const [key, op, ...rest] = part.split(':')
-      return key && op ? { key, op, value: rest.join(':') } : null
-    })
-    .filter(Boolean) as { key: string; op: string; value: string }[]
 }
 
 async function fetchPortalUsers(

@@ -87,6 +87,13 @@ export const saveAuthProviderCredentialsFn = createServerFn({ method: 'POST' })
         if (!verdict.safe) {
           throw new Error(`${field.label} must be a valid public URL`)
         }
+        // Sign-in sends the client secret, the code and the access token to
+        // these hosts, and refuses any that is not https
+        // (`createOidcEndpointSource`). Refuse it here too, so the admin sees
+        // why instead of a sign-in that fails later.
+        if (new URL(value).protocol !== 'https:') {
+          throw new Error(`${field.label} must be an https:// URL`)
+        }
       }
 
       await savePlatformCredentials({

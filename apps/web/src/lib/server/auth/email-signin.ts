@@ -37,16 +37,21 @@ export async function requestEmailSignin(opts: {
     ? '/auth/login?callbackUrl=/admin'
     : '/auth/login'
 
-  const [{ url: signInUrl }, , settings] = await Promise.all([
+  // The OTP send goes through the sign-in hooks (rate limit, hard binding,
+  // and the per-method gate, which refuses a new address while magic link is
+  // off). Run it first, so a refused request never mints a magic-link row;
+  // mintMagicLinkUrl writes its row directly and bypasses those hooks.
+  await auth.api.sendVerificationOTP({
+    body: { email: opts.email, type: 'sign-in' },
+    headers,
+  })
+
+  const [{ url: signInUrl }, settings] = await Promise.all([
     mintMagicLinkUrl({
       email: opts.email,
       callbackPath: opts.callbackURL,
       errorCallbackPath,
       portalUrl: config.baseUrl,
-    }),
-    auth.api.sendVerificationOTP({
-      body: { email: opts.email, type: 'sign-in' },
-      headers,
     }),
     db.query.settings.findFirst({ columns: { logoKey: true } }),
   ])

@@ -27,39 +27,110 @@ export function parseJsonConfig<T extends object>(json: string | null, defaultVa
   }
 }
 
-/** @internal */
+/**
+ * Parse a JSON settings column that is read whole instead of merged into
+ * defaults (today only `brandingConfig`). The parsed value goes through
+ * {@link withoutUnsafeKeys}, so a row stored before its write path dropped
+ * those keys reads back without them.
+ *
+ * @internal
+ */
 export function parseJsonOrNull<T>(json: string | null): T | null {
   if (!json) return null
   try {
-    return JSON.parse(json) as T
+    return withoutUnsafeKeys(JSON.parse(json)) as T
   } catch {
     return null
   }
 }
 
+/**
+ * Keys deepMerge never copies. `JSON.parse('{"__proto__":{...}}')` creates an
+ * ordinary own `__proto__` key, and assigning it onto the merged object would
+ * run the `__proto__` setter and replace that object's prototype, so every key
+ * the payload supplied would read through as an inherited setting.
+ * `constructor` and `prototype` are skipped as defence in depth; no settings
+ * shape uses them.
+ */
+const UNSAFE_MERGE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+
+/** A `{}`-style object (including a null-prototype one), never an array or class instance. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+/**
+ * Copy an array for the merged result. Arrays still replace the target's
+ * array wholesale and are never merged element by element (the office-hours
+ * and canned-reply editors rely on that), but a plain-object element is
+ * rebuilt through deepMerge and a nested array is copied the same way, so an
+ * unsafe key inside an array is dropped at any depth instead of being kept
+ * and later written to the database by JSON.stringify. Primitives, null and
+ * non-plain objects such as a Date are kept as given.
+ */
+function copyArrayWithoutUnsafeKeys(values: readonly unknown[]): unknown[] {
+  return values.map((item) => {
+    if (Array.isArray(item)) return copyArrayWithoutUnsafeKeys(item)
+    if (isPlainObject(item)) return deepMerge<Record<string, unknown>>({}, item)
+    return item
+  })
+}
+
 /** @internal */
 export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target }
-  for (const key in source) {
-    if (source[key] !== undefined) {
-      const srcVal = source[key]
-      const tgtVal = result[key]
-      const isNestedObject =
-        typeof srcVal === 'object' &&
-        srcVal !== null &&
-        !Array.isArray(srcVal) &&
-        typeof tgtVal === 'object' &&
-        tgtVal !== null
+  // Own keys only: `for...in` would also merge keys inherited by `source`.
+  // `?? {}` keeps a stored JSON `null` merging to the defaults, as before.
+  for (const key of Object.keys(source ?? {}) as Array<keyof T & string>) {
+    if (UNSAFE_MERGE_KEYS.has(key)) continue
+    const srcVal = source[key]
+    if (srcVal === undefined) continue
+    // Read only the merged object's own value, never an inherited one.
+    const tgtVal = Object.hasOwn(result, key) ? result[key] : undefined
+    const isNestedObject =
+      typeof srcVal === 'object' &&
+      srcVal !== null &&
+      !Array.isArray(srcVal) &&
+      typeof tgtVal === 'object' &&
+      tgtVal !== null
 
-      result[key] = isNestedObject
-        ? (deepMerge(
-            tgtVal as Record<string, unknown>,
-            srcVal as Record<string, unknown>
-          ) as T[typeof key])
-        : (srcVal as T[typeof key])
+    if (isNestedObject) {
+      result[key] = deepMerge(
+        tgtVal as Record<string, unknown>,
+        srcVal as Record<string, unknown>
+      ) as T[typeof key]
+    } else if (isPlainObject(srcVal)) {
+      // Nothing to merge into: copy the subtree through deepMerge instead of by
+      // reference, so an unsafe key nested at any depth is dropped here rather
+      // than kept and later written to the database by JSON.stringify.
+      result[key] = deepMerge<Record<string, unknown>>({}, srcVal) as T[typeof key]
+    } else {
+      // An array replaces the target's value wholesale, as a guarded copy.
+      const value = Array.isArray(srcVal) ? copyArrayWithoutUnsafeKeys(srcVal) : srcVal
+      result[key] = value as T[typeof key]
     }
   }
   return result
+}
+
+/**
+ * Copy a JSON value with every {@link UNSAFE_MERGE_KEYS} key removed at any
+ * depth, inside objects and inside arrays. This is the guard deepMerge gives
+ * the merged settings columns, for a column that is stored and read whole
+ * instead of merged (`brandingConfig`): a plain object is rebuilt through
+ * deepMerge and an array through copyArrayWithoutUnsafeKeys, so the unsafe-key
+ * rule keeps one definition. Every other key and value is kept, except a key
+ * whose value is `undefined`, which JSON cannot hold and JSON.stringify drops.
+ * Primitives, null and non-plain objects are returned as given.
+ *
+ * @internal
+ */
+export function withoutUnsafeKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return copyArrayWithoutUnsafeKeys(value)
+  if (isPlainObject(value)) return deepMerge<Record<string, unknown>>({}, value)
+  return value
 }
 
 /** @internal */

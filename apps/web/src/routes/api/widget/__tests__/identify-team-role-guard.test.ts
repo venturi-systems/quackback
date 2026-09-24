@@ -1,5 +1,5 @@
 /**
- * Team-role guard on POST /api/widget/identify.
+ * Team guard on POST /api/widget/identify.
  *
  * Background: the route mints a normal Better Auth session token and returns
  * it as a Bearer. The `bearer()` plugin is registered globally, so that token
@@ -7,10 +7,12 @@
  * `requireAuth({ roles: ['admin'] })` path. Without this guard, "knowing an
  * admin's email" in unverified mode escalates to full admin takeover.
  *
- * The guard refuses to mint sessions for emails whose principal is admin or
- * member. Customer-tier collisions (role='user') remain allowed — that's the
- * documented unverified trust model. The verified (ssoToken) path is exempt:
- * HMAC vouches for the claim.
+ * The guard refuses to mint sessions for an account that holds a team role
+ * (admin or member) and for any address at a team domain, on BOTH paths: a
+ * widget identify is never a Google or GitHub sign-in, and holding the widget
+ * secret is not a team identity (landing-page#2309). Customer-tier collisions
+ * (role='user', outside the team domains) remain allowed on the unverified
+ * path — that's the documented unverified trust model.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -194,8 +196,8 @@ describe('POST /api/widget/identify — team-role guard (unverified path)', () =
   })
 })
 
-describe('POST /api/widget/identify — team-role guard does NOT apply to verified path', () => {
-  it('allows ssoToken identify even when the email backs an admin', async () => {
+describe('POST /api/widget/identify — team guard on the verified (ssoToken) path', () => {
+  it('refuses ssoToken identify when the email backs an admin (the widget-secret hole)', async () => {
     // verifyHS256JWT mock above returns sso@acme.com; we map an admin to it.
     mockUserFindFirst.mockResolvedValue({
       id: 'user_admin_sso',
@@ -209,7 +211,66 @@ describe('POST /api/widget/identify — team-role guard does NOT apply to verifi
 
     const res = await postIdentify({ ssoToken: 'jwt.token.here' })
 
-    // HMAC vouches for this claim — the guard must NOT engage.
-    expect(res.status).toBe(200)
+    // Holding the widget secret is not a Google or GitHub identity.
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error?: { code?: string } }
+    expect(body.error?.code).toBe('IDENTITY_LOCKED')
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('refuses an ssoToken that claims a team-domain address, even for a new account', async () => {
+    const { verifyHS256JWT } = await import('@/lib/server/widget/identity-token')
+    vi.mocked(verifyHS256JWT).mockReturnValueOnce({
+      sub: 'host-user-1',
+      email: 'Someone@Venturi.Systems',
+      name: 'Someone',
+    })
+    mockUserFindFirst.mockResolvedValue(null)
+
+    const res = await postIdentify({ ssoToken: 'jwt.token.here' })
+
+    expect(res.status).toBe(403)
+    expect(((await res.json()) as { error?: { code?: string } }).error?.code).toBe(
+      'IDENTITY_LOCKED'
+    )
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+
+  it('refuses an ssoToken whose subject resolves to a team-domain account', async () => {
+    mockUserFindFirst.mockResolvedValue({
+      id: 'user_team',
+      email: 'ops@venturi.systems',
+      name: 'Ops',
+      image: null,
+      imageKey: null,
+      metadata: null,
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+
+    const res = await postIdentify({ ssoToken: 'jwt.token.here' })
+
+    expect(res.status).toBe(403)
+  })
+})
+
+describe('POST /api/widget/identify — team-domain addresses (unverified path)', () => {
+  it('refuses a team-domain address that has no account yet', async () => {
+    mockUserFindFirst.mockResolvedValue(null)
+    const res = await postIdentify({ id: 'x', email: 'new@venturi.systems' })
+    expect(res.status).toBe(403)
+    expect(mockInsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/widget/identify — widget off', () => {
+  it('answers 404 while the widget is disabled', async () => {
+    const { getWidgetConfig } = await import('@/lib/server/domains/settings/settings.widget')
+    vi.mocked(getWidgetConfig).mockResolvedValueOnce({
+      enabled: false,
+      identifyVerification: false,
+    } as Awaited<ReturnType<typeof getWidgetConfig>>)
+    const res = await postIdentify({ id: 'x', email: 'customer@acme.com' })
+    expect(res.status).toBe(404)
+    expect(mockUserFindFirst).not.toHaveBeenCalled()
   })
 })

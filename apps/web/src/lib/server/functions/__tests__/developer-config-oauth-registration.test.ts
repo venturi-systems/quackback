@@ -1,9 +1,9 @@
 /**
  * fetchDeveloperConfig tells the admin MCP setup guide whether OAuth client
- * registration without an account is open on this deployment, so the guide
- * never recommends an OAuth config the server would refuse to register. The
- * flag comes from config.oauthAllowUnauthenticatedClientRegistration (only
- * the literal env value 'true' turns it on) and the endpoint stays admin-only.
+ * registration without an account is open, so the guide never recommends an
+ * OAuth config the server would refuse to register. This fork never allows
+ * it (auth/oauth-client-defaults.ts, landing-page#2309), so the answer is
+ * always closed, whatever the environment says. The endpoint stays admin-only.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -78,10 +78,10 @@ describe('fetchDeveloperConfig: OAuth client registration status', () => {
     })
   })
 
-  it("reports registration open only for the literal 'true'", async () => {
+  it('reports registration closed even when the retired switch is set', async () => {
     process.env[KEY] = 'true'
     const result = await fetchDeveloperConfigHandler()
-    expect(result.oauthClientRegistrationOpen).toBe(true)
+    expect(result.oauthClientRegistrationOpen).toBe(false)
   })
 
   it('stays admin-only', async () => {

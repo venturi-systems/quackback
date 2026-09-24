@@ -8,6 +8,7 @@ import {
   requireSettings,
   wrapDbError,
   parseJsonOrNull,
+  withoutUnsafeKeys,
   invalidateSettingsCache,
 } from './settings.helpers'
 
@@ -27,9 +28,16 @@ export async function getBrandingConfig(): Promise<BrandingConfig> {
   }
 }
 
-export async function updateBrandingConfig(config: BrandingConfig): Promise<BrandingConfig> {
+export async function updateBrandingConfig(input: BrandingConfig): Promise<BrandingConfig> {
   log.info('update branding config')
   try {
+    // updateThemeFn validates brandingConfig only as a record of unknown
+    // values, so drop `__proto__`, `constructor` and `prototype` at every depth
+    // before the config is read, stored or returned. Every other key and value
+    // is kept as sent: which branding values are accepted is the theme
+    // schema's decision, not this guard's.
+    const config = withoutUnsafeKeys(input) as BrandingConfig
+
     // Setting custom theme colors (light/dark overrides) is gated.
     // Preset and themeMode swaps don't count as colour customisation —
     // they pick from the curated set the workspace already has access to.

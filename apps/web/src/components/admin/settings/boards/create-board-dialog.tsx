@@ -33,6 +33,8 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { cn } from '@/lib/shared/utils/cn'
+import { useIsManagedSetting } from '@/components/admin/settings/managed-setting-note'
+import { BOARD_ANONYMOUS_ACCESS_PATH } from '@/lib/shared/policy-managed-paths'
 
 interface CreateBoardDialogProps {
   open?: boolean
@@ -55,13 +57,18 @@ export function CreateBoardDialog({
   // submitted payload. Lives outside the form so it doesn't show up in
   // the validation schema (or in mutation input).
   const [customize, setCustomize] = useState(false)
+  // The deployment's policy may own the Anyone tier on boards
+  // (POLICY_MANAGED_SETTINGS `boards.anonymousAccess`). The Public preset
+  // opens viewing to anyone, so the server refuses it with 403
+  // FIELD_MANAGED; offer Private and explain instead.
+  const anonymousManaged = useIsManagedSetting(BOARD_ANONYMOUS_ACCESS_PATH)
 
   const form = useForm({
     resolver: standardSchemaResolver(createBoardSchema),
     defaultValues: {
       name: '',
       description: '',
-      preset: 'public' as BoardPreset,
+      preset: (anonymousManaged ? 'private' : 'public') as BoardPreset,
     },
   })
 
@@ -159,9 +166,14 @@ export function CreateBoardDialog({
                       <PresetTile
                         active={field.value === 'public'}
                         label="Public"
-                        description="Anyone can view. Sign-in for vote, comment, submit."
+                        description={
+                          anonymousManaged
+                            ? 'Unavailable: this deployment requires sign-in on every board.'
+                            : 'Anyone can view. Sign-in for vote, comment, submit.'
+                        }
                         icon={<GlobeAltIcon className="h-3.5 w-3.5" />}
                         onClick={() => field.onChange('public')}
+                        disabled={anonymousManaged}
                       />
                       <PresetTile
                         active={field.value === 'private'}
@@ -171,6 +183,15 @@ export function CreateBoardDialog({
                         onClick={() => field.onChange('private')}
                       />
                     </div>
+                    {anonymousManaged && (
+                      <p
+                        className="text-xs text-muted-foreground"
+                        data-testid="anonymous-policy-note"
+                      >
+                        To open a board to every signed-in user, create it here, then choose
+                        Signed-in on its Access tab.
+                      </p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -210,6 +231,7 @@ interface PresetTileProps {
   description: string
   icon: React.ReactNode
   onClick: () => void
+  disabled?: boolean
 }
 
 /**
@@ -217,18 +239,29 @@ interface PresetTileProps {
  * tab's preset row (board-access-form.tsx → PresetCard) so the two
  * surfaces feel like the same decision in different contexts.
  */
-function PresetTile({ active, label, description, icon, onClick }: PresetTileProps) {
+function PresetTile({
+  active,
+  label,
+  description,
+  icon,
+  onClick,
+  disabled = false,
+}: PresetTileProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
       aria-pressed={active}
+      disabled={disabled}
+      data-disabled-reason={disabled ? 'policy' : undefined}
       className={cn(
         'flex flex-col items-stretch gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors',
-        active
-          ? 'border-primary bg-primary/10'
-          : 'border-border bg-muted/30 hover:bg-muted/60 cursor-pointer'
+        disabled
+          ? 'cursor-not-allowed border-border bg-muted/30 opacity-60'
+          : active
+            ? 'border-primary bg-primary/10'
+            : 'border-border bg-muted/30 hover:bg-muted/60 cursor-pointer'
       )}
     >
       <div className="flex items-center gap-2">

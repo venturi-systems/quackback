@@ -26,6 +26,7 @@ import {
 } from '@/lib/server/domains/users/user.attributes'
 import { reconcileWidgetMemberships } from '@/lib/server/domains/segments/segment-membership.service'
 import { captureCountryFromHeaders } from '@/lib/server/auth/country-capture'
+import { widgetNotFoundResponse } from '@/lib/server/widget/widget-enabled'
 
 const identifySchema = z
   .object({
@@ -107,8 +108,16 @@ async function findOrCreateSession(
   userId: UserId,
   request: Request
 ): Promise<{ id: string; token: string }> {
+  // Reuse only a session this route minted earlier (it carries a
+  // widget_identified_session row). A session the person created by signing
+  // in to the portal is never handed to a widget caller: on the unverified
+  // path the caller only claims an email address.
   const existingSession = await db.query.session.findFirst({
-    where: and(eq(session.userId, userId), gt(session.expiresAt, new Date())),
+    where: and(
+      eq(session.userId, userId),
+      gt(session.expiresAt, new Date()),
+      sql`EXISTS (SELECT 1 FROM widget_identified_session w WHERE w.session_id = ${session.id})`
+    ),
   })
   if (existingSession) {
     await db
@@ -146,7 +155,7 @@ export const Route = createFileRoute('/api/widget/identify')({
       POST: async ({ request }) => {
         const widgetConfig = await getWidgetConfig()
         if (!widgetConfig.enabled) {
-          return jsonError('WIDGET_DISABLED', 'Widget is not enabled', 403)
+          return widgetNotFoundResponse()
         }
 
         let body: z.infer<typeof identifySchema>
@@ -253,27 +262,39 @@ export const Route = createFileRoute('/api/widget/identify')({
           })
         }
 
-        // Team-role guard: refuse to mint a session-Bearer for an email
-        // that already backs a team principal (admin or member). The Bearer
-        // the route hands out is a normal Better Auth session token — `bearer()`
-        // is registered globally, so it satisfies `auth.api.getSession()` at
-        // every server function, including `requireAuth({ roles: ['admin'] })`.
-        // Allowing this in the unverified path would turn "knowing an admin's
-        // email" into full admin takeover. Customer-tier collisions (role='user')
-        // remain allowed — that's the documented trust model for unverified
-        // identify. The verified (ssoToken) path is exempt: HMAC vouches for it.
-        if (!claimsAreVerified && userRecord) {
+        // Team guard, on BOTH paths. The Bearer this route hands out is a
+        // normal Better Auth session token: `bearer()` is registered globally,
+        // so it satisfies `auth.api.getSession()` at every server function,
+        // including `requireAuth({ roles: ['admin'] })`. A widget identify is
+        // never a Google or GitHub sign-in, so it must never yield a session
+        // that could carry team authority (owner decisions 6 and 7,
+        // landing-page#2309):
+        //  - an account that holds a stored team role (admin or member), and
+        //  - any address at a team domain, which VENTURI_TEAM_ADMIN_EMAILS or
+        //    an administrator could designate,
+        // are refused, whether the claim came unverified or in an ssoToken.
+        // Holding the widget secret is not a Google or GitHub identity.
+        // Customer-tier collisions (role='user', outside the team domains)
+        // remain allowed on the unverified path: that is the documented trust
+        // model for unverified identify.
+        const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+        const teamAddress =
+          isTeamDomainEmail(normalizedEmail) ||
+          (userRecord ? isTeamDomainEmail(userRecord.email) : false)
+        let teamRole = false
+        if (userRecord) {
           const existingPrincipal = await db.query.principal.findFirst({
             where: eq(principal.userId, userRecord.id as UserId),
             columns: { role: true },
           })
-          if (existingPrincipal?.role === 'admin' || existingPrincipal?.role === 'member') {
-            return jsonError(
-              'IDENTITY_LOCKED',
-              'This address is bound to a team account. Use a verified ssoToken to identify.',
-              403
-            )
-          }
+          teamRole = existingPrincipal?.role === 'admin' || existingPrincipal?.role === 'member'
+        }
+        if (teamAddress || teamRole) {
+          return jsonError(
+            'IDENTITY_LOCKED',
+            'This address belongs to a team account. Team members sign in to the portal with Google or GitHub.',
+            403
+          )
         }
 
         const country = captureCountryFromHeaders(request.headers)
@@ -293,6 +314,7 @@ export const Route = createFileRoute('/api/widget/identify')({
             // First verified sight of this account — stamp the durable subject.
             updates.externalId = externalId
           }
+          let emailChanged = false
           if (externalId && userRecord.email !== normalizedEmail) {
             // `sub` is authoritative on a verified email change. Adopt the new
             // address unless another row already holds it — the partial-unique
@@ -304,11 +326,18 @@ export const Route = createFileRoute('/api/widget/identify')({
             })
             if (!emailHolder || emailHolder.id === userRecord.id) {
               updates.email = normalizedEmail
+              emailChanged = true
             }
           }
 
           if (Object.keys(updates).length > 0) {
-            await db.update(user).set(updates).where(eq(user.id, userRecord.id))
+            // The host app vouched for a new address, not its owner's mailbox:
+            // the changed address has not been verified by anyone this workspace
+            // trusts, so it must not inherit the old one's verification.
+            await db
+              .update(user)
+              .set(emailChanged ? { ...updates, emailVerified: false } : updates)
+              .where(eq(user.id, userRecord.id))
           }
         } else {
           const [created] = await db

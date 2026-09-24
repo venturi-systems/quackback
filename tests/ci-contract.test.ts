@@ -158,6 +158,71 @@ describe('root dependency contract', () => {
   })
 })
 
+// HYG-18: the runner stage inherited the Bun base image's OCI labels, so the
+// deployed image claimed to be oven-sh/bun at Bun's revision and version.
+// Assert the shape, never current values: every OCI key the base sets is
+// overridden in the final stage, the build-specific ones come from build
+// args, both image workflows pass those args, and the publish workflow reads
+// the pushed labels back before any tag points at the image.
+describe('image provenance labels', () => {
+  const OCI_KEYS = [
+    'title',
+    'description',
+    'licenses',
+    'url',
+    'source',
+    'revision',
+    'version',
+    'created',
+  ]
+  const BUILD_ARG_LABELS: Array<[string, string]> = [
+    ['url', 'SOURCE_REPOSITORY'],
+    ['source', 'SOURCE_REPOSITORY'],
+    ['revision', 'SOURCE_COMMIT'],
+    ['version', 'IMAGE_VERSION'],
+    ['created', 'SOURCE_CREATED'],
+  ]
+
+  it('overrides every base-image OCI label in the shipped stage', () => {
+    const dockerfile = readFileSync(join(process.cwd(), 'apps', 'web', 'Dockerfile'), 'utf8')
+    const stages = [...dockerfile.matchAll(/^FROM \S+ AS (\S+)$/gm)].map((match) => match[1])
+    expect(stages[stages.length - 1], 'runner must be the final, shipped stage').toBe('runner')
+
+    const runnerStage = dockerfile.split(/^FROM \S+ AS runner$/m)[1] ?? ''
+    for (const key of OCI_KEYS) {
+      expect(runnerStage, `runner stage must set org.opencontainers.image.${key}`).toMatch(
+        new RegExp(`org\\.opencontainers\\.image\\.${key}=`)
+      )
+    }
+    for (const [key, arg] of BUILD_ARG_LABELS) {
+      expect(runnerStage, `runner stage must declare ARG ${arg}`).toMatch(
+        new RegExp(`^ARG ${arg}=`, 'm')
+      )
+      expect(runnerStage, `${key} must come from ${arg}`).toContain(
+        `org.opencontainers.image.${key}="\${${arg}}"`
+      )
+    }
+  })
+
+  it('passes the build values from both image workflows', () => {
+    const publish = readFileSync(join(workflowDir, 'docker.yml'), 'utf8')
+    const exported = readFileSync(join(workflowDir, 'export-amd64-image.yml'), 'utf8')
+    for (const arg of new Set(BUILD_ARG_LABELS.map(([, name]) => name))) {
+      expect(publish, `docker.yml must pass ${arg}`).toMatch(
+        new RegExp(`^\\s+${arg}=\\$\\{\\{ `, 'm')
+      )
+      expect(exported, `export-amd64-image.yml must pass ${arg}`).toContain(
+        `--build-arg "${arg}=`
+      )
+    }
+
+    const verify = publish.indexOf('name: Verify per-arch provenance labels')
+    const tag = publish.indexOf('name: Create manifest list and push')
+    expect(verify, 'docker.yml must read the pushed labels back').toBeGreaterThan(-1)
+    expect(verify, 'labels must be verified before any tag is applied').toBeLessThan(tag)
+  })
+})
+
 const REQUIRED_GOVERNANCE_KEYS = [
   'schema_version',
   'repository',
@@ -268,6 +333,12 @@ describe('QB-GOV-001 repository governance contract', () => {
     })
     expect(record.auto_merge).toBe(false)
     expect(record.review.decision).toBe('accepted')
+
+    // REQ-21: the ledger is enforced in the required lane, on full history.
+    const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+    const staticAnalysis = ci.split('\n  static_analysis:\n')[1]?.split('\n  database_tests:\n')[0]
+    expect(staticAnalysis).toContain('fetch-depth: 0')
+    expect(staticAnalysis).toContain('run: bun scripts/check-upstream-intake-ledger.ts')
   })
 })
 
@@ -339,5 +410,42 @@ describe('QB-CI-002 e2e shard balance contract', () => {
     // (803 distinct tests either way).
     expect(ci).toContain('exactly one shard for ANY weight vector')
     expect(ci).toContain('803 distinct tests either way')
+  })
+})
+
+describe('QB-CI-003 database setup steps fail fast', () => {
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+
+  /** The text of one job, from its key up to the next job's key. */
+  function job(name: string): string {
+    const body = ci.split(`\n  ${name}:\n`)[1]
+    expect(body, `ci.yml must declare the ${name} job`).toBeDefined()
+    return body!.split(/\n {2}[a-z0-9_-]+:\n/)[0]
+  }
+
+  /** The text of the step in `jobText` whose run line is exactly `command`. */
+  function step(jobText: string, command: string): string | undefined {
+    const steps = jobText.split('\n    steps:\n')[1]?.split(/\n {6}- /) ?? []
+    return steps.find((text) => text.split('\n').some((line) => line.trim() === `run: ${command}`))
+  }
+
+  // A hung `bun run db:migrate` on run 35980940017 (shard 8, attempt 1) held
+  // its runner for an hour, because only the job cap applied. Every step that
+  // sets up the database container carries its own, much smaller cap.
+  it.each([
+    ['database_tests', ['bun run db:migrate', 'bun run db:indexes']],
+    ['e2e_tests', ['bun run db:migrate', 'bun run db:seed']],
+  ] as const)('%s caps each database setup step on its own', (name, commands) => {
+    const text = job(name)
+    const jobCap = Number(text.match(/\n {4}timeout-minutes: (\d+)\n/)?.[1])
+    expect(jobCap).toBeGreaterThan(0)
+    for (const command of commands) {
+      const found = step(text, command)
+      expect(found, `${name} must run ${command}`).toBeDefined()
+      const cap = Number(found!.match(/(?:^|\n) {8}timeout-minutes: (\d+)(?:\n|$)/)?.[1])
+      expect(cap, `${name}: ${command} needs its own timeout-minutes`).toBeGreaterThan(0)
+      expect(cap).toBeLessThanOrEqual(10)
+      expect(cap).toBeLessThan(jobCap)
+    }
   })
 })

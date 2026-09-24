@@ -16,9 +16,14 @@ import {
   updateBoard,
   deleteBoard,
 } from '@/lib/server/domains/boards/board.service'
+import {
+  assertBoardAccessWithinPolicy,
+  defaultAccessWithinPolicy,
+} from '@/lib/server/domains/boards/board-access-policy'
 import { invalidateSettingsCache } from '@/lib/server/domains/settings/settings.helpers'
 import { boardAccessSchema, boardPresetSchema, accessForPreset } from '@/lib/shared/schemas/boards'
 import { logger } from '@/lib/server/logger'
+import { recordAuditSafely, sessionAuditActor } from '@/lib/server/audit/audit-safe'
 
 // Re-export for back-compat: existing test imports `boardAccessSchema`
 // from '../boards'. The actual definition lives in @/lib/shared/schemas/boards
@@ -95,6 +100,35 @@ export type DeleteBoardInput = z.infer<typeof deleteBoardSchema>
 export type CreateBoardsBatchInput = z.infer<typeof createBoardsBatchSchema>
 
 // ============================================
+// Audit helpers
+// ============================================
+
+/** The board fields an audit row records (never posts or counts). */
+function boardAuditView(b: {
+  name: string
+  slug: string
+  description?: string | null
+  settings?: unknown
+}) {
+  return {
+    name: b.name,
+    slug: b.slug,
+    description: b.description ?? null,
+    settings: (b.settings ?? null) as unknown,
+  }
+}
+
+/** Board state before a change, for the audit row; null if unreadable. */
+async function boardSnapshot(id: BoardId) {
+  try {
+    const row = await db.query.boards.findFirst({ where: eq(boards.id, id) })
+    return row ? boardAuditView(row) : null
+  } catch {
+    return null
+  }
+}
+
+// ============================================
 // Read Operations
 // ============================================
 
@@ -144,7 +178,7 @@ export const createBoardFn = createServerFn({ method: 'POST' })
   .validator(createBoardSchema)
   .handler(async ({ data }) => {
     log.debug({ name: data.name, preset: data.preset }, 'create board')
-    await requireAuth({ roles: ['admin', 'member'] })
+    const auth = await requireAuth({ roles: ['admin', 'member'] })
 
     // Map the binary preset choice (Public/Private) into a BoardAccess
     // matrix via the shared helper. For finer-grained access (segments,
@@ -156,6 +190,15 @@ export const createBoardFn = createServerFn({ method: 'POST' })
       access: accessForPreset(data.preset),
     })
     log.info({ board_id: board.id }, 'board created')
+    await recordAuditSafely(
+      {
+        event: 'board.created',
+        actor: sessionAuditActor(auth),
+        target: { type: 'board', id: board.id },
+        after: boardAuditView(board),
+      },
+      'request'
+    )
     return serializeBoard(board)
   })
 
@@ -171,8 +214,9 @@ export const updateBoardFn = createServerFn({ method: 'POST' })
   .validator(updateBoardSchema)
   .handler(async ({ data }) => {
     log.debug({ board_id: data.id }, 'update board')
-    await requireAuth({ roles: ['admin', 'member'] })
+    const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+    const before = await boardSnapshot(data.id as BoardId)
     const board = await updateBoard(data.id as BoardId, {
       name: data.name,
       description: data.description,
@@ -180,6 +224,16 @@ export const updateBoardFn = createServerFn({ method: 'POST' })
     })
 
     log.info({ board_id: board.id }, 'board updated')
+    await recordAuditSafely(
+      {
+        event: 'board.updated',
+        actor: sessionAuditActor(auth),
+        target: { type: 'board', id: board.id },
+        before,
+        after: boardAuditView(board),
+      },
+      'request'
+    )
     return serializeBoard(board)
   })
 
@@ -195,10 +249,20 @@ export const deleteBoardFn = createServerFn({ method: 'POST' })
   .validator(deleteBoardSchema)
   .handler(async ({ data }) => {
     log.debug({ board_id: data.id }, 'delete board')
-    await requireAuth({ roles: ['admin'] })
+    const auth = await requireAuth({ roles: ['admin'] })
 
+    const before = await boardSnapshot(data.id as BoardId)
     await deleteBoard(data.id as BoardId)
     log.info({ board_id: data.id }, 'board deleted')
+    await recordAuditSafely(
+      {
+        event: 'board.deleted',
+        actor: sessionAuditActor(auth),
+        target: { type: 'board', id: data.id },
+        before,
+      },
+      'request'
+    )
     return { id: data.id }
   })
 
@@ -244,8 +308,10 @@ export const createBoardsBatchFn = createServerFn({ method: 'POST' })
         // (view=anonymous, vote/comment/submit=authenticated). Admins can
         // lock them down later via updateBoardAccessFn. Without this the
         // column default (all 'anonymous') would apply, which is more
-        // permissive than the create-modal's Public tile.
-        access: accessForPreset('public'),
+        // permissive than the create-modal's Public tile. The wizard never
+        // offers a choice, so when the deployment's policy owns the anonymous
+        // tier the default starts at signed-in instead (DEF-42).
+        access: defaultAccessWithinPolicy(accessForPreset('public')),
       })
       createdBoards.push(serializeBoard(board))
     }
@@ -333,6 +399,10 @@ export const updateBoardAccessFn = createServerFn({ method: 'POST' })
         import('@/lib/shared/policy-managed-paths'),
       ])
       await assertNotManaged(boardAccessManagedPath(before.slug))
+      // The policy may own the anonymous tier on every board
+      // (`boards.anonymousAccess`). Refuse it here with a clean 403 instead
+      // of letting the database guard reject the write as a server error.
+      assertBoardAccessWithinPolicy(data.access)
     }
 
     await db

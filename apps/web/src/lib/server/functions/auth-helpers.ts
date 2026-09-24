@@ -11,7 +11,7 @@ import { auth } from '@/lib/server/auth'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import { getSettings } from './workspace'
 import { db, principal, eq } from '@/lib/server/db'
-import { effectiveRole } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'auth-helpers' })
@@ -57,23 +57,6 @@ async function getSessionDirect(): Promise<SessionResult | null> {
 }
 
 export type { Role }
-
-/**
- * Role a session principal may exercise. A team role held by a non-human
- * principal (anonymous or service) is capped at 'user' and logged, because
- * that state only arises from a privilege-escalation path and must never
- * grant team access.
- */
-function resolveEffectiveRole(record: { id: string; role: string; type: string }): Role {
-  const role = effectiveRole(record.role, record.type) ?? 'user'
-  if (role !== record.role) {
-    log.warn(
-      { principal_id: record.id, stored_role: record.role, principal_type: record.type },
-      'team role on a non-human principal ignored'
-    )
-  }
-  return role
-}
 
 export interface AuthContext {
   settings: {
@@ -131,10 +114,10 @@ export async function requireAuth(options?: { roles?: Role[] }): Promise<AuthCon
       throw new Error('Access denied: Not a team member')
     }
 
-    // Only a human principal may exercise a team role. An anonymous or
-    // service principal that carries admin/member is treated as a portal
-    // user, so it fails every team-role check below.
-    const role = resolveEffectiveRole(principalRecord)
+    // Only a human principal may exercise a team role, and only while its
+    // identity satisfies the team identity rule. Everyone else is treated as
+    // a portal user, so they fail every team-role check below.
+    const role = await resolveSessionRole(principalRecord, session.user, getRequestHeaders())
 
     if (options?.roles && !options.roles.includes(role)) {
       throw new Error(`Access denied: Requires [${options.roles.join(', ')}], got ${role}`)
@@ -222,7 +205,7 @@ export async function getOptionalAuth(): Promise<AuthContext | null> {
       },
       principal: {
         id: principalRecord.id as PrincipalId,
-        role: resolveEffectiveRole(principalRecord),
+        role: await resolveSessionRole(principalRecord, session.user, getRequestHeaders()),
         type: principalRecord.type,
       },
     }

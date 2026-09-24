@@ -119,7 +119,20 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
                         <span className="text-amber-600 dark:text-amber-400">Never used</span>
                       </>
                     )}
+                    <span className="hidden sm:inline">·</span>
+                    <span>
+                      {key.expiresAt
+                        ? new Date(key.expiresAt).getTime() <= Date.now()
+                          ? 'Expired'
+                          : `Expires ${formatDistanceToNow(key.expiresAt, { addSuffix: true })}`
+                        : 'Never expires (created before expiry was required)'}
+                    </span>
                   </div>
+                  <p className="text-xs text-muted-foreground" data-testid="api-key-scopes">
+                    {key.scopes
+                      ? `Scopes: ${key.scopes.join(', ')}`
+                      : 'Scopes: full access (created before scopes existed)'}
+                  </p>
                 </div>
               </div>
 

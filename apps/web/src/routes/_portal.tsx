@@ -8,7 +8,7 @@ import { AuthDialog } from '@/components/auth/auth-dialog'
 import { PortalAccessGate } from '@/components/portal/portal-access-gate'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 import { DEFAULT_AUTH_CONFIG } from '@/lib/shared/types/settings'
-import { generateThemeCSS, getGoogleFontsUrl } from '@/lib/shared/theme'
+import { generateThemeCSS } from '@/lib/shared/theme'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { getPortalLocaleFn, loadPortalIntl } from '@/lib/server/functions/locale'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
@@ -164,9 +164,6 @@ export const Route = createFileRoute('/_portal')({
     // Always apply custom CSS on top (cascades over theme styles)
     const customCssToApply = customCss
 
-    // Always load Google Fonts from theme config
-    const googleFontsUrl = getGoogleFontsUrl(brandingConfig)
-
     const initialUserData = session?.user
       ? {
           name: session.user.name,
@@ -195,7 +192,6 @@ export const Route = createFileRoute('/_portal')({
       themeStyles,
       customCss: customCssToApply,
       themeMode,
-      googleFontsUrl,
       initialUserData,
       authConfig,
       locale,
@@ -273,7 +269,6 @@ function PortalLayout() {
     themeStyles,
     customCss,
     themeMode,
-    googleFontsUrl,
     initialUserData,
     authConfig,
     locale,
@@ -297,16 +292,15 @@ function PortalLayout() {
           data-theme={themeMode}
           data-venturi-web-theme={themeMode}
         >
-          <a
-            href="#portal-main"
-            className="sr-only z-50 rounded-md bg-background px-4 py-3 text-foreground shadow-lg focus:not-sr-only focus:fixed focus:start-4 focus:top-4"
-          >
+          {/* Same skip link as the public frame: off-screen until focused,
+              then a 44px target (sr-only's focus reset dropped the padding
+              and left a 24px link). */}
+          <a href="#portal-main" className="public-frame__skip shadow-lg">
             <FormattedMessage
               id="portal.accessibility.skipToContent"
               defaultMessage="Skip to content"
             />
           </a>
-          {googleFontsUrl && <link rel="stylesheet" href={googleFontsUrl} />}
           {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
           {/* Custom CSS is injected after theme styles so it can override */}
           {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}

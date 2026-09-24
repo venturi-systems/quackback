@@ -12,6 +12,8 @@ const hoisted = vi.hoisted(() => ({
   tenant: null as null | Record<string, unknown>,
   cookie: '' as string,
   principal: null as null | { type: string; role: string },
+  emailVerified: true,
+  providers: ['github'] as string[],
 }))
 
 vi.mock('@tanstack/react-start', () => ({
@@ -23,6 +25,9 @@ vi.mock('@tanstack/react-start', () => ({
 }))
 vi.mock('@tanstack/react-start/server', () => ({
   getRequestHeaders: () => new Headers(hoisted.cookie ? { cookie: hoisted.cookie } : {}),
+  // Upstream v0.13.1 (80f392a69, 1df60426a): bootstrap sends Accept-CH,
+  // Critical-CH and Vary on the document response.
+  setResponseHeader: () => undefined,
 }))
 vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   getTenantSettings: async () => hoisted.tenant,
@@ -36,6 +41,8 @@ vi.mock('@/lib/server/config', () => ({
     get policyManagedSettings() {
       return hoisted.policyManagedSettings
     },
+    teamEmailDomains: ['acme.example'],
+    teamAdminEmails: [],
   },
 }))
 vi.mock('@/lib/server/auth/index', () => ({
@@ -53,7 +60,7 @@ vi.mock('@/lib/server/auth/index', () => ({
           id: 'user_1',
           name: 'Visitor',
           email: 'visitor@acme.example',
-          emailVerified: false,
+          emailVerified: hoisted.emailVerified,
           image: null,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -63,8 +70,17 @@ vi.mock('@/lib/server/auth/index', () => ({
   },
 }))
 vi.mock('@/lib/server/db', () => ({
-  db: { query: { principal: { findFirst: async () => hoisted.principal } } },
+  db: {
+    query: {
+      principal: { findFirst: async () => hoisted.principal },
+      account: {
+        findMany: async () => hoisted.providers.map((providerId) => ({ providerId })),
+      },
+    },
+  },
   principal: { userId: 'userId' },
+  account: { userId: 'account.userId' },
+  user: { id: 'user.id' },
   eq: vi.fn(),
 }))
 vi.mock('@/lib/server/redis', () => ({
@@ -92,6 +108,8 @@ const ACCESS = {
 beforeEach(() => {
   hoisted.cookie = ''
   hoisted.principal = null
+  hoisted.emailVerified = true
+  hoisted.providers = ['github']
   hoisted.tenant = {
     name: 'Acme',
     slug: 'acme',
@@ -143,6 +161,15 @@ describe('getBootstrapData RPC boundary', () => {
     hoisted.principal = { type: 'user', role: 'admin' }
     const data = await getBootstrapData()
     expect(data.userRole).toBe('admin')
+  })
+
+  it('reports a stored admin that fails the team identity rule as a portal user', async () => {
+    hoisted.cookie = 'better-auth.session_token=abc'
+    hoisted.principal = { type: 'user', role: 'admin' }
+    hoisted.providers = ['credential']
+    hoisted.emailVerified = false
+    const data = await getBootstrapData()
+    expect(data.userRole).toBe('user')
   })
 })
 

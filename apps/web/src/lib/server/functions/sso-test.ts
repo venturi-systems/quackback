@@ -25,7 +25,9 @@ import { createServerFn } from '@tanstack/react-start'
 import { z } from 'zod'
 import { requireAuth } from './auth-helpers'
 import type { DiagnosticStep, HandshakeStage } from '@/lib/server/auth/sso-test-handshake'
+import type { JsonValue } from '@/lib/server/audit/log'
 import { DEFAULT_OIDC_SCOPES } from '@/lib/server/auth/build-oauth-configs'
+import { asHttpsUrl } from '@/lib/server/auth/custom-oidc-fetch'
 import { ssoTestResultKey, ssoTestSessionKey } from '@/lib/shared/sso-test-keys'
 
 const TTL_SECONDS = 600
@@ -57,7 +59,7 @@ type TestSession = {
 
 export type StartSsoTestResult =
   | { testId: string; authorizeUrl: string }
-  | { error: 'sso-not-configured' | 'no-secret' | 'discovery-unreachable' }
+  | { error: 'sso-not-configured' | 'no-secret' | 'discovery-unreachable' | 'insecure-endpoint' }
 
 export const startSsoTestFn = createServerFn({ method: 'POST' })
   .validator(z.object({ registrationId: z.string().min(1) }))
@@ -98,6 +100,11 @@ export const startSsoTestFn = createServerFn({ method: 'POST' })
       tokenEndpoint: string
       jwksUri: string
       userinfoEndpoint?: string
+    }
+    // Sign-in only fetches an https discovery URL (`fetchDiscovery` in
+    // custom-oidc-fetch.ts); the test must not pass where sign-in refuses.
+    if (provider.discoveryUrl && !asHttpsUrl(provider.discoveryUrl)) {
+      return { error: 'insecure-endpoint' }
     }
     if (provider.discoveryUrl) {
       try {
@@ -142,6 +149,18 @@ export const startSsoTestFn = createServerFn({ method: 'POST' })
       return { error: 'sso-not-configured' }
     }
 
+    // Sign-in sends a browser only to an https authorization endpoint, and a
+    // discovered one only when it resolves to a public address
+    // (`createOidcEndpointSource`, `fetchDiscovery`). Refuse here, before the
+    // admin is redirected anywhere sign-in would not go.
+    const authorizationEndpoint = asHttpsUrl(endpoints.authorizationEndpoint)
+    if (!authorizationEndpoint) return { error: 'insecure-endpoint' }
+    if (provider.discoveryUrl) {
+      const { checkUrlSafety } = await import('@/lib/server/content/ssrf-guard')
+      const verdict = await checkUrlSafety(authorizationEndpoint)
+      if (!verdict.safe) return { error: 'insecure-endpoint' }
+    }
+
     const { config } = await import('@/lib/server/config')
     // Use the provider's own production callback so admins register exactly
     // one redirect URI with their IdP. The catch-all dispatches test vs prod
@@ -165,7 +184,7 @@ export const startSsoTestFn = createServerFn({ method: 'POST' })
       discoveryUrl: provider.discoveryUrl ?? undefined,
       tokenEndpoint: endpoints.tokenEndpoint,
       jwksUri: endpoints.jwksUri,
-      authorizationEndpoint: endpoints.authorizationEndpoint,
+      authorizationEndpoint,
       userinfoEndpoint: endpoints.userinfoEndpoint,
       issuer: endpoints.issuer,
       clientId: provider.clientId,
@@ -199,7 +218,7 @@ export const startSsoTestFn = createServerFn({ method: 'POST' })
     })
     return {
       testId,
-      authorizeUrl: `${endpoints.authorizationEndpoint}?${params}`,
+      authorizeUrl: `${authorizationEndpoint}?${params}`,
     }
   })
 
@@ -229,6 +248,9 @@ export type SsoTestDiagnostic = {
           hasRefreshToken: boolean
           expiresIn?: number
         }
+        /** Full decoded ID-token payload as the IdP returned it (groups, roles,
+         *  and any other non-standard claims), for claim-mapping debugging. */
+        allClaims?: Record<string, JsonValue>
       }
     | {
         ok: false

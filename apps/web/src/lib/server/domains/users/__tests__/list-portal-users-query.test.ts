@@ -155,4 +155,39 @@ describe('portal user activity query bounds', () => {
       ])
     )
   })
+
+  it('casts a custom attribute to numeric only behind a numeric-text check', async () => {
+    await listPortalUsers({
+      customAttrs: [
+        { key: 'seats', op: 'gte', value: '5' },
+        { key: 'tier', op: 'gt', value: 'abc' },
+      ],
+    })
+    const main = state.queries.find((query) => query.sql.startsWith('with '))!
+    expect(main).toBeDefined()
+    // One cast, and it is the THEN branch of a CASE whose WHEN checks the text,
+    // so a stored "gold" reads as NULL instead of failing the list (DEF-45).
+    expect(main.sql.split('::numeric')).toHaveLength(2)
+    expect(main.sql).toMatch(
+      /\(CASE WHEN \(.+?->>\$\d+\) ~ \$\d+ THEN \(\(.+?->>\$\d+\)\)::numeric END\) >= \$\d+/
+    )
+    expect(main.params).toContain('^[-+]?([0-9]{1,255}([.][0-9]{0,255})?|[.][0-9]{1,255})$')
+    expect(main.params).toContain(5)
+    // The comparison with no number to compare with is skipped entirely.
+    expect(main.params).not.toContain('tier')
+  })
+
+  it('matches ILIKE filter values literally', async () => {
+    await listPortalUsers({
+      search: '50%_off',
+      emailDomain: 'example.com\\',
+      customAttrs: [{ key: 'plan', op: 'ends_with', value: 'a\\' }],
+    })
+    const main = state.queries.find((query) => query.sql.startsWith('with '))!
+    // A trailing backslash left the pattern ending in the escape character,
+    // which Postgres rejects; `%` and `_` in a value are literal characters.
+    expect(main.params).toContain('%50\\%\\_off%')
+    expect(main.params).toContain('%@example.com\\\\')
+    expect(main.params).toContain('%a\\\\')
+  })
 })

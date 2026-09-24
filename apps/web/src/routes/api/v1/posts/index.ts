@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
-import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
+import { withApiKeyAuth, assertNoStatusChange } from '@/lib/server/domains/api/auth'
 import { InternalError, NotFoundError, ValidationError } from '@/lib/shared/errors'
 import {
   successResponse,
@@ -13,6 +13,7 @@ import {
   parseOptionalTypeId,
   parseTypeIdArray,
 } from '@/lib/server/domains/api/validation'
+import { contentJsonToMarkdown } from '@/lib/server/markdown-tiptap'
 import type { BoardId, PrincipalId, StatusId, TagId } from '@quackback/ids'
 import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-membership.service'
 
@@ -91,7 +92,7 @@ export const Route = createFileRoute('/api/v1/posts/')({
             result.items.map((post) => ({
               id: post.id,
               title: post.title,
-              content: post.content,
+              content: contentJsonToMarkdown(post.contentJson, post.content),
               voteCount: post.voteCount,
               commentCount: post.commentCount,
               boardId: post.boardId,
@@ -139,6 +140,9 @@ export const Route = createFileRoute('/api/v1/posts/')({
           }
 
           const boardId = parseTypeId<BoardId>(parsed.data.boardId, 'board', 'board ID')
+          // A new post starts in the board's default status; an API key never
+          // chooses a status (status changes email subscribers).
+          assertNoStatusChange(parsed.data.statusId)
           const statusId = parseOptionalTypeId<StatusId>(
             parsed.data.statusId,
             'status',
@@ -239,7 +243,7 @@ export const Route = createFileRoute('/api/v1/posts/')({
           return createdResponse({
             id: result.id,
             title: result.title,
-            content: result.content,
+            content: contentJsonToMarkdown(result.contentJson, result.content),
             voteCount: result.voteCount,
             boardId: result.boardId,
             statusId: result.statusId,

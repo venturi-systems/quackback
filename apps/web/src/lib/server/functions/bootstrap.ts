@@ -1,11 +1,10 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
-import { getThemeCookie, type Theme } from '@/lib/shared/theme'
+import { getThemeCookie, parsePrefersColorScheme, type Theme } from '@/lib/shared/theme'
 import { resolveLocale, type SupportedLocale } from '@/lib/shared/i18n'
 import type { Session, PrincipalType } from '@/lib/server/auth/session'
 import type { TenantSettings } from '@/lib/server/domains/settings'
 import type { SessionId, UserId } from '@quackback/ids'
 import { redactTenantSettingsForClient } from '@/lib/shared/redact-portal-config'
-import { effectiveRole } from '@/lib/shared/roles'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'bootstrap' })
@@ -16,6 +15,11 @@ export interface BootstrapData {
   settings: TenantSettings | null
   userRole: 'admin' | 'member' | 'user' | null
   themeCookie: Theme
+  /** OS color-scheme preference from the `Sec-CH-Prefers-Color-Scheme` client
+   *  hint, used by the root document to resolve a `system` theme during SSR so
+   *  even first-time `system` visitors don't flash. null when the browser
+   *  didn't send the hint (e.g. Firefox/Safari, or before it's advertised). */
+  prefersColorScheme: 'light' | 'dark' | null
   /** Dot-paths managed by `/etc/quackback/config.yaml`. The matching
    *  in-app form controls render disabled when the path appears here.
    *  Empty list = nothing locked. */
@@ -72,15 +76,33 @@ async function getSessionAndRole(): Promise<{
     // api-key.service.ts, auth/index.ts anon-link) invalidate explicitly;
     // the 5min TTL backstops anything we miss.
     const cacheKey = CACHE_KEYS.PRINCIPAL_BY_USER(userId)
-    let principalRecord = await cacheGet<{ type: string; role: string }>(cacheKey)
+    let principalRecord = await cacheGet<{ id?: string; type: string; role: string }>(cacheKey)
     if (!principalRecord) {
       principalRecord =
         (await db.query.principal.findFirst({
           where: eq(principal.userId, userId),
-          columns: { type: true, role: true },
+          columns: { id: true, type: true, role: true },
         })) ?? null
       if (principalRecord) await cacheSet(cacheKey, principalRecord, 300)
     }
+
+    // Same rule as requireAuth: a team role counts only on a human principal
+    // whose identity satisfies the team identity rule, and a designated
+    // address is promoted on this request. The cache holds the stored role
+    // only, so the identity is always checked fresh for a team role.
+    const { resolveSessionRole } = await import('@/lib/server/domains/principals/session-role')
+    const role = principalRecord
+      ? await resolveSessionRole(
+          {
+            id: principalRecord.id ?? userId,
+            role: principalRecord.role,
+            type: principalRecord.type,
+            userId,
+          },
+          session.user,
+          headers
+        )
+      : null
 
     return {
       session: {
@@ -103,8 +125,7 @@ async function getSessionAndRole(): Promise<{
           updatedAt: session.user.updatedAt.toISOString(),
         },
       },
-      // A team role only counts on a human principal (see effectiveRole).
-      role: principalRecord ? effectiveRole(principalRecord.role, principalRecord.type) : null,
+      role,
     }
   } catch (error) {
     // During SSR, auth might fail due to env var issues
@@ -117,13 +138,17 @@ async function getSessionAndRole(): Promise<{
 let _initialized = false
 
 const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapData> => {
-  const [{ getTenantSettings }, { getRegisteredAuthProviders }, { config }, { getRequestHeaders }] =
-    await Promise.all([
-      import('@/lib/server/domains/settings/settings.service'),
-      import('@/lib/server/auth/registered-providers'),
-      import('@/lib/server/config'),
-      import('@tanstack/react-start/server'),
-    ])
+  const [
+    { getTenantSettings },
+    { getRegisteredAuthProviders },
+    { config },
+    { getRequestHeaders, setResponseHeader },
+  ] = await Promise.all([
+    import('@/lib/server/domains/settings/settings.service'),
+    import('@/lib/server/auth/registered-providers'),
+    import('@/lib/server/config'),
+    import('@tanstack/react-start/server'),
+  ])
 
   // Single principal read returns both session.principalType + userRole;
   // run in parallel with the settings fetch.
@@ -152,6 +177,22 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
   const themeCookie = getThemeCookie(headers.get('cookie') ?? null)
   const acceptLanguageLocale = resolveLocale(headers.get('accept-language'))
 
+  // Advertise the prefers-color-scheme client hint so the browser tells us the
+  // OS preference. Critical-CH makes Chromium retry the very first navigation
+  // with the hint attached, so even a first-time `system` visitor gets the
+  // right theme server-rendered (one extra request, once per origin). Browsers
+  // that don't support it (Firefox/Safari) ignore it and fall back to the
+  // `color-scheme: light dark` canvas.
+  setResponseHeader('Accept-CH', 'Sec-CH-Prefers-Color-Scheme')
+  setResponseHeader('Critical-CH', 'Sec-CH-Prefers-Color-Scheme')
+  // This document is keyed on every input we render into it: the `theme` cookie
+  // (and the session/role embedded in the dehydrated context), Accept-Language
+  // for `<html lang>`/`dir`, and the color-scheme hint. List them all so a
+  // shared cache can never serve e.g. a dark-cookie document to a no-cookie
+  // visitor that happens to share the same hint.
+  setResponseHeader('Vary', 'Cookie, Accept-Language, Sec-CH-Prefers-Color-Scheme')
+  const prefersColorScheme = parsePrefersColorScheme(headers.get('sec-ch-prefers-color-scheme'))
+
   return {
     baseUrl: config.baseUrl,
     session,
@@ -161,6 +202,7 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
     settings: redactTenantSettingsForClient(settings),
     userRole,
     themeCookie,
+    prefersColorScheme,
     // Config-file paths plus POLICY_MANAGED_SETTINGS (read at request time).
     managedFieldPaths: [
       ...new Set([...(settings?.managedFieldPaths ?? []), ...config.policyManagedSettings]),

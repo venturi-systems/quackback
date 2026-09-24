@@ -4,12 +4,21 @@
  * treated as a portal user, so it fails every team-role check. Such a row can
  * only come from a privilege-escalation path (for example the pre-fix
  * onboarding promotion), so it must never grant team access.
+ *
+ * A human principal exercises a stored team role only while its identity
+ * satisfies the team identity rule (verified team-domain address from a
+ * linked Google or GitHub account). A designated address
+ * (VENTURI_TEAM_ADMIN_EMAILS) is promoted on the next authenticated request.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const hoisted = vi.hoisted(() => ({
-  session: null as null | { user: { id: string; email: string; name: string } },
+  session: null as null | {
+    user: { id: string; email: string; name: string; emailVerified?: boolean }
+  },
   principal: undefined as undefined | Record<string, unknown>,
+  providers: ['github'] as string[],
+  designation: vi.fn(),
   warn: vi.fn(),
 }))
 
@@ -29,11 +38,21 @@ vi.mock('@/lib/server/functions/workspace', () => ({
 }))
 vi.mock('@/lib/server/db', () => ({
   db: {
-    query: { principal: { findFirst: async () => hoisted.principal } },
+    query: {
+      principal: { findFirst: async () => hoisted.principal },
+      account: {
+        findMany: async () => hoisted.providers.map((providerId) => ({ providerId })),
+      },
+    },
     insert: vi.fn(),
   },
   principal: { userId: 'userId' },
+  account: { userId: 'account.userId' },
+  user: { id: 'user.id' },
   eq: vi.fn(),
+}))
+vi.mock('@/lib/server/domains/principals/team-designation', () => ({
+  applyTeamDesignation: (input: unknown) => hoisted.designation(input),
 }))
 vi.mock('@/lib/server/domains/segments/segment-membership.service', () => ({
   segmentIdsForPrincipal: vi.fn(async () => new Set()),
@@ -46,15 +65,30 @@ vi.mock('@/lib/server/logger', () => ({
 
 const { requireAuth, getOptionalAuth } = await import('../auth-helpers')
 
-function signedIn(role: string, type: string) {
-  hoisted.session = { user: { id: 'user_1', email: 'jane@acme.example', name: 'Jane' } }
+function signedIn(role: string, type: string, email = 'jane@acme.example', emailVerified = true) {
+  hoisted.session = { user: { id: 'user_1', email, name: 'Jane', emailVerified } }
   hoisted.principal = { id: 'principal_1', userId: 'user_1', role, type }
 }
+
+const savedDomains = process.env.VENTURI_TEAM_EMAIL_DOMAINS
+const savedAdmins = process.env.VENTURI_TEAM_ADMIN_EMAILS
 
 beforeEach(() => {
   hoisted.session = null
   hoisted.principal = undefined
+  hoisted.providers = ['github']
+  hoisted.designation.mockReset()
+  hoisted.designation.mockResolvedValue(null)
   hoisted.warn.mockClear()
+  process.env.VENTURI_TEAM_EMAIL_DOMAINS = 'acme.example'
+  delete process.env.VENTURI_TEAM_ADMIN_EMAILS
+})
+
+afterEach(() => {
+  if (savedDomains === undefined) delete process.env.VENTURI_TEAM_EMAIL_DOMAINS
+  else process.env.VENTURI_TEAM_EMAIL_DOMAINS = savedDomains
+  if (savedAdmins === undefined) delete process.env.VENTURI_TEAM_ADMIN_EMAILS
+  else process.env.VENTURI_TEAM_ADMIN_EMAILS = savedAdmins
 })
 
 describe('requireAuth role cap', () => {
@@ -99,6 +133,41 @@ describe('requireAuth role cap', () => {
   it('rejects a portal user for team roles', async () => {
     signedIn('user', 'user')
     await expect(requireAuth({ roles: ['admin', 'member'] })).rejects.toThrow(/got user/)
+  })
+})
+
+describe('requireAuth team identity rule', () => {
+  it('rejects a stored admin whose only link is the password credential', async () => {
+    hoisted.providers = ['credential']
+    signedIn('admin', 'user')
+    await expect(requireAuth({ roles: ['admin'] })).rejects.toThrow(/got user/)
+  })
+
+  it('rejects a stored admin whose address is not verified', async () => {
+    signedIn('admin', 'user', 'jane@acme.example', false)
+    await expect(requireAuth({ roles: ['admin'] })).rejects.toThrow(/got user/)
+  })
+
+  it('rejects a stored member at an address outside the team domains', async () => {
+    signedIn('member', 'user', 'jane@gmail.com')
+    await expect(requireAuth({ roles: ['admin', 'member'] })).rejects.toThrow(/got user/)
+  })
+
+  it('lets a Google-linked team account through', async () => {
+    hoisted.providers = ['google', 'credential']
+    signedIn('admin', 'user')
+    expect((await requireAuth({ roles: ['admin'] })).principal.role).toBe('admin')
+  })
+
+  it('promotes a designated address on the next authenticated request', async () => {
+    process.env.VENTURI_TEAM_ADMIN_EMAILS = 'jane@acme.example'
+    hoisted.designation.mockResolvedValue({ newRole: 'admin' })
+    signedIn('user', 'user')
+    const ctx = await requireAuth({ roles: ['admin'] })
+    expect(ctx.principal.role).toBe('admin')
+    expect(hoisted.designation).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user_1', source: 'session', includeInvitations: false })
+    )
   })
 })
 

@@ -15,14 +15,10 @@ import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'audit' })
 
-/** A JSON-shaped value — fits into a Postgres jsonb column. */
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: JsonValue }
-  | JsonValue[]
+/** A JSON-shaped value — fits into a Postgres jsonb column. Re-exported from the
+ *  shared module so client/shared code can reference it without importing from
+ *  `@/lib/server`. */
+export type { JsonValue } from '@/lib/shared/json'
 
 /**
  * Closed taxonomy of audit event types.
@@ -99,6 +95,26 @@ export type AuditEventType =
   | 'portal.access.denied' // OWASP authz_fail — gate denied an authenticated visitor
   | 'auth.signin.failed' // OWASP authn_login_fail — twin of auth.signin.success
   | 'portal.invite.expired' // emitted by the daily sweep for pending invites past their expiry
+  // landing-page#2309: workspace changes the audit log did not cover
+  | 'board.created'
+  | 'board.updated'
+  | 'board.deleted'
+  | 'post.status.changed'
+  | 'status.created'
+  | 'status.updated'
+  | 'status.deleted'
+  | 'status.reordered'
+  | 'settings.changed' // metadata.section names the settings area
+  | 'widget.secret.regenerated'
+  | 'api_key.created'
+  | 'api_key.rotated'
+  | 'api_key.revoked'
+  | 'api_key.renamed'
+  | 'webhook.created'
+  | 'webhook.updated'
+  | 'webhook.deleted'
+  | 'webhook.secret_rotated'
+  | 'audit.exported'
 
 export type AuditEventOutcome = 'success' | 'failure'
 
@@ -195,9 +211,9 @@ const MAX_REASON_LEN = 200
 
 /**
  * Default retention for audit-log rows. 365 days covers SOC2's
- * one-year minimum with no extra work for operators. Self-hosters
- * can override via the `auditLogRetentionDays` field on
- * `settings.audit_config` (added below). 0 = keep forever.
+ * one-year minimum with no extra work for operators. There is no
+ * workspace setting that overrides it; `pruneAuditLog` accepts a
+ * `retentionDays` argument, and 0 keeps rows forever.
  */
 export const DEFAULT_AUDIT_RETENTION_DAYS = 365
 

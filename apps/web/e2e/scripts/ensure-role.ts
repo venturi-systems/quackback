@@ -61,6 +61,24 @@ async function ensureRole(): Promise<void> {
     console.log(`User ${email} already has role: ${role}`)
   }
 
+  // Team identity rule: a team role takes effect only for a verified address
+  // at a team domain (the CI .env sets VENTURI_TEAM_EMAIL_DOMAINS=example.com)
+  // from a linked Google or GitHub account. Test users sign in by magic link,
+  // so give a team-role user a verified email and a stand-in GitHub link.
+  if (role === 'admin' || role === 'member') {
+    await sql`
+      UPDATE "user" SET email_verified = true WHERE id = ${userId}
+    `
+    await sql`
+      INSERT INTO account (id, account_id, provider_id, user_id, created_at, updated_at)
+      SELECT ${randomUUID()}, ${`e2e-github-${userId}`}, 'github', ${userId}, NOW(), NOW()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM account WHERE user_id = ${userId} AND provider_id = 'github'
+      )
+    `
+    console.log(`Linked a stand-in GitHub account for ${email}`)
+  }
+
   // Also update user name if it's empty (Better-auth creates users with empty name)
   if (!users[0].name || users[0].name.trim() === '') {
     await sql`

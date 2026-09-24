@@ -3,8 +3,10 @@
  *
  * Validates that a URL is safe to fetch from the server:
  * - scheme allow-list (http/https only)
- * - DNS resolution with every returned address checked against a
- *   private / link-local blocklist
+ * - DNS resolution with every returned address checked by
+ *   `isPrivateAddress`: parsed with `node:net`, IPv4-mapped IPv6 judged
+ *   as the IPv4 address it carries, and every non-global or
+ *   special-purpose range refused
  * - returns the resolved IP so the caller can pin it across the fetch
  *   and close DNS-rebinding TOCTOU windows
  *
@@ -15,6 +17,7 @@
  */
 
 import { lookup } from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { request as httpsRequest } from 'node:https'
 import { request as httpRequest } from 'node:http'
 import { checkServerIdentity } from 'node:tls'
@@ -33,118 +36,157 @@ export function isSafeScheme(url: string): boolean {
 }
 
 /**
- * Parse an IPv4 dotted-quad string to a 32-bit number.
- * Returns null for any input that isn't a well-formed IPv4 address.
+ * Parse an IPv4 dotted quad to a 32-bit unsigned number. Only the canonical
+ * form `node:net`'s `isIP` accepts parses (four decimal octets, no leading
+ * zeros); anything else is null and fails closed in `isPrivateAddress`.
  */
 function parseIpv4(addr: string): number | null {
-  const parts = addr.split('.')
-  if (parts.length !== 4) return null
-  let result = 0
-  for (const part of parts) {
-    if (!/^\d+$/.test(part)) return null
-    const n = Number(part)
-    if (n < 0 || n > 255) return null
-    result = (result << 8) | n
-  }
-  return result >>> 0
-}
-
-/** Is the given IPv4 address (as 32-bit int) inside the CIDR range (base, maskBits)? */
-function ipv4InRange(ip: number, baseCidr: string): boolean {
-  const [base, bitsStr] = baseCidr.split('/')
-  const baseInt = parseIpv4(base)
-  const bits = Number(bitsStr)
-  if (baseInt === null || Number.isNaN(bits)) return false
-  if (bits === 0) return true
-  const mask = (0xffffffff << (32 - bits)) >>> 0
-  return (ip & mask) === (baseInt & mask)
+  if (isIP(addr) !== 4) return null
+  return addr.split('.').reduce((acc, octet) => ((acc << 8) | Number(octet)) >>> 0, 0)
 }
 
 /**
- * Extract the embedded IPv4 address from an IPv4-mapped IPv6 address.
- * Handles both dotted-decimal (`::ffff:127.0.0.1`) and hextet
- * (`::ffff:7f00:1`) representations. Returns the IPv4 as a dotted string
- * or null if the input isn't IPv4-mapped.
+ * Parse IPv6 text to its eight 16-bit groups, or null. Accepts every form
+ * `node:net`'s `isIP` accepts: `::` compression, any letter case, an embedded
+ * dotted-quad tail (`::ffff:127.0.0.1`) and a zone index (`fe80::1%eth0`),
+ * which is dropped.
  */
-function extractMappedIpv4(lowerAddr: string): string | null {
-  if (!lowerAddr.startsWith('::ffff:')) return null
-  const suffix = lowerAddr.slice('::ffff:'.length)
-  // Dotted-decimal form: ::ffff:127.0.0.1
-  if (parseIpv4(suffix) !== null) {
-    return suffix
+function parseIpv6(addr: string): number[] | null {
+  // Validate the whole string, zone included, so a malformed zone fails closed.
+  if (isIP(addr) !== 6) return null
+  const zone = addr.indexOf('%')
+  let text = (zone === -1 ? addr : addr.slice(0, zone)).toLowerCase()
+  if (isIP(text) !== 6) return null
+  // A dotted-quad tail is the last two groups written in decimal.
+  const lastColon = text.lastIndexOf(':')
+  const tail = text.slice(lastColon + 1)
+  if (tail.includes('.')) {
+    const v4 = parseIpv4(tail)
+    if (v4 === null) return null
+    const high = (v4 >>> 16).toString(16)
+    const low = (v4 & 0xffff).toString(16)
+    text = `${text.slice(0, lastColon + 1)}${high}:${low}`
   }
-  // Hextet form: ::ffff:7f00:1 (= ::ffff:127.0.0.1)
-  const hextets = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(suffix)
-  if (hextets) {
-    const hi = parseInt(hextets[1], 16)
-    const lo = parseInt(hextets[2], 16)
-    if (hi > 0xffff || lo > 0xffff) return null
-    const ip = ((hi << 16) | lo) >>> 0
-    const a = (ip >>> 24) & 0xff
-    const b = (ip >>> 16) & 0xff
-    const c = (ip >>> 8) & 0xff
-    const d = ip & 0xff
-    return `${a}.${b}.${c}.${d}`
+  const halves = text.split('::')
+  if (halves.length > 2) return null
+  const groupsOf = (part: string) =>
+    part === '' ? [] : part.split(':').map((group) => parseInt(group, 16))
+  const head = groupsOf(halves[0])
+  const rest = halves.length === 2 ? groupsOf(halves[1]) : []
+  const zeros = 8 - head.length - rest.length
+  if (halves.length === 2 ? zeros < 1 : zeros !== 0) return null
+  const groups = [...head, ...new Array<number>(zeros).fill(0), ...rest]
+  return groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null
+}
+
+type Ipv4Range = { base: number; mask: number }
+type Ipv6Prefix = { groups: number[]; bits: number }
+
+function ipv4Range(cidr: string): Ipv4Range {
+  const [base, bits] = cidr.split('/')
+  const parsed = parseIpv4(base)
+  if (parsed === null) throw new Error(`invalid IPv4 range ${cidr}`)
+  const mask = Number(bits) === 0 ? 0 : (0xffffffff << (32 - Number(bits))) >>> 0
+  return { base: (parsed & mask) >>> 0, mask }
+}
+
+function ipv6Prefix(cidr: string): Ipv6Prefix {
+  const [base, bits] = cidr.split('/')
+  const groups = parseIpv6(base)
+  if (groups === null) throw new Error(`invalid IPv6 prefix ${cidr}`)
+  return { groups, bits: Number(bits) }
+}
+
+function inIpv4Range(ip: number, { base, mask }: Ipv4Range): boolean {
+  return ((ip & mask) >>> 0) === base
+}
+
+function inIpv6Prefix(groups: number[], prefix: Ipv6Prefix): boolean {
+  for (let i = 0; i * 16 < prefix.bits; i++) {
+    const take = Math.min(16, prefix.bits - i * 16)
+    const mask = (0xffff << (16 - take)) & 0xffff
+    if ((groups[i] & mask) !== (prefix.groups[i] & mask)) return false
   }
-  return null
+  return true
 }
 
 /**
- * IPv6 handling: we normalize to lowercase and check leading-segment prefixes.
- * This is a pragmatic approximation — we don't need full RFC 4291 parsing for
- * the small set of ranges we block.
+ * IPv4 ranges a server-side fetch must never reach: every range the IANA IPv4
+ * Special-Purpose Address Registry marks as not globally reachable, plus
+ * multicast and the deprecated 6to4 relay anycast block. This guard serves
+ * webhooks, image rehosting and OIDC: tighten it, never loosen it.
  */
-function isPrivateIpv6(addr: string): boolean {
-  const lower = addr.toLowerCase()
-  // IPv4-mapped IPv6 — covers both ::ffff:127.0.0.1 (dotted) and ::ffff:7f00:1 (hextet)
-  const mappedV4 = extractMappedIpv4(lower)
-  if (mappedV4 !== null) {
-    return isPrivateIpv4(mappedV4)
+const BLOCKED_IPV4 = [
+  '0.0.0.0/8', // "this network" (RFC 791), including 0.0.0.0 "this host"
+  '10.0.0.0/8', // private use (RFC 1918)
+  '100.64.0.0/10', // shared address space, CGNAT (RFC 6598)
+  '127.0.0.0/8', // loopback (RFC 1122)
+  '169.254.0.0/16', // link-local (RFC 3927), including cloud metadata 169.254.169.254
+  '172.16.0.0/12', // private use (RFC 1918)
+  '192.0.0.0/24', // IETF protocol assignments (RFC 6890), including 192.0.0.8 and 192.0.0.170/171
+  '192.0.2.0/24', // documentation, TEST-NET-1 (RFC 5737)
+  '192.88.99.0/24', // deprecated 6to4 relay anycast (RFC 7526)
+  '192.168.0.0/16', // private use (RFC 1918)
+  '198.18.0.0/15', // benchmarking (RFC 2544)
+  '198.51.100.0/24', // documentation, TEST-NET-2 (RFC 5737)
+  '203.0.113.0/24', // documentation, TEST-NET-3 (RFC 5737)
+  '224.0.0.0/4', // multicast (RFC 5771)
+  '240.0.0.0/4', // reserved (RFC 1112), including limited broadcast 255.255.255.255
+].map(ipv4Range)
+
+/**
+ * Global unicast (RFC 4291 2.4). IANA allocates public IPv6 space only from
+ * 2000::/3, so an address outside it is never a legitimate fetch target. That
+ * one rule blocks the unspecified and loopback addresses, IPv4-compatible
+ * (`::/96`, e.g. `::7f00:1`) and IPv4-translated (`::ffff:0:0:0/96`) forms,
+ * NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`), discard-only `100::/64`, SRv6
+ * `5f00::/16`, unique-local `fc00::/7`, link-local `fe80::/10`, deprecated
+ * site-local `fec0::/10`, multicast `ff00::/8` and all unallocated space.
+ */
+const GLOBAL_UNICAST_IPV6 = ipv6Prefix('2000::/3')
+
+/**
+ * Prefixes inside 2000::/3 that are still not fetch targets: the IANA IPv6
+ * Special-Purpose Address Registry's non-global entries, and the transition
+ * ranges that embed an attacker-chosen IPv4 address.
+ */
+const BLOCKED_GLOBAL_IPV6 = [
+  '2001::/23', // IETF protocol assignments (RFC 2928): Teredo 2001::/32, benchmarking, ORCHID
+  '2001:db8::/32', // documentation (RFC 3849)
+  '2002::/16', // 6to4 (RFC 3056): embeds an IPv4 address
+  '3fff::/20', // documentation (RFC 9637)
+].map(ipv6Prefix)
+
+/** IPv4-mapped IPv6, `::ffff:0:0/96` (RFC 4291 2.5.5.2). */
+const IPV4_MAPPED = ipv6Prefix('::ffff:0:0/96')
+
+function isBlockedIpv4(ip: number): boolean {
+  return BLOCKED_IPV4.some((range) => inIpv4Range(ip, range))
+}
+
+function isBlockedIpv6(groups: number[]): boolean {
+  // An IPv4-mapped address is dialled as the IPv4 address it carries, so it is
+  // judged as that address: `::ffff:8.8.8.8` is public, `::ffff:7f00:1` is not.
+  if (inIpv6Prefix(groups, IPV4_MAPPED)) {
+    return isBlockedIpv4(((groups[6] << 16) | groups[7]) >>> 0)
   }
-  // Documentation (RFC 3849) 2001:db8::/32 — non-routable
-  if (/^2001:0?db8:/.test(lower)) return true
-  // Loopback
-  if (lower === '::1') return true
-  // Unspecified
-  if (lower === '::' || lower === '0:0:0:0:0:0:0:0') return true
-  // Unique local fc00::/7 — first byte 0xfc or 0xfd
-  if (/^(fc|fd)[0-9a-f]{2}:/.test(lower)) return true
-  // Link-local fe80::/10 — fe8x, fe9x, feax, febx
-  if (/^fe[89ab][0-9a-f]:/.test(lower)) return true
-  // Transition/tunneling ranges that embed an attacker-controllable IPv4 (or
-  // tunnel arbitrary traffic): a server-side fetch never legitimately targets
-  // one, and each is a private-IPv4-embedding SSRF bypass around the v4 check.
-  // NAT64 64:ff9b::/96
-  if (/^0*64:0*ff9b:/.test(lower)) return true
-  // 6to4 2002::/16 (the whole range is 6to4-mapped IPv4)
-  if (/^2002:/.test(lower)) return true
-  // Teredo 2001:0000::/32 (second hextet all-zero; distinct from 2001:db8 above
-  // and from routable 2001:xxxx globals)
-  if (/^2001:0{1,4}:/.test(lower)) return true
-  return false
+  if (!inIpv6Prefix(groups, GLOBAL_UNICAST_IPV6)) return true
+  return BLOCKED_GLOBAL_IPV6.some((prefix) => inIpv6Prefix(groups, prefix))
 }
 
-function isPrivateIpv4(addr: string): boolean {
-  const ip = parseIpv4(addr)
-  if (ip === null) return false
-  const blocklist = [
-    '0.0.0.0/8', // this-network
-    '10.0.0.0/8', // RFC 1918
-    '100.64.0.0/10', // CGNAT
-    '127.0.0.0/8', // loopback
-    '169.254.0.0/16', // link-local (includes cloud metadata 169.254.169.254)
-    '172.16.0.0/12', // RFC 1918
-    '192.168.0.0/16', // RFC 1918
-  ]
-  return blocklist.some((cidr) => ipv4InRange(ip, cidr))
-}
-
-/** Is the given textual IP address in any private / link-local / loopback range? */
+/**
+ * Is the given textual IP address one a server-side fetch must not reach? True
+ * for private, loopback, link-local, special-purpose and non-global addresses,
+ * and for anything that does not parse as an IP address: this guard fails
+ * closed.
+ */
 export function isPrivateAddress(addr: string): boolean {
   if (addr.includes(':')) {
-    return isPrivateIpv6(addr)
+    const groups = parseIpv6(addr)
+    return groups === null || isBlockedIpv6(groups)
   }
-  return isPrivateIpv4(addr)
+  const ip = parseIpv4(addr)
+  return ip === null || isBlockedIpv4(ip)
 }
 
 export type UrlSafetyResult =
@@ -205,6 +247,17 @@ export class ResponseTooLargeError extends Error {
   constructor(public readonly maxResponseBytes: number) {
     super(`safeFetch: response body exceeded ${maxResponseBytes} bytes`)
     this.name = 'ResponseTooLargeError'
+  }
+}
+
+/**
+ * Thrown by `safeFetch` when the peer answers with a status a `Response`
+ * cannot carry (outside 200-599: a 1xx as the final status, or 600+).
+ */
+export class InvalidResponseStatusError extends Error {
+  constructor(public readonly status: number) {
+    super(`safeFetch: unusable response status ${status}`)
+    this.name = 'InvalidResponseStatusError'
   }
 }
 
@@ -303,21 +356,34 @@ export async function safeFetch(url: string, init: SafeFetchInit = {}): Promise<
       (res: IncomingMessage) => {
         const chunks: Buffer[] = []
         let total = 0
+        // Runs inside the response's event listeners, so it must never throw:
+        // an exception there escapes this promise (an uncaught exception) and
+        // leaves it pending forever. Every failure rejects instead.
         const finish = () => {
           const status = res.statusCode ?? 502
-          const nullBody = status < 200 || status === 204 || status === 304
+          if (status < 200 || status > 599) {
+            reject(new InvalidResponseStatusError(status))
+            return
+          }
+          // Null-body statuses: the Response constructor refuses a body on them.
+          const nullBody = status === 204 || status === 205 || status === 304
           const headerEntries: [string, string][] = []
           for (const [k, v] of Object.entries(res.headers)) {
             if (typeof v === 'string') headerEntries.push([k, v])
             else if (Array.isArray(v)) headerEntries.push([k, v.join(', ')])
           }
-          resolve(
-            new Response(nullBody ? null : Buffer.concat(chunks), {
-              status,
-              statusText: res.statusMessage ?? '',
-              headers: headerEntries,
-            })
-          )
+          try {
+            resolve(
+              new Response(nullBody ? null : Buffer.concat(chunks), {
+                status,
+                statusText: res.statusMessage ?? '',
+                headers: headerEntries,
+              })
+            )
+          } catch (err) {
+            // e.g. a status text or header value the Response refuses.
+            reject(err)
+          }
         }
         res.on('data', (chunk: Buffer) => {
           total += chunk.length

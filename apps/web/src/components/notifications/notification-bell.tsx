@@ -39,7 +39,7 @@ export function NotificationBell({ className, popoverSide = 'right' }: Notificat
           <PopoverTrigger asChild>
             <button
               className={cn(
-                'relative flex items-center justify-center w-10 h-10 rounded-lg',
+                'relative flex items-center justify-center w-10 h-10 pointer-coarse:size-(--ds-component-touch-minimum) rounded-lg',
                 'text-muted-foreground/70 hover:text-foreground hover:bg-muted/50',
                 'transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 className

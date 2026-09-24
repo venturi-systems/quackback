@@ -8,29 +8,62 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/components/shared/error-page'
+import {
+  isSearchCount,
+  searchChoice,
+  searchDate,
+  searchId,
+  searchIdCsv,
+  searchText,
+  searchWhere,
+} from '@/lib/shared/search-params'
+import { parseCustomAttrs } from '@/lib/shared/custom-attr-filters'
 
+/**
+ * An activity-count filter in its URL form, `op:value` (`gte:5`). The list
+ * query compares the value with a `count(*)::int`, and its server function
+ * accepts only these operators, so anything else would fail the request.
+ */
+function isActivityFilter(value: string): boolean {
+  const [op, count, ...rest] = value.split(':')
+  return (
+    rest.length === 0 &&
+    ['gt', 'gte', 'lt', 'lte', 'eq'].includes(op) &&
+    count !== undefined &&
+    isSearchCount(count)
+  )
+}
+
+// Fields fall back instead of throwing, so a hand-edited filter URL
+// (`?verified=true`, which the router parses as a boolean) opens the list
+// instead of failing with a 500. Values that feed the list query are also held
+// to what it accepts: ids must be TypeIDs of their entity (id columns throw on
+// anything else), dates must be real dates, and activity counts must be
+// `op:value` with a known operator and a whole number.
+// See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  search: z.string().optional(),
-  verified: z.enum(['true', 'false']).optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  emailDomain: z.string().optional(),
-  postCount: z.string().optional(),
-  voteCount: z.string().optional(),
-  commentCount: z.string().optional(),
-  customAttrs: z.string().optional(),
-  includeAnonymous: z.enum(['true']).optional(),
+  search: searchText(),
+  verified: searchChoice(['true', 'false']),
+  dateFrom: searchDate(),
+  dateTo: searchDate(),
+  emailDomain: searchText(),
+  postCount: searchWhere(isActivityFilter),
+  voteCount: searchWhere(isActivityFilter),
+  commentCount: searchWhere(isActivityFilter),
+  customAttrs: searchText(),
+  includeAnonymous: searchChoice(['true']),
   sort: z
     .enum(['newest', 'oldest', 'most_active', 'most_posts', 'most_comments', 'most_votes', 'name'])
     .optional()
-    .default('newest'),
-  selected: z.string().optional(),
-  segments: z.string().optional(),
+    .default('newest')
+    .catch('newest'),
+  selected: searchId('principal'),
+  segments: searchIdCsv('segment'),
   // When set, /admin/users renders the Invitations view instead of the
   // signed-up users list. 'pending' is the deep-link target from the
   // Portal settings page; the view itself lets admins flip between
   // statuses without leaving the page.
-  invites: z.enum(['pending', 'accepted', 'expired', 'all']).optional(),
+  invites: searchChoice(['pending', 'accepted', 'expired', 'all']),
 })
 
 type SearchParams = z.infer<typeof searchSchema>
@@ -52,18 +85,6 @@ function parseSearchToQueryParams(deps: SearchParams) {
     return { op: op as 'gt' | 'gte' | 'lt' | 'lte' | 'eq', value: Number(val) }
   }
 
-  // Parse custom attrs "key:op:value,key2:op:value2" format
-  function parseCustomAttrs(raw?: string) {
-    if (!raw) return undefined
-    return raw
-      .split(',')
-      .map((part) => {
-        const [key, op, ...rest] = part.split(':')
-        return key && op ? { key, op, value: rest.join(':') } : null
-      })
-      .filter(Boolean) as { key: string; op: string; value: string }[]
-  }
-
   return {
     search: deps.search,
     verified,
@@ -73,6 +94,7 @@ function parseSearchToQueryParams(deps: SearchParams) {
     postCount: parseActivityFilter(deps.postCount),
     voteCount: parseActivityFilter(deps.voteCount),
     commentCount: parseActivityFilter(deps.commentCount),
+    // "key:op:value,…"; a numeric comparison with a non-numeric value is dropped
     customAttrs: parseCustomAttrs(deps.customAttrs),
     sort: deps.sort,
     page: 1,

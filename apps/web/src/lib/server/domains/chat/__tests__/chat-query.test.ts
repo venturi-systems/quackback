@@ -93,7 +93,7 @@ import {
   resolveVisitorConversation,
   enrichMessagesForAgent,
 } from '../chat.query'
-import { isNull, eq } from '@/lib/server/db'
+import { isNull, eq, sql } from '@/lib/server/db'
 
 const visitorId = 'principal_visitor' as PrincipalId
 const agentId = 'principal_agent' as PrincipalId
@@ -333,6 +333,24 @@ describe('listConversationsForAgent assignee filter', () => {
   it('does not constrain the assignee by default', async () => {
     await listConversationsForAgent({})
     expect(isNull).not.toHaveBeenCalled()
+  })
+})
+
+describe('listConversationsForAgent search', () => {
+  // The values interpolated into every sql`` template the builder evaluated.
+  const sqlValues = () => vi.mocked(sql).mock.calls.flatMap((call) => call.slice(1))
+
+  it('matches the search text literally, so a trailing backslash cannot end the pattern', async () => {
+    // DEF-45: `?q=a%5C` left the ILIKE pattern ending in the escape character,
+    // which Postgres rejects, and failed the whole list.
+    await listConversationsForAgent({ search: ' 50%_off\\ ' })
+    expect(sqlValues()).toContain('%50\\%\\_off\\\\%')
+    expect(sqlValues()).not.toContain('%50%_off\\%')
+  })
+
+  it('adds no search condition for a blank search', async () => {
+    await listConversationsForAgent({ search: '   ' })
+    expect(sqlValues().some((v) => typeof v === 'string' && v.startsWith('%'))).toBe(false)
   })
 })
 
