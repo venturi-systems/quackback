@@ -585,8 +585,11 @@ a svg,
 }
 
 @media (pointer: coarse) {
+  /* Native actions and Radix-composed triggers may not retain the Button slot.
+     Keep semantic selection widgets on their own geometry and target rules. */
+  button:not([role='checkbox']):not([role='switch']):not([role='radio']),
   [data-slot='button'] {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: var(--ds-component-touch-minimum);
+    min-width: var(--ds-component-touch-minimum);
   }
 }
