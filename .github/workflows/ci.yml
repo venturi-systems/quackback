@@ -100,6 +100,8 @@ jobs:
           restore-keys: ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun run lint
+      - name: Typecheck design acceptance and its fixture dependencies
+        run: bunx tsc --noEmit -p apps/web/tsconfig.design-acceptance.json
       - run: bun run --filter @quackback/widget build
       - run: bun run --filter @quackback/widget test
       - run: bun run build
@@ -426,6 +428,8 @@ jobs:
     env:
       SECRET_KEY: test-secret-for-ci-only-must-be-at-least-32-characters
       REDIS_URL: redis://localhost:6379
+      TRUSTED_ORIGINS: http://acme.localhost:3000
+      VENTURI_TEAM_EMAIL_DOMAINS: example.com
       # Duration-balanced shard boundaries.
       #
       # `--shard=i/8` splits by test COUNT, not duration: filterForShard sums
@@ -520,6 +524,17 @@ jobs:
           VENTURI_TEAM_EMAIL_DOMAINS=example.com
           EOF
 
+      # Reuses the existing eight jobs and their disposable service lifecycle.
+      # No new job, matrix leg or scheduled run; bounded process checks only.
+      - name: Validate isolated services and all fixture environment loaders
+        working-directory: apps/web
+        env:
+          DESIGN_FIXTURE_POSTGRES_ID: ${{ job.services.postgres.id }}
+          DESIGN_FIXTURE_REDIS_ID: ${{ job.services.redis.id }}
+        run: |
+          bun e2e/utils/design-fixture-guard.ts --preflight
+          printf 'DESIGN_FIXTURE_POSTGRES_ID=%s\nDESIGN_FIXTURE_REDIS_ID=%s\n' "$DESIGN_FIXTURE_POSTGRES_ID" "$DESIGN_FIXTURE_REDIS_ID" >> "$GITHUB_ENV"
+
       - run: bun run --filter @quackback/widget build
 
       # The database setup steps each get their own cap. The job cap alone
@@ -534,7 +549,8 @@ jobs:
       # fails within five minutes. Raise it only with a measured reason.
       - run: bun run db:migrate
         timeout-minutes: 5
-      - run: bun run db:seed
+      # Match the validated packages/db dotenv working directory.
+      - run: bun run --cwd packages/db db:seed
         timeout-minutes: 5
 
       - name: Install the Playwright browser
