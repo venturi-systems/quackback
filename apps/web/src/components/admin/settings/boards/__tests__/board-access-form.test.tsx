@@ -538,3 +538,78 @@ describe('<BoardAccessForm> policy-managed', () => {
     expect(screen.getByRole('button', { name: 'View: Anyone' })).not.toBeDisabled()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Policy-owned Anyone tier (POLICY_MANAGED_SETTINGS boards.anonymousAccess)
+// ---------------------------------------------------------------------------
+
+describe('<BoardAccessForm> policy-owned Anyone tier', () => {
+  const SIGNED_IN_ACCESS: BoardAccess = {
+    ...PUBLIC_ACCESS,
+    view: 'authenticated',
+  }
+
+  function renderAnonManaged(access: BoardAccess, managed = false) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={client}>
+        <BoardAccessForm
+          board={{ id: BOARD_ID, access }}
+          managed={managed}
+          anonymousManaged={true}
+        />
+      </QueryClientProvider>
+    )
+  }
+
+  it('explains the rule and never offers Anyone on any action', () => {
+    renderAnonManaged(SIGNED_IN_ACCESS)
+    expect(screen.getByTestId('managed-setting-note')).toHaveTextContent(
+      'The Anyone (no sign-in) tier is managed by the deployment configuration'
+    )
+    for (const action of ['View', 'Vote', 'Comment', 'Submit posts']) {
+      const cell = screen.getByRole('button', { name: `${action}: Anyone` })
+      expect(cell).toBeDisabled()
+      expect(cell).toHaveAttribute('data-disabled-reason', 'policy')
+    }
+    // The other tiers stay available.
+    expect(screen.getByRole('button', { name: 'View: Team only' })).not.toBeDisabled()
+  })
+
+  it('disables the Public preset, which opens viewing to anyone', () => {
+    renderAnonManaged(SIGNED_IN_ACCESS)
+    const publicPreset = screen.getByRole('button', { name: 'Public' })
+    expect(publicPreset).toBeDisabled()
+    expect(publicPreset).toHaveTextContent('requires sign-in on every board')
+    expect(screen.getByRole('button', { name: 'Private' })).not.toBeDisabled()
+    fireEvent.click(publicPreset)
+    expect(isCellSelected('View', 'Signed-in')).toBe(true)
+  })
+
+  it('bumps a board that still holds Anyone to Signed-in and leaves the form dirty', async () => {
+    renderAnonManaged(PUBLIC_ACCESS)
+    await waitFor(() => expect(isCellSelected('View', 'Signed-in')).toBe(true))
+    expect(screen.getByRole('region', { name: /save changes/i }).getAttribute('data-dirty')).toBe(
+      'true'
+    )
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+    await waitFor(() =>
+      expect(mutate).toHaveBeenCalledWith({
+        boardId: BOARD_ID,
+        access: expect.objectContaining({ view: 'authenticated' }),
+      })
+    )
+  })
+
+  it('leaves a board the policy owns outright to its own lock, showing what the policy wrote', () => {
+    renderAnonManaged(PUBLIC_ACCESS, true)
+    expect(screen.getAllByTestId('managed-setting-note')).toHaveLength(1)
+    expect(screen.getByTestId('managed-setting-note')).toHaveTextContent(
+      'Board access is managed by the deployment configuration'
+    )
+    expect(isCellSelected('View', 'Anyone')).toBe(true)
+    expect(
+      screen.getByRole('region', { name: /save changes/i }).getAttribute('data-dirty')
+    ).toBeNull()
+  })
+})

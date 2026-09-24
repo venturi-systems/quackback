@@ -1,4 +1,8 @@
 import { test, expect } from '@playwright/test'
+import { setHelpCenterEnabled } from '../../utils/access-helpers'
+
+// The flags are workspace-wide. One worker must own their enable/restore pair.
+test.describe.configure({ mode: 'serial' })
 
 /**
  * Public Help Center E2E tests.
@@ -6,10 +10,13 @@ import { test, expect } from '@playwright/test'
  * These tests cover the public-facing help center at /hc.
  * No authentication is required.
  *
- * The help center requires the `helpCenter` feature flag and `helpCenterConfig.enabled`
- * to be true for the acme workspace. Tests degrade gracefully (early return or
- * conditional assertions) when the flag is off or seed data is absent.
+ * The suite explicitly enables both help-center flags and restores them after
+ * execution. A disabled-feature 404 must never stand in for the help-center UI.
+ * Assertions that require articles or categories still depend on seeded content.
  */
+
+test.beforeAll(() => setHelpCenterEnabled('enable'))
+test.afterAll(() => setHelpCenterEnabled('restore'))
 
 test.describe('Public Help Center', () => {
   test.beforeEach(async ({ page }) => {

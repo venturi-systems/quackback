@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useRouteContext } from '@tanstack/react-router'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
-import { generateThemeCSS, getGoogleFontsUrl } from '@/lib/shared/theme'
+import { generateThemeCSS } from '@/lib/shared/theme'
 import type { BrandingConfig } from '@/lib/server/domains/settings/settings.types'
 
 interface PortalAuthShellProps {
@@ -34,14 +34,9 @@ export function PortalAuthShell({ heading, subheading, children, footer }: Porta
     const hasThemeConfig = brandingConfig.light || brandingConfig.dark
     return hasThemeConfig ? generateThemeCSS(brandingConfig) : ''
   }, [brandingConfig])
-  const googleFontsUrl = useMemo(
-    () => (brandingConfig ? getGoogleFontsUrl(brandingConfig) : null),
-    [brandingConfig]
-  )
 
   return (
     <>
-      {googleFontsUrl && <link rel="stylesheet" href={googleFontsUrl} />}
       {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
       {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
       <PublicPageFrame className="public-auth">

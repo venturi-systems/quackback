@@ -78,3 +78,42 @@ describe('fork migration journal', () => {
     }
   })
 })
+
+describe('upstream migrations taken after the fork migrations', () => {
+  const lastForkIndex = Math.max(
+    ...journal.entries.map((e, i) => (/^9\d{3}_venturi_/.test(e.tag) ? i : -1))
+  )
+  const lastForkWhen = journal.entries[lastForkIndex]!.when
+  const later = journal.entries.slice(lastForkIndex + 1)
+
+  /** Upstream QuackbackIO/quackback v0.13.0..v0.13.2 (landing-page#2309, OPT-08). */
+  const UPSTREAM_V0_13_2 = [
+    '0118_identity_provider_consolidate_default_role',
+    '0119_changelog_display_date',
+    '0120_changelog_notified_at',
+    '0121_board_slug_backfill',
+    '0122_help_center_slug_backfill',
+    '0123_csat_comment_subscription_backfill',
+    '0124_conversation_channel_messenger',
+    '0125_conversation_channel_drop_default',
+  ]
+
+  it('journals upstream 0118..0125 in order, directly after the fork migrations', () => {
+    expect(later.slice(0, UPSTREAM_V0_13_2.length).map((e) => e.tag)).toEqual(UPSTREAM_V0_13_2)
+    for (const e of later) expect(existsSync(join(drizzleDir, `${e.tag}.sql`))).toBe(true)
+  })
+
+  it('dates every later migration after the last fork migration, in increasing order', () => {
+    // Drizzle applies a migration only when its `when` is later than the newest
+    // applied one, so a database already at 9002 still applies each of these.
+    let previous = lastForkWhen
+    for (const e of later) {
+      expect(e.when).toBeGreaterThan(previous)
+      previous = e.when
+    }
+  })
+
+  it('keeps journal indexes contiguous', () => {
+    expect(journal.entries.map((e) => e.idx)).toEqual(journal.entries.map((_, i) => i))
+  })
+})

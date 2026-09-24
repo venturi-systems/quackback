@@ -12,6 +12,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import Underline from '@tiptap/extension-underline'
 import Image from '@tiptap/extension-image'
+import { emojis as defaultEmojis } from '@tiptap/extension-emoji'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table } from '@tiptap/extension-table'
@@ -70,6 +71,134 @@ export function markdownToTiptapJson(markdown: string): TiptapContent {
  */
 export function tiptapJsonToMarkdown(json: TiptapContent | JSONContent): string {
   return manager.serialize(json as JSONContent)
+}
+
+/**
+ * Image node types found in stored `contentJson`. The editor stores uploads as
+ * `resizableImage`; markdown parsed via {@link markdownToTiptapJson} yields the
+ * plain `image`. Mirrors `IMAGE_NODE_TYPES` in content/rehost-images.ts.
+ */
+const IMAGE_NODE_TYPES = new Set(['image', 'resizableImage'])
+
+/**
+ * Node types this module can faithfully turn into markdown: the server
+ * manager's own nodes (see SERVER_EXTENSIONS) plus the three we normalize below
+ * (`resizableImage` -> `image`, `mention` -> text, `emoji` -> text). Anything
+ * else — `youtube`, `quackbackEmbed`, future custom nodes — would be silently
+ * dropped by the narrower server manager, so a document containing one keeps
+ * its stored markdown (which the client serialized with full coverage) instead.
+ */
+const RESERIALIZABLE_NODE_TYPES = new Set([
+  'doc',
+  'paragraph',
+  'text',
+  'heading',
+  'blockquote',
+  'bulletList',
+  'orderedList',
+  'listItem',
+  'codeBlock',
+  'horizontalRule',
+  'hardBreak',
+  'taskList',
+  'taskItem',
+  'table',
+  'tableRow',
+  'tableCell',
+  'tableHeader',
+  'image',
+  'resizableImage',
+  'mention',
+  'emoji',
+])
+
+/**
+ * Render an entity's markdown for output (API / MCP responses), preferring the
+ * stored `content` column but restoring images from the canonical `contentJson`.
+ *
+ * The stored markdown is faithful for everything except images: the editor's
+ * resizable-image node has no markdown serializer, so client-computed markdown
+ * silently dropped them. `contentJson` keeps the images (with rehosted src), so
+ * only when it carries an image do we re-serialize it to put them back as
+ * `![alt](src)`. Image-free content returns the stored markdown verbatim — no
+ * reason to pay for, or risk reformatting from, a re-serialize.
+ *
+ * Re-serialization runs through the narrower server manager, so we only do it
+ * when every node is representable (see {@link RESERIALIZABLE_NODE_TYPES}); a
+ * document mixing an image with, say, a YouTube embed keeps its stored markdown
+ * rather than dropping the embed. Also falls back when `contentJson` is absent
+ * (legacy rows / list queries that omit it) or can't be serialized — a read
+ * path must never fail over content shape.
+ */
+export function contentJsonToMarkdown(
+  contentJson: TiptapContent | JSONContent | null | undefined,
+  fallback: string
+): string {
+  if (!contentJson || !hasImageNode(contentJson) || !isReserializable(contentJson)) {
+    return fallback
+  }
+  try {
+    const markdown = tiptapJsonToMarkdown(normalizeForMarkdown(contentJson))
+    return markdown.trim() ? markdown : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * Depth-first scan for an image node (`image` or `resizableImage`) anywhere in a
+ * tree. Runs before the serialize try/catch, so it must stay total: a malformed
+ * row whose `content` is present but not an array must not throw.
+ */
+function hasImageNode(node: JSONContent): boolean {
+  if (typeof node.type === 'string' && IMAGE_NODE_TYPES.has(node.type)) return true
+  return Array.isArray(node.content) ? node.content.some(hasImageNode) : false
+}
+
+/**
+ * True only when every node in the tree can be re-serialized without loss. A
+ * single unknown node type makes this false so the caller keeps stored markdown.
+ * Total by the same contract as {@link hasImageNode}.
+ */
+function isReserializable(node: JSONContent): boolean {
+  if (typeof node.type === 'string' && !RESERIALIZABLE_NODE_TYPES.has(node.type)) return false
+  return Array.isArray(node.content) ? node.content.every(isReserializable) : true
+}
+
+/**
+ * Rewrite the editor's custom nodes into ones @tiptap/markdown can serialize:
+ * `resizableImage` -> `image` (shares src/alt but has no markdown spec),
+ * `mention` -> the `@label` text the directive would otherwise hide, and
+ * `emoji` -> its Unicode character. Only called once {@link isReserializable}
+ * has cleared the tree.
+ */
+function normalizeForMarkdown(node: JSONContent): JSONContent {
+  if (node.type === 'mention') {
+    const attrs = node.attrs ?? {}
+    const label = (attrs.label as string) || (attrs.id as string) || 'mention'
+    return { type: 'text', text: `@${label}` }
+  }
+  if (node.type === 'emoji') {
+    return { type: 'text', text: emojiNodeToText(node) }
+  }
+  const next = node.type === 'resizableImage' ? { ...node, type: 'image' } : node
+  if (!Array.isArray(next.content)) return next
+  return { ...next, content: next.content.map(normalizeForMarkdown) }
+}
+
+/**
+ * The text an `emoji` node serializes to. `@tiptap/extension-emoji` persists
+ * `{ name }` and only sometimes the character itself, so fall back to the
+ * shortcode table, and to `:name:` for a custom emoji that has no Unicode
+ * equivalent — the same text the editor round-trips it as.
+ */
+function emojiNodeToText(node: JSONContent): string {
+  const attrs = node.attrs ?? {}
+  const stored = attrs.emoji
+  if (typeof stored === 'string' && stored) return stored
+  const name = typeof attrs.name === 'string' ? attrs.name : ''
+  if (!name) return ''
+  return defaultEmojis.find((e) => e.emoji && e.shortcodes.includes(name))?.emoji ?? `:${name}:`
 }
 
 /**

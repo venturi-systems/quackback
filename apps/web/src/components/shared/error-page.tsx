@@ -53,9 +53,50 @@ export function errorMessage(error: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * True for the role-gate failures thrown by requireAuth / requireWorkspaceRole
+ * (e.g. "Access denied: Requires [admin], got member"). These are expected
+ * outcomes, not crashes, so they get a calm permission notice rather than the
+ * generic error treatment, and the raw role-gate text never reaches the page.
+ * (Upstream v0.13.0, 71b6c8f6c.)
+ */
+export function isAuthorizationError(error: unknown): boolean {
+  const message = errorMessage(error)
+  return message !== undefined && /access denied/i.test(message)
+}
+
+const PERMISSION_DENIED_TITLE = 'Access denied'
+
+function PermissionDeniedContent() {
+  return (
+    <FriendlyShell>
+      <h1 className="public-status__title">You don't have access to this page</h1>
+      <p className="public-status__lead">
+        This area is limited to team members with the required role. If you think that's a
+        mistake, ask an administrator for access.
+      </p>
+
+      <div className="public-status__actions">
+        <Button size="lg" variant="outline" asChild>
+          <a href="/">Go to feedback home</a>
+        </Button>
+      </div>
+    </FriendlyShell>
+  )
+}
+
+export function PermissionDeniedPage() {
+  useStatusTitle(PERMISSION_DENIED_TITLE)
+  return <PermissionDeniedContent />
+}
+
 export function DefaultErrorPage({ error, reset }: ErrorPageProps) {
   const message = errorMessage(error)
-  useStatusTitle('Page could not load')
+  const denied = isAuthorizationError(error)
+  // One title per page: decided here, not in a child, because a child's effect
+  // runs before this one and would be overwritten.
+  useStatusTitle(denied ? PERMISSION_DENIED_TITLE : 'Page could not load')
+  if (denied) return <PermissionDeniedContent />
   return (
     <FriendlyShell>
       <h1 className="public-status__title">This page could not load</h1>
