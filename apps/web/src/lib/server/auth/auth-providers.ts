@@ -93,6 +93,9 @@ export const AUTH_PROVIDERS: AuthProviderDefinition[] = [
         label: 'Issuer URL',
         placeholder: 'https://gitlab.example.com (optional)',
         sensitive: false,
+        // Better-Auth's GitLab provider sends the code exchange, token refresh
+        // and user lookup to this host, so it gets the save-time SSRF check.
+        url: true,
         helpText: 'For self-hosted GitLab instances',
       },
     ],

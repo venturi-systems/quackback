@@ -63,6 +63,34 @@ describe('saveAuthProviderCredentialsFn — SSRF URL guard', () => {
     expect(hoisted.mockSavePlatformCredentials).toHaveBeenCalledTimes(1)
   })
 
+  // Better-Auth's GitLab provider sends the code, client secret and access
+  // token to `${issuer}/oauth/token` and `${issuer}/api/v4/user`.
+  it('rejects a self-hosted GitLab issuer that fails the SSRF guard, before storing', async () => {
+    hoisted.mockCheckUrlSafety.mockResolvedValue({ safe: false, reason: 'ssrf-rejected' })
+    const issuer = 'http://169.254.169.254'
+
+    await expect(
+      saveAuthProviderCredentialsFn({
+        data: {
+          credentialType: 'auth_gitlab',
+          credentials: { clientId: 'gl', clientSecret: 'gl', issuer },
+        },
+      })
+    ).rejects.toThrow(/valid public URL/i)
+
+    expect(hoisted.mockCheckUrlSafety).toHaveBeenCalledWith(issuer)
+    expect(hoisted.mockSavePlatformCredentials).not.toHaveBeenCalled()
+  })
+
+  it('skips the guard for GitLab when no self-hosted issuer is set', async () => {
+    await saveAuthProviderCredentialsFn({
+      data: { credentialType: 'auth_gitlab', credentials: { clientId: 'gl', clientSecret: 'gl' } },
+    })
+
+    expect(hoisted.mockCheckUrlSafety).not.toHaveBeenCalled()
+    expect(hoisted.mockSavePlatformCredentials).toHaveBeenCalledTimes(1)
+  })
+
   it('skips the guard for providers with no URL fields (built-in Google)', async () => {
     await saveAuthProviderCredentialsFn({
       data: { credentialType: 'auth_google', credentials: { clientId: 'g', clientSecret: 'g' } },
