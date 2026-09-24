@@ -18,9 +18,26 @@ A team role takes effect only for an account that:
 
 1. has a Google or GitHub account linked (never the password credential alone,
    never a magic link, a widget identify or an OIDC provider),
-2. whose provider reported its email address as verified, and
+2. whose email address is marked verified on the account, and
 3. whose address is at a domain in `VENTURI_TEAM_EMAIL_DOMAINS` (default
    `venturi.systems`; exact hostnames, subdomains never match).
+
+What rule 2 reads is the account's own verified flag. These keep it honest:
+
+- Google and GitHub are **not** trusted linking providers
+  (`lib/server/auth/linking-trust.ts`). They attach to an existing account
+  only when they report the address verified and the account is already
+  verified, so a provider identity with an unverified address can never sign
+  in as someone else's account.
+- The REST API cannot set the flag of a team account or a team-domain address,
+  and cannot create an account at a team domain (`user.identify.ts`,
+  `TEAM_IDENTITY_LOCKED`). That account is created by its owner's first Google
+  or GitHub sign-in.
+- The admin UI cannot edit a team member's address (`TEAM_EMAIL_LOCKED`).
+- A sign-in method the workspace has switched off (password, magic link) is
+  refused for brand-new addresses as well as known ones, so nobody can create a
+  password account that would sit on a future team member's address
+  (`auth/hooks.ts`, `handleSignInPreCheck`).
 
 The server checks the rule when a role is assigned **and** on every team or
 administrator action (`lib/server/domains/principals/team-identity.ts`,
