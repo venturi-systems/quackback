@@ -10,6 +10,7 @@ import {
 import { createChangelog } from '@/lib/server/domains/changelog/changelog.service'
 import { listChangelogs } from '@/lib/server/domains/changelog/changelog.query'
 import { publishedAtToPublishState } from '@/lib/shared/schemas/changelog'
+import { contentJsonToMarkdown } from '@/lib/server/markdown-tiptap'
 import { db, principal, eq } from '@/lib/server/db'
 import type { PostId } from '@quackback/ids'
 
@@ -52,8 +53,9 @@ export const Route = createFileRoute('/api/v1/changelog/')({
             result.items.map((entry) => ({
               id: entry.id,
               title: entry.title,
-              content: entry.content,
+              content: contentJsonToMarkdown(entry.contentJson, entry.content),
               publishedAt: entry.publishedAt?.toISOString() || null,
+              displayDate: entry.displayDate?.toISOString() || null,
               createdAt: entry.createdAt.toISOString(),
               updatedAt: entry.updatedAt.toISOString(),
             })),
@@ -112,8 +114,9 @@ export const Route = createFileRoute('/api/v1/changelog/')({
           return createdResponse({
             id: entry.id,
             title: entry.title,
-            content: entry.content,
+            content: contentJsonToMarkdown(entry.contentJson, entry.content),
             publishedAt: entry.publishedAt?.toISOString() || null,
+            displayDate: entry.displayDate?.toISOString() || null,
             createdAt: entry.createdAt.toISOString(),
             updatedAt: entry.updatedAt.toISOString(),
           })

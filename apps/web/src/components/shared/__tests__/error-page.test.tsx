@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
-import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { DefaultErrorPage, NotFoundPage, errorMessage } from '../error-page'
+import { cleanup, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import {
+  DefaultErrorPage,
+  NotFoundPage,
+  PermissionDeniedPage,
+  errorMessage,
+  isAuthorizationError,
+} from '../error-page'
 import { InShell } from '@/components/public/shell/shell-context'
 
 // TanStack Router types a caught route error as `unknown`, so the error page and
@@ -82,5 +88,59 @@ describe('NotFoundPage', () => {
     expect(screen.queryByRole('link', { name: 'Venturi home' })).not.toBeInTheDocument()
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument()
     expect(screen.queryByRole('main')).not.toBeInTheDocument()
+  })
+})
+
+// Upstream v0.13.0 (71b6c8f6c): a role-gate failure is an expected outcome, not
+// a crash, so it gets a calm permission notice in the fork's status-page frame.
+describe('isAuthorizationError', () => {
+  it('flags the role-gate failures thrown by requireAuth', () => {
+    expect(isAuthorizationError(new Error('Access denied: Requires [admin], got member'))).toBe(
+      true
+    )
+    expect(isAuthorizationError(new Error('Access denied: Not a team member'))).toBe(true)
+  })
+
+  it('ignores unrelated runtime errors and thrown values without a message', () => {
+    expect(isAuthorizationError(new Error('Network request failed'))).toBe(false)
+    expect(isAuthorizationError(new Error('undefined is not a function'))).toBe(false)
+    expect(isAuthorizationError(null)).toBe(false)
+    expect(isAuthorizationError('Access denied')).toBe(false)
+  })
+})
+
+describe('DefaultErrorPage for an authorization error', () => {
+  afterEach(() => cleanup())
+
+  it('shows a permission notice, never the raw role-gate text or technical details', () => {
+    render(<DefaultErrorPage error={new Error('Access denied: Requires [admin], got member')} />)
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: "You don't have access to this page" })
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Requires \[admin\]/)).toBeNull()
+    expect(screen.queryByText('Technical details')).toBeNull()
+    expect(screen.queryByText('This page could not load')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Go to feedback home' })).toHaveAttribute('href', '/')
+    expect(document.title).toBe('Access denied · Venturi Feedback')
+  })
+
+  it('keeps the generic error treatment for everything else', () => {
+    render(<DefaultErrorPage error={new Error('boom')} />)
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'This page could not load' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('Technical details')).toBeInTheDocument()
+  })
+
+  it('is also available as a page of its own', () => {
+    render(<PermissionDeniedPage />)
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: "You don't have access to this page" })
+    ).toBeInTheDocument()
+    expect(document.title).toBe('Access denied · Venturi Feedback')
   })
 })
