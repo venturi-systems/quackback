@@ -8,6 +8,7 @@ import {
   SsrfError,
   ResponseTooLargeError,
   TimeoutError,
+  InvalidResponseStatusError,
 } from '../ssrf-guard'
 
 vi.mock('node:dns/promises', () => ({
@@ -368,6 +369,38 @@ describe('safeFetch', () => {
 
     const res = await safeFetch('https://idp.example.com/jwks')
     expect(res.status).toBe(304)
+    expect(await res.text()).toBe('')
+  })
+
+  // The Response constructor throws on these. Thrown inside the response's
+  // 'end' listener, that was an uncaught exception and a promise that never
+  // settled; each must reject instead.
+  it('rejects a status above 599 instead of throwing from the listener', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    httpsRequestMock.mockImplementation(requestImpl({ status: 600, chunks: ['{}'] }))
+
+    const err = await safeFetch('https://idp.example.com/.well-known/openid-configuration').catch(
+      (e: unknown) => e
+    )
+    expect(err).toBeInstanceOf(InvalidResponseStatusError)
+    expect((err as InvalidResponseStatusError).status).toBe(600)
+  })
+
+  it('rejects an informational status delivered as the final status', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    httpsRequestMock.mockImplementation(requestImpl({ status: 101 }))
+
+    await expect(safeFetch('https://idp.example.com/token')).rejects.toBeInstanceOf(
+      InvalidResponseStatusError
+    )
+  })
+
+  it('returns a null-body Response for a 205 that carried a body', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+    httpsRequestMock.mockImplementation(requestImpl({ status: 205, chunks: ['unexpected'] }))
+
+    const res = await safeFetch('https://idp.example.com/token')
+    expect(res.status).toBe(205)
     expect(await res.text()).toBe('')
   })
 

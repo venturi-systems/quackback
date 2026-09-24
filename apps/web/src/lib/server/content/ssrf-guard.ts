@@ -208,6 +208,17 @@ export class ResponseTooLargeError extends Error {
   }
 }
 
+/**
+ * Thrown by `safeFetch` when the peer answers with a status a `Response`
+ * cannot carry (outside 200-599: a 1xx as the final status, or 600+).
+ */
+export class InvalidResponseStatusError extends Error {
+  constructor(public readonly status: number) {
+    super(`safeFetch: unusable response status ${status}`)
+    this.name = 'InvalidResponseStatusError'
+  }
+}
+
 /** Thrown by `safeFetch` when the request exceeds `timeoutMs`. */
 export class TimeoutError extends Error {
   constructor(public readonly timeoutMs: number) {
@@ -303,21 +314,34 @@ export async function safeFetch(url: string, init: SafeFetchInit = {}): Promise<
       (res: IncomingMessage) => {
         const chunks: Buffer[] = []
         let total = 0
+        // Runs inside the response's event listeners, so it must never throw:
+        // an exception there escapes this promise (an uncaught exception) and
+        // leaves it pending forever. Every failure rejects instead.
         const finish = () => {
           const status = res.statusCode ?? 502
-          const nullBody = status < 200 || status === 204 || status === 304
+          if (status < 200 || status > 599) {
+            reject(new InvalidResponseStatusError(status))
+            return
+          }
+          // Null-body statuses: the Response constructor refuses a body on them.
+          const nullBody = status === 204 || status === 205 || status === 304
           const headerEntries: [string, string][] = []
           for (const [k, v] of Object.entries(res.headers)) {
             if (typeof v === 'string') headerEntries.push([k, v])
             else if (Array.isArray(v)) headerEntries.push([k, v.join(', ')])
           }
-          resolve(
-            new Response(nullBody ? null : Buffer.concat(chunks), {
-              status,
-              statusText: res.statusMessage ?? '',
-              headers: headerEntries,
-            })
-          )
+          try {
+            resolve(
+              new Response(nullBody ? null : Buffer.concat(chunks), {
+                status,
+                statusText: res.statusMessage ?? '',
+                headers: headerEntries,
+              })
+            )
+          } catch (err) {
+            // e.g. a status text or header value the Response refuses.
+            reject(err)
+          }
         }
         res.on('data', (chunk: Buffer) => {
           total += chunk.length
