@@ -1,6 +1,72 @@
 @import 'tailwindcss';
 @plugin "@tailwindcss/typography";
 @import 'tw-animate-css';
+/* Self-hosted branding fonts (upstream v0.13.1, 456a2963e): every font the
+   branding picker (FONT_OPTIONS in use-branding-state.ts) and the theme presets
+   (FONTS in presets.ts) can select is bundled here, so no fonts.googleapis.com
+   <link> is emitted. An edge optimizer (e.g. Cloudflare Fonts) rewrites such a
+   link into inline @font-face and breaks SSR hydration: add fonts here, never
+   via a Google Fonts <link>, and keep the family name matching the value those
+   two sources store. Lato ships 400/700 only; Geist's @fontsource family is
+   "Geist Sans".
+   Venturi fork: DM Sans and Space Grotesk come from the design system's own
+   self-hosted files (styles/venturi-fonts.css), so their @fontsource packages
+   are not bundled, and the variable Inter that upstream uses for its default
+   UI is not bundled either (the fork's UI font is DM Sans). */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/roboto/400.css';
+@import '@fontsource/roboto/500.css';
+@import '@fontsource/roboto/600.css';
+@import '@fontsource/roboto/700.css';
+@import '@fontsource/open-sans/400.css';
+@import '@fontsource/open-sans/500.css';
+@import '@fontsource/open-sans/600.css';
+@import '@fontsource/open-sans/700.css';
+@import '@fontsource/lato/400.css';
+@import '@fontsource/lato/700.css';
+@import '@fontsource/nunito/400.css';
+@import '@fontsource/nunito/500.css';
+@import '@fontsource/nunito/600.css';
+@import '@fontsource/nunito/700.css';
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/500.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+@import '@fontsource/plus-jakarta-sans/400.css';
+@import '@fontsource/plus-jakarta-sans/500.css';
+@import '@fontsource/plus-jakarta-sans/600.css';
+@import '@fontsource/plus-jakarta-sans/700.css';
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+@import '@fontsource/playfair-display/400.css';
+@import '@fontsource/playfair-display/500.css';
+@import '@fontsource/playfair-display/600.css';
+@import '@fontsource/playfair-display/700.css';
+@import '@fontsource/merriweather/400.css';
+@import '@fontsource/merriweather/500.css';
+@import '@fontsource/merriweather/600.css';
+@import '@fontsource/merriweather/700.css';
+@import '@fontsource/lora/400.css';
+@import '@fontsource/lora/500.css';
+@import '@fontsource/lora/600.css';
+@import '@fontsource/lora/700.css';
+@import '@fontsource/fira-code/400.css';
+@import '@fontsource/fira-code/500.css';
+@import '@fontsource/fira-code/600.css';
+@import '@fontsource/fira-code/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/600.css';
+@import '@fontsource/jetbrains-mono/700.css';
+@import '@fontsource/geist-sans/400.css';
+@import '@fontsource/geist-sans/500.css';
+@import '@fontsource/geist-sans/600.css';
+@import '@fontsource/geist-sans/700.css';
 @import './styles/venturi-fonts.css';
 @import './styles/venturi-tokens.css';
 @import './styles/venturi-theme.css';
