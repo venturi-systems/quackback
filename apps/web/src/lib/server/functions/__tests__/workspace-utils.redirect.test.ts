@@ -4,8 +4,10 @@ import { db } from '@/lib/server/db'
 /**
  * `requireWorkspaceRole` guards team routes in `beforeLoad`. When an
  * unauthenticated caller hits a team-only route it must land on the
- * portal sign-in dialog (portal root with `auth=signin`) carrying
- * `callbackUrl=/admin`. Portal-allowed routes still fall back to `/`.
+ * portal sign-in dialog (portal root with `auth=signin`) carrying the team
+ * page it asked for as `callbackUrl` (`/admin` when none was passed, or when
+ * the one passed is not a same-origin team path). Portal-allowed routes
+ * still fall back to `/`.
  *
  * The handler is a `createServerFn`, so we stub `createServerFn` to
  * capture the raw handler and invoke it directly — the same pattern the
@@ -39,7 +41,9 @@ vi.mock('@/lib/server/logger', () => ({
   logger: { child: () => ({ debug: vi.fn(), error: vi.fn(), warn: vi.fn(), info: vi.fn() }) },
 }))
 
-type AnyHandler = (args: { data: { allowedRoles: string[] } }) => Promise<unknown>
+type AnyHandler = (args: {
+  data: { allowedRoles: string[]; callbackUrl?: string }
+}) => Promise<unknown>
 
 const handlers: AnyHandler[] = []
 vi.mock('@tanstack/react-start', () => ({
@@ -97,6 +101,59 @@ describe('requireWorkspaceRole redirect target', () => {
     const search = err?.search ?? err?.options?.search
     expect(search?.auth).toBe('signin')
     expect(search?.callbackUrl).toBe('/admin')
+  })
+
+  // DEF-48: a signed-out visitor on /admin/settings was sent to sign in with
+  // callbackUrl=/admin, so the page they asked for was lost.
+  it('keeps the team page a signed-out caller asked for as the callback', async () => {
+    hoisted.mockGetSession.mockResolvedValue(null)
+    const requested = '/admin/settings/security/authentication?tab=sign-in'
+
+    const err = await requireWorkspaceRole({
+      data: { allowedRoles: ['admin', 'member'], callbackUrl: requested },
+    })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    const search = err?.search ?? err?.options?.search
+    expect(search?.auth).toBe('signin')
+    expect(search?.callbackUrl).toBe(requested)
+  })
+
+  it.each([
+    '//evil.example/admin',
+    'https://evil.example/admin',
+    '/\\evil.example',
+    '/\t/evil.example',
+    '/b/ideas',
+    '/administrator',
+    '',
+  ])('falls back to /admin for the callback %j', async (callbackUrl) => {
+    hoisted.mockGetSession.mockResolvedValue(null)
+
+    const err = await requireWorkspaceRole({
+      data: { allowedRoles: ['admin', 'member'], callbackUrl },
+    })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    expect((err?.search ?? err?.options?.search)?.callbackUrl).toBe('/admin')
+  })
+
+  it('keeps the requested team page when a signed-in portal user is refused', async () => {
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_002'))
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ role: 'user' })
+
+    const err = await requireWorkspaceRole({
+      data: { allowedRoles: ['admin', 'member'], callbackUrl: '/admin/settings' },
+    })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    const search = err?.search ?? err?.options?.search
+    expect(search?.callbackUrl).toBe('/admin/settings')
+    expect(search?.error).toBe('not_team_member')
   })
 
   it('leaves portal-allowed (non-team) callers on /', async () => {

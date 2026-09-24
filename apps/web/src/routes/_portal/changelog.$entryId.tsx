@@ -5,6 +5,7 @@ import { publicChangelogQueries } from '@/lib/client/queries/changelog'
 import { ChangelogEntryDetail } from '@/components/portal/changelog'
 import { BackLink } from '@/components/ui/back-link'
 import type { ChangelogId } from '@quackback/ids'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 export const Route = createFileRoute('/_portal/changelog/$entryId')({
   loader: async ({ context, params }) => {
@@ -26,7 +27,11 @@ export const Route = createFileRoute('/_portal/changelog/$entryId')({
       baseUrl: context.baseUrl ?? '',
     }
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, matches }) => {
+    // Behind the sign-in gate the page shows only the gate, so it takes the
+    // gate's title and indexing instead of describing this page (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData) return {}
     const { entryTitle, entryId, workspaceName, baseUrl } = loaderData
     const title = `${entryTitle} - ${workspaceName} Changelog`

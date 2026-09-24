@@ -163,3 +163,42 @@ describe('PortalAccessGate — callbackUrl', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 })
+
+// DEF-47: a refused sign-in lands on the gate as ?error=<code>, and the
+// anonymous gate used to show the bare form with no reason.
+describe('PortalAccessGate — refused sign-in notice', () => {
+  it('explains a known sign-in error code on the anonymous gate', () => {
+    render(<PortalAccessGate {...baseProps} visibility="authenticated" error="not_team_member" />)
+    expect(screen.getByTestId('auth-notice')).toHaveTextContent(
+      "This account doesn't have team access."
+    )
+    expect(screen.getByTestId('auth-form-body')).toBeInTheDocument()
+  })
+
+  it('explains it to a signed-in visitor without access too', () => {
+    render(
+      <PortalAccessGate
+        {...baseProps}
+        reason="unauthorized"
+        userEmail="alice@example.com"
+        error="team_identity_required"
+      />
+    )
+    expect(screen.getByTestId('auth-notice')).toHaveTextContent(
+      'Team access needs a verified team email address'
+    )
+  })
+
+  it.each(['123', 'bogus', '__proto__', 'constructor', 'toString', '<script>'])(
+    'shows nothing for the unknown code %j',
+    (error) => {
+      render(<PortalAccessGate {...baseProps} error={error} />)
+      expect(screen.queryByTestId('auth-notice')).not.toBeInTheDocument()
+    }
+  )
+
+  it('shows nothing when there is no code', () => {
+    render(<PortalAccessGate {...baseProps} />)
+    expect(screen.queryByTestId('auth-notice')).not.toBeInTheDocument()
+  })
+})

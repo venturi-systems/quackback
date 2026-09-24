@@ -1,5 +1,6 @@
 import { createFileRoute, isRedirect } from '@tanstack/react-router'
 import { ownMessage } from '@/lib/shared/own-message'
+import { completeSignupSearch } from '@/lib/shared/auth-route-search'
 import { useState } from 'react'
 import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import {
@@ -50,9 +51,7 @@ const DEFAULT_BRANDING: InviteBranding = {
 }
 
 export const Route = createFileRoute('/complete-signup/$id')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    error: (search.error as string) || undefined,
-  }),
+  validateSearch: completeSignupSearch,
   loader: async ({ params, context }) => {
     const { id } = params
     const { session } = context
