@@ -3,6 +3,9 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 // Exercise the actual portal and composed Radix triggers, rather than a button
 // fixture: Tooltip/Popover/DropdownMenu can replace a Button's data-slot.
 async function useSmallRoot(page: Page) {
+  // SSR controls are visible before their click handlers hydrate.
+  await page.waitForLoadState('networkidle')
+  await page.evaluate(() => document.fonts.ready.then(() => undefined))
   await page.addStyleTag({ content: 'html { font-size: 14px !important; }' })
   await expect(page.locator('html')).toHaveCSS('font-size', '14px')
 }
@@ -68,7 +71,12 @@ test.describe('Portal coarse-pointer action targets', () => {
 
   test('post detail actions fit the mobile page at a 14px root', async ({ page }) => {
     await page.goto('/')
-    const post = page.locator('a[href*="/posts/"]:has(h3)').first()
+    // Choose a seeded post with comments so reply/edit/delete rows are
+    // mandatory coverage, without creating content for a layout assertion.
+    const post = page
+      .locator('a[href*="/posts/"]:has(h3)')
+      .filter({ has: page.locator('span.ms-auto').filter({ hasText: /^[1-9]\\d*$/ }) })
+      .first()
     await expect(post).toBeVisible()
     await post.click()
     await expect(page).toHaveURL(/\/posts\//)
@@ -76,15 +84,26 @@ test.describe('Portal coarse-pointer action targets', () => {
     const detail = page.getByTestId('post-detail')
     await expect(detail).toBeVisible()
     await expectTouchTarget(detail.getByTestId('vote-button').first())
+    for (const name of ['Reply', 'Edit', 'Delete']) {
+      await expectTouchTarget(detail.getByRole('button', { name, exact: true }).first())
+    }
     const buttons = detail.locator(
       "button:not([role='checkbox']):not([role='switch']):not([role='radio'])"
     )
     for (const button of await buttons.all()) {
-      if (await button.isVisible()) {
+      // Collapsed reply forms stay mounted for their grid animation. Their
+      // transparent descendants have boxes but are not rendered actions.
+      const rendered = await button.evaluate((element) =>
+        element.checkVisibility({ opacityProperty: true })
+      )
+      if (rendered) {
         await expectTouchTarget(button)
         const box = (await button.boundingBox())!
         expect(box.x).toBeGreaterThanOrEqual(0)
-        expect(box.x + box.width).toBeLessThanOrEqual(320)
+        const name = (await button.getAttribute('aria-label')) || (await button.textContent())
+        expect(box.x + box.width, `Action extends beyond the viewport: ${name}`).toBeLessThanOrEqual(
+          320
+        )
       }
     }
     await expectNoPageOverflow(page)
@@ -125,9 +144,13 @@ test.describe('Portal fine-pointer action sizing', () => {
     expect(await page.evaluate(() => matchMedia('(pointer: fine)').matches)).toBe(true)
     const bell = page.getByRole('button', { name: /^Notifications/ })
     await expect(bell).toBeVisible()
-    const box = await bell.boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.width).toBe(35)
-    expect(box!.height).toBe(35)
+    // The bell transitions all properties; wait for the font-size change to
+    // settle before comparing the compact, fine-pointer geometry.
+    await expect
+      .poll(async () => {
+        const box = await bell.boundingBox()
+        return box && { width: box.width, height: box.height }
+      })
+      .toEqual({ width: 35, height: 35 })
   })
 })
