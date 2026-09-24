@@ -64,7 +64,7 @@ describe('accessTokenClaims', () => {
     const claims = await accessTokenClaims({
       id: 'user_2',
       name: 'Owner',
-      email: 'richard@venturi.systems',
+      email: 'owner@venturi.systems',
     })
     expect(claims.role).toBe('admin')
   })

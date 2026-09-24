@@ -680,7 +680,7 @@ describe('handleCallbackPolicyCleanup — unverified team-domain address', () =>
         emailVerified: true,
         createdAt: new Date(Date.now() - 5_000),
       })
-      const ctx = socialCallback(provider, 'user_owner', 'richard@venturi.systems')
+      const ctx = socialCallback(provider, 'user_owner', 'owner@venturi.systems')
 
       await cleanup(ctx, tenantSettings({ googleEnabled: true, githubEnabled: true }))
 
