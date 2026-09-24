@@ -79,6 +79,11 @@ export function setWorkspaceAnon(enabled: boolean): void {
   runScript('../scripts/set-workspace-anon.ts', [String(enabled)])
 }
 
+/** Enable the help center for a suite, or restore its exact prior settings. */
+export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
+  runScript('../scripts/set-help-center-enabled.ts', [action])
+}
+
 /**
  * Flip sign-in methods and drop the tenant-settings cache (the script does
  * both). All three actions write `settings.auth_config.oauth`, the one map the

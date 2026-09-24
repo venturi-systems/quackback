@@ -161,7 +161,7 @@ jobs:
     outputs:
       e2e: ${{ steps.filter.outputs.e2e }}
       # true ONLY when the probe proved this merge-queue entry's git tree is
-      # byte-identical to a PR head on which all 8 e2e shards already
+      # byte-identical to the recorded checkout on which all 8 e2e shards
       # succeeded. Every other outcome -- not a merge_group event, multi-PR
       # group, no successful PR run, any shard not `success`, tree mismatch,
       # any API error -- is false, and the e2e lane runs in full.
@@ -225,7 +225,7 @@ jobs:
         #   - that run's e2e shards are not ALL `success` -- a PR whose
         #     path filter skipped e2e has no e2e evidence to reuse, so its
         #     queue entry still gets the full lane, exactly as today;
-        #   - the queue head's git tree differs from the PR head's tree
+        #   - the queue head's git tree differs from the recorded tested merge tree
         #     (base advanced under it);
         #   - any thrown error, including API failures.
         #
@@ -273,23 +273,90 @@ jobs:
                 { owner, repo, run_id: successful.id, per_page: 100 }
               );
               const shards = jobs.filter(j => /^End-to-end tests \(shard \d+ of 8\)$/.test(j.name));
-              const green = shards.filter(j => j.conclusion === 'success');
-              if (shards.length !== 8 || green.length !== 8) {
+              const green = shards.filter(j => j.status === 'completed' && j.conclusion === 'success');
+              if (shards.length !== 8 || green.length !== 8 || new Set(shards.map(j => j.name)).size !== 8) {
                 core.setOutput('reason', `PR run ${successful.id} has ${green.length}/${shards.length} successful e2e shards (need 8/8)`);
                 core.info('full run required: e2e evidence incomplete on the PR lane');
                 return;
               }
-              const [queueCommit, prCommit] = await Promise.all([
+              const requiredSteps = [
+                'Checkout tested source', 'Record the actual tested checkout',
+                'Collect the expected tests for this shard', 'Run the Playwright suite',
+                'Check the shard against the known-failure ratchet',
+                'Verify the tested checkout is unchanged', 'Upload tested checkout evidence',
+              ];
+              if (!shards.every(job => requiredSteps.every(name => {
+                const steps = (job.steps || []).filter(step => step.name === name);
+                return steps.length === 1 && steps[0].status === 'completed' &&
+                  steps[0].conclusion === 'success';
+              }))) throw new Error('required shard steps did not execute successfully');
+              // The PR jobs check out GitHub's synthetic merge, not prHeadSha.
+              // Each successful shard uploads the commit/tree captured immediately
+              // after checkout. Require all eight immutable, digest-verified receipts.
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
+                { owner, repo, run_id: successful.id, per_page: 100 }
+              );
+              const prefix = `e2e-tested-tree-${successful.id}-${successful.run_attempt}-`;
+              const evidence = artifacts.filter(a => a.name.startsWith(prefix));
+              if (evidence.length !== 8) throw new Error('missing or duplicate shard evidence');
+              const fs = require('node:fs');
+              const os = require('node:os');
+              const path = require('node:path');
+              const crypto = require('node:crypto');
+              const { execFileSync } = require('node:child_process');
+              const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-evidence-'));
+              const receipts = [];
+              try {
+                for (let shard = 1; shard <= 8; shard++) {
+                  const matches = evidence.filter(a => a.name === prefix + shard);
+                  if (matches.length !== 1 || matches[0].expired || matches[0].size_in_bytes > 65536) throw new Error('invalid shard evidence');
+                  const artifact = matches[0];
+                  if (artifact.workflow_run?.id !== successful.id ||
+                      artifact.workflow_run?.head_sha !== prHeadSha ||
+                      !/^sha256:[0-9a-f]{64}$/.test(artifact.digest || '')) {
+                    throw new Error('unbound artifact metadata');
+                  }
+                  const download = await github.rest.actions.downloadArtifact({
+                    owner, repo, artifact_id: artifact.id, archive_format: 'zip'
+                  });
+                  const bytes = Buffer.from(download.data);
+                  const digest = 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex');
+                  if (digest !== artifact.digest) throw new Error('artifact digest mismatch');
+                  const archive = path.join(tmp, `shard-${shard}.zip`);
+                  fs.writeFileSync(archive, bytes);
+                  const receipt = JSON.parse(execFileSync('unzip', ['-p', archive, 'tested-tree.json'], {
+                    encoding: 'utf8', maxBuffer: 65536
+                  }));
+                  if (receipt.schema !== 1 || receipt.run_id !== successful.id ||
+                      receipt.run_attempt !== successful.run_attempt || receipt.shard !== shard ||
+                      receipt.pr_head !== prHeadSha || receipt.event !== 'pull_request' ||
+                      !/^[0-9a-f]{40}$/.test(receipt.commit || '') ||
+                      !/^[0-9a-f]{40}$/.test(receipt.tree || '')) {
+                    throw new Error('malformed or mismatched tested-tree receipt');
+                  }
+                  receipts.push(receipt);
+                }
+              } finally {
+                fs.rmSync(tmp, { recursive: true, force: true });
+              }
+              const first = receipts[0];
+              if (!receipts.every(r => r.commit === first.commit && r.tree === first.tree)) {
+                throw new Error('shards tested different checkouts');
+              }
+              const [queueCommit, testedCommit] = await Promise.all([
                 github.rest.repos.getCommit({ owner, repo, ref: headSha }),
-                github.rest.repos.getCommit({ owner, repo, ref: prHeadSha }),
+                github.rest.repos.getCommit({ owner, repo, ref: first.commit }),
               ]);
-              if (queueCommit.data.commit.tree.sha !== prCommit.data.commit.tree.sha) {
-                core.setOutput('reason', 'queue tree differs from tested PR tree (multi-PR group or base advanced)');
+              if (testedCommit.data.commit.tree.sha !== first.tree ||
+                  !testedCommit.data.parents.some(p => p.sha === prHeadSha) ||
+                  queueCommit.data.commit.tree.sha !== first.tree) {
+                core.setOutput('reason', 'queue tree differs from verified tested PR merge tree');
                 core.info('full run required: tree mismatch');
                 return;
               }
               core.setOutput('reuse', 'true');
-              core.setOutput('reason', `queue tree ${queueCommit.data.commit.tree.sha} equals PR #${prNumber} head tree; 8/8 e2e shards succeeded in run ${successful.id}`);
+              core.setOutput('reason', `queue tree ${first.tree} equals tested PR merge ${first.commit}; 8/8 e2e shards succeeded in run ${successful.id} attempt ${successful.run_attempt}`);
               core.info('reusing exact-tree PR e2e evidence');
             } catch (error) {
               core.setOutput('reason', `evidence lookup failed: ${error.message}`);
@@ -397,9 +464,32 @@ jobs:
       # drop a test.
       PWTEST_SHARD_WEIGHTS: '124:80:157:78:80:92:89:103'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - name: Checkout tested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+      - name: Record the actual tested checkout
+        env:
+          SHARD: ${{ matrix.shard }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          from pathlib import Path
+          evidence = {
+              'schema': 1,
+              'run_id': int(os.environ['GITHUB_RUN_ID']),
+              'run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+              'shard': int(os.environ['SHARD']),
+              'event': os.environ['GITHUB_EVENT_NAME'],
+              'pr_head': os.environ['PR_HEAD'],
+              'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'tree': subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
+          }
+          target = Path(os.environ['RUNNER_TEMP']) / 'e2e-evidence'
+          target.mkdir()
+          (target / 'tested-tree.json').write_text(json.dumps(evidence) + '\n')
+          PYTHON
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -474,6 +564,29 @@ jobs:
       - name: Check the shard against the known-failure ratchet
         working-directory: apps/web
         run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json
+
+      - name: Verify the tested checkout is unchanged
+        run: |
+          python3 - <<'PYTHON'
+          import json, os, subprocess
+          from pathlib import Path
+          target = Path(os.environ['RUNNER_TEMP']) / 'e2e-evidence' / 'tested-tree.json'
+          evidence = json.loads(target.read_text())
+          for field, ref in [('commit', 'HEAD'), ('tree', 'HEAD^{tree}')]:
+              actual = subprocess.check_output(['git', 'rev-parse', ref], text=True).strip()
+              if actual != evidence[field]:
+                  raise SystemExit('Tested checkout changed after evidence capture')
+          subprocess.run(['git', 'diff', '--exit-code', 'HEAD', '--'], check=True)
+          PYTHON
+
+      - name: Upload tested checkout evidence
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-tested-tree-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-evidence/tested-tree.json
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload the Playwright artifacts
         if: failure()
