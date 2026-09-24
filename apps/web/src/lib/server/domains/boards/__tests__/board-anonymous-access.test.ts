@@ -125,6 +125,9 @@ describe('createBoard under the anonymous-tier policy', () => {
       statusCode: 403,
       message: expect.stringContaining('(requested for view)'),
     })
+    // The published boards may keep Anyone in the public posture, so the
+    // message names the boards the rule covers instead of every board.
+    expect((error as Error).message).toContain('requires sign-in on every board it does not manage')
     expect(hoisted.inserted).toEqual([])
     // Refused before the tier-limit count query as well.
     expect(hoisted.tierLimitsRead).toBe(0)

@@ -174,7 +174,7 @@ describe('<CreateBoardDialog> policy-owned Anyone tier', () => {
     renderModal()
     expect(getPublicTile()).toBeDisabled()
     expect(getPublicTile()).toHaveAttribute('data-disabled-reason', 'policy')
-    expect(getPublicTile()).toHaveTextContent('requires sign-in on every board')
+    expect(getPublicTile()).toHaveTextContent('requires sign-in on every board it does not manage')
     expect(getPrivateTile()).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByTestId('anonymous-policy-note')).toHaveTextContent(
       'choose Signed-in on its Access tab'
