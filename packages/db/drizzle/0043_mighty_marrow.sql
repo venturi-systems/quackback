@@ -1,1 +1,0 @@
-DROP TABLE "feedback_signal_corrections" CASCADE;

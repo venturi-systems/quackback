@@ -1,1 +1,0 @@
-ALTER TABLE "post_external_links" ADD COLUMN "external_display_id" text;
