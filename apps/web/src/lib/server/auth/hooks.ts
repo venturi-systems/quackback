@@ -341,11 +341,11 @@ type SessionResolver = (ctx: never) => Promise<{ user?: { id?: string } } | null
 /**
  * OAuth dynamic client registration gate (`POST /oauth2/register`).
  *
- * Unauthenticated registration is off unless the operator opts in (see
- * `allowUnauthenticatedClientRegistration` in auth/index.ts). An anonymous
- * Better Auth session is not an authenticated identity either, so it must not
- * be able to register clients in place of a real account. Callers with no
- * session fall through to the OAuth provider, which applies the opt-in.
+ * Registration without a session is always refused
+ * (`allowUnauthenticatedClientRegistration: false` in auth/index.ts). An
+ * anonymous Better Auth session is not an authenticated identity either, so
+ * it must not be able to register clients in place of a real account. Callers
+ * with no session fall through to the OAuth provider, which refuses them.
  */
 export async function handleClientRegistrationGate(
   ctx: { path?: string },
