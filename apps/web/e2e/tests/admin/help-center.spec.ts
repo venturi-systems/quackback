@@ -47,30 +47,44 @@ async function enableHelpCenter(page: import('@playwright/test').Page): Promise<
   }
 }
 
-/** Select the first available category in a combobox, or create one if none exist. */
-async function selectFirstCategoryIfAvailable(
+/**
+ * Select the first category in the create-article dialog, creating one first
+ * when the workspace has none.
+ *
+ * An article needs a category: without one, Save Draft fails validation and
+ * the dialog stays open. The suite used to get its category from "can create a
+ * new top-level category" running earlier in this file, but the config is
+ * fully parallel and CI shards by test, so that test can run in another shard.
+ * When new tests elsewhere moved the shard 2 boundary into this file, every
+ * editor test found no category (landing-page#2309). Each caller now makes
+ * its own, through the dialog's "Create new category" button, which selects
+ * the category it creates.
+ */
+async function selectOrCreateCategory(
   container: import('@playwright/test').Locator,
   page: import('@playwright/test').Page
 ): Promise<void> {
   const trigger = container.locator('[role="combobox"]').first()
   if ((await trigger.count()) === 0) return
   await trigger.click()
-  const firstOption = page.getByRole('option').first()
+  const listbox = page.getByRole('listbox')
+  await expect(listbox).toBeAttached()
+  const firstOption = listbox.getByRole('option').first()
   if ((await firstOption.count()) > 0) {
     await firstOption.click()
     return
   }
 
   await page.keyboard.press('Escape')
-  const addCategoryBtn = container.locator('button[title="Create new category"]').first()
-  if ((await addCategoryBtn.count()) > 0) {
-    await addCategoryBtn.click()
-    const catDialog = page.getByRole('dialog').filter({ hasText: /create category/i })
-    await expect(catDialog).toBeVisible({ timeout: 5000 })
-    await catDialog.getByLabel(/name/i).fill(`E2E Category ${Date.now()}`)
-    await catDialog.getByRole('button', { name: /create|save/i }).click()
-    await expect(catDialog).toBeHidden({ timeout: 10000 })
-  }
+  await expect(listbox).toHaveCount(0)
+
+  await container.getByTitle('Create new category').click()
+  const categoryDialog = page.getByRole('dialog', { name: 'New category' })
+  await expect(categoryDialog).toBeVisible({ timeout: 5000 })
+  await categoryDialog.getByLabel('Name', { exact: true }).fill(`E2E Category ${Date.now()}`)
+  await categoryDialog.getByRole('button', { name: 'Create', exact: true }).click()
+  await expect(categoryDialog).toBeHidden({ timeout: 10000 })
+  await expect(trigger).not.toHaveText(/select category/i, { timeout: 10000 })
 }
 
 /**
@@ -85,27 +99,6 @@ async function createAndOpenArticle(
   await page.goto('/admin/help-center')
   await page.waitForLoadState('networkidle')
 
-  // Ensure at least one category exists so article creation can succeed
-  const categoryLinks = page.locator('a[href*="/admin/help-center?categoryId="]')
-  if ((await categoryLinks.count()) === 0) {
-    const newBtn = page.getByRole('button', { name: /^New$/i })
-    if ((await newBtn.count()) > 0) {
-      await newBtn.click()
-      const newCatItem = page.getByRole('menuitem', { name: 'New category' })
-      if ((await newCatItem.count()) > 0) {
-        await newCatItem.click()
-        const catDialog = page.getByRole('dialog').filter({ hasText: /create category/i })
-        if ((await catDialog.count()) > 0) {
-          await expect(catDialog).toBeVisible({ timeout: 5000 })
-          await catDialog.getByLabel(/name/i).fill(`General ${Date.now()}`)
-          await catDialog.getByRole('button', { name: /create|save/i }).click()
-          await expect(catDialog).toBeHidden({ timeout: 10000 })
-          await page.waitForLoadState('networkidle')
-        }
-      }
-    }
-  }
-
   const newButton = page.getByRole('button', { name: /^New$/i })
   if ((await newButton.count()) === 0) return null
   await newButton.click()
@@ -116,7 +109,7 @@ async function createAndOpenArticle(
   await expect(dialog).toBeVisible()
 
   await dialog.getByPlaceholder('Article title').fill(title)
-  await selectFirstCategoryIfAvailable(dialog, page)
+  await selectOrCreateCategory(dialog, page)
 
   await dialog.locator('.ProseMirror[contenteditable="true"]').click()
   await page.keyboard.type('Test article content for e2e test.')

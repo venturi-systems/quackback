@@ -2,6 +2,7 @@
 import { appendFileSync } from 'node:fs'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
+const OPTIONAL_SHAS: readonly string[] = ['downstream_commit', 'patch_id', 'neutralized_by']
 
 /**
  * One reviewed upstream intake. For a `git cherry-pick -x` intake:
@@ -19,6 +20,15 @@ const FULL_SHA = /^[0-9a-f]{40}$/
  * pick is satisfied only by an `accepted` record that names it as
  * `downstream_commit`.
  *
+ * A merge intake (`intake: 'merge'`) records one record per upstream commit
+ * the merge commit brought in:
+ * - `downstream_commit` is the merge commit, and there is no `patch_id`;
+ * - `downstream_head` is the merge's fork-side parent;
+ * - `merge_base` is a merge base of `downstream_head` and `upstream_sha`;
+ * - the decision is `accepted`, or `rejected` with `neutralized_by`, the later
+ *   fork commit that undoes the upstream change. A merged commit is in the
+ *   tree, so it cannot be `deferred`.
+ *
  * The ledger is append-only. This script appends each record, and a later
  * record for the same `upstream_sha` adds to an earlier one; it does not
  * replace it. The check reads every record: each must hold against history on
@@ -29,6 +39,8 @@ const FULL_SHA = /^[0-9a-f]{40}$/
  * `scripts/check-upstream-intake-ledger.ts` enforces the ledger in CI.
  */
 export interface UpstreamIntakeInput {
+  /** `merge` for a merge intake; omitted for a cherry-pick. */
+  intake?: 'merge'
   upstream_sha: string
   merge_base: string
   downstream_head: string
@@ -39,6 +51,7 @@ export interface UpstreamIntakeInput {
   recorded_at?: string
   downstream_commit?: string
   patch_id?: string
+  neutralized_by?: string
   intake_pr?: number
   reason?: string
   notes?: string
@@ -51,14 +64,34 @@ export function buildUpstreamIntakeRecord(input: UpstreamIntakeInput) {
     ['downstream_head', input.downstream_head],
     ['downstream_commit', input.downstream_commit],
     ['patch_id', input.patch_id],
+    ['neutralized_by', input.neutralized_by],
   ] as const) {
-    if (value === undefined && (name === 'downstream_commit' || name === 'patch_id')) continue
+    if (value === undefined && OPTIONAL_SHAS.includes(name)) continue
     if (!FULL_SHA.test(value ?? '')) {
       throw new Error(`${name} must be a lowercase 40-character SHA`)
     }
   }
-  if ((input.downstream_commit === undefined) !== (input.patch_id === undefined)) {
-    throw new Error('downstream_commit and patch_id must be recorded together')
+  if (input.intake !== undefined && input.intake !== 'merge') {
+    throw new Error("intake must be 'merge' when given")
+  }
+  if (input.intake === 'merge') {
+    if (input.downstream_commit === undefined) {
+      throw new Error('a merge intake names its merge commit as downstream_commit')
+    }
+    if (input.patch_id !== undefined) throw new Error('a merge intake records no patch_id')
+    if (input.decision === 'deferred') {
+      throw new Error('a merged upstream commit cannot be deferred')
+    }
+    if ((input.decision === 'rejected') !== (input.neutralized_by !== undefined)) {
+      throw new Error('a rejected merged commit, and only one, records neutralized_by')
+    }
+  } else {
+    if ((input.downstream_commit === undefined) !== (input.patch_id === undefined)) {
+      throw new Error('downstream_commit and patch_id must be recorded together')
+    }
+    if (input.neutralized_by !== undefined) {
+      throw new Error('neutralized_by belongs only on a merge intake record')
+    }
   }
   if (input.downstream_patches.length === 0) {
     throw new Error('at least one downstream patch disposition is required')
@@ -74,11 +107,13 @@ export function buildUpstreamIntakeRecord(input: UpstreamIntakeInput) {
     schema_version: 1,
     source_update_mode: 'manual-review-only',
     auto_merge: false,
+    ...(input.intake !== undefined && { intake: input.intake }),
     upstream_sha: input.upstream_sha,
     merge_base: input.merge_base,
     downstream_head: input.downstream_head,
     ...(input.downstream_commit !== undefined && { downstream_commit: input.downstream_commit }),
     ...(input.patch_id !== undefined && { patch_id: input.patch_id }),
+    ...(input.neutralized_by !== undefined && { neutralized_by: input.neutralized_by }),
     downstream_patches: input.downstream_patches,
     tests: input.tests,
     review: { by: input.reviewed_by, decision: input.decision },
@@ -111,7 +146,10 @@ if (import.meta.main) {
     throw new Error('--decision must be accepted, rejected, or deferred')
   }
   const intakePr = optional('--intake-pr')
+  const intake = optional('--intake')
+  if (intake !== undefined && intake !== 'merge') throw new Error("--intake must be 'merge'")
   const record = buildUpstreamIntakeRecord({
+    intake: intake as UpstreamIntakeInput['intake'],
     upstream_sha: value('--upstream-sha'),
     merge_base: value('--merge-base'),
     downstream_head: value('--downstream-head'),
@@ -121,6 +159,7 @@ if (import.meta.main) {
     decision,
     downstream_commit: optional('--downstream-commit'),
     patch_id: optional('--patch-id'),
+    neutralized_by: optional('--neutralized-by'),
     intake_pr: intakePr === undefined ? undefined : Number(intakePr),
     reason: optional('--reason'),
     notes: optional('--notes'),

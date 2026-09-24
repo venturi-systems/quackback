@@ -116,4 +116,29 @@ describe('upstream migrations taken after the fork migrations', () => {
   it('keeps journal indexes contiguous', () => {
     expect(journal.entries.map((e) => e.idx)).toEqual(journal.entries.map((_, i) => i))
   })
+
+  it('writes every statement of upstream 0118..0125 so a re-run is a no-op', () => {
+    // Venturi fork: 0119 and 0120 gained IF NOT EXISTS, and 0120's backfill
+    // skips rows already stamped. migration-reapply.test.ts runs them again
+    // against a real database; this pins the statement forms without one.
+    for (const tag of UPSTREAM_V0_13_2) {
+      const statements = readFileSync(join(drizzleDir, `${tag}.sql`), 'utf8')
+        .replace(/--.*$/gm, '')
+        .split(/--> statement-breakpoint|;/)
+        .map((s) => s.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+      expect(statements.length, tag).toBeGreaterThan(0)
+      for (const statement of statements) {
+        if (/^ALTER TABLE "\w+" ADD COLUMN /i.test(statement)) {
+          expect(statement, tag).toMatch(/ADD COLUMN IF NOT EXISTS /i)
+        } else if (/^ALTER TABLE "\w+" ALTER COLUMN "\w+" (SET|DROP) DEFAULT\b/i.test(statement)) {
+          // Setting or dropping a default is idempotent.
+        } else if (/^UPDATE "\w+" SET /i.test(statement)) {
+          expect(statement, tag).toMatch(/ WHERE /i)
+        } else {
+          throw new Error(`${tag}: classify this statement's re-run behavior: ${statement}`)
+        }
+      }
+    }
+  })
 })
