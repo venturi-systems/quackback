@@ -4,7 +4,8 @@
  * Given an `auth_custom-oidc` platform credential, the backfill creates exactly
  * one provider row with `registration_id='custom-oidc'` and `show_button=true`,
  * leaves the credential key untouched (so `account.provider_id` still matches),
- * and is idempotent. Runs inside a transaction that is rolled back so the shared
+ * and is idempotent. A legacy plain-http endpoint it copies is refused at
+ * sign-in. Runs inside a transaction that is rolled back so the shared
  * test DB is left clean.
  */
 
@@ -28,7 +29,9 @@ import {
   settings,
 } from '@/lib/server/db'
 import { encryptPlatformCredentials } from '@/lib/server/integrations/encryption'
+import type { IdentityProvider } from '@/lib/server/domains/settings/identity-providers.service'
 import { backfillCustomOidcProvider } from '../backfill-custom-oidc-provider'
+import { buildGenericOAuthConfigs } from '../build-oauth-configs'
 
 describe('custom-oidc backfill', () => {
   it('migrates the custom-oidc credential into a provider and is idempotent', async () => {
@@ -105,6 +108,59 @@ describe('custom-oidc backfill', () => {
           .from(settings)
           .where(eq(settings.id, settingsRow.id))
         expect(settingsAfterSecond.authConfigVersion).toBe(settingsAfterFirst.authConfigVersion)
+
+        throw new Error('__ROLLBACK__')
+      })
+      .catch((e) => {
+        if (e.message !== '__ROLLBACK__') throw e
+      })
+  })
+
+  // The backfill copies a legacy credential's manual endpoints verbatim; they
+  // never passed the save-time https schema. The runtime holds the row it
+  // writes to the https rule instead, so a plain-http token URL here must leave
+  // the provider with nothing to send the code and client secret to.
+  it('copies a legacy plain-http token URL, which sign-in then refuses to use', async () => {
+    await db
+      .transaction(async (tx) => {
+        await tx.delete(settings)
+        await tx.insert(settings).values({
+          name: 'T',
+          slug: 'custom-oidc-backfill-http-test',
+          createdAt: new Date(),
+          authConfig: JSON.stringify({ oauth: { 'custom-oidc': true } }),
+          portalConfig: JSON.stringify({ oauth: {} }),
+        })
+        await tx.insert(integrationPlatformCredentials).values({
+          integrationType: 'auth_custom-oidc',
+          secrets: encryptPlatformCredentials({
+            displayName: 'Legacy IdP',
+            clientId: 'client-legacy',
+            clientSecret: 'shh',
+            authorizationUrl: 'https://legacy-idp.example.com/authorize',
+            tokenUrl: 'http://legacy-idp.example.com/token',
+          }),
+        })
+
+        expect((await backfillCustomOidcProvider(tx)).created).toBe(1)
+        const [row] = await tx
+          .select()
+          .from(identityProvider)
+          .where(eq(identityProvider.registrationId, 'custom-oidc'))
+        // Copied as-is: the backfill does not apply the https schema.
+        expect(row.tokenUrl).toBe('http://legacy-idp.example.com/token')
+
+        const configs = await buildGenericOAuthConfigs({
+          providers: [row as unknown as IdentityProvider],
+          creds: async () => ({ clientSecret: 'shh' }),
+          tierAllowsOidc: true,
+        })
+        expect(configs).toHaveLength(1)
+        expect(configs[0].tokenUrl).toBeUndefined()
+        expect(configs[0].authorizationUrl).toBeUndefined()
+        await expect(configs[0].pinned?.resolveEndpoints()).rejects.toThrow(
+          /no discovery URL or manual endpoints/
+        )
 
         throw new Error('__ROLLBACK__')
       })

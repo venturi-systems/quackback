@@ -125,6 +125,24 @@ describe('self-hosted GitLab fetches', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  // The issuer is saved with a public-address check only, so it can be plain
+  // http. The pinned methods then refuse every fetch instead of sending the
+  // client secret or the access token in clear.
+  it('refuses every fetch for a plain-http issuer', async () => {
+    const provider = selfHosted({ issuer: 'http://gitlab.acme.example' })
+
+    expect(pinSelfHostedGitlabProvider([provider])).toBe(true)
+    await expect(
+      provider.validateAuthorizationCode({ code: 'code-1', redirectURI: REDIRECT_URI })
+    ).rejects.toThrow(/no discovery URL or manual endpoints/)
+    await expect(provider.getUserInfo({ accessToken: 'access-1' })).resolves.toBeNull()
+    await expect(provider.refreshAccessToken?.('refresh-1')).rejects.toThrow(
+      /no discovery URL or manual endpoints/
+    )
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it('leaves gitlab.com and other providers untouched', () => {
     const hosted = gitlab({ clientId: 'gl-client', clientSecret: 'gl-secret' })
     const exchange = hosted.validateAuthorizationCode

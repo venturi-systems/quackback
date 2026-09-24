@@ -617,6 +617,59 @@ describe('custom OIDC runtime fetches', () => {
     ])
   })
 
+  it('holds stored manual endpoints to the https rule discovered endpoints meet', async () => {
+    const httpToken = createOidcEndpointSource({
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'http://manual.example.com/token',
+    })
+    const httpAuthorize = createOidcEndpointSource({
+      authorizationUrl: 'http://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+    })
+    const httpUserinfo = createOidcEndpointSource({
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+      userInfoUrl: 'http://manual.example.com/userinfo',
+    })
+
+    expect(httpToken.peek()).toBeUndefined()
+    await expect(httpToken.resolve()).rejects.toThrow(/no discovery URL or manual endpoints/)
+    expect(httpAuthorize.peek()).toBeUndefined()
+    // A plain-http userinfo URL is dropped; the https endpoints still serve.
+    expect(httpUserinfo.peek()).toEqual({
+      authorizationEndpoint: 'https://manual.example.com/authorize',
+      tokenEndpoint: 'https://manual.example.com/token',
+    })
+    const getUserInfo = createPinnedUserInfo({ clientId: 'client-1', endpoints: httpUserinfo })
+    await expect(
+      getUserInfo({ accessToken: 'access-1', idToken: idToken(claims({ sub: 'user-1' })) })
+    ).resolves.toBeNull()
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  // `backfill-custom-oidc-provider.ts` copies a legacy credential's endpoint
+  // URLs as they are, without the save-time https schema. A row it wrote must
+  // not become a way to send the code and client secret in clear.
+  it('gives a backfilled provider with a plain-http token URL no endpoints to sign in with', async () => {
+    const { configs, oauthProvider } = await signInStack([
+      provider({
+        registrationId: 'custom-oidc',
+        discoveryUrl: null,
+        authorizationUrl: 'https://legacy.example.com/authorize',
+        tokenUrl: 'http://legacy.example.com/token',
+      }),
+    ])
+
+    expect(configs[0].authorizationUrl).toBeUndefined()
+    expect(configs[0].tokenUrl).toBeUndefined()
+    await expect(oauthProvider('custom-oidc').validateAuthorizationCode(CODE)).rejects.toThrow(
+      /no discovery URL or manual endpoints/
+    )
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   // Control: proves the global-fetch spy above would catch the leak this fix
   // closes. The stock plugin, given a discoveryUrl, fetches it unpinned.
   it('control: the unpinned plugin fetches discovery with the global fetch', async () => {

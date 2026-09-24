@@ -70,11 +70,14 @@ async function pinnedFetch(url: string, init: SafeFetchInit): Promise<Response> 
 }
 
 /**
- * The value as an absolute https URL string, or undefined. Endpoints named by
- * a discovery document must be https (OIDC Discovery 1.0 §3, RFC 8414 §2): the
- * token endpoint receives the code, the client secret and refresh tokens.
+ * The value as an absolute https URL string, or undefined. Every endpoint a
+ * provider signs in against must be https (OIDC Discovery 1.0 §3, RFC 8414
+ * §2): the token endpoint receives the code, the client secret and refresh
+ * tokens, and the userinfo endpoint the access token. The rule covers the
+ * endpoints a discovery document names, a manual provider's stored endpoints
+ * and the SSO test handshake's (`sso-test-handshake.ts`).
  */
-function httpsUrl(value: unknown): string | undefined {
+export function httpsUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value) return undefined
   try {
     return new URL(value).protocol === 'https:' ? value : undefined
@@ -250,6 +253,13 @@ export interface OidcEndpointSource {
  * handshake uses for a manual install). A provider row that carries both keeps
  * the plugin's old precedence: the discovery document wins, and the stored URLs
  * are the fallback when it cannot be fetched.
+ *
+ * Stored endpoints meet the https rule discovered ones do (`httpsUrl`): a
+ * plain-http authorization or token URL leaves the provider with no manual
+ * endpoints, and a plain-http userinfo URL is dropped. The save-time schema
+ * already requires https, but a row can predate it: the startup backfill
+ * (`backfill-custom-oidc-provider.ts`) copies legacy credential values as they
+ * are, and a self-hosted GitLab issuer is only checked for a public address.
  */
 export function createOidcEndpointSource(provider: {
   discoveryUrl?: string
@@ -258,12 +268,15 @@ export function createOidcEndpointSource(provider: {
   userInfoUrl?: string
   issuer?: string
 }): OidcEndpointSource {
+  const authorizationEndpoint = httpsUrl(provider.authorizationUrl)
+  const tokenEndpoint = httpsUrl(provider.tokenUrl)
+  const userinfoEndpoint = httpsUrl(provider.userInfoUrl)
   const manual: OidcEndpoints | undefined =
-    provider.authorizationUrl && provider.tokenUrl
+    authorizationEndpoint && tokenEndpoint
       ? {
-          authorizationEndpoint: provider.authorizationUrl,
-          tokenEndpoint: provider.tokenUrl,
-          ...(provider.userInfoUrl ? { userinfoEndpoint: provider.userInfoUrl } : {}),
+          authorizationEndpoint,
+          tokenEndpoint,
+          ...(userinfoEndpoint ? { userinfoEndpoint } : {}),
           ...(provider.issuer ? { issuer: provider.issuer } : {}),
         }
       : undefined
@@ -379,9 +392,11 @@ const GOOGLE_ISSUER = 'https://accounts.google.com'
  *   its tenant in `tid`, so the template is filled in from that claim.
  * - Google's ID tokens carry `https://accounts.google.com` or the bare
  *   `accounts.google.com`, and Google says to accept either.
- * Any other issuer must match exactly.
+ * Any other issuer must match exactly. Production sign-in
+ * (`idTokenClaimProblem`) and the SSO test handshake both check `iss` with
+ * this, so a test passes exactly when sign-in would.
  */
-function acceptedIssuers(issuer: string, claims: JWTPayload): string[] {
+export function acceptedIssuers(issuer: string, claims: JWTPayload): string[] {
   const tenant = claims.tid
   if (issuer.includes('{tenantid}') && typeof tenant === 'string' && tenant) {
     return [issuer.replace('{tenantid}', tenant)]
