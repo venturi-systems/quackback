@@ -68,7 +68,7 @@ vi.mock('@/lib/server/db', () => ({
   ),
 }))
 
-import { mergeAnonymousToIdentified } from '../merge-anonymous'
+import { absorbedSignUpIdentity, mergeAnonymousToIdentified } from '../merge-anonymous'
 
 describe('mergeAnonymousToIdentified', () => {
   const ANON_PRINCIPAL_ID = 'principal_anon' as PrincipalId
@@ -215,5 +215,29 @@ describe('mergeAnonymousToIdentified', () => {
     expect(operations).toContain('delete:principal')
     expect(operations).toContain('delete:session')
     expect(operations).toContain('delete:user')
+  })
+})
+
+describe('absorbedSignUpIdentity (anonymous user absorbs a new sign-up)', () => {
+  it('carries a verified sign-up over as verified', () => {
+    expect(
+      absorbedSignUpIdentity({ name: 'Ada', email: 'ada@example.com', emailVerified: true })
+    ).toEqual({ name: 'Ada', email: 'ada@example.com', emailVerified: true, isAnonymous: false })
+  })
+
+  it('never marks an unverified sign-up verified (landing-page#2309)', () => {
+    // A password sign-up, or a provider that reported the address unverified.
+    expect(
+      absorbedSignUpIdentity({
+        name: 'Squat',
+        email: 'newhire@venturi.systems',
+        emailVerified: false,
+      }).emailVerified
+    ).toBe(false)
+    expect(
+      absorbedSignUpIdentity({ name: 'X', email: 'x@example.com', emailVerified: null })
+        .emailVerified
+    ).toBe(false)
+    expect(absorbedSignUpIdentity({ name: 'Y', email: 'y@example.com' }).emailVerified).toBe(false)
   })
 })

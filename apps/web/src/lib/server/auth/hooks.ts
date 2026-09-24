@@ -935,6 +935,31 @@ export async function handleCallbackPolicyCleanup(
     await blockSignIn('oauth_method_not_allowed')
   }
 
+  // Team identity rule, sign-in side (owner decisions 6 and 7,
+  // landing-page#2309). A built-in social provider (Google, GitHub and the
+  // rest) may create or open an account at a team domain only when that
+  // account's address is verified. Better Auth creates the account with the
+  // provider's own `emailVerified` answer, so a provider account that reports
+  // a team address UNVERIFIED would otherwise leave a row on that address with
+  // the provider linked. A later magic-link sign-in by the address's real
+  // owner (a team invitation link, for example) marks the row verified, and
+  // the linked provider account, which never proved the address, would then
+  // satisfy the team identity rule: a pre-account hijack of a team seat.
+  // Administrator-registered OIDC providers are the single sign-on trust model
+  // and are not gated here.
+  if (typeof userEmail === 'string' && !isRegisteredOidcProvider(provider, registeredOidcIds)) {
+    const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+    if (isTeamDomainEmail(userEmail)) {
+      // The row, not the session copy: Better Auth marks an existing account
+      // verified during this callback when the provider verified its address.
+      const userRow = await db.query.user.findFirst({
+        where: eq(userTable.id, userId as UserId),
+        columns: { emailVerified: true },
+      })
+      if (userRow?.emailVerified !== true) await blockSignIn('team_email_unverified')
+    }
+  }
+
   if (!principalRow) return
 
   const result = await isAuthMethodAllowed(provider, role, registeredOidcIds, tenant)

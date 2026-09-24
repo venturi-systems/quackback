@@ -41,6 +41,30 @@ export interface MergeAnonymousParams {
   targetDisplayName: string
 }
 
+/**
+ * The identity an anonymous user row takes on when a brand-new sign-up is
+ * absorbed into it (onLinkAccount's sign-up branch in auth/index.ts).
+ *
+ * The verification flag is the new account's own: the sign-up method decided
+ * it (a provider that verified the address, or a magic link or code sent to
+ * it). It used to be hard-coded true, which marked any absorbed address
+ * verified, including a password sign-up's or an address a provider reported
+ * unverified. The team identity rule reads this flag, and Better Auth links a
+ * later Google or GitHub sign-in on it (landing-page#2309).
+ */
+export function absorbedSignUpIdentity(newUser: {
+  name: string
+  email: string
+  emailVerified?: boolean | null
+}): { name: string; email: string; emailVerified: boolean; isAnonymous: false } {
+  return {
+    name: newUser.name,
+    email: newUser.email,
+    emailVerified: newUser.emailVerified === true,
+    isAnonymous: false,
+  }
+}
+
 export async function mergeAnonymousToIdentified(params: MergeAnonymousParams): Promise<void> {
   const { anonPrincipalId, targetPrincipalId, anonUserId, anonDisplayName, targetDisplayName } =
     params

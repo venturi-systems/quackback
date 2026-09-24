@@ -581,3 +581,159 @@ describe('handleCallbackPolicyCleanup — hard-binding branch (enforced verified
     expect(mockPrincipalDeleteWhere).not.toHaveBeenCalled()
   })
 })
+
+// ============================================================
+// Team-domain address the provider did not verify
+//
+// Team identity rule, sign-in side (landing-page#2309): a built-in social
+// provider may not create or open an account at a team domain
+// (VENTURI_TEAM_EMAIL_DOMAINS, default venturi.systems) while the account's
+// address is unverified. Otherwise the provider account stays linked to a row
+// that a later magic-link sign-in by the real owner marks verified, and the
+// provider account would then satisfy the team identity rule.
+// ============================================================
+
+describe('handleCallbackPolicyCleanup — unverified team-domain address', () => {
+  const socialCallback = (provider: string, userId: string, email: string) => ({
+    path: '/callback/:id',
+    params: { id: provider },
+    body: {},
+    context: { newSession: { user: { id: userId, email }, session: { token: 'tok' } } },
+    redirect: vi.fn((url: string) => new Error(`REDIRECT:${url}`)),
+  })
+
+  it.each(['google', 'github'])(
+    'refuses a brand-new %s sign-up at a team domain the provider did not verify, and wipes its shells',
+    async (provider) => {
+      mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+      mockUserFindFirst.mockResolvedValue({
+        emailVerified: false,
+        createdAt: new Date(Date.now() - 5_000),
+      })
+      const ctx = socialCallback(provider, 'user_squat', 'newhire@venturi.systems')
+
+      await expect(
+        cleanup(ctx, tenantSettings({ googleEnabled: true, githubEnabled: true }))
+      ).rejects.toThrow(/\/\?auth=signin&error=team_email_unverified/)
+
+      expect(mockSessionDeleteWhere).toHaveBeenCalled()
+      expect(mockDeleteSessionCookie).toHaveBeenCalled()
+      expect(mockUserDeleteWhere).toHaveBeenCalled()
+      expect(mockAccountDeleteWhere).toHaveBeenCalled()
+      expect(mockPrincipalDeleteWhere).toHaveBeenCalled()
+    }
+  )
+
+  it('refuses an existing team-domain account whose address is still unverified, keeping its rows', async () => {
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'admin' })
+    mockUserFindFirst.mockResolvedValue({
+      emailVerified: false,
+      createdAt: new Date(Date.now() - 60 * 60_000),
+    })
+    const ctx = socialCallback('github', 'user_existing', 'bootstrap@venturi.systems')
+
+    await expect(cleanup(ctx, tenantSettings({ githubEnabled: true }))).rejects.toThrow(
+      /\/\?auth=signin&callbackUrl=\/admin&error=team_email_unverified/
+    )
+
+    expect(mockSessionDeleteWhere).toHaveBeenCalled()
+    expect(mockUserDeleteWhere).not.toHaveBeenCalled()
+    expect(mockAccountDeleteWhere).not.toHaveBeenCalled()
+    expect(mockPrincipalDeleteWhere).not.toHaveBeenCalled()
+  })
+
+  it('refuses the idToken flow (/sign-in/social) at an unverified team-domain address', async () => {
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+    mockUserFindFirst.mockResolvedValue({
+      emailVerified: false,
+      createdAt: new Date(Date.now() - 5_000),
+    })
+    const ctx = ctxFor({
+      path: '/sign-in/social',
+      bodyProvider: 'google',
+      userId: 'user_squat',
+      email: 'newhire@venturi.systems',
+      token: 'tok',
+    })
+
+    await expect(cleanup(ctx, tenantSettings({ googleEnabled: true }))).rejects.toThrow(
+      /team_email_unverified/
+    )
+    expect(mockSessionDeleteWhere).toHaveBeenCalled()
+  })
+
+  it('treats a missing user row as unverified (fails closed)', async () => {
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+    mockUserFindFirst.mockResolvedValue(null)
+    const ctx = socialCallback('google', 'user_gone', 'newhire@venturi.systems')
+
+    await expect(cleanup(ctx, tenantSettings({ googleEnabled: true }))).rejects.toThrow(
+      /team_email_unverified/
+    )
+  })
+
+  it.each(['google', 'github'])(
+    'lets a %s sign-in through when the team-domain address is verified',
+    async (provider) => {
+      mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+      mockUserFindFirst.mockResolvedValue({
+        emailVerified: true,
+        createdAt: new Date(Date.now() - 5_000),
+      })
+      const ctx = socialCallback(provider, 'user_owner', 'richard@venturi.systems')
+
+      await cleanup(ctx, tenantSettings({ googleEnabled: true, githubEnabled: true }))
+
+      expect(ctx.redirect).not.toHaveBeenCalled()
+      expect(mockSessionDeleteWhere).not.toHaveBeenCalled()
+    }
+  )
+
+  it('does not gate an unverified address outside the team domains', async () => {
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+    mockUserFindFirst.mockResolvedValue({
+      emailVerified: false,
+      createdAt: new Date(Date.now() - 5_000),
+    })
+    const ctx = socialCallback('github', 'user_contributor', 'someone@external.com')
+
+    await cleanup(ctx, tenantSettings({ githubEnabled: true }))
+
+    expect(ctx.redirect).not.toHaveBeenCalled()
+    expect(mockSessionDeleteWhere).not.toHaveBeenCalled()
+    expect(mockUserFindFirst).not.toHaveBeenCalled()
+  })
+
+  it('does not match a subdomain of a team domain', async () => {
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+    mockUserFindFirst.mockResolvedValue({
+      emailVerified: false,
+      createdAt: new Date(Date.now() - 5_000),
+    })
+    const ctx = socialCallback('github', 'user_contributor', 'someone@mail.venturi.systems')
+
+    await cleanup(ctx, tenantSettings({ githubEnabled: true }))
+
+    expect(ctx.redirect).not.toHaveBeenCalled()
+  })
+
+  it('leaves an administrator-registered OIDC provider to the single sign-on trust model', async () => {
+    mockPrincipalFindFirst.mockResolvedValue({ role: 'user' })
+    mockUserFindFirst.mockResolvedValue({
+      emailVerified: false,
+      createdAt: new Date(Date.now() - 5_000),
+    })
+    const ctx = ctxFor({
+      path: '/oauth2/callback/:providerId',
+      providerParam: 'sso',
+      userId: 'user_sso',
+      email: 'staff@venturi.systems',
+      token: 'tok',
+    })
+
+    await cleanup(ctx, tenantSettings({}))
+
+    expect(ctx.redirect).not.toHaveBeenCalled()
+    expect(mockSessionDeleteWhere).not.toHaveBeenCalled()
+  })
+})

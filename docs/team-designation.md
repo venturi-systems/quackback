@@ -45,6 +45,16 @@ What rule 2 reads is the account's own verified flag. These keep it honest:
   refused for brand-new addresses as well as known ones, so nobody can create a
   password account that would sit on a future team member's address
   (`auth/hooks.ts`, `handleSignInPreCheck`).
+- A Google, GitHub or other social sign-in that would create or open an account
+  at a team domain whose address is not verified is refused, and a
+  just-created account is removed again (`auth/hooks.ts`,
+  `team_email_unverified`). Otherwise a provider account that reported the
+  address unverified would stay linked to the row, and the real owner's later
+  magic-link sign-in (a team invitation link, for example) would mark the row
+  verified and hand that provider account a team seat.
+- An anonymous visitor who then signs up keeps the new account's own verified
+  flag, never a blanket "verified" (`auth/merge-anonymous.ts`,
+  `absorbedSignUpIdentity`).
 
 The server checks the rule when a role is assigned **and** on every team or
 administrator action (`lib/server/domains/principals/team-identity.ts`,
@@ -78,6 +88,12 @@ Every role write runs in one transaction under one advisory lock
 - unlinking the last Google or GitHub account of the only such administrator
   is refused.
 
+The unlink check runs before Better Auth unlinks, not in the same transaction:
+two administrators who each unlink their last Google or GitHub account at the
+same moment can both pass it. Either recovers without break-glass by signing
+in with Google or GitHub again, which links the provider back onto the
+verified account.
+
 ## Cutover after deploy (feedback.venturi.systems)
 
 The feedback infrastructure repository delivers `VENTURI_TEAM_ADMIN_EMAILS`
@@ -88,6 +104,22 @@ the fork-side steps are:
 1. **Read the roles** (read-only SQL, runbook step 8): the password bootstrap
    administrator is `admin` with an unverified address and no Google or GitHub
    link, so under this release it already acts as a Contributor.
+   In the same read, list team-domain accounts whose address is unverified
+   but that carry a `google` or `github` link:
+
+   ```sql
+   SELECT u.id, u.email, a.provider_id, u.created_at
+   FROM "user" u JOIN account a ON a.user_id = u.id
+   WHERE a.provider_id IN ('google', 'github')
+     AND u.email_verified = false
+     AND lower(split_part(u.email, '@', 2)) = 'venturi.systems';
+   ```
+
+   This release refuses such a sign-in, so a row of that shape predates it.
+   Review each one (and remove it if nobody on the team owns it) before
+   inviting that address: an invitation link would mark the row verified and
+   give its linked provider account the invited role.
+
 2. **Promote** (runbook step 9): the designated owner signs in with Google or
    GitHub. The sign-in hook promotes the account to `admin`; an already open
    session is promoted on its next request. Pass: the account is `admin` with
