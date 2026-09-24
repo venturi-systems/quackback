@@ -18,7 +18,7 @@ test.describe('Public Voting', () => {
 
     // Reuse the run's single portal sign-in. Sending another OTP here is what
     // pushed the suite past the product's 3-per-15-min cap; see portal-auth.ts.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
     isAuthenticated = true
   })
 
@@ -361,7 +361,7 @@ test.describe('Voting — independence and persistence', () => {
     test.setTimeout(90000)
 
     // Same single sign-in as every other authenticated portal group.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
   })
 
   test.afterAll(async () => {

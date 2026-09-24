@@ -250,7 +250,7 @@ test.describe('Authenticated user — comment form and submission', () => {
     // Reuse the run's single portal sign-in. Each of these four groups used to
     // send its own OTP for the same address, which alone is more than the
     // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
   })
 
   test.afterAll(async () => {
@@ -480,7 +480,7 @@ test.describe('Edge cases — comment content', () => {
     // Reuse the run's single portal sign-in. Each of these four groups used to
     // send its own OTP for the same address, which alone is more than the
     // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
   })
 
   test.afterAll(async () => {
@@ -656,7 +656,7 @@ test.describe('Comment editing', () => {
     // Reuse the run's single portal sign-in. Each of these four groups used to
     // send its own OTP for the same address, which alone is more than the
     // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
   })
 
   test.afterAll(async () => {
@@ -865,7 +865,7 @@ test.describe('Markdown comment rendering', () => {
     // Reuse the run's single portal sign-in. Each of these four groups used to
     // send its own OTP for the same address, which alone is more than the
     // product's 3-per-15-min cap allows; see e2e/utils/portal-auth.ts.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
   })
 
   test.afterAll(async () => {
