@@ -8,7 +8,12 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { deepMerge, parseJsonConfig } from '../settings.helpers'
-import { DEFAULT_AUTH_CONFIG, DEFAULT_PORTAL_CONFIG } from '../settings.types'
+import {
+  DEFAULT_AUTH_CONFIG,
+  DEFAULT_OFFICE_HOURS,
+  DEFAULT_PORTAL_CONFIG,
+  DEFAULT_WIDGET_CONFIG,
+} from '../settings.types'
 
 const PROBE = 'def40Polluted'
 
@@ -123,7 +128,7 @@ describe('deepMerge prototype guard', () => {
     expect(PROBE in b).toBe(false)
   })
 
-  it('copies a subtree the target lacks by value, and arrays and primitives as given', () => {
+  it('copies a subtree or array the target lacks by value, and primitives as given', () => {
     const list = [{ id: 1 }]
     const source = {
       nested: { a: 1, deeper: { b: 'two', flag: false, none: null } },
@@ -138,8 +143,91 @@ describe('deepMerge prototype guard', () => {
     expect(merged).toEqual(source)
     // A plain subtree is rebuilt, so the merge never hands back the caller's object.
     expect(merged.nested).not.toBe(source.nested)
-    // Arrays are still assigned as-is, exactly as before.
-    expect(merged.list).toBe(list)
+    // An array and its plain-object elements are copied the same way.
+    expect(merged.list).not.toBe(list)
+    expect((merged.list as unknown[])[0]).not.toBe(list[0])
+  })
+})
+
+describe('deepMerge array element guard', () => {
+  it('drops an own __proto__ key from an object inside an array', () => {
+    const payload = JSON.parse(
+      `{"chat":{"cannedReplies":[{"__proto__":{"${PROBE}":true},"id":"r1","title":"Hi","body":"Hello"}]}}`
+    )
+    expect(ownProtoKeyPaths(payload)).toEqual(['$.chat.cannedReplies.0'])
+
+    const merged = deepMerge(DEFAULT_WIDGET_CONFIG, payload)
+
+    expect(objectPrototypeIsClean()).toBe(true)
+    expect(ownProtoKeyPaths(merged)).toEqual([])
+    const reply = merged.chat?.cannedReplies?.[0] as object
+    expect(Object.getPrototypeOf(reply)).toBe(Object.prototype)
+    expect(PROBE in reply).toBe(false)
+    expect(reply).toEqual({ id: 'r1', title: 'Hi', body: 'Hello' })
+    expect(JSON.stringify(merged.chat?.cannedReplies)).toBe(
+      '[{"id":"r1","title":"Hi","body":"Hello"}]'
+    )
+    expect(JSON.stringify(merged)).not.toContain('__proto__')
+    expect(JSON.stringify(merged)).not.toContain(PROBE)
+  })
+
+  it('drops constructor.prototype from an object inside an array', () => {
+    const payload = JSON.parse(
+      `{"chat":{"officeHours":{"enabled":true,"timezone":"UTC","days":[{"constructor":{"prototype":{"${PROBE}":true}},"enabled":true,"start":"09:00","end":"17:00"}]}}}`
+    )
+
+    const merged = deepMerge(DEFAULT_WIDGET_CONFIG, payload)
+
+    expect(objectPrototypeIsClean()).toBe(true)
+    const day = merged.chat?.officeHours?.days[0] as object
+    expect(Object.prototype.hasOwnProperty.call(day, 'constructor')).toBe(false)
+    expect(day.constructor).toBe(Object)
+    expect(day).toEqual({ enabled: true, start: '09:00', end: '17:00' })
+    expect(JSON.stringify(merged)).not.toContain('constructor')
+    expect(JSON.stringify(merged)).not.toContain('prototype')
+    expect(JSON.stringify(merged)).not.toContain(PROBE)
+  })
+
+  it('drops unsafe keys from arrays nested inside array elements and inside arrays', () => {
+    const source = JSON.parse(
+      `{"a":[[{"__proto__":{"${PROBE}":1},"k":1}],[1,"two",null,true]],"b":[{"inner":[{"__proto__":{"${PROBE}":1},"constructor":{"prototype":{"${PROBE}":1}},"kept":true}]}]}`
+    )
+    expect(ownProtoKeyPaths(source)).toEqual(['$.a.0.0', '$.b.0.inner.0'])
+
+    const merged = deepMerge<Record<string, unknown>>({}, source)
+
+    expect(objectPrototypeIsClean()).toBe(true)
+    expect(ownProtoKeyPaths(merged)).toEqual([])
+    expect(JSON.stringify(merged)).toBe(
+      '{"a":[[{"k":1}],[1,"two",null,true]],"b":[{"inner":[{"kept":true}]}]}'
+    )
+  })
+
+  it('keeps primitives, null and non-plain objects inside an array as given', () => {
+    class Box {
+      value = 1
+    }
+    const when = new Date(0)
+    const box = new Box()
+    const list = [1, 'two', null, true, when, box]
+
+    const merged = deepMerge<Record<string, unknown>>({}, { list })
+
+    const copied = merged.list as unknown[]
+    expect(copied).toEqual(list)
+    expect(copied[4]).toBe(when)
+    expect(copied[5]).toBe(box)
+    expect(copied[5]).toBeInstanceOf(Box)
+  })
+
+  it('replaces the target array wholesale instead of merging elements', () => {
+    const target = { days: [{ enabled: true }, { enabled: true }, { enabled: true }] }
+    const source = JSON.parse('{"days":[{"enabled":false}]}')
+
+    const merged = deepMerge(target, source)
+
+    expect(merged.days).toEqual([{ enabled: false }])
+    expect(target.days).toHaveLength(3)
   })
 })
 
@@ -171,5 +259,73 @@ describe('parseJsonConfig prototype guard', () => {
 
   it('still returns the defaults for a stored JSON null', () => {
     expect(parseJsonConfig('null', DEFAULT_AUTH_CONFIG)).toEqual(DEFAULT_AUTH_CONFIG)
+  })
+
+  it('drops a stored __proto__ at any depth inside the welcome card body arrays', () => {
+    const stored = `{"welcomeCard":{"enabled":true,"title":"t","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi","__proto__":{"${PROBE}":true},"marks":[{"type":"bold","constructor":{"prototype":{"${PROBE}":true}}}]}]}]}}}`
+
+    const config = parseJsonConfig(stored, DEFAULT_PORTAL_CONFIG)
+
+    expect(objectPrototypeIsClean()).toBe(true)
+    expect(ownProtoKeyPaths(config)).toEqual([])
+    expect(JSON.stringify(config.welcomeCard?.body)).toBe(
+      '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi","marks":[{"type":"bold"}]}]}]}'
+    )
+  })
+})
+
+describe('parseJsonConfig array round-trip', () => {
+  it('returns ordinary arrays of strings unchanged', () => {
+    const access = {
+      visibility: 'private',
+      allowedDomains: ['acme.example', 'widgets.example'],
+      widgetSignIn: true,
+      allowedSegmentIds: ['segment_01', 'segment_02'],
+    }
+
+    const config = parseJsonConfig(JSON.stringify({ access }), DEFAULT_PORTAL_CONFIG)
+
+    expect(config.access).toEqual(access)
+    expect(JSON.stringify(config.access)).toBe(JSON.stringify(access))
+  })
+
+  it('returns ordinary arrays of objects unchanged', () => {
+    const chat = {
+      enabled: true,
+      cannedReplies: [
+        { id: 'r1', title: 'Hi', body: 'Hello there' },
+        { id: 'r2', title: 'Bye', body: 'Talk soon' },
+      ],
+      officeHours: DEFAULT_OFFICE_HOURS,
+    }
+
+    const config = parseJsonConfig(JSON.stringify({ chat }), DEFAULT_WIDGET_CONFIG)
+
+    expect(config.chat?.cannedReplies).toEqual(chat.cannedReplies)
+    expect(config.chat?.officeHours).toEqual(DEFAULT_OFFICE_HOURS)
+    expect(JSON.stringify(config.chat?.cannedReplies)).toBe(JSON.stringify(chat.cannedReplies))
+    expect(JSON.stringify(config.chat?.officeHours)).toBe(JSON.stringify(DEFAULT_OFFICE_HOURS))
+  })
+
+  it('returns SSO attribute-mapping rules unchanged', () => {
+    const ssoOidc = {
+      enabled: false,
+      discoveryUrl: 'https://idp.acme.example/.well-known/openid-configuration',
+      clientId: 'client',
+      autoCreateUsers: true,
+      attributeMapping: {
+        claimPath: 'groups',
+        rules: [
+          { whenContains: 'admins', role: 'admin' },
+          { whenContains: 'staff', role: 'member' },
+        ],
+        defaultRole: 'user',
+      },
+    }
+
+    const config = parseJsonConfig(JSON.stringify({ ssoOidc }), DEFAULT_AUTH_CONFIG)
+
+    expect(config.ssoOidc).toEqual(ssoOidc)
+    expect(JSON.stringify(config.ssoOidc)).toBe(JSON.stringify(ssoOidc))
   })
 })
