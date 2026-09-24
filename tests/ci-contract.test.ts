@@ -341,3 +341,40 @@ describe('QB-CI-002 e2e shard balance contract', () => {
     expect(ci).toContain('803 distinct tests either way')
   })
 })
+
+describe('QB-CI-003 database setup steps fail fast', () => {
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+
+  /** The text of one job, from its key up to the next job's key. */
+  function job(name: string): string {
+    const body = ci.split(`\n  ${name}:\n`)[1]
+    expect(body, `ci.yml must declare the ${name} job`).toBeDefined()
+    return body!.split(/\n {2}[a-z0-9_-]+:\n/)[0]
+  }
+
+  /** The text of the step in `jobText` whose run line is exactly `command`. */
+  function step(jobText: string, command: string): string | undefined {
+    const steps = jobText.split('\n    steps:\n')[1]?.split(/\n {6}- /) ?? []
+    return steps.find((text) => text.split('\n').some((line) => line.trim() === `run: ${command}`))
+  }
+
+  // A hung `bun run db:migrate` on run 35980940017 (shard 8, attempt 1) held
+  // its runner for an hour, because only the job cap applied. Every step that
+  // sets up the database container carries its own, much smaller cap.
+  it.each([
+    ['database_tests', ['bun run db:migrate', 'bun run db:indexes']],
+    ['e2e_tests', ['bun run db:migrate', 'bun run db:seed']],
+  ] as const)('%s caps each database setup step on its own', (name, commands) => {
+    const text = job(name)
+    const jobCap = Number(text.match(/\n {4}timeout-minutes: (\d+)\n/)?.[1])
+    expect(jobCap).toBeGreaterThan(0)
+    for (const command of commands) {
+      const found = step(text, command)
+      expect(found, `${name} must run ${command}`).toBeDefined()
+      const cap = Number(found!.match(/(?:^|\n) {8}timeout-minutes: (\d+)(?:\n|$)/)?.[1])
+      expect(cap, `${name}: ${command} needs its own timeout-minutes`).toBeGreaterThan(0)
+      expect(cap).toBeLessThanOrEqual(10)
+      expect(cap).toBeLessThan(jobCap)
+    }
+  })
+})
