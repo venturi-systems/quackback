@@ -567,6 +567,11 @@ describe('<BoardAccessForm> policy-owned Anyone tier', () => {
     expect(screen.getByTestId('managed-setting-note')).toHaveTextContent(
       'The Anyone (no sign-in) tier is managed by the deployment configuration'
     )
+    // Boards whose access the policy manages (the published ones in the public
+    // posture) may keep Anyone, so the note must not say every board.
+    expect(screen.getByTestId('managed-setting-note')).toHaveTextContent(
+      'Sign-in is required on every board this deployment does not manage'
+    )
     for (const action of ['View', 'Vote', 'Comment', 'Submit posts']) {
       const cell = screen.getByRole('button', { name: `${action}: Anyone` })
       expect(cell).toBeDisabled()
@@ -580,7 +585,7 @@ describe('<BoardAccessForm> policy-owned Anyone tier', () => {
     renderAnonManaged(SIGNED_IN_ACCESS)
     const publicPreset = screen.getByRole('button', { name: 'Public' })
     expect(publicPreset).toBeDisabled()
-    expect(publicPreset).toHaveTextContent('requires sign-in on every board')
+    expect(publicPreset).toHaveTextContent('requires sign-in on every board it does not manage')
     expect(screen.getByRole('button', { name: 'Private' })).not.toBeDisabled()
     fireEvent.click(publicPreset)
     expect(isCellSelected('View', 'Signed-in')).toBe(true)

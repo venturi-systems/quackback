@@ -45,8 +45,9 @@ export function assertBoardAccessWithinPolicy(access: BoardAccess): void {
   throw new ForbiddenError(
     'FIELD_MANAGED',
     `Field "${BOARD_ANONYMOUS_ACCESS_PATH}" is managed: this deployment's access policy ` +
-      `requires sign-in on every board, so the "Anyone" tier cannot be used ` +
-      `(requested for ${actions.join(', ')}). Choose Signed-in, Segments or Team only.`
+      `requires sign-in on every board it does not manage, so the "Anyone" tier ` +
+      `cannot be used (requested for ${actions.join(', ')}). ` +
+      `Choose Signed-in, Segments or Team only.`
   )
 }
 
