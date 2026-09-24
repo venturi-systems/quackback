@@ -5,6 +5,7 @@ import { ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-membership.service'
 import { logger } from '@/lib/server/logger'
 import { widgetDisabledResponse } from '@/lib/server/widget/widget-enabled'
+import { isMatchableText, searchLimit } from '@/lib/server/widget/search-query'
 
 const log = logger.child({ component: 'widget-search' })
 
@@ -17,9 +18,11 @@ export const Route = createFileRoute('/api/widget/search')({
         const url = new URL(request.url)
         const q = url.searchParams.get('q')?.trim()
         const board = url.searchParams.get('board') || undefined
-        const limit = Math.min(Number(url.searchParams.get('limit')) || 5, 20)
+        const limit = searchLimit(url.searchParams.get('limit'), 5, 20)
 
-        if (!q) {
+        // A term or board slug holding a NUL matches nothing, and Postgres
+        // would reject it, so it gets the empty result an absent term gets.
+        if (!q || !isMatchableText(q) || (board !== undefined && !isMatchableText(board))) {
           return Response.json({ data: { posts: [] } }, { headers: corsHeaders() })
         }
 
