@@ -19,10 +19,15 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  UNKNOWN_SERVER_FN_MESSAGES,
   guardServerFnDecode,
+  isServerFnRequestWithoutId,
   isUndecodedServerFnFailure,
+  isUnknownServerFnError,
   markServerFnDispatched,
   serverFnBadRequest,
+  serverFnIdFromPathname,
+  serverFnNotFound,
 } from '../serverfn-decode-guard'
 
 const FN_URL = 'http://acme.localhost:3000/_serverFn/0123abcd'
@@ -299,8 +304,31 @@ describe('guardServerFnDecode: everything else passes through untouched', () => 
     expect((result as { response: Response }).response).toBe(original)
   })
 
-  it('a thrown error (for example an unknown function id) propagates unchanged', async () => {
-    const error = new Error('Server function info not found for 0123abcd')
+  const propagated: Array<[string, unknown]> = [
+    [
+      'a function module that failed to import',
+      new Error('Server function module not resolved for 0123abcd'),
+    ],
+    [
+      'a function export that is missing',
+      new Error('Server function module export not resolved for serverFn ID: 0123abcd'),
+    ],
+    [
+      'an unknown-id message for a different id',
+      new Error('Server function info not found for 9999'),
+    ],
+    [
+      'an unknown-id message with extra text',
+      new Error('Server function info not found for 0123abcd (and more)'),
+    ],
+    [
+      'an unknown-id message for a prefix of the id',
+      new Error('Server function info not found for 0123'),
+    ],
+    ['a non-Error value', 'Server function info not found for 0123abcd'],
+    ['an abort', new DOMException('The operation was aborted.', 'AbortError')],
+  ]
+  it.each(propagated)('a thrown error propagates unchanged: %s', async (_label, error) => {
     const request = getRequest()
     await expect(
       guardServerFnDecode({
@@ -311,6 +339,148 @@ describe('guardServerFnDecode: everything else passes through untouched', () => 
         },
       })
     ).rejects.toBe(error)
+  })
+})
+
+describe('guardServerFnDecode: an id that names no function answers 404', () => {
+  async function expectNotFound(result: unknown) {
+    expect(result).toBeInstanceOf(Response)
+    const response = result as Response
+    expect(response.status).toBe(404)
+    expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('x-tss-serialized')).toBeNull()
+    const body = await response.text()
+    expect(body).toBe('Not Found')
+    expect(body).not.toContain('0123abcd')
+  }
+
+  it.each(UNKNOWN_SERVER_FN_MESSAGES.map((prefix) => [prefix]))(
+    'the resolver error "%s<id>" for this request id',
+    async (prefix) => {
+      const result = await guardServerFnDecode({
+        request: getRequest(),
+        handlerType: 'serverFn',
+        next: async () => {
+          throw new Error(`${prefix}0123abcd`)
+        },
+      })
+      await expectNotFound(result)
+    }
+  )
+
+  it('a POST to an unknown id', async () => {
+    const result = await guardServerFnDecode({
+      request: postRequest(JSON.stringify(VALID_ENVELOPE)),
+      handlerType: 'serverFn',
+      next: async () => {
+        throw new Error('Server function info not found for 0123abcd')
+      },
+    })
+    await expectNotFound(result)
+  })
+
+  it("uses the framework's pathname when it is given", async () => {
+    const request = new Request('http://acme.localhost:3000/_serverFn/raw-id', {
+      headers: { 'x-tsr-serverFn': 'true' },
+    })
+    const result = await guardServerFnDecode({
+      request,
+      pathname: '/_serverFn/normalized-id',
+      handlerType: 'serverFn',
+      next: async () => {
+        throw new Error('Server function info not found for normalized-id')
+      },
+    })
+    await expectNotFound(result)
+  })
+
+  it('a matching message thrown after the function started still propagates', async () => {
+    const request = getRequest(JSON.stringify(VALID_ENVELOPE))
+    const error = new Error('Server function info not found for 0123abcd')
+    await expect(
+      guardServerFnDecode({
+        request,
+        handlerType: 'serverFn',
+        next: async () => {
+          markServerFnDispatched(request)
+          throw error
+        },
+      })
+    ).rejects.toBe(error)
+  })
+
+  it('router requests are not inspected, even with a matching message', async () => {
+    const error = new Error('Server function info not found for 0123abcd')
+    await expect(
+      guardServerFnDecode({
+        request: getRequest(),
+        handlerType: 'router',
+        next: async () => {
+          throw error
+        },
+      })
+    ).rejects.toBe(error)
+  })
+})
+
+describe('serverFnIdFromPathname', () => {
+  const table: Array<[string, string | undefined]> = [
+    ['/_serverFn/0123abcd', '0123abcd'],
+    ['/_serverFn/0123abcd/extra', '0123abcd'],
+    ['/_serverFn/', ''],
+    ['/_serverFn//0123abcd', ''],
+    ['/_serverFn', undefined],
+    ['/_serverFnX/0123abcd', undefined],
+    ['/api/_serverFn/0123abcd', undefined],
+    ['/', undefined],
+  ]
+  it.each(table)('%s -> %o', (pathname, expected) => {
+    expect(serverFnIdFromPathname(pathname)).toBe(expected)
+  })
+})
+
+describe('isUnknownServerFnError', () => {
+  it('needs a non-empty id', () => {
+    const error = new Error('Server function info not found for ')
+    expect(isUnknownServerFnError(error, '')).toBe(false)
+    expect(isUnknownServerFnError(error, undefined)).toBe(false)
+  })
+
+  it('accepts an error-like object from another realm', () => {
+    expect(
+      isUnknownServerFnError({ message: 'Invalid server function ID: 0123abcd' }, '0123abcd')
+    ).toBe(true)
+  })
+
+  it('rejects values without a string message', () => {
+    expect(isUnknownServerFnError(null, '0123abcd')).toBe(false)
+    expect(isUnknownServerFnError(undefined, '0123abcd')).toBe(false)
+    expect(isUnknownServerFnError({ message: 42 }, '0123abcd')).toBe(false)
+  })
+})
+
+describe('isServerFnRequestWithoutId', () => {
+  const table: Array<[string, boolean]> = [
+    ['http://acme.localhost:3000/_serverFn/', true],
+    ['http://acme.localhost:3000/_serverFn/?payload=x', true],
+    ['http://acme.localhost:3000/_serverFn//0123abcd', true],
+    ['http://acme.localhost:3000/_serverFn/0123abcd', false],
+    ['http://acme.localhost:3000/_serverFn', false],
+    ['http://acme.localhost:3000/', false],
+  ]
+  it.each(table)('%s -> %s', (url, expected) => {
+    expect(isServerFnRequestWithoutId(new Request(url))).toBe(expected)
+  })
+})
+
+describe('serverFnNotFound', () => {
+  it('returns a fresh, detail-free 404 each time', async () => {
+    const a = serverFnNotFound()
+    const b = serverFnNotFound()
+    expect(a).not.toBe(b)
+    expect(a.status).toBe(404)
+    expect(await a.text()).toBe('Not Found')
   })
 })
 

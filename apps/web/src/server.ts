@@ -1,5 +1,9 @@
 import handler, { createServerEntry } from '@tanstack/react-start/server-entry'
 import { logStartupBanner } from '@/lib/server/startup'
+import {
+  isServerFnRequestWithoutId,
+  serverFnNotFound,
+} from '@/lib/server/middleware/serverfn-decode-guard'
 
 // Cold-start optimization: eagerly warm DB + Redis connections AND preload
 // the modules that bootstrap.ts dynamically imports on first SSR. The
@@ -26,6 +30,10 @@ logStartupBanner()
 
 export default createServerEntry({
   fetch(request) {
+    // A bare `/_serverFn/` names no server function. TanStack Start throws
+    // for it before any request middleware runs, which h3 answers 500; it is
+    // a client error, so answer 404 here (DEF-59).
+    if (isServerFnRequestWithoutId(request)) return serverFnNotFound()
     return handler.fetch(request)
   },
 })
