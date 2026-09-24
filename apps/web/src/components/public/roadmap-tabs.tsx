@@ -32,6 +32,11 @@ export function RoadmapTabs({ roadmaps, selectedId, onSelect }: RoadmapTabsProps
       >
         {roadmaps.map((roadmap) => {
           const isActive = selectedId === roadmap.id
+          // No forced single line (v6.6): a tab keeps its full label on one line
+          // while it fits (shrink-0 in a scrollable row), and a label wider than
+          // the row reflows inside it (max-w-full) instead of being clipped or
+          // pushed past the row. Roadmap names are written by admins, so the
+          // label is marked as user text for the design text checker.
           return (
             <button
               key={roadmap.id}
@@ -40,13 +45,13 @@ export function RoadmapTabs({ roadmaps, selectedId, onSelect }: RoadmapTabsProps
               aria-selected={isActive}
               onClick={() => onSelect(roadmap.id)}
               className={cn(
-                'inline-flex items-center rounded-full text-sm px-3 py-1 pointer-coarse:min-h-(--ds-component-touch-minimum) whitespace-nowrap transition-colors shrink-0',
+                'inline-flex max-w-full items-center rounded-full text-sm px-3 py-1 pointer-coarse:min-h-(--ds-component-touch-minimum) transition-colors shrink-0',
                 isActive
                   ? 'bg-foreground/10 text-foreground font-medium'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               )}
             >
-              {roadmap.name}
+              <span className="min-w-0 break-words" data-text-origin="user">{roadmap.name}</span>
             </button>
           )
         })}
