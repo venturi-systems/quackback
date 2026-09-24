@@ -37,27 +37,40 @@ export function parseJsonOrNull<T>(json: string | null): T | null {
   }
 }
 
+/**
+ * Keys deepMerge never copies. `JSON.parse('{"__proto__":{...}}')` creates an
+ * ordinary own `__proto__` key, and assigning it onto the merged object would
+ * run the `__proto__` setter and replace that object's prototype, so every key
+ * the payload supplied would read through as an inherited setting.
+ * `constructor` and `prototype` are the other route to a shared prototype.
+ * No settings shape uses any of these names.
+ */
+const UNSAFE_MERGE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+
 /** @internal */
 export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target }
-  for (const key in source) {
-    if (source[key] !== undefined) {
-      const srcVal = source[key]
-      const tgtVal = result[key]
-      const isNestedObject =
-        typeof srcVal === 'object' &&
-        srcVal !== null &&
-        !Array.isArray(srcVal) &&
-        typeof tgtVal === 'object' &&
-        tgtVal !== null
+  // Own keys only: `for...in` would also merge keys inherited by `source`.
+  // `?? {}` keeps a stored JSON `null` merging to the defaults, as before.
+  for (const key of Object.keys(source ?? {}) as Array<keyof T & string>) {
+    if (UNSAFE_MERGE_KEYS.has(key)) continue
+    const srcVal = source[key]
+    if (srcVal === undefined) continue
+    // Read only the merged object's own value, never an inherited one.
+    const tgtVal = Object.hasOwn(result, key) ? result[key] : undefined
+    const isNestedObject =
+      typeof srcVal === 'object' &&
+      srcVal !== null &&
+      !Array.isArray(srcVal) &&
+      typeof tgtVal === 'object' &&
+      tgtVal !== null
 
-      result[key] = isNestedObject
-        ? (deepMerge(
-            tgtVal as Record<string, unknown>,
-            srcVal as Record<string, unknown>
-          ) as T[typeof key])
-        : (srcVal as T[typeof key])
-    }
+    result[key] = isNestedObject
+      ? (deepMerge(
+          tgtVal as Record<string, unknown>,
+          srcVal as Record<string, unknown>
+        ) as T[typeof key])
+      : (srcVal as T[typeof key])
   }
   return result
 }
