@@ -45,6 +45,11 @@ What rule 2 reads is the account's own verified flag. These keep it honest:
   refused for brand-new addresses as well as known ones, so nobody can create a
   password account that would sit on a future team member's address
   (`auth/hooks.ts`, `handleSignInPreCheck`).
+- A password sign-up at a team-domain address is refused even while password
+  sign-in is switched on (`auth/hooks.ts`, `team_identity_required`). The row
+  it would leave carries a password its creator knows: once the real owner
+  verified the address by magic link and linked Google or GitHub, that
+  password would open an account that holds a team role.
 - A Google, GitHub or other social sign-in that would create or open an account
   at a team domain whose address is not verified is refused, and a
   just-created account is removed again (`auth/hooks.ts`,
@@ -119,6 +124,20 @@ the fork-side steps are:
    Review each one (and remove it if nobody on the team owns it) before
    inviting that address: an invitation link would mark the row verified and
    give its linked provider account the invited role.
+
+   Also list team-domain accounts that carry a password:
+
+   ```sql
+   SELECT u.id, u.email, u.email_verified, u.created_at
+   FROM "user" u JOIN account a ON a.user_id = u.id
+   WHERE a.provider_id = 'credential'
+     AND lower(split_part(u.email, '@', 2)) = 'venturi.systems';
+   ```
+
+   This release refuses a password sign-up at a team domain, so apart from the
+   bootstrap account such a row predates it. Review each one the same way:
+   whenever password sign-in is switched on, its password still opens the
+   account after the owner has linked Google or GitHub to it.
 
 2. **Promote** (runbook step 9): the designated owner signs in with Google or
    GitHub. The sign-in hook promotes the account to `admin`; an already open
