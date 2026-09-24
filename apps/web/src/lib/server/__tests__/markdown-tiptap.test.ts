@@ -280,7 +280,14 @@ describe('contentJsonToMarkdown', () => {
         { type: 'image', attrs: { src: 'https://cdn.example.com/s.png', alt: 'S', title: null } },
       ],
     }
-    expect(contentJsonToMarkdown(doc, 'stored')).toContain(':quackback_logo:')
+    // Venturi fork: @tiptap/markdown 3.31 backslash-escapes `_` in text, so the
+    // source reads `:quackback\_logo:`. It renders, and parses back, as the
+    // shortcode itself.
+    const markdown = contentJsonToMarkdown(doc, 'stored')
+    expect(markdown).toMatch(/:quackback\\?_logo:/)
+    const textOf = (node: { text?: string; content?: unknown[] }): string =>
+      node.text ?? (node.content ?? []).map((child) => textOf(child as typeof node)).join('')
+    expect(textOf(markdownToTiptapJson(markdown))).toContain(':quackback_logo:')
   })
 
   test('keeps stored markdown when an image coexists with an unsupported node', () => {
