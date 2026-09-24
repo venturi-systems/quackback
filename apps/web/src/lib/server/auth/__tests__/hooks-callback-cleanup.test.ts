@@ -731,7 +731,13 @@ describe('handleCallbackPolicyCleanup — unverified team-domain address', () =>
       token: 'tok',
     })
 
-    await cleanup(ctx, tenantSettings({}))
+    // The provider owns the team domain (routing-only), so the portal OIDC
+    // eligibility gate lets this user through and only the team-address
+    // check is under test.
+    await cleanup(
+      ctx,
+      tenantSettings({ verifiedDomains: [makeVerifiedDomain('venturi.systems', false)] })
+    )
 
     expect(ctx.redirect).not.toHaveBeenCalled()
     expect(mockSessionDeleteWhere).not.toHaveBeenCalled()
