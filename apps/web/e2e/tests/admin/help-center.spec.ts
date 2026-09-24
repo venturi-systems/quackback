@@ -39,9 +39,13 @@ async function enableHelpCenter(page: import('@playwright/test').Page): Promise<
   const toggle = page.locator('#flag-helpCenter')
   await expect(toggle).toBeVisible({ timeout: 10000 })
   if (!(await toggle.isChecked())) {
+    // The success handler reloads the page. Wait for that reload's load event,
+    // armed before the click: waitForLoadState alone returns at once, since
+    // the current document already reached that state, and the late reload
+    // then aborted the caller's next page.goto (net::ERR_ABORTED).
+    const reloaded = page.waitForEvent('load')
     await toggle.click()
-    // The success handler reloads the page; wait for the reloaded document to
-    // settle before asserting, or the assertion races the navigation.
+    await reloaded
     await page.waitForLoadState('networkidle')
     await expect(page.locator('#flag-helpCenter')).toBeChecked({ timeout: 10000 })
   }
@@ -225,6 +229,33 @@ test.describe('Help Center article creation', () => {
   }) => {
     const url = await createAndOpenArticle(page, `E2E Test Article ${Date.now()}`)
     expect(url).toMatch(/\/admin\/help-center\/articles\//)
+  })
+
+  test('a category created from the article dialog is the one selected', async ({ page }) => {
+    const newButton = page.getByRole('button', { name: /^New$/i })
+    await expect(newButton).toBeVisible({ timeout: 10000 })
+    await newButton.click()
+    await page.getByRole('menuitem', { name: 'New article' }).click()
+
+    const dialog = page.getByRole('dialog', { name: 'Create help article' })
+    await expect(dialog).toBeVisible()
+
+    const categoryName = `E2E Dialog Category ${Date.now()}`
+    await dialog.getByTitle('Create new category').click()
+    const categoryDialog = page.getByRole('dialog', { name: 'New category' })
+    await expect(categoryDialog).toBeVisible({ timeout: 5000 })
+    await categoryDialog.getByLabel('Name', { exact: true }).fill(categoryName)
+    await categoryDialog.getByRole('button', { name: 'Create', exact: true }).click()
+    await expect(categoryDialog).toBeHidden({ timeout: 10000 })
+
+    // The article dialog stays open, with the new category chosen.
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('combobox').first()).toContainText(categoryName, {
+      timeout: 10000,
+    })
+
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden({ timeout: 5000 })
   })
 
   test('create article dialog can be dismissed with Escape', async ({ page }) => {

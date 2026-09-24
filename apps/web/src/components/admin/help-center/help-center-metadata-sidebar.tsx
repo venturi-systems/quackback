@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { PlusIcon } from '@heroicons/react/24/solid'
 import { CategoryIcon } from '@/components/help-center/category-icon'
@@ -34,6 +34,19 @@ function SidebarContent({
 }: HelpCenterMetadataSidebarProps) {
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false)
   const { data: categories } = useQuery(helpCenterQueries.categories())
+
+  // A category created here is selected once the list holds it, not before.
+  // The Select sits inside the article form, so Radix mirrors its value into a
+  // hidden native <select>. Until that select has an <option> for the new id,
+  // it reads the value back as '' and reports that as a change, which cleared
+  // the new selection whenever the list refetch had not landed yet.
+  const [pendingCategoryId, setPendingCategoryId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!pendingCategoryId) return
+    if (!categories?.some((cat) => cat.id === pendingCategoryId)) return
+    setPendingCategoryId(null)
+    onCategoryChange(pendingCategoryId)
+  }, [pendingCategoryId, categories, onCategoryChange])
 
   return (
     <>
@@ -80,7 +93,7 @@ function SidebarContent({
       <CategoryFormDialog
         open={createCategoryOpen}
         onOpenChange={setCreateCategoryOpen}
-        onCreated={(id) => onCategoryChange(id)}
+        onCreated={setPendingCategoryId}
       />
 
       {authorName && (
