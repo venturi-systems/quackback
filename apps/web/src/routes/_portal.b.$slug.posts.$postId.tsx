@@ -36,6 +36,7 @@ import { PortalMergeBanner } from '@/components/public/post-detail/merge-banner'
 import { similarPostsQuery } from '@/components/public/post-detail/similar-posts-section'
 import { isValidTypeId, type CommentId, type PostId } from '@quackback/ids'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 export const Route = createFileRoute('/_portal/b/$slug/posts/$postId')({
   loader: async ({ params, context }) => {
@@ -98,7 +99,11 @@ export const Route = createFileRoute('/_portal/b/$slug/posts/$postId')({
       baseUrl: context.baseUrl ?? '',
     }
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, matches }) => {
+    // Behind the sign-in gate the page shows only the gate, so it takes the
+    // gate's title and indexing instead of describing this page (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData) return {}
     const { postTitle, boardName, slug, postId, baseUrl } = loaderData
     const title = `${postTitle} - ${boardName}`

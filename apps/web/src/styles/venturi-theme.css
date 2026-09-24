@@ -333,6 +333,12 @@
   text-wrap: balance;
 }
 
+/* Why the last sign-in was refused: under the title, at a prose measure. */
+.portal-gate__notice {
+  max-inline-size: var(--ds-primitive-dimension-container-article);
+  margin: 0 0 16px;
+}
+
 .portal-gate__email {
   color: var(--ds-color-text-primary);
   font-weight: var(--ds-primitive-font-weight-medium);

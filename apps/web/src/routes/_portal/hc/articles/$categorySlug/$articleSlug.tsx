@@ -18,6 +18,7 @@ import { JsonLd } from '@/components/json-ld'
 import { buildArticleJsonLd, buildBreadcrumbJsonLd } from '@/lib/shared/json-ld'
 import { cn, stripMarkdownPreview } from '@/lib/shared/utils'
 import type { JSONContent } from '@tiptap/react'
+import { portalGateHead } from '@/lib/shared/route-head'
 
 const helpCenterApi = getRouteApi('/_portal/hc')
 const categoryApi = getRouteApi('/_portal/hc/articles/$categorySlug')
@@ -32,6 +33,10 @@ export const Route = createFileRoute('/_portal/hc/articles/$categorySlug/$articl
     }
   },
   head: ({ loaderData, params, matches }) => {
+    // Behind the sign-in gate the page shows only the gate, so it takes the
+    // gate's title and indexing instead of describing this page (DEF-44).
+    const gated = portalGateHead(matches)
+    if (gated) return gated
     if (!loaderData) return {}
 
     const { article } = loaderData

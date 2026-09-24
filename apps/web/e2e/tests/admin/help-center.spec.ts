@@ -47,7 +47,7 @@ async function enableHelpCenter(page: import('@playwright/test').Page): Promise<
   }
 }
 
-/** Select the first available category in a combobox, or dismiss if none exist. */
+/** Select the first available category in a combobox, or create one if none exist. */
 async function selectFirstCategoryIfAvailable(
   container: import('@playwright/test').Locator,
   page: import('@playwright/test').Page
@@ -58,8 +58,18 @@ async function selectFirstCategoryIfAvailable(
   const firstOption = page.getByRole('option').first()
   if ((await firstOption.count()) > 0) {
     await firstOption.click()
-  } else {
-    await page.keyboard.press('Escape')
+    return
+  }
+
+  await page.keyboard.press('Escape')
+  const addCategoryBtn = container.locator('button[title="Create new category"]').first()
+  if ((await addCategoryBtn.count()) > 0) {
+    await addCategoryBtn.click()
+    const catDialog = page.getByRole('dialog').filter({ hasText: /create category/i })
+    await expect(catDialog).toBeVisible({ timeout: 5000 })
+    await catDialog.getByLabel(/name/i).fill(`E2E Category ${Date.now()}`)
+    await catDialog.getByRole('button', { name: /create|save/i }).click()
+    await expect(catDialog).toBeHidden({ timeout: 10000 })
   }
 }
 
@@ -74,6 +84,27 @@ async function createAndOpenArticle(
   await enableHelpCenter(page)
   await page.goto('/admin/help-center')
   await page.waitForLoadState('networkidle')
+
+  // Ensure at least one category exists so article creation can succeed
+  const categoryLinks = page.locator('a[href*="/admin/help-center?categoryId="]')
+  if ((await categoryLinks.count()) === 0) {
+    const newBtn = page.getByRole('button', { name: /^New$/i })
+    if ((await newBtn.count()) > 0) {
+      await newBtn.click()
+      const newCatItem = page.getByRole('menuitem', { name: 'New category' })
+      if ((await newCatItem.count()) > 0) {
+        await newCatItem.click()
+        const catDialog = page.getByRole('dialog').filter({ hasText: /create category/i })
+        if ((await catDialog.count()) > 0) {
+          await expect(catDialog).toBeVisible({ timeout: 5000 })
+          await catDialog.getByLabel(/name/i).fill(`General ${Date.now()}`)
+          await catDialog.getByRole('button', { name: /create|save/i }).click()
+          await expect(catDialog).toBeHidden({ timeout: 10000 })
+          await page.waitForLoadState('networkidle')
+        }
+      }
+    }
+  }
 
   const newButton = page.getByRole('button', { name: /^New$/i })
   if ((await newButton.count()) === 0) return null
