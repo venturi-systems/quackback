@@ -163,7 +163,11 @@ function GateCard({
     }
   }
 
-  const header = headerForStep(mode, stepCtx, { surface: 'private-portal', workspaceName })
+  const header = headerForStep(mode, stepCtx, {
+    surface: 'private-portal',
+    workspaceName,
+    visibility,
+  })
   // The base step explains the portal; later steps (email code, password
   // reset) show that step's own description instead.
   const isBaseStep = stepCtx.step === 'credentials'

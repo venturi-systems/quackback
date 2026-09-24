@@ -119,6 +119,52 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
     )
   })
 
+  // DEF-06 residual: the later base steps (email, two-factor) take their copy
+  // from the shared step header, which must follow the read posture too. The
+  // open copy carries the open lead's own sentence.
+  const OPEN_SENTENCE = 'Anyone who signs in can read and take part.'
+  const LATER_BASE_STEPS = ['email', 'two-factor-enroll', 'two-factor-challenge'] as const
+
+  function moveToStep(step: string) {
+    const onContextChange = formProps.onContextChange as (ctx: {
+      step: string
+      email: string
+    }) => void
+    act(() => onContextChange({ step, email: 'alice@example.com' }))
+  }
+
+  function introText(container: HTMLElement): string {
+    return container.querySelector('.portal-gate__intro')?.textContent ?? ''
+  }
+
+  it.each(
+    (['login', 'signup'] as const).flatMap((mode) =>
+      LATER_BASE_STEPS.map((step) => [mode, step] as const)
+    )
+  )('never calls an open portal private on a later step (%s, %s)', (mode, step) => {
+    const { container } = render(
+      <PortalAccessGate {...baseProps} visibility="authenticated" autoOpenSignin={mode} />
+    )
+    moveToStep(step)
+    // The lead now comes from the step header, not the first-step lead.
+    expect(screen.queryByTestId('portal-gate-lead')).not.toBeInTheDocument()
+    expect(introText(container)).toContain(
+      mode === 'login'
+        ? `${OPEN_SENTENCE} Sign in or create an account to continue.`
+        : `${OPEN_SENTENCE} Create an account to continue.`
+    )
+    expect(introText(container)).not.toMatch(/private/i)
+  })
+
+  it.each(LATER_BASE_STEPS)('still calls a private portal private on the %s step', (step) => {
+    const { container } = render(<PortalAccessGate {...baseProps} visibility="private" />)
+    moveToStep(step)
+    expect(introText(container)).toContain(
+      'This portal is private. Sign in or create an account to continue.'
+    )
+    expect(introText(container)).not.toContain(OPEN_SENTENCE)
+  })
+
   it('keeps the who-can-do-what summary off the later sign-in steps', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
     const onContextChange = formProps.onContextChange as (ctx: {
