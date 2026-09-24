@@ -27,11 +27,18 @@ export function parseJsonConfig<T extends object>(json: string | null, defaultVa
   }
 }
 
-/** @internal */
+/**
+ * Parse a JSON settings column that is read whole instead of merged into
+ * defaults (today only `brandingConfig`). The parsed value goes through
+ * {@link withoutUnsafeKeys}, so a row stored before its write path dropped
+ * those keys reads back without them.
+ *
+ * @internal
+ */
 export function parseJsonOrNull<T>(json: string | null): T | null {
   if (!json) return null
   try {
-    return JSON.parse(json) as T
+    return withoutUnsafeKeys(JSON.parse(json)) as T
   } catch {
     return null
   }
@@ -106,6 +113,24 @@ export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
     }
   }
   return result
+}
+
+/**
+ * Copy a JSON value with every {@link UNSAFE_MERGE_KEYS} key removed at any
+ * depth, inside objects and inside arrays. This is the guard deepMerge gives
+ * the merged settings columns, for a column that is stored and read whole
+ * instead of merged (`brandingConfig`): a plain object is rebuilt through
+ * deepMerge and an array through copyArrayWithoutUnsafeKeys, so the unsafe-key
+ * rule keeps one definition. Every other key and value is kept, except a key
+ * whose value is `undefined`, which JSON cannot hold and JSON.stringify drops.
+ * Primitives, null and non-plain objects are returned as given.
+ *
+ * @internal
+ */
+export function withoutUnsafeKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return copyArrayWithoutUnsafeKeys(value)
+  if (isPlainObject(value)) return deepMerge<Record<string, unknown>>({}, value)
+  return value
 }
 
 /** @internal */
