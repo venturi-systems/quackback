@@ -16,7 +16,7 @@ export function BackLink({ children, className, ...props }: BackLinkProps) {
     <Link
       {...props}
       className={cn(
-        'inline-flex items-center gap-1.5 px-2 py-1 -ml-2 rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors',
+        'inline-flex items-center gap-1.5 px-2 py-1 -ml-2 pointer-coarse:min-h-(--ds-component-touch-minimum) rounded-md text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors',
         className
       )}
     >

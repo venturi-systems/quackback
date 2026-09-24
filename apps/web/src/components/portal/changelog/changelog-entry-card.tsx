@@ -32,8 +32,9 @@ export function ChangelogEntryCard({
 }: ChangelogEntryCardProps) {
   return (
     <article className={cn('flex gap-8 lg:gap-16', className)}>
-      {/* Date sidebar */}
-      <div className="hidden md:block w-40 shrink-0 pt-1">
+      {/* Date sidebar. 11rem holds the longest English date ("September 30,
+          2026") on one line even under WCAG 1.4.12 text-spacing overrides. */}
+      <div className="hidden md:block w-44 shrink-0 pt-1">
         <time
           dateTime={publishedAt}
           className="text-sm text-muted-foreground"
@@ -58,7 +59,7 @@ export function ChangelogEntryCard({
         <Link
           to="/changelog/$entryId"
           params={{ entryId: id }}
-          className="group inline-flex items-center gap-2"
+          className="group inline-flex min-h-11 items-center gap-2"
         >
           <h2
             className="text-2xl font-normal group-hover:text-primary transition-colors"

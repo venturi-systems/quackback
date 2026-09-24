@@ -522,7 +522,9 @@
 .share-idea__note {
   margin: 0;
   color: var(--muted-foreground);
-  text-wrap: pretty;
+  /* balance, not pretty: pretty still broke "signed-in" at its hyphen and
+     left "in account." alone on the last line at 320 and 390px. */
+  text-wrap: balance;
 }
 
 /* Participation explainer: side by side on wide screens; on phones the same

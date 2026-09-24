@@ -297,10 +297,10 @@ function PortalLayout() {
           data-theme={themeMode}
           data-venturi-web-theme={themeMode}
         >
-          <a
-            href="#portal-main"
-            className="sr-only z-50 rounded-md bg-background px-4 py-3 text-foreground shadow-lg focus:not-sr-only focus:fixed focus:start-4 focus:top-4"
-          >
+          {/* Same skip link as the public frame: off-screen until focused,
+              then a 44px target (sr-only's focus reset dropped the padding
+              and left a 24px link). */}
+          <a href="#portal-main" className="public-frame__skip shadow-lg">
             <FormattedMessage
               id="portal.accessibility.skipToContent"
               defaultMessage="Skip to content"

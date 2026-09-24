@@ -756,7 +756,7 @@ export function MetadataSidebar({
                 <Link
                   key={roadmap.id}
                   to="/roadmap"
-                  className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+                  className="inline-flex min-h-6 items-center pointer-coarse:min-h-(--ds-component-touch-minimum) text-sm font-medium text-foreground hover:text-primary transition-colors"
                 >
                   {roadmap.name}
                 </Link>
@@ -794,7 +794,7 @@ export function MetadataSidebar({
               <button
                 type="button"
                 onClick={() => setSourceQuoteOpen(true)}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-primary transition-colors"
+                className="inline-flex min-h-6 items-center gap-1.5 pointer-coarse:min-h-(--ds-component-touch-minimum) text-sm font-medium text-foreground hover:text-primary transition-colors"
               >
                 <SourceTypeIcon sourceType={feedbackSource.sourceType} size="xs" />
                 <span>

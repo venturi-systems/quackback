@@ -11,7 +11,7 @@ export function AdminOnlyNotice() {
   return (
     <section
       aria-labelledby="admin-only-notice-title"
-      className="max-w-3xl space-y-4 rounded-lg border border-border bg-card p-6"
+      className="max-w-3xl space-y-4 rounded-lg border border-border bg-card p-4 sm:p-6"
       data-testid="admin-only-notice"
     >
       <div className="flex items-start gap-3">
@@ -20,15 +20,19 @@ export function AdminOnlyNotice() {
           <h2 id="admin-only-notice-title" className="text-lg font-medium">
             Administrators only
           </h2>
-          <p className="text-sm text-muted-foreground">
+          {/* Two short balanced paragraphs rather than one long one, so no
+              width leaves a stranded final line (v6.6 short-copy rule). */}
+          <p className="text-sm text-balance text-muted-foreground">
             Only administrators can change workspace settings such as members, sign-in, portal
-            access, branding, boards and integrations. Ask an administrator in your workspace if
-            something needs to change.
+            access, branding, boards and integrations.
+          </p>
+          <p className="text-sm text-balance text-muted-foreground">
+            Ask an administrator in your workspace if something needs to change.
           </p>
         </div>
       </div>
       <div className="space-y-2 text-sm">
-        <p className="font-medium">As a team member you can change</p>
+        <p className="font-medium">Team members can change</p>
         <ul className="flex flex-wrap gap-x-6 gap-y-1">
           <li>
             <Link
@@ -47,10 +51,15 @@ export function AdminOnlyNotice() {
             </Link>
           </li>
         </ul>
-        <p className="text-muted-foreground">
-          Reviewing feedback, setting status, moving roadmap items and moderating submissions stay
-          in the sidebar.
-        </p>
+        {/* A list, not a sentence: each task is a short label, so no width
+            strands a final word (v6.6 short-copy rule). */}
+        <p className="pt-2 font-medium">Also from the sidebar</p>
+        <ul className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
+          <li>Review feedback</li>
+          <li>Set status</li>
+          <li>Move roadmap items</li>
+          <li>Moderate submissions</li>
+        </ul>
       </div>
     </section>
   )
