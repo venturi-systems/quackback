@@ -18,7 +18,7 @@ test.describe('Public Voting', () => {
 
     // Reuse the run's single portal sign-in. Sending another OTP here is what
     // pushed the suite past the product's 3-per-15-min cap; see portal-auth.ts.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
     isAuthenticated = true
   })
 
@@ -361,7 +361,7 @@ test.describe('Voting — independence and persistence', () => {
     test.setTimeout(90000)
 
     // Same single sign-in as every other authenticated portal group.
-    sharedContext = await browser.newContext({ storageState: await portalStorageState(browser) })
+    sharedContext = await browser.newContext({ storageState: portalStorageState() })
   })
 
   test.afterAll(async () => {
@@ -464,21 +464,22 @@ test.describe('Voting — independence and persistence', () => {
       await page.waitForLoadState('networkidle')
 
       // Use post 15 to avoid conflicts
-      const voteButtons = page.getByTestId('vote-button')
-      await expect(voteButtons.first()).toBeVisible({ timeout: 10000 })
+      const card = page.locator('a.post-card[href*="/posts/"]').nth(15)
+      await card.scrollIntoViewIfNeeded()
+      await expect(card).toBeVisible({ timeout: 10000 })
 
-      const listVoteButton = voteButtons.nth(15)
-      const listCountSpan = listVoteButton.getByTestId('vote-count')
+      const href = await card.getAttribute('href')
+      expect(href).toBeTruthy()
+
+      const listCountSpan = card.getByTestId('vote-count')
       const listCount = await listCountSpan.textContent()
 
-      // Find the post link in the same card and navigate to it
-      const postLinks = page.locator('a[href*="/posts/"]')
-      await postLinks.nth(15).click()
-      await page.waitForURL(/\/posts\//)
+      // Navigate directly to this exact post
+      await page.goto(href!)
       await page.waitForLoadState('networkidle')
 
       // Detail page vote button — use first vote button (VoteSidebar, in DOM order)
-      const detailVoteButton = page.getByTestId('vote-button').first()
+      const detailVoteButton = page.locator('[data-testid="post-detail"] [data-testid="vote-button"]').first()
       await expect(detailVoteButton).toBeVisible({ timeout: 10000 })
 
       const detailCount = await detailVoteButton.getByTestId('vote-count').textContent()
