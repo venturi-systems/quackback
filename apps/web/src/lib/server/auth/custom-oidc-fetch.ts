@@ -20,7 +20,7 @@
  * imported by a server-function module.
  */
 
-import { decodeJwt } from 'jose'
+import { decodeJwt, type JWTPayload } from 'jose'
 import type { OAuth2Tokens, OAuth2UserInfo } from 'better-auth/oauth2'
 import type { SafeFetchInit } from '@/lib/server/content/ssrf-guard'
 import { logger } from '@/lib/server/logger'
@@ -42,10 +42,19 @@ export interface OidcEndpoints {
 export const DISCOVERY_TTL_MS = 10 * 60 * 1000
 
 const DISCOVERY_TIMEOUT_MS = 5_000
+/**
+ * Hard ceiling on one discovery resolution: the discovery fetch plus the DNS
+ * check of the authorization endpoint. Concurrent sign-ins share the in-flight
+ * promise, so a promise that never settled would block every sign-in for that
+ * provider; this deadline guarantees it settles.
+ */
+const DISCOVERY_DEADLINE_MS = 15_000
 const TOKEN_TIMEOUT_MS = 10_000
 const USERINFO_TIMEOUT_MS = 5_000
 // A partial body is never acted on: an over-cap response is an error.
 const MAX_RESPONSE_BYTES = 256 * 1024
+/** Clock-skew allowance for the ID token `exp` check (OIDC Core 3.1.3.7). */
+const ID_TOKEN_CLOCK_SKEW_S = 120
 
 /** A custom-OIDC fetch that returned an unusable response. */
 export class OidcFetchError extends Error {
@@ -60,15 +69,30 @@ async function pinnedFetch(url: string, init: SafeFetchInit): Promise<Response> 
   return safeFetch(url, { maxResponseBytes: MAX_RESPONSE_BYTES, onOverflow: 'error', ...init })
 }
 
-/** The value as an absolute http(s) URL string, or undefined. */
-function httpUrl(value: unknown): string | undefined {
+/**
+ * The value as an absolute https URL string, or undefined. Endpoints named by
+ * a discovery document must be https (OIDC Discovery 1.0 §3, RFC 8414 §2): the
+ * token endpoint receives the code, the client secret and refresh tokens.
+ */
+function httpsUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value) return undefined
   try {
-    const { protocol } = new URL(value)
-    return protocol === 'https:' || protocol === 'http:' ? value : undefined
+    return new URL(value).protocol === 'https:' ? value : undefined
   } catch {
     return undefined
   }
+}
+
+/** Reject when `promise` has not settled within `ms`. */
+function withDeadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new OidcFetchError(`${what} did not settle within ${ms} ms`)),
+      ms
+    )
+  })
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
 }
 
 async function readJsonObject(res: Response, what: string): Promise<Record<string, unknown>> {
@@ -130,17 +154,32 @@ export function clearOidcDiscoveryCache(): void {
 async function fetchDiscovery(discoveryUrl: string): Promise<OidcEndpoints> {
   const res = await pinnedFetch(discoveryUrl, { timeoutMs: DISCOVERY_TIMEOUT_MS })
   const doc = await readJsonObject(res, 'discovery document')
-  const authorizationEndpoint = httpUrl(doc.authorization_endpoint)
-  const tokenEndpoint = httpUrl(doc.token_endpoint)
+  const authorizationEndpoint = httpsUrl(doc.authorization_endpoint)
+  const tokenEndpoint = httpsUrl(doc.token_endpoint)
   if (!authorizationEndpoint || !tokenEndpoint) {
     throw new OidcFetchError(
-      'discovery document is missing an http(s) authorization_endpoint or token_endpoint'
+      'discovery document is missing an https authorization_endpoint or token_endpoint'
+    )
+  }
+  // A non-https userinfo_endpoint is dropped rather than used: the access
+  // token is never sent in clear. Sign-ins whose ID token carries the email
+  // do not need it.
+  const userinfoEndpoint = httpsUrl(doc.userinfo_endpoint)
+  // The authorization endpoint is never fetched server-side, but it is where
+  // the user's browser is sent. The save-time policy refuses a private or
+  // loopback authorizationUrl for that reason; hold the discovered one to the
+  // same rule.
+  const { checkUrlSafety } = await import('@/lib/server/content/ssrf-guard')
+  const verdict = await checkUrlSafety(authorizationEndpoint)
+  if (!verdict.safe) {
+    throw new OidcFetchError(
+      `discovery document names an authorization_endpoint that is not a public URL (${verdict.reason})`
     )
   }
   return {
     authorizationEndpoint,
     tokenEndpoint,
-    userinfoEndpoint: httpUrl(doc.userinfo_endpoint),
+    userinfoEndpoint,
     issuer: typeof doc.issuer === 'string' && doc.issuer ? doc.issuer : undefined,
   }
 }
@@ -167,7 +206,11 @@ export function resolveOidcDiscovery(discoveryUrl: string): Promise<OidcEndpoint
   if (cached) return Promise.resolve(cached)
   const existing = discoveryInflight.get(discoveryUrl)
   if (existing) return existing
-  const inflight: Promise<OidcEndpoints> = fetchDiscovery(discoveryUrl)
+  const inflight: Promise<OidcEndpoints> = withDeadline(
+    fetchDiscovery(discoveryUrl),
+    DISCOVERY_DEADLINE_MS,
+    'discovery'
+  )
     .then((endpoints) => {
       discoveryCache.set(discoveryUrl, { endpoints, fetchedAt: Date.now() })
       return endpoints
@@ -189,18 +232,27 @@ export interface OidcEndpointSource {
 
 /**
  * Discovery providers resolve their endpoints through `resolveOidcDiscovery`.
- * Manual-endpoint providers use the stored URLs. A provider row that carries
- * both keeps the plugin's old precedence: the discovery document wins, and the
- * stored URLs are the fallback when it cannot be fetched.
+ * Manual-endpoint providers use the stored URLs, plus the stored userinfo URL
+ * and expected issuer when the row has them (the same values the SSO test
+ * handshake uses for a manual install). A provider row that carries both keeps
+ * the plugin's old precedence: the discovery document wins, and the stored URLs
+ * are the fallback when it cannot be fetched.
  */
 export function createOidcEndpointSource(provider: {
   discoveryUrl?: string
   authorizationUrl?: string
   tokenUrl?: string
+  userInfoUrl?: string
+  issuer?: string
 }): OidcEndpointSource {
   const manual: OidcEndpoints | undefined =
     provider.authorizationUrl && provider.tokenUrl
-      ? { authorizationEndpoint: provider.authorizationUrl, tokenEndpoint: provider.tokenUrl }
+      ? {
+          authorizationEndpoint: provider.authorizationUrl,
+          tokenEndpoint: provider.tokenUrl,
+          ...(provider.userInfoUrl ? { userinfoEndpoint: provider.userInfoUrl } : {}),
+          ...(provider.issuer ? { issuer: provider.issuer } : {}),
+        }
       : undefined
   const { discoveryUrl } = provider
   if (!discoveryUrl) {
@@ -304,19 +356,64 @@ function isNonEmptyId(id: unknown): id is string | number {
 }
 
 /**
+ * Why an ID token's claims must not be trusted, or undefined when they pass.
+ *
+ * The token is not signature-checked: it arrived from the token endpoint over
+ * the pinned TLS back channel, which OIDC Core 3.1.3.7 step 6 accepts in place
+ * of the signature. That substitution covers the signature only. The issuer
+ * (step 2), audience (step 3) and expiry (step 9) checks are still required,
+ * and are made here. The issuer is checked whenever one is known: from the
+ * discovery document, or the expected issuer stored on a manual provider.
+ */
+export function idTokenClaimProblem(
+  claims: JWTPayload,
+  expected: { clientId: string; issuer?: string; nowMs?: number }
+): string | undefined {
+  if (expected.issuer && claims.iss !== expected.issuer) return 'iss does not match the issuer'
+  const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
+  if (!audience.includes(expected.clientId)) return 'aud does not contain the client id'
+  if (typeof claims.exp !== 'number') return 'exp is missing'
+  const nowS = (expected.nowMs ?? Date.now()) / 1000
+  if (claims.exp + ID_TOKEN_CLOCK_SKEW_S <= nowS) return 'the ID token has expired'
+  return undefined
+}
+
+/**
  * The genericOAuth `getUserInfo` hook. Mirrors the plugin's default: claims
  * from the ID token when it carries `sub` and `email`, otherwise the userinfo
- * endpoint from the discovery document, fetched through `safeFetch`. Any fetch
- * failure returns null, which the plugin turns into a failed sign-in.
- *
- * The ID token is decoded without a signature check, exactly as the plugin
- * does: it arrived from the token endpoint over the pinned TLS back channel
- * (OIDC Core 3.1.3.7).
+ * endpoint, fetched through `safeFetch`. It returns null, which the plugin
+ * turns into a failed sign-in, when:
+ * - the ID token cannot be decoded or fails `idTokenClaimProblem`;
+ * - the endpoints or the userinfo response cannot be fetched;
+ * - the userinfo `sub` differs from the ID token's (OIDC Core 5.3.2).
  */
-export function createPinnedUserInfo(client: Pick<PinnedOidcClient, 'endpoints'>) {
+export function createPinnedUserInfo(client: Pick<PinnedOidcClient, 'clientId' | 'endpoints'>) {
   return async (tokens: OAuth2Tokens): Promise<OAuth2UserInfo | null> => {
+    let endpoints: OidcEndpoints
+    try {
+      endpoints = await client.endpoints.resolve()
+    } catch (err) {
+      log.warn({ err }, 'custom OIDC endpoints unavailable for user info')
+      return null
+    }
+
+    let idTokenSubject: unknown
     if (tokens.idToken) {
-      const claims = decodeJwt(tokens.idToken)
+      let claims: JWTPayload
+      try {
+        claims = decodeJwt(tokens.idToken)
+      } catch (err) {
+        log.warn({ err }, 'custom OIDC ID token could not be decoded')
+        return null
+      }
+      const problem = idTokenClaimProblem(claims, {
+        clientId: client.clientId,
+        issuer: endpoints.issuer,
+      })
+      if (problem) {
+        log.warn({ problem }, 'custom OIDC ID token rejected')
+        return null
+      }
       if (claims.sub && claims.email) {
         const fromIdToken: Record<string, unknown> = {
           id: claims.sub,
@@ -326,15 +423,10 @@ export function createPinnedUserInfo(client: Pick<PinnedOidcClient, 'endpoints'>
         }
         return fromIdToken as OAuth2UserInfo
       }
+      idTokenSubject = claims.sub
     }
 
-    let userinfoEndpoint: string | undefined
-    try {
-      userinfoEndpoint = (await client.endpoints.resolve()).userinfoEndpoint
-    } catch (err) {
-      log.warn({ err }, 'custom OIDC endpoints unavailable for userinfo')
-      return null
-    }
+    const { userinfoEndpoint } = endpoints
     if (!userinfoEndpoint) return null
 
     let profile: Record<string, unknown>
@@ -346,6 +438,14 @@ export function createPinnedUserInfo(client: Pick<PinnedOidcClient, 'endpoints'>
       profile = await readJsonObject(res, 'userinfo endpoint')
     } catch (err) {
       log.warn({ err }, 'custom OIDC userinfo fetch failed')
+      return null
+    }
+
+    // OIDC Core 5.3.2: the userinfo `sub` must exactly match the ID token's,
+    // or the response must not be used. A token substituted from another
+    // user's session would otherwise sign in as that user.
+    if (isNonEmptyId(idTokenSubject) && String(profile.sub) !== String(idTokenSubject)) {
+      log.warn('custom OIDC userinfo sub does not match the ID token sub')
       return null
     }
 

@@ -3,19 +3,23 @@ import { genericOAuth } from 'better-auth/plugins'
 import type { IdentityProvider } from '@/lib/server/domains/settings/identity-providers.service'
 
 // Custom OIDC sign-in must fetch discovery / token / userinfo / refresh through
-// `safeFetch`, as the SSO test handshake does. Mock only `safeFetch` and keep
-// the rest of the ssrf-guard module real, notably `SsrfError`, so a rejection
-// here is the same object the production guard throws.
+// `safeFetch`, as the SSO test handshake does. Mock only `safeFetch` and the
+// DNS check of the discovered authorization endpoint, and keep the rest of the
+// ssrf-guard module real, notably `SsrfError`, so a rejection here is the same
+// object the production guard throws.
 vi.mock('@/lib/server/content/ssrf-guard', async (orig) => {
   const actual = await orig<typeof import('@/lib/server/content/ssrf-guard')>()
-  return { ...actual, safeFetch: vi.fn() }
+  return { ...actual, safeFetch: vi.fn(), checkUrlSafety: vi.fn() }
 })
 
-import { safeFetch, SsrfError } from '@/lib/server/content/ssrf-guard'
+import { checkUrlSafety, safeFetch, SsrfError } from '@/lib/server/content/ssrf-guard'
 import { buildGenericOAuthConfigs, type GenericOAuthConfig } from '../build-oauth-configs'
 import {
   clearOidcDiscoveryCache,
+  createOidcEndpointSource,
+  createPinnedUserInfo,
   DISCOVERY_TTL_MS,
+  idTokenClaimProblem,
   resolveOidcDiscovery,
 } from '../custom-oidc-fetch'
 import {
@@ -25,6 +29,7 @@ import {
 } from '../custom-oidc-plugin'
 
 const safeFetchMock = vi.mocked(safeFetch)
+const checkUrlSafetyMock = vi.mocked(checkUrlSafety)
 
 const BASE_URL = 'https://qb.example/api/auth'
 const DISCOVERY_URL = 'https://idp.example.com/.well-known/openid-configuration'
@@ -36,6 +41,7 @@ const DISCOVERY_DOC = {
   jwks_uri: 'https://idp.example.com/jwks',
 }
 const SIGN_IN = { path: '/sign-in/oauth2', body: { providerId: 'sso' } }
+const CALLBACK = { path: '/oauth2/callback/:providerId', params: { providerId: 'sso' } }
 const AUTHORIZE = {
   state: 'state-1',
   codeVerifier: 'v'.repeat(43),
@@ -54,6 +60,16 @@ function json(body: unknown, status = 200): Response {
 function idToken(claims: Record<string, unknown>): string {
   const part = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url')
   return `${part({ alg: 'RS256', typ: 'JWT' })}.${part(claims)}.c2ln`
+}
+
+/** The claims a valid ID token from DISCOVERY_DOC's issuer carries, plus `extra`. */
+function claims(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    iss: DISCOVERY_DOC.issuer,
+    aud: 'client-1',
+    exp: Math.floor(Date.now() / 1000) + 600,
+    ...extra,
+  }
 }
 
 function provider(overrides: Partial<IdentityProvider> = {}): IdentityProvider {
@@ -105,6 +121,8 @@ const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
 beforeEach(() => {
   safeFetchMock.mockReset()
+  checkUrlSafetyMock.mockReset()
+  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '203.0.113.10', family: 4 })
   clearOidcDiscoveryCache()
   fetchSpy.mockReset()
   fetchSpy.mockImplementation(async () => {
@@ -158,7 +176,7 @@ describe('custom OIDC runtime fetches', () => {
           token_type: 'Bearer',
           expires_in: 3600,
           // No email claim, so user info comes from the userinfo endpoint.
-          id_token: idToken({ sub: 'user-1', iss: DISCOVERY_DOC.issuer }),
+          id_token: idToken(claims({ sub: 'user-1' })),
         })
       )
       .mockResolvedValueOnce(
@@ -261,6 +279,63 @@ describe('custom OIDC runtime fetches', () => {
     await expect(resolveOidcDiscovery(DISCOVERY_URL)).rejects.toThrow(/token_endpoint/)
   })
 
+  // OIDC Discovery 1.0 §3 / RFC 8414 §2: the token endpoint gets the code, the
+  // client secret and refresh tokens, so a cleartext one is refused.
+  it('rejects a discovery document whose token or authorization endpoint is plain http', async () => {
+    safeFetchMock
+      .mockResolvedValueOnce(
+        json({ ...DISCOVERY_DOC, token_endpoint: 'http://idp.example.com/token' })
+      )
+      .mockResolvedValueOnce(
+        json({ ...DISCOVERY_DOC, authorization_endpoint: 'http://idp.example.com/authorize' })
+      )
+
+    await expect(resolveOidcDiscovery(DISCOVERY_URL)).rejects.toThrow(/https/)
+    await expect(resolveOidcDiscovery(DISCOVERY_URL)).rejects.toThrow(/https/)
+  })
+
+  it('drops a plain-http userinfo endpoint instead of sending the access token to it', async () => {
+    safeFetchMock.mockResolvedValueOnce(
+      json({ ...DISCOVERY_DOC, userinfo_endpoint: 'http://idp.example.com/userinfo' })
+    )
+
+    const endpoints = await resolveOidcDiscovery(DISCOVERY_URL)
+
+    expect(endpoints.userinfoEndpoint).toBeUndefined()
+    expect(endpoints.tokenEndpoint).toBe(DISCOVERY_DOC.token_endpoint)
+  })
+
+  // The save-time policy refuses a private authorizationUrl because it is where
+  // the browser is sent; a discovered one gets the same DNS check.
+  it('rejects a discovered authorization endpoint that resolves to a private address', async () => {
+    safeFetchMock.mockResolvedValueOnce(json(DISCOVERY_DOC))
+    checkUrlSafetyMock.mockResolvedValueOnce({ safe: false, reason: 'ssrf-rejected' })
+
+    await expect(resolveOidcDiscovery(DISCOVERY_URL)).rejects.toThrow(/authorization_endpoint/)
+    expect(checkUrlSafetyMock).toHaveBeenCalledWith(DISCOVERY_DOC.authorization_endpoint)
+  })
+
+  // A shared in-flight promise that never settled would block every sign-in
+  // for the provider; the deadline makes it reject, and the next request
+  // starts a fresh fetch.
+  it('rejects a discovery fetch that never settles, then lets the next request retry', async () => {
+    vi.useFakeTimers()
+    safeFetchMock
+      .mockReturnValueOnce(new Promise<Response>(() => {}))
+      .mockResolvedValueOnce(json(DISCOVERY_DOC))
+
+    const stuck = resolveOidcDiscovery(DISCOVERY_URL)
+    const settled = expect(stuck).rejects.toThrow(/did not settle/)
+    await vi.advanceTimersByTimeAsync(15_000)
+    await settled
+
+    vi.useRealTimers()
+    await expect(resolveOidcDiscovery(DISCOVERY_URL)).resolves.toMatchObject({
+      tokenEndpoint: DISCOVERY_DOC.token_endpoint,
+    })
+    expect(safeFetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('shares one discovery fetch between concurrent requests', async () => {
     safeFetchMock.mockResolvedValueOnce(json(DISCOVERY_DOC))
 
@@ -277,7 +352,8 @@ describe('custom OIDC runtime fetches', () => {
     safeFetchMock.mockResolvedValueOnce(
       json({
         access_token: 'access-1',
-        id_token: idToken({ sub: 'user-1', email: 'ada@acme.example' }),
+        // A manual provider with no stored issuer: no `iss` to check.
+        id_token: idToken(claims({ iss: undefined, sub: 'user-1', email: 'ada@acme.example' })),
       })
     )
     const { configs, oauthProvider } = await signInStack([
@@ -357,6 +433,150 @@ describe('custom OIDC runtime fetches', () => {
     expect(matches(SIGN_IN)).toBe(true)
     expect(matches({ path: '/sign-in/social', body: { provider: 'google' } })).toBe(false)
     expect(matches({ path: '/sign-in/email', body: { email: 'a@b.co' } })).toBe(false)
+  })
+
+  // The plugin's callback skips its RFC 9207 `iss` check when the `issuer`
+  // getter reads undefined, and `getToken` resolves the endpoints again. The
+  // hook must stop the callback itself, before any code is exchanged.
+  it('fails a callback closed when the endpoints cannot be resolved', async () => {
+    safeFetchMock
+      .mockRejectedValueOnce(new SsrfError('dns-error'))
+      .mockResolvedValueOnce(json(DISCOVERY_DOC))
+    const { configs, byId } = await signInStack()
+
+    await expect(resolveEndpointsForRoute(CALLBACK, byId)).resolves.toBe(
+      'oauth_code_verification_failed'
+    )
+    // The route never runs, so the getter the plugin would read stays empty and
+    // the later resolve that would have succeeded is never reached.
+    expect(configs[0].issuer).toBeUndefined()
+    expect(safeFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps sign-in routes on the plugin configuration error when resolution fails', async () => {
+    safeFetchMock.mockRejectedValueOnce(new SsrfError('dns-error'))
+    const { byId } = await signInStack()
+
+    await expect(resolveEndpointsForRoute(SIGN_IN, byId)).resolves.toBeUndefined()
+  })
+
+  it('checks the callback iss against the issuer the hook just resolved', async () => {
+    safeFetchMock.mockResolvedValue(json(DISCOVERY_DOC))
+    const { byId } = await signInStack()
+    const withIss = (iss: unknown) => ({ ...CALLBACK, query: { code: 'code-1', iss } })
+
+    await expect(resolveEndpointsForRoute(withIss('https://evil.example'), byId)).resolves.toBe(
+      'issuer_mismatch'
+    )
+    await expect(resolveEndpointsForRoute(withIss(['a', 'b']), byId)).resolves.toBe(
+      'issuer_mismatch'
+    )
+    await expect(
+      resolveEndpointsForRoute(withIss(DISCOVERY_DOC.issuer), byId)
+    ).resolves.toBeUndefined()
+    // No `iss` parameter: RFC 9207 lets the IdP omit it.
+    await expect(
+      resolveEndpointsForRoute({ ...CALLBACK, query: { code: 'code-1' } }, byId)
+    ).resolves.toBeUndefined()
+    // The same check on Better-Auth's social callback route.
+    await expect(
+      resolveEndpointsForRoute(
+        { path: '/callback/:id', params: { id: 'sso' }, query: { iss: 'https://evil.example' } },
+        byId
+      )
+    ).resolves.toBe('issuer_mismatch')
+  })
+
+  describe('ID token claims (OIDC Core 3.1.3.7 steps 2, 3 and 9)', () => {
+    const expected = { clientId: 'client-1', issuer: DISCOVERY_DOC.issuer }
+
+    it('accepts a token for this client from the expected issuer', () => {
+      expect(idTokenClaimProblem(claims(), expected)).toBeUndefined()
+      expect(idTokenClaimProblem(claims({ aud: ['other', 'client-1'] }), expected)).toBeUndefined()
+    })
+
+    it('rejects the wrong issuer, audience or an expired token', () => {
+      expect(idTokenClaimProblem(claims({ iss: 'https://evil.example' }), expected)).toMatch(/iss/)
+      expect(idTokenClaimProblem(claims({ aud: 'other-client' }), expected)).toMatch(/aud/)
+      expect(idTokenClaimProblem(claims({ aud: undefined }), expected)).toMatch(/aud/)
+      expect(idTokenClaimProblem(claims({ exp: undefined }), expected)).toMatch(/exp/)
+      const longExpired = Math.floor(Date.now() / 1000) - 3600
+      expect(idTokenClaimProblem(claims({ exp: longExpired }), expected)).toMatch(/expired/)
+    })
+
+    it('skips the issuer comparison only when no issuer is known', () => {
+      expect(
+        idTokenClaimProblem(claims({ iss: 'https://anything.example' }), { clientId: 'client-1' })
+      ).toBeUndefined()
+    })
+
+    it('fails sign-in on a rejected ID token instead of trusting its claims', async () => {
+      safeFetchMock.mockResolvedValueOnce(json(DISCOVERY_DOC))
+      const { oauthProvider } = await signInStack()
+      const sso = oauthProvider('sso')
+      const withIdToken = (extra: Record<string, unknown>) => ({
+        accessToken: 'access-1',
+        idToken: idToken(claims({ sub: 'user-1', email: 'ada@acme.example', ...extra })),
+      })
+
+      await expect(
+        sso.getUserInfo(withIdToken({ iss: 'https://evil.example' }))
+      ).resolves.toBeNull()
+      await expect(sso.getUserInfo(withIdToken({ aud: 'other-client' }))).resolves.toBeNull()
+      await expect(sso.getUserInfo(withIdToken({ exp: 1 }))).resolves.toBeNull()
+      await expect(
+        sso.getUserInfo({ accessToken: 'access-1', idToken: 'not-a-jwt' })
+      ).resolves.toBeNull()
+      const accepted = await sso.getUserInfo(withIdToken({}))
+      expect(accepted?.user).toMatchObject({ id: 'user-1', email: 'ada@acme.example' })
+      // Discovery only; no userinfo fetch for any of these.
+      expect(safeFetchMock).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // OIDC Core 5.3.2: a userinfo response for a different subject is not used.
+  it('rejects a userinfo response whose sub differs from the ID token', async () => {
+    safeFetchMock
+      .mockResolvedValueOnce(json(DISCOVERY_DOC))
+      .mockResolvedValueOnce(json({ sub: 'someone-else', email: 'eve@acme.example' }))
+      .mockResolvedValueOnce(json({ email: 'eve@acme.example' }))
+    const { oauthProvider } = await signInStack()
+    const sso = oauthProvider('sso')
+    const tokens = { accessToken: 'access-1', idToken: idToken(claims({ sub: 'user-1' })) }
+
+    await expect(sso.getUserInfo(tokens)).resolves.toBeNull()
+    await expect(sso.getUserInfo(tokens)).resolves.toBeNull()
+    expect(safeFetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('uses the stored userinfo URL and issuer of a manual-endpoint provider', async () => {
+    safeFetchMock.mockResolvedValueOnce(
+      json({ sub: 'user-1', email: 'ada@acme.example', name: 'Ada' })
+    )
+    const endpoints = createOidcEndpointSource({
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+      userInfoUrl: 'https://manual.example.com/userinfo',
+      issuer: 'https://manual.example.com',
+    })
+    const getUserInfo = createPinnedUserInfo({ clientId: 'client-1', endpoints })
+
+    expect(endpoints.peek()?.issuer).toBe('https://manual.example.com')
+    await expect(
+      getUserInfo({
+        accessToken: 'access-1',
+        idToken: idToken(claims({ sub: 'user-1', email: 'ada@acme.example' })),
+      })
+    ).resolves.toBeNull()
+    const info = await getUserInfo({
+      accessToken: 'access-1',
+      idToken: idToken(claims({ iss: 'https://manual.example.com', sub: 'user-1' })),
+    })
+
+    expect(info).toMatchObject({ id: 'user-1', email: 'ada@acme.example' })
+    expect(safeFetchMock.mock.calls.map((c) => c[0])).toEqual([
+      'https://manual.example.com/userinfo',
+    ])
   })
 
   // Control: proves the global-fetch spy above would catch the leak this fix

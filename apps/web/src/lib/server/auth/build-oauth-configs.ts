@@ -33,6 +33,7 @@ import {
   createPinnedTokenExchange,
   createPinnedTokenRefresh,
   createPinnedUserInfo,
+  type OidcEndpoints,
 } from './custom-oidc-fetch'
 
 /**
@@ -58,7 +59,10 @@ export interface GenericOAuthConfig {
   authorizationUrl?: string
   /** Read by the plugin at request time; undefined makes sign-in fail closed. */
   tokenUrl?: string
-  /** Expected `iss` callback parameter (RFC 9207), from the discovery document. */
+  /**
+   * Expected `iss` callback parameter (RFC 9207): the discovery document's
+   * issuer, or the issuer stored on a manual-endpoint provider.
+   */
   issuer?: string
   scopes?: string[]
   /** Pinned authorization-code exchange; replaces the plugin's own fetch. */
@@ -76,7 +80,7 @@ export interface GenericOAuthConfig {
    */
   pinned?: {
     /** Resolve the endpoints before a request reads the getters above. */
-    resolveEndpoints: () => Promise<unknown>
+    resolveEndpoints: () => Promise<OidcEndpoints>
     /** Pinned replacement for the plugin provider's `refreshAccessToken`. */
     refreshAccessToken: (refreshToken: string) => Promise<OAuth2Tokens>
   }
@@ -157,6 +161,8 @@ export async function buildGenericOAuthConfigs({
       discoveryUrl: provider.discoveryUrl || c.discoveryUrl || undefined,
       authorizationUrl: provider.authorizationUrl || undefined,
       tokenUrl: provider.tokenUrl || undefined,
+      userInfoUrl: provider.userInfoUrl || undefined,
+      issuer: provider.issuer || undefined,
     })
     const client = { clientId, clientSecret: c.clientSecret, endpoints }
 
