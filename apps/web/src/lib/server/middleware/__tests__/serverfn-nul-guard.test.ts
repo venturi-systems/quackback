@@ -121,6 +121,13 @@ describe('serverFnNulGuard', () => {
   it('is registered for every server function, after the dispatch marker', () => {
     const here = dirname(fileURLToPath(import.meta.url))
     const start = readFileSync(join(here, '../../../../start.ts'), 'utf8')
-    expect(start).toMatch(/functionMiddleware:\s*\[serverFnDispatchMarker,\s*serverFnNulGuard\]/)
+    const list = start.match(/functionMiddleware:\s*\[([^\]]*)\]/)?.[1]
+    const names =
+      list
+        ?.split(',')
+        .map((name) => name.trim())
+        .filter(Boolean) ?? []
+    expect(names[0]).toBe('serverFnDispatchMarker')
+    expect(names).toContain('serverFnNulGuard')
   })
 })

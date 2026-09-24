@@ -17,6 +17,7 @@ import {
   serverFnDispatchMarker,
 } from '@/lib/server/middleware/serverfn-decode-guard'
 import { serverFnNulGuard } from '@/lib/server/middleware/serverfn-nul-guard'
+import { serverFnDatabaseErrorRedaction } from '@/lib/server/middleware/serverfn-database-error'
 
 /**
  * Same-origin protection for server functions, matching the framework default.
@@ -40,8 +41,10 @@ export const startInstance = createStart(() => {
     requestMiddleware: [requestContextMiddleware, csrfMiddleware, serverFnDecodeGuardMiddleware],
     // The dispatch marker must stay first: it tells the decode guard that the
     // function started, i.e. that the payload decoded. It adds no context.
-    // The NUL guard then refuses any input holding a NUL, which Postgres
-    // cannot store, before the function's own validator runs (DEF-45).
-    functionMiddleware: [serverFnDispatchMarker, serverFnNulGuard],
+    // The database-error redaction wraps everything after it, so a failed
+    // query's SQL and parameters stay on the server. The NUL guard then
+    // refuses any input holding a NUL, which Postgres cannot store, before
+    // the function's own validator runs (DEF-45).
+    functionMiddleware: [serverFnDispatchMarker, serverFnDatabaseErrorRedaction, serverFnNulGuard],
   }
 })
