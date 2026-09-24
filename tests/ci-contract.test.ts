@@ -268,6 +268,12 @@ describe('QB-GOV-001 repository governance contract', () => {
     })
     expect(record.auto_merge).toBe(false)
     expect(record.review.decision).toBe('accepted')
+
+    // REQ-21: the ledger is enforced in the required lane, on full history.
+    const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+    const staticAnalysis = ci.split('\n  static_analysis:\n')[1]?.split('\n  database_tests:\n')[0]
+    expect(staticAnalysis).toContain('fetch-depth: 0')
+    expect(staticAnalysis).toContain('run: bun scripts/check-upstream-intake-ledger.ts')
   })
 })
 
