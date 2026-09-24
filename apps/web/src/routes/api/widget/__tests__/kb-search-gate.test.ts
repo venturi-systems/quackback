@@ -8,6 +8,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const hoisted = vi.hoisted(() => ({
   readable: vi.fn(),
   hybridSearch: vi.fn(),
+  widgetEnabled: true,
+}))
+
+vi.mock('@/lib/server/domains/settings/settings.widget', () => ({
+  getWidgetConfig: async () => ({ enabled: hoisted.widgetEnabled }),
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -29,6 +34,7 @@ const request = () => new Request('https://feedback.acme.example/api/widget/kb-s
 
 beforeEach(() => {
   vi.clearAllMocks()
+  hoisted.widgetEnabled = true
   hoisted.hybridSearch.mockResolvedValue([
     {
       id: 'article_1',
@@ -56,5 +62,16 @@ describe('/api/widget/kb-search gate', () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { data: { articles: Array<{ slug: string }> } }
     expect(body.data.articles.map((a) => a.slug)).toEqual(['getting-started'])
+  })
+})
+
+describe('widget off', () => {
+  it('answers 404 without reading the help center while the widget is disabled', async () => {
+    hoisted.widgetEnabled = false
+    hoisted.readable.mockResolvedValue(true)
+    const res = await GET({ request: request() })
+    expect(res.status).toBe(404)
+    expect(hoisted.readable).not.toHaveBeenCalled()
+    expect(hoisted.hybridSearch).not.toHaveBeenCalled()
   })
 })

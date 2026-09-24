@@ -5,6 +5,11 @@ vi.mock('@/lib/server/auth', () => ({
   auth: { api: { getSession: vi.fn() } },
 }))
 
+const widget = vi.hoisted(() => ({ enabled: true }))
+vi.mock('@/lib/server/domains/settings/settings.widget', () => ({
+  getWidgetConfig: async () => ({ enabled: widget.enabled }),
+}))
+
 vi.mock('@/lib/server/storage/s3', async () => {
   const { createS3MockFactory } = await import('../../__tests__/s3-upload-mock')
   return createS3MockFactory()
@@ -34,7 +39,15 @@ function authAs() {
 describe('POST /api/widget/upload', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    widget.enabled = true
     vi.mocked(isS3Configured).mockReturnValue(true)
+  })
+
+  it('returns 404 while the widget is disabled, before reading any session', async () => {
+    widget.enabled = false
+    const res = await handleWidgetUpload({ request: makeRequest() })
+    expect(res.status).toBe(404)
+    expect(auth.api.getSession).not.toHaveBeenCalled()
   })
 
   it('returns 401 when there is no valid widget session', async () => {

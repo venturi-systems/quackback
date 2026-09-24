@@ -4,6 +4,7 @@ import { getWidgetSession } from '@/lib/server/functions/widget-auth'
 import { ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
 import { segmentIdsForPrincipal } from '@/lib/server/domains/segments/segment-membership.service'
 import { logger } from '@/lib/server/logger'
+import { widgetDisabledResponse } from '@/lib/server/widget/widget-enabled'
 
 const log = logger.child({ component: 'widget-search' })
 
@@ -11,6 +12,8 @@ export const Route = createFileRoute('/api/widget/search')({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        const disabled = await widgetDisabledResponse(corsHeaders())
+        if (disabled) return disabled
         const url = new URL(request.url)
         const q = url.searchParams.get('q')?.trim()
         const board = url.searchParams.get('board') || undefined

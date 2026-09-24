@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { widgetNotFoundResponse } from '@/lib/server/widget/widget-enabled'
 
 interface ServerTheme {
   lightPrimary?: string
@@ -81,8 +82,13 @@ export const Route = createFileRoute('/api/widget/config.json')({
         // experimental `chat` flag), so this endpoint just forwards them.
         const widgetConfig = await getPublicWidgetConfig()
 
+        // A disabled widget answers like a route that does not exist (the SDK
+        // treats any non-OK response as "no server config").
         if (!widgetConfig.enabled) {
-          return jsonResponse({ enabled: false }, 60)
+          return widgetNotFoundResponse({
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=60',
+          })
         }
 
         const theme: ServerTheme = {}
