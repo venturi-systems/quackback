@@ -28,6 +28,7 @@ import {
   restoreArticle,
   recordArticleFeedback,
 } from '@/lib/server/domains/help-center/help-center.service'
+import { filterText } from '@/lib/shared/schemas/list-filters'
 import {
   listCategoriesSchema,
   getCategorySchema,
@@ -343,7 +344,9 @@ export const recordArticleFeedbackFn = createServerFn({ method: 'POST' })
 
 export const searchPublicArticlesFn = createServerFn({ method: 'GET' })
   .validator(
-    z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).optional() })
+    // The query feeds a full-text search, and Postgres rejects a NUL in text
+    // (DEF-45; /api/widget/kb-search holds its ?q= to the same rule).
+    z.object({ query: filterText().min(1), limit: z.number().int().min(1).max(20).optional() })
   )
   .handler(async ({ data }) => {
     if (!(await isPublicHelpCenterReadable())) return []

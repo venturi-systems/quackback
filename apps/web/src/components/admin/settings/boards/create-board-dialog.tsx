@@ -168,7 +168,7 @@ export function CreateBoardDialog({
                         label="Public"
                         description={
                           anonymousManaged
-                            ? 'Unavailable: this deployment requires sign-in on every board.'
+                            ? 'Unavailable: this deployment requires sign-in on every board it does not manage.'
                             : 'Anyone can view. Sign-in for vote, comment, submit.'
                         }
                         icon={<GlobeAltIcon className="h-3.5 w-3.5" />}

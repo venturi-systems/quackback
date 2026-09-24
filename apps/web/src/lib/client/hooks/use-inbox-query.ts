@@ -51,7 +51,13 @@ async function fetchInboxPosts(
       statusSlugs: filters.status,
       tagIds: filters.tags as TagId[] | undefined,
       segmentIds: filters.segmentIds as SegmentId[] | undefined,
-      ownerId: (filters.owner || undefined) as PrincipalId | null | undefined,
+      // "Unassigned" selects posts with no owner, which the query takes as
+      // null (as the inbox loader sends it). Sent as text, it reached the
+      // owner id column, which throws on anything that is not a TypeID.
+      ownerId:
+        filters.owner === 'unassigned'
+          ? null
+          : ((filters.owner || undefined) as PrincipalId | undefined),
       search: filters.search,
       dateFrom: filters.dateFrom,
       dateTo: filters.dateTo,

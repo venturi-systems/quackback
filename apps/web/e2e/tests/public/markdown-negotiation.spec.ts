@@ -14,7 +14,9 @@ import { test, expect } from '@playwright/test'
  * This runs against the real server stack, so a dependency change that brings
  * the 500 back fails here, not in production.
  */
-const PAGES = ['/', '/roadmap']
+// The sign-in routes and a signed-out admin deep link redirect before any
+// page renders; a Markdown-preferring request must not turn that into a 5xx.
+const PAGES = ['/', '/roadmap', '/auth/login', '/admin/settings']
 
 test.describe('Markdown negotiation on portal pages', () => {
   for (const path of PAGES) {

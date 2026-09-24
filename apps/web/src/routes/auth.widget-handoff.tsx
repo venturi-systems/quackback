@@ -40,6 +40,7 @@ import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { getRequestHeaders, setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
 import { isSafeCallbackUrl } from '@/lib/shared/routing'
+import { widgetHandoffSearch } from '@/lib/shared/auth-route-search'
 import type { UserId } from '@quackback/ids'
 
 /**
@@ -83,6 +84,11 @@ export const isWidgetSessionHmacVerified = createServerOnlyFn(
 // Search schema
 // ---------------------------------------------------------------------------
 
+/**
+ * The server fn's input. The route reads its query through the tolerant
+ * `widgetHandoffSearch` first, so both values reach this schema as text or
+ * not at all; a malformed query (`?returnTo=123`) never fails the request.
+ */
 const searchSchema = z.object({
   ott: z.string().optional(),
   returnTo: z.string().optional(),
@@ -281,17 +287,17 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
 // ---------------------------------------------------------------------------
 
 export const Route = createFileRoute('/auth/widget-handoff')({
-  validateSearch: searchSchema.parse,
+  validateSearch: widgetHandoffSearch,
   loader: async ({ location, context }): Promise<LoaderData> => {
     // Like every widget route, the handoff does not exist while the widget is
     // off: no widget session can legitimately be handed to the portal then.
     if (!context.settings?.publicWidgetConfig?.enabled) {
       throw notFound()
     }
-    // The search schema is shared between validateSearch and the server fn's
-    // validator, so location.search is shape-compatible with the fn's
-    // expected input.
-    const search = location.search as z.infer<typeof searchSchema>
+    // location.search is the parsed query, not the validated one, so read it
+    // through the same tolerant schema validateSearch uses. That hands the
+    // server fn text or nothing, the shape its validator expects.
+    const search = widgetHandoffSearch.parse(location.search)
     const result = await consumeWidgetHandoffFn({
       data: { ott: search.ott, returnTo: search.returnTo },
     })

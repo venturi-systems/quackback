@@ -37,20 +37,32 @@
  *   7  searchShippedPostsFn
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { generateId } from '@quackback/ids'
+import {
+  fetchPortalDataSchema,
+  fetchPublicPostsSchema,
+  publicRoadmapPostListSchema,
+} from '@/lib/shared/schemas/list-filters'
 
 // ---------------------------------------------------------------------------
 // Shared handler registry
 // ---------------------------------------------------------------------------
 
 type AnyHandler = (args: { data: Record<string, unknown> }) => Promise<unknown>
+type InputSchema = { safeParse(value: unknown): { success: boolean } }
 
 const handlersByModule = new Map<string, AnyHandler[]>()
+// The validator each handler was registered with, at the handler's index
+// (undefined for a function that takes no input). Handlers run unvalidated.
+const validatorsByModule = new Map<string, Array<InputSchema | undefined>>()
 let _currentModule = ''
 
 vi.mock('@tanstack/react-start', () => ({
   createServerFn: () => {
+    let input: InputSchema | undefined
     const chain = {
-      validator() {
+      validator(schema: InputSchema) {
+        input = schema
         return chain
       },
       handler(fn: AnyHandler) {
@@ -58,6 +70,9 @@ vi.mock('@tanstack/react-start', () => ({
         const arr = handlersByModule.get(key) ?? []
         arr.push(fn)
         handlersByModule.set(key, arr)
+        const inputs = validatorsByModule.get(key) ?? []
+        inputs.push(input)
+        validatorsByModule.set(key, inputs)
         return chain
       },
     }
@@ -925,6 +940,38 @@ describe('portal.ts identity lookups — caller-scoped', () => {
     )
   })
 
+  // fetchPortalData once read the votes (on every board) and the principal id
+  // of whatever userId the request named, so a hand-made call could ask about
+  // anyone. It now reads the viewer from the session and ignores that field.
+  it.each<Persona>(['cookieless', 'anonymous', 'portalUser', 'member', 'admin'])(
+    'fetchPortalData gives a %s only its own votes and principal, whatever userId it names',
+    async (persona) => {
+      await actAs(persona)
+      mockResolvePortalAccess.mockResolvedValue({ granted: true, reason: 'public' })
+      mockListPublicBoardsWithStats.mockResolvedValue([])
+      mockListPublicPostsWithVotesAndAvatars.mockResolvedValue({ items: [], hasMore: false })
+      mockListPublicStatuses.mockResolvedValue([])
+      mockListPublicTags.mockResolvedValue([])
+      mockGetVotedPostIdsByUserId.mockResolvedValue(new Set(['post_voted']))
+
+      const h = await loadModule(PORTAL)
+      const result = await h[FETCH_PORTAL_DATA]({ data: { sort: 'top', userId: 'user_target' } })
+
+      expect(mockGetVotedPostIdsByUserId).not.toHaveBeenCalledWith('user_target')
+      if (persona === 'cookieless') {
+        expect(mockGetVotedPostIdsByUserId).not.toHaveBeenCalled()
+        expect(result).toMatchObject({ votedPostIds: [], principalId: null })
+      } else {
+        const own = PERSONAS[persona].userId
+        expect(mockGetVotedPostIdsByUserId).toHaveBeenCalledWith(own)
+        expect(result).toMatchObject({
+          votedPostIds: ['post_voted'],
+          principalId: `principal_${own}`,
+        })
+      }
+    }
+  )
+
   it.each<Persona>(['cookieless', 'anonymous', 'portalUser'])(
     'fetchUserAvatar gives a %s only the fallback for someone else',
     async (persona) => {
@@ -971,5 +1018,86 @@ describe('portal.ts identity lookups — caller-scoped', () => {
       principal_a: 'https://avatars.example/a.png',
       principal_b: null,
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// portal.ts inputs (DEF-45): a hand-made `/_serverFn/` call reaches these
+// validators without the route, so each takes only what its query accepts.
+// An id column throws on anything but a TypeID, and Postgres rejects a NUL in
+// text; either would fail the query instead of the validator.
+// ---------------------------------------------------------------------------
+
+const FETCH_SUBSCRIPTION_STATUS = 10
+const GET_COMMENTS_SECTION_DATA = 13
+
+describe('portal.ts inputs — only what the queries accept (DEF-45)', () => {
+  const NUL = '\u0000'
+  const USER = generateId('user')
+  const POST = generateId('post')
+  const PRINCIPAL = generateId('principal')
+
+  async function inputOf(index: number): Promise<InputSchema> {
+    await loadModule(PORTAL)
+    const schema = validatorsByModule.get(PORTAL)?.[index]
+    if (!schema) throw new Error(`portal.ts handler ${index} has no validator`)
+    return schema
+  }
+
+  it.each<[name: string, index: number, schema: unknown]>([
+    ['fetchPortalData', FETCH_PORTAL_DATA, fetchPortalDataSchema],
+    ['fetchPublicPosts', FETCH_PUBLIC_POSTS, fetchPublicPostsSchema],
+    ['fetchPublicRoadmapPosts', FETCH_PUBLIC_ROADMAP_POSTS, publicRoadmapPostListSchema],
+  ])('%s validates with its shared list schema', async (_name, index, schema) => {
+    expect(await inputOf(index)).toBe(schema)
+  })
+
+  it.each<[name: string, index: number, accepted: unknown, refused: unknown[]]>([
+    [
+      'getPrincipalIdForUser',
+      GET_PRINCIPAL_ID_FOR_USER,
+      { userId: USER },
+      [{ userId: 'user_target' }, { userId: PRINCIPAL }, { userId: `${USER}${NUL}` }],
+    ],
+    [
+      'fetchPublicBoardBySlug',
+      FETCH_PUBLIC_BOARD_BY_SLUG,
+      { slug: 'ideas' },
+      [{ slug: `ide${NUL}as` }, { slug: NUL }],
+    ],
+    [
+      'fetchPublicPostDetail',
+      FETCH_PUBLIC_POST_DETAIL,
+      { postId: POST },
+      [{ postId: 'post_1' }, { postId: generateId('board') }, { postId: `${POST}${NUL}` }],
+    ],
+    [
+      'fetchUserAvatar',
+      FETCH_USER_AVATAR,
+      { userId: USER, fallbackImageUrl: null },
+      [{ userId: 'user_target', fallbackImageUrl: null }],
+    ],
+    ['fetchAvatars', FETCH_AVATARS, [PRINCIPAL], [['principal_a'], [USER], [null]]],
+    [
+      'fetchSubscriptionStatus',
+      FETCH_SUBSCRIPTION_STATUS,
+      { principalId: PRINCIPAL, postId: POST },
+      [
+        { principalId: USER, postId: POST },
+        { principalId: PRINCIPAL, postId: 'post_1' },
+      ],
+    ],
+    [
+      'getCommentsSectionDataFn',
+      GET_COMMENTS_SECTION_DATA,
+      { postId: POST },
+      [{ postId: 'post_1' }, { postId: `${POST}${NUL}` }],
+    ],
+  ])('%s takes what the app sends and refuses the rest', async (_name, index, ok, refused) => {
+    const schema = await inputOf(index)
+    expect(schema.safeParse(ok).success).toBe(true)
+    for (const value of refused) {
+      expect(schema.safeParse(value).success, JSON.stringify(value)).toBe(false)
+    }
   })
 })
