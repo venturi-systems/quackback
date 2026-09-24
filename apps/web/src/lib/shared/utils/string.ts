@@ -107,7 +107,9 @@ export function getStatusEmoji(status: string): string {
     complete: '\u2705',
     closed: '\ud83d\udd12',
   }
-  return map[status.toLowerCase().replace(/\s+/g, '_')] || '\ud83d\udccc'
+  // Own keys only: a status named "Constructor" must not resolve to Object.prototype.constructor.
+  const key = status.toLowerCase().replace(/\s+/g, '_')
+  return Object.hasOwn(map, key) ? map[key] : '\ud83d\udccc'
 }
 
 /**

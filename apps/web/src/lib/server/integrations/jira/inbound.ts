@@ -51,12 +51,18 @@ export const jiraInboundHandler: InboundWebhookHandler = {
     )
     if (!statusChange) return null
 
+    // A changelog item carries the new status name in its own `toString` field.
+    // Read it as an own property: on an item without one, `statusChange.toString`
+    // would be the inherited Object.prototype.toString function, not a name.
+    const newStatus = Object.hasOwn(statusChange, 'toString') ? statusChange.toString : undefined
+    if (typeof newStatus !== 'string' || !newStatus) return null
+
     const issueKey = payload.issue?.key
     if (!issueKey) return null
 
     return {
       externalId: issueKey,
-      externalStatus: statusChange.toString,
+      externalStatus: newStatus,
       eventType: 'jira:issue_updated',
     }
   },

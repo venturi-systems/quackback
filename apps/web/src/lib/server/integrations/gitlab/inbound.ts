@@ -47,7 +47,9 @@ export const gitlabInboundHandler: InboundWebhookHandler = {
       closed: 'Closed',
     }
 
-    const externalStatus = statusMap[state]
+    // `state` comes from the webhook payload: read own keys only, so a state such
+    // as `constructor` or `__proto__` cannot resolve to an Object.prototype member.
+    const externalStatus = Object.hasOwn(statusMap, state) ? statusMap[state] : undefined
     if (!externalStatus) return null
 
     return {

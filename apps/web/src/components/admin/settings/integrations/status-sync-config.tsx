@@ -19,6 +19,7 @@ import {
   useDisableStatusSync,
   useUpdateStatusMappings,
 } from '@/lib/client/mutations'
+import { lookupStatusMapping } from '@/lib/server/integrations/status-mapping'
 
 /** External statuses that can be mapped (provided by the integration config component) */
 export interface ExternalStatus {
@@ -139,7 +140,7 @@ export function StatusSyncConfig({
               >
                 <span className="text-sm font-medium min-w-0 truncate">{ext.name}</span>
                 <Select
-                  value={mappings[ext.name] ?? IGNORE_VALUE}
+                  value={lookupStatusMapping(mappings, ext.name) ?? IGNORE_VALUE}
                   onValueChange={(value) => handleMappingChange(ext.name, value)}
                   disabled={saving || !enabled}
                 >

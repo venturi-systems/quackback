@@ -302,6 +302,13 @@ describe('getStatusEmoji', () => {
   it('returns fallback emoji for unknown status', () => {
     expect(getStatusEmoji('unknown')).toBe('\ud83d\udccc')
   })
+
+  it.each(['Constructor', 'constructor', '__proto__'])(
+    'returns fallback emoji for a status named %s, not an inherited Object.prototype member',
+    (status) => {
+      expect(getStatusEmoji(status)).toBe('\ud83d\udccc')
+    }
+  )
 })
 
 describe('contentPreview', () => {
