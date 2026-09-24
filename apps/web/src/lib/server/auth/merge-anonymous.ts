@@ -65,6 +65,36 @@ export function absorbedSignUpIdentity(newUser: {
   }
 }
 
+/**
+ * The fields the anonymous principal takes on in the same absorption: it
+ * becomes a person, always as a contributor.
+ *
+ * An anonymous principal never exercised a team role (effectiveRole caps it),
+ * but a stored admin or member can sit on one, for example from a pre-fix
+ * onboarding call (lib/shared/roles.ts). Flipping `type` to 'user' alone would
+ * bring that stored role to life for whoever signs up next in the anonymous
+ * session, with no designation. A team role is only ever given by the
+ * designation paths (team-designation.ts), so the role is reset here
+ * (landing-page#2309).
+ */
+export function absorbedSignUpPrincipal(input: {
+  newName: string | null | undefined
+  anonName: string | null | undefined
+  image: string | null
+}): {
+  type: 'user'
+  role: 'user'
+  displayName: string | null | undefined
+  avatarUrl: string | null
+} {
+  return {
+    type: 'user',
+    role: 'user',
+    displayName: input.newName || input.anonName,
+    avatarUrl: input.image,
+  }
+}
+
 export async function mergeAnonymousToIdentified(params: MergeAnonymousParams): Promise<void> {
   const { anonPrincipalId, targetPrincipalId, anonUserId, anonDisplayName, targetDisplayName } =
     params

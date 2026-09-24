@@ -68,7 +68,11 @@ vi.mock('@/lib/server/db', () => ({
   ),
 }))
 
-import { absorbedSignUpIdentity, mergeAnonymousToIdentified } from '../merge-anonymous'
+import {
+  absorbedSignUpIdentity,
+  absorbedSignUpPrincipal,
+  mergeAnonymousToIdentified,
+} from '../merge-anonymous'
 
 describe('mergeAnonymousToIdentified', () => {
   const ANON_PRINCIPAL_ID = 'principal_anon' as PrincipalId
@@ -239,5 +243,30 @@ describe('absorbedSignUpIdentity (anonymous user absorbs a new sign-up)', () => 
         .emailVerified
     ).toBe(false)
     expect(absorbedSignUpIdentity({ name: 'Y', email: 'y@example.com' }).emailVerified).toBe(false)
+  })
+})
+
+describe('absorbedSignUpPrincipal (the anonymous principal becomes a person)', () => {
+  it('always becomes a contributor, whatever role the anonymous row stored', () => {
+    // A stored admin on an anonymous principal (for example from a pre-fix
+    // onboarding call) must not come to life when the type flips to 'user'.
+    expect(
+      absorbedSignUpPrincipal({ newName: 'Ada', anonName: 'Curious Penguin', image: null })
+    ).toEqual({
+      type: 'user',
+      role: 'user',
+      displayName: 'Ada',
+      avatarUrl: null,
+    })
+  })
+
+  it('keeps the anonymous name when the sign-up has none, and carries the image', () => {
+    expect(
+      absorbedSignUpPrincipal({
+        newName: '',
+        anonName: 'Curious Penguin',
+        image: 'https://x/a.png',
+      })
+    ).toMatchObject({ displayName: 'Curious Penguin', avatarUrl: 'https://x/a.png', role: 'user' })
   })
 })
