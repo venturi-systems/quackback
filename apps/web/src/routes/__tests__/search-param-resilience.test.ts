@@ -129,6 +129,7 @@ vi.mock('@/components/widget/widget-messages-section', () => ({
 }))
 vi.mock('@/components/widget/widget-auth-provider', () => ({ useWidgetAuth: () => ({}) }))
 vi.mock('@/components/widget/use-chat-presence', () => ({ CHAT_PRESENCE_QUERY_KEY: [] }))
+vi.mock('@/components/admin/settings/security/auth-settings', () => ({ AuthSettings: () => null }))
 
 type StandardResult = { value?: Record<string, unknown>; issues?: ReadonlyArray<unknown> }
 type StandardSchema = { '~standard': { validate: (input: unknown) => StandardResult } }
@@ -171,6 +172,12 @@ const { Route: adminBoardSettings } = await import('../admin/settings.boards.ind
 const { Route: adminDevelopers } = await import('../admin/settings.developers')
 const { Route: widget } = await import('../widget/index')
 const { Route: unsubscribe } = await import('../unsubscribe')
+// DEF-55: the sign-in, account and OAuth routes.
+const { Route: authLogin } = await import('../auth.login')
+const { Route: authSignup } = await import('../auth.signup')
+const { Route: adminLogin } = await import('../admin.login')
+const { Route: oauthConsent } = await import('../oauth/consent')
+const { Route: adminAuthSettings } = await import('../admin/settings.security.authentication')
 
 const BOARD = generateId('board')
 const OTHER_BOARD = generateId('board')
@@ -229,6 +236,18 @@ const HOSTILE_QUERIES = [
   '?search=%00',
   '?board=a%00b',
   '?status=open%00&tags=%00&customAttrs=plan:eq:%00&emailDomain=%00&c=%00&token=%00',
+  // DEF-55: `?error=123` reached the sign-in routes as the number 123.
+  '?error=123',
+  '?callbackUrl=123',
+  '?error=123&callbackUrl=123',
+  '?error=%5B%22a%22%5D&callbackUrl=%7B%22href%22%3A%22%2Fadmin%22%7D',
+  '?error=null&callbackUrl=true',
+  '?error=%00&callbackUrl=%2Fadmin%00',
+  '?callbackUrl=%2F%2Fevil.example&error=%3Cscript%3E',
+  '?tab=team-access',
+  '?tab=%5B%22sign-in%22%5D',
+  '?client_id=123&state=12345&exp=1700000000&sig=true',
+  '?client_id=%5B1%5D&scope=%7B%7D&redirect_uri=null',
 ]
 
 const ROUTES: Array<[string, unknown]> = [
@@ -243,6 +262,11 @@ const ROUTES: Array<[string, unknown]> = [
   ['/admin/settings/developers', adminDevelopers],
   ['/widget/', widget],
   ['/unsubscribe', unsubscribe],
+  ['/auth/login', authLogin],
+  ['/auth/signup', authSignup],
+  ['/admin/login', adminLogin],
+  ['/oauth/consent', oauthConsent],
+  ['/admin/settings/security/authentication', adminAuthSettings],
 ]
 
 describe.each(ROUTES)('%s validateSearch', (_id, route) => {
@@ -403,5 +427,47 @@ describe('a value holding a NUL, which Postgres rejects in text, reads as absent
 
   it('keeps the same values without the NUL', () => {
     expect(valueOf(portalHome, '?search=a&board=ab')).toMatchObject({ search: 'a', board: 'ab' })
+  })
+})
+
+// DEF-44: behind the sign-in gate a portal page renders only the gate, yet
+// `/roadmap` kept "Roadmap - …", its description and a canonical link in the
+// server-rendered head. Child heads now return the gate head first.
+describe('gated portal pages take the sign-in head', () => {
+  type Head = { meta?: Array<{ title?: string; name?: string; content?: string }>; links?: unknown }
+
+  function headOf(route: unknown) {
+    return (route as { options: { head: (ctx: unknown) => Head } }).options.head
+  }
+
+  const gated = [
+    { routeId: '__root__', status: 'success' },
+    { routeId: '/_portal', status: 'success', loaderData: { gate: { workspaceName: 'Venturi' } } },
+  ]
+  const open = [
+    { routeId: '__root__', status: 'success' },
+    { routeId: '/_portal', status: 'success', loaderData: { gate: null } },
+  ]
+  const roadmapData = { workspaceName: 'Venturi', baseUrl: 'https://feedback.example' }
+
+  it('titles /roadmap behind the gate as the sign-in page, with no canonical link', () => {
+    const head = headOf(portalRoadmap)({ matches: gated, loaderData: roadmapData })
+    expect(head.meta?.[0]).toEqual({ title: 'Sign in · Venturi' })
+    expect(head.meta).toContainEqual({ name: 'robots', content: 'noindex, nofollow' })
+    expect(head.links).toBeUndefined()
+  })
+
+  it('keeps the roadmap title and canonical link when the portal is open', () => {
+    const head = headOf(portalRoadmap)({ matches: open, loaderData: roadmapData })
+    expect(head.meta?.[0]).toEqual({ title: 'Roadmap - Venturi' })
+    expect(head.links).toEqual([{ rel: 'canonical', href: 'https://feedback.example/roadmap' }])
+  })
+
+  it('titles the portal home behind the gate as the sign-in page', () => {
+    const head = headOf(portalHome)({
+      matches: gated,
+      loaderData: { accessGated: false, org: { name: 'Venturi' }, baseUrl: '' },
+    })
+    expect(head.meta?.[0]).toEqual({ title: 'Sign in · Venturi' })
   })
 })

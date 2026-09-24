@@ -1,25 +1,13 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { ExternalLink, Globe, ShieldCheck } from 'lucide-react'
-
-const searchSchema = z.object({
-  client_id: z.string(),
-  scope: z.string().optional(),
-  redirect_uri: z.string().optional(),
-  state: z.string().optional(),
-  response_type: z.string().optional(),
-  code_challenge: z.string().optional(),
-  code_challenge_method: z.string().optional(),
-  prompt: z.string().optional(),
-  exp: z.union([z.string(), z.number()]).optional(),
-  sig: z.string().optional(),
-  resource: z.string().optional(),
-})
+import { oauthConsentSearch, oauthText } from '@/lib/shared/auth-route-search'
 
 export const Route = createFileRoute('/oauth/consent')({
-  validateSearch: searchSchema,
+  // Tolerant and value-preserving: a numeric `state` or a missing `client_id`
+  // renders the page instead of failing validation with HTTP 500.
+  validateSearch: oauthConsentSearch,
   component: ConsentPage,
 })
 
@@ -96,10 +84,11 @@ const HIDDEN_SCOPES = new Set(['openid', 'profile', 'email', 'offline_access'])
 // Client info hook
 // ============================================================================
 
-function useClientInfo(clientId: string) {
+function useClientInfo(clientId: string | undefined) {
   const [client, setClient] = useState<OAuthClientInfo | null>(null)
 
   useEffect(() => {
+    if (!clientId) return
     fetch(`/api/auth/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`, {
       credentials: 'include',
     })
@@ -117,8 +106,32 @@ function useClientInfo(clientId: string) {
 
 function ConsentPage() {
   const search = Route.useSearch()
-  const client = useClientInfo(search.client_id)
-  const allScopes: string[] = search.scope?.split(' ').filter(Boolean) ?? []
+  const clientId = oauthText(search.client_id)
+  if (!clientId) return <IncompleteRequest />
+  return <ConsentForm clientId={clientId} scope={oauthText(search.scope)} />
+}
+
+/**
+ * A consent URL without a `client_id` names no application, so there is
+ * nothing to authorize. Say so instead of rendering an empty consent form.
+ */
+function IncompleteRequest() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm space-y-3 text-center">
+        <h1 className="text-xl font-semibold">This authorization request is incomplete</h1>
+        <p className="text-sm text-muted-foreground">
+          It does not name the application asking for access. Return to that application and
+          start again.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function ConsentForm({ clientId, scope }: { clientId: string; scope: string | undefined }) {
+  const client = useClientInfo(clientId)
+  const allScopes: string[] = scope?.split(' ').filter(Boolean) ?? []
   const visibleScopes = allScopes.filter((s) => !HIDDEN_SCOPES.has(s))
   const scopeGroups = groupScopes(visibleScopes)
   const [submitting, setSubmitting] = useState<'accept' | 'deny' | null>(null)
@@ -146,7 +159,7 @@ function ConsentPage() {
         credentials: 'include',
         body: JSON.stringify({
           accept,
-          scope: search.scope,
+          scope,
           oauth_query: oauthQuery,
         }),
       })

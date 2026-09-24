@@ -33,6 +33,7 @@ import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
 import { PortalRolesExplainer } from '@/components/portal/portal-roles-explainer'
+import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
@@ -55,6 +56,8 @@ interface GateCardProps {
   callbackUrl?: string
   /** Seeds the form's initial mode (e.g. ?auth=signup → start on sign-up). */
   autoOpenSignin?: 'login' | 'signup'
+  /** `?error=` code of a refused sign-in; a known code shows its message. */
+  error?: string
 }
 
 function GateCard({
@@ -65,6 +68,7 @@ function GateCard({
   userEmail,
   callbackUrl,
   autoOpenSignin,
+  error,
 }: GateCardProps) {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -169,6 +173,10 @@ function GateCard({
   const isBaseStep = stepCtx.step === 'credentials'
   const anyoneCanRead = visibility === 'authenticated'
 
+  // Why the last sign-in or access attempt was refused, kept on the page
+  // (the redirect's toast alone disappears). Unknown codes render nothing.
+  const notice = <AuthNotice code={error} className="portal-gate__notice" />
+
   if (reason === 'unauthorized') {
     return (
       <div className="portal-gate__intro">
@@ -178,6 +186,7 @@ function GateCard({
             defaultMessage="This account has no access"
           />
         </h1>
+        {notice}
         <p className="portal-gate__lead">
           {userEmail ? (
             <FormattedMessage
@@ -215,6 +224,7 @@ function GateCard({
     <div className="portal-gate__layout">
       <div className="portal-gate__intro">
         <h1 className="portal-gate__title">{header.title}</h1>
+        {notice}
         {isBaseStep ? (
           <p className="portal-gate__lead" data-testid="portal-gate-lead">
             {anyoneCanRead ? (
@@ -282,6 +292,7 @@ export function PortalAccessGate({
   locale,
   callbackUrl,
   autoOpenSignin,
+  error,
 }: PortalAccessGateProps) {
   return (
     // The gate renders from the _portal loader's gate branch, which does not
@@ -302,6 +313,7 @@ export function PortalAccessGate({
           userEmail={userEmail}
           callbackUrl={callbackUrl}
           autoOpenSignin={autoOpenSignin}
+          error={error}
         />
       </PublicPageFrame>
     </PortalIntlProvider>
