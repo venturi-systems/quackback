@@ -58,6 +58,7 @@ import {
   removeInviteMagicLinkToken,
 } from './invitation-magic-link'
 import { logger } from '@/lib/server/logger'
+import { inboxPostListSchema, listPortalUsersSchema } from '@/lib/shared/schemas/list-filters'
 
 /**
  * Server functions for admin data fetching.
@@ -66,56 +67,9 @@ import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'admin' })
 
-// Schemas for GET request parameters
-const inboxPostListSchema = z.object({
-  sort: z.enum(['votes', 'newest', 'oldest']).default('newest'),
-  limit: z.number().default(20),
-  cursor: z.string().optional(),
-  search: z.string().optional(),
-  ownerId: z.string().nullable().optional(),
-  statusSlugs: z.array(z.string()).optional(),
-  boardIds: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  segmentIds: z.array(z.string()).optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  minVotes: z.number().optional(),
-  minComments: z.number().optional(),
-  hasDuplicates: z.boolean().optional(),
-  responded: z.enum(['all', 'responded', 'unresponded']).optional(),
-  updatedBefore: z.string().optional(),
-  showDeleted: z.boolean().optional(),
-})
-
-const activityCountFilterSchema = z.object({
-  op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq']),
-  value: z.number(),
-})
-
-const customAttrFilterSchema = z.object({
-  key: z.string(),
-  op: z.string(),
-  value: z.string(),
-})
-
-const listPortalUsersSchema = z.object({
-  search: z.string().optional(),
-  verified: z.boolean().optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  emailDomain: z.string().optional(),
-  postCount: activityCountFilterSchema.optional(),
-  voteCount: activityCountFilterSchema.optional(),
-  commentCount: activityCountFilterSchema.optional(),
-  customAttrs: z.array(customAttrFilterSchema).optional(),
-  sort: z
-    .enum(['newest', 'oldest', 'most_active', 'most_posts', 'most_comments', 'most_votes', 'name'])
-    .optional(),
-  page: z.number().optional(),
-  limit: z.number().optional(),
-  segmentIds: z.array(z.string()).optional(),
-  includeAnonymous: z.boolean().optional(),
-})
+// Schemas for GET request parameters: inboxPostListSchema and
+// listPortalUsersSchema live in lib/shared/schemas/list-filters.ts, which holds
+// each filter to what the list query accepts.
 
 const portalUserByIdSchema = z.object({
   principalId: z.string(),
