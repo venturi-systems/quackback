@@ -16,6 +16,7 @@
  * - post.permissions.ts - User edit/delete permissions
  */
 
+import { recordPostStatusAudit } from './post.status-audit'
 import {
   db,
   and,
@@ -429,6 +430,13 @@ export async function updatePost(
       previousStatusName,
       newStatus.name
     )
+
+    await recordPostStatusAudit({
+      postId: id,
+      actor,
+      from: { id: existingPost.statusId ?? null, name: previousStatusName },
+      to: { id: newStatus.id, name: newStatus.name, slug: newStatus.slug },
+    })
 
     createActivity({
       postId: id,

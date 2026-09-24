@@ -18,6 +18,29 @@ export const updateFeatureFlagsFn = createServerFn({ method: 'POST' })
     })
   )
   .handler(async ({ data }): Promise<FeatureFlags> => {
-    await requireAuth({ roles: ['admin'] })
-    return updateFeatureFlags(data)
+    const auth = await requireAuth({ roles: ['admin'] })
+    const { getFeatureFlags } = await import('@/lib/server/domains/settings/settings.service')
+    const before = await getFeatureFlags().catch(() => null)
+    // The Help Center may be held off by policy (POLICY_MANAGED_SETTINGS
+    // `features.helpCenter`): Venturi keeps it off and links the portal to
+    // docs.venturi.systems instead. Refuse a change rather than save one the
+    // policy forbids; a save that keeps the current value passes.
+    if (data.helpCenter !== undefined && data.helpCenter !== (before?.helpCenter ?? false)) {
+      const { assertNotManaged } = await import('@/lib/server/config-file/managed-guard')
+      await assertNotManaged('features.helpCenter')
+    }
+    const result = await updateFeatureFlags(data)
+    const { recordAuditSafely, sessionAuditActor } = await import('@/lib/server/audit/audit-safe')
+    await recordAuditSafely(
+      {
+        event: 'settings.changed',
+        actor: sessionAuditActor(auth),
+        target: { type: 'settings', id: 'feature_flags' },
+        before,
+        after: data,
+        metadata: { section: 'feature_flags' },
+      },
+      'request'
+    )
+    return result
   })

@@ -15,6 +15,7 @@ import {
   reorderStatuses,
 } from '@/lib/server/domains/statuses/status.service'
 import { logger } from '@/lib/server/logger'
+import { recordAuditSafely, sessionAuditActor } from '@/lib/server/audit/audit-safe'
 
 const log = logger.child({ component: 'statuses' })
 
@@ -113,6 +114,40 @@ export const fetchStatusFn = createServerFn({ method: 'GET' })
   })
 
 // ============================================
+// Audit helpers
+// ============================================
+
+/** The status-definition fields an audit row records. */
+function statusAuditView(s: {
+  name: string
+  slug?: string | null
+  color?: string | null
+  category?: string | null
+  showOnRoadmap?: boolean | null
+  isDefault?: boolean | null
+}) {
+  return {
+    name: s.name,
+    slug: s.slug ?? null,
+    color: s.color ?? null,
+    category: s.category ?? null,
+    showOnRoadmap: s.showOnRoadmap ?? null,
+    isDefault: s.isDefault ?? null,
+  }
+}
+
+/** Status definition before a change, for the audit row; null if unreadable. */
+async function statusSnapshot(id: StatusId) {
+  try {
+    const { db, postStatuses, eq } = await import('@/lib/server/db')
+    const row = await db.query.postStatuses.findFirst({ where: eq(postStatuses.id, id) })
+    return row ? statusAuditView(row) : null
+  } catch {
+    return null
+  }
+}
+
+// ============================================
 // Write Operations
 // ============================================
 
@@ -124,10 +159,19 @@ export const createStatusFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ category: data.category }, 'create status')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
       const status = await createStatus(data)
       log.info({ status_id: status.id }, 'status created')
+      await recordAuditSafely(
+        {
+          event: 'status.created',
+          actor: sessionAuditActor(auth),
+          target: { type: 'status', id: status.id },
+          after: statusAuditView(status),
+        },
+        'request'
+      )
       return status
     } catch (error) {
       log.error({ err: error }, 'create status failed')
@@ -143,8 +187,9 @@ export const updateStatusFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ status_id: data.id }, 'update status')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await statusSnapshot(data.id as StatusId)
       const status = await updateStatus(data.id as StatusId, {
         name: data.name,
         color: data.color,
@@ -152,6 +197,16 @@ export const updateStatusFn = createServerFn({ method: 'POST' })
         isDefault: data.isDefault,
       })
       log.info({ status_id: status.id }, 'status updated')
+      await recordAuditSafely(
+        {
+          event: 'status.updated',
+          actor: sessionAuditActor(auth),
+          target: { type: 'status', id: status.id },
+          before,
+          after: statusAuditView(status),
+        },
+        'request'
+      )
       return status
     } catch (error) {
       log.error({ err: error }, 'update status failed')
@@ -167,10 +222,20 @@ export const deleteStatusFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ status_id: data.id }, 'delete status')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await statusSnapshot(data.id as StatusId)
       await deleteStatus(data.id as StatusId)
       log.info({ status_id: data.id }, 'status deleted')
+      await recordAuditSafely(
+        {
+          event: 'status.deleted',
+          actor: sessionAuditActor(auth),
+          target: { type: 'status', id: data.id },
+          before,
+        },
+        'request'
+      )
       return { id: data.id as StatusId }
     } catch (error) {
       log.error({ err: error }, 'delete status failed')
@@ -186,10 +251,19 @@ export const reorderStatusesFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ count: data.statusIds.length }, 'reorder statuses')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
       await reorderStatuses(data.statusIds as StatusId[])
       log.info({ count: data.statusIds.length }, 'statuses reordered')
+      await recordAuditSafely(
+        {
+          event: 'status.reordered',
+          actor: sessionAuditActor(auth),
+          target: { type: 'status' },
+          after: { order: data.statusIds },
+        },
+        'request'
+      )
       return { success: true }
     } catch (error) {
       log.error({ err: error }, 'reorder statuses failed')

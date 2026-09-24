@@ -15,6 +15,10 @@ export const POLICY_MANAGED_PATH_OPTIONS = [
   'portal.oauth',
   'auth.oauth',
   'auth.openSignup',
+  // The Help Center on/off switch (the Labs feature flag and the public
+  // Help Center "enabled" setting). Venturi holds it off and links the portal
+  // to docs.venturi.systems instead (landing-page#2309).
+  'features.helpCenter',
 ] as const
 
 /** `boards.<slug>.access`: the access policy of the one board with that slug. */

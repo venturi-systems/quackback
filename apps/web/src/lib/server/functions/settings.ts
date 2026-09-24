@@ -38,6 +38,7 @@ import { assertNotManaged } from '@/lib/server/config-file/managed-guard'
 import { getSession } from '@/lib/server/auth/session'
 import { db, principal, user, invitation, account, eq, ne, and } from '@/lib/server/db'
 import { logger } from '@/lib/server/logger'
+import { recordAuditSafely, sessionAuditActor } from '@/lib/server/audit/audit-safe'
 
 const log = logger.child({ component: 'settings' })
 
@@ -111,18 +112,65 @@ export const fetchAuthConfigFn = createServerFn({ method: 'GET' }).handler(async
   }
 })
 
+// ============================================
+// Audit helpers (landing-page#2309)
+// ============================================
+
+/** Read a before-value for an audit row; null when it cannot be read. */
+async function readForAudit<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read()
+  } catch {
+    return null
+  }
+}
+
+/** A stylesheet's length and SHA-256 prefix, never its text; null if unavailable. */
+async function cssDigest(
+  css: string | null | undefined
+): Promise<{ length: number; sha256: string } | null> {
+  if (typeof css !== 'string') return null
+  try {
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(css))
+    const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+    return { length: css.length, sha256: hex.slice(0, 16) }
+  } catch {
+    return { length: css.length, sha256: '' }
+  }
+}
+
+/** One `settings.changed` row per saved settings area, with before and after. */
+async function auditSettingsChange(
+  auth: Parameters<typeof sessionAuditActor>[0],
+  section: string,
+  before: unknown,
+  after: unknown
+): Promise<void> {
+  await recordAuditSafely(
+    {
+      event: 'settings.changed',
+      actor: sessionAuditActor(auth),
+      target: { type: 'settings', id: section },
+      before,
+      after,
+      metadata: { section },
+    },
+    'request'
+  )
+}
+
 export const fetchDeveloperConfig = createServerFn({ method: 'GET' }).handler(async () => {
   log.debug('fetch developer config')
   try {
     await requireAuth({ roles: ['admin'] })
     const developerConfig = await getDeveloperConfig()
     // Claude Code and Claude Desktop sign in to MCP with OAuth by registering
-    // a client before any account exists. The setup guide offers that path
-    // only when this deployment allows unauthenticated registration.
-    const { config } = await import('@/lib/server/config')
+    // a client before any account exists. This fork never allows registration
+    // without a session (auth/index.ts), so the setup guide offers API-key
+    // configurations only.
     return {
       ...developerConfig,
-      oauthClientRegistrationOpen: config.oauthAllowUnauthenticatedClientRegistration === true,
+      oauthClientRegistrationOpen: false,
     }
   } catch (error) {
     log.error({ err: error }, 'fetch developer config failed')
@@ -141,7 +189,7 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
   async () => {
     log.debug('fetch team members and invitations')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
       // Subquery: latest session timestamp per user. Left-joined so
       // a team member with no sessions still appears (lastSignInAt
@@ -165,12 +213,27 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
           avatarUrl: principal.avatarUrl,
           userName: user.name,
           userEmail: user.email,
+          userEmailVerified: user.emailVerified,
           lastSignInAt: sqlOp<Date | null>`${lastSession.lastSignInAt}`,
         })
         .from(principal)
         .innerJoin(user, eq(principal.userId, user.id))
         .leftJoin(lastSession, eq(lastSession.userId, user.id))
         .where(ne(principal.role, 'user'))
+
+      // Team identity rule: which stored team roles can actually act, and
+      // (for administrators) which contributors could be designated.
+      const { loadTeamDesignationView } =
+        await import('@/lib/server/domains/principals/team-designation-view')
+      const designation = await loadTeamDesignationView(
+        membersRaw.map((m) => ({
+          principalId: m.id,
+          userId: m.userId,
+          email: m.userEmail,
+          emailVerified: m.userEmailVerified,
+        })),
+        { includeCandidates: isAdmin(auth.principal.role) }
+      )
 
       // Serialise to ISO string on the boundary so the client type
       // stays narrow (`string | null`). `toIsoStringOrNull` handles
@@ -181,6 +244,7 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
       const members = membersRaw.map((m) => ({
         ...m,
         lastSignInAt: toIsoStringOrNull(m.lastSignInAt),
+        identityGap: designation.gaps[m.id] ?? null,
       }))
 
       const pendingInvitations = await db.query.invitation.findMany({
@@ -207,7 +271,13 @@ export const fetchTeamMembersAndInvitations = createServerFn({ method: 'GET' }).
         expiresAt: inv.expiresAt.toISOString(),
       }))
 
-      return { members, avatarMap, formattedInvitations }
+      return {
+        members,
+        avatarMap,
+        formattedInvitations,
+        teamPolicy: designation.policy,
+        candidates: designation.candidates,
+      }
     } catch (error) {
       log.error({ err: error }, 'fetch team members and invitations failed')
       throw error
@@ -340,8 +410,11 @@ export const updateThemeFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info('update theme')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await updateBrandingConfig(data.brandingConfig as BrandingConfig)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await readForAudit(() => getBrandingConfig())
+      const result = await updateBrandingConfig(data.brandingConfig as BrandingConfig)
+      await auditSettingsChange(auth, 'branding', before, data.brandingConfig)
+      return result
     } catch (error) {
       log.error({ err: error }, 'update theme failed')
       throw error
@@ -353,7 +426,8 @@ export const updatePortalConfigFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info('update portal config')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await readForAudit(() => getPortalConfig())
       // allowAnonymous may be owned by an external policy process
       // (POLICY_MANAGED_SETTINGS); refuse a change rather than save a value
       // that would be reverted. Saves that keep the current value pass.
@@ -366,7 +440,9 @@ export const updatePortalConfigFn = createServerFn({ method: 'POST' })
           await assertNotManaged('portal.features.allowAnonymous')
         }
       }
-      return await updatePortalConfig(data as UpdatePortalConfigInput)
+      const result = await updatePortalConfig(data as UpdatePortalConfigInput)
+      await auditSettingsChange(auth, 'portal', before, data)
+      return result
     } catch (error) {
       log.error({ err: error }, 'update portal config failed')
       throw error
@@ -672,8 +748,15 @@ export const updateWorkspaceNameFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ name: data.name }, 'update workspace name')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await updateWorkspaceName(data.name)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const result = await updateWorkspaceName(data.name)
+      await auditSettingsChange(
+        auth,
+        'workspace.name',
+        { name: auth?.settings?.name ?? null },
+        { name: data.name }
+      )
+      return result
     } catch (error) {
       log.error({ err: error }, 'update workspace name failed')
       throw error
@@ -707,8 +790,17 @@ export const updateCustomCssFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ css_length: data.customCss.length }, 'update custom css')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await updateCustomCss(data.customCss)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await readForAudit(() => getCustomCss())
+      const result = await updateCustomCss(data.customCss)
+      // Digests, not the stylesheet: enough to tell versions apart.
+      await auditSettingsChange(
+        auth,
+        'custom_css',
+        await cssDigest(before),
+        await cssDigest(data.customCss)
+      )
+      return result
     } catch (error) {
       log.error({ err: error }, 'update custom css failed')
       throw error
@@ -728,8 +820,11 @@ export const updateDeveloperConfigFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ mcp_enabled: data.mcpEnabled }, 'update developer config')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await updateDeveloperConfig(data)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await readForAudit(() => getDeveloperConfig())
+      const result = await updateDeveloperConfig(data)
+      await auditSettingsChange(auth, 'developer', before, data)
+      return result
     } catch (error) {
       log.error({ err: error }, 'update developer config failed')
       throw error
@@ -825,9 +920,13 @@ export const updateWidgetConfigFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ enabled: data.enabled, position: data.position }, 'update widget config')
     try {
-      await requireAuth({ roles: ['admin'] })
-      const { updateWidgetConfig } = await import('@/lib/server/domains/settings/settings.widget')
-      return await updateWidgetConfig(data)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const { updateWidgetConfig, getWidgetConfig } =
+        await import('@/lib/server/domains/settings/settings.widget')
+      const before = await readForAudit(() => getWidgetConfig())
+      const result = await updateWidgetConfig(data)
+      await auditSettingsChange(auth, 'widget', before, data)
+      return result
     } catch (error) {
       log.error({ err: error }, 'update widget config failed')
       throw error
@@ -837,9 +936,19 @@ export const updateWidgetConfigFn = createServerFn({ method: 'POST' })
 export const regenerateWidgetSecretFn = createServerFn({ method: 'POST' }).handler(async () => {
   log.info('regenerate widget secret')
   try {
-    await requireAuth({ roles: ['admin'] })
+    const auth = await requireAuth({ roles: ['admin'] })
     const { regenerateWidgetSecret } = await import('@/lib/server/domains/settings/settings.widget')
-    return await regenerateWidgetSecret()
+    const result = await regenerateWidgetSecret()
+    // Never the secret itself: the row records that it changed and who did it.
+    await recordAuditSafely(
+      {
+        event: 'widget.secret.regenerated',
+        actor: sessionAuditActor(auth),
+        target: { type: 'settings', id: 'widget' },
+      },
+      'request'
+    )
+    return result
   } catch (error) {
     log.error({ err: error }, 'regenerate widget secret failed')
     throw error

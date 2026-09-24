@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
@@ -60,7 +61,7 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const boardId = parseTypeId<BoardId>(params.boardId, 'board', 'board ID')
 
@@ -81,6 +82,16 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
             slug: parsed.data.slug,
             description: parsed.data.description,
           })
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'board.updated',
+              target: { type: 'board', id: board.id },
+              after: board,
+            },
+            request.headers
+          )
 
           return successResponse({
             id: board.id,
@@ -104,13 +115,22 @@ export const Route = createFileRoute('/api/v1/boards/$boardId')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'admin' })
+          const auth = await withApiKeyAuth(request, { role: 'admin' })
 
           const boardId = parseTypeId<BoardId>(params.boardId, 'board', 'board ID')
 
           const { deleteBoard } = await import('@/lib/server/domains/boards/board.service')
 
           await deleteBoard(boardId)
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'board.deleted',
+              target: { type: 'board', id: boardId },
+            },
+            request.headers
+          )
 
           return noContentResponse()
         } catch (error) {
