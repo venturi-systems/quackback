@@ -135,6 +135,25 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# OCI provenance labels. Without these the image config keeps the Bun base
+# image's own labels (source oven-sh/bun, Bun's revision, version
+# 1.4.x-alpine), so a registry, scanner or operator reading the image is told
+# it is Bun. Every key the base sets is overridden here, so no build path can
+# ship Bun's; the image workflows pass the real values. They sit at the end of
+# the stage so a new commit does not invalidate the cached layers above.
+ARG SOURCE_REPOSITORY=https://github.com/venturi-systems/quackback
+ARG SOURCE_COMMIT=unknown
+ARG IMAGE_VERSION=unknown
+ARG SOURCE_CREATED=
+LABEL org.opencontainers.image.title="quackback" \
+      org.opencontainers.image.description="Venturi feedback portal, built from the venturi-systems/quackback fork of Quackback" \
+      org.opencontainers.image.licenses="AGPL-3.0" \
+      org.opencontainers.image.url="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${SOURCE_COMMIT}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.created="${SOURCE_CREATED}"
+
 # Default behavior: run migrations on startup. K8s deployments should set
 # SKIP_MIGRATIONS=true and run migrations from a pre-upgrade Helm hook Job
 # instead — that way cold starts don't wait on a DB round-trip.

@@ -46,15 +46,24 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
+      # SOURCE_COMMIT gives the portal footer its exact AGPL source link; it and
+      # the other build args become the image's OCI labels, which otherwise
+      # describe the Bun base image. Same values as the GHCR workflow.
       - name: Build amd64 image archive
         env:
           IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+          INPUT_SHA: ${{ github.event.inputs.sha }}
         run: |
           set -euo pipefail
           tag="venturi-feedback-quackback:${IMAGE_TAG}"
+          source_created="$(git show -s --format=%cI "$INPUT_SHA")"
           docker buildx build \
             --platform linux/amd64 \
             --file apps/web/Dockerfile \
+            --build-arg "SOURCE_COMMIT=${INPUT_SHA}" \
+            --build-arg "SOURCE_REPOSITORY=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --build-arg "IMAGE_VERSION=sha-${INPUT_SHA:0:7}" \
+            --build-arg "SOURCE_CREATED=${source_created}" \
             --tag "$tag" \
             --output type=docker,dest=/tmp/quackback-amd64.tar \
             .
