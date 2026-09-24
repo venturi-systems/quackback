@@ -22,7 +22,9 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }))
 
-vi.mock('@/lib/client/auth-client', () => ({ signOut: vi.fn() }))
+// Resolves: unmounting the gate mid-2FA revokes the session with
+// `void signOut().catch(...)`, which the later-step tests exercise.
+vi.mock('@/lib/client/auth-client', () => ({ signOut: vi.fn().mockResolvedValue(undefined) }))
 
 // Capture the props the gate hands the inline form (mode etc.).
 let formProps: Record<string, unknown> = {}
