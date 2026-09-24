@@ -576,6 +576,10 @@ describe('<BoardAccessForm> policy-owned Anyone tier', () => {
       const cell = screen.getByRole('button', { name: `${action}: Anyone` })
       expect(cell).toBeDisabled()
       expect(cell).toHaveAttribute('data-disabled-reason', 'policy')
+      // The cell's tooltip carries the same qualified rule as the note.
+      expect(cell.getAttribute('title')).toContain(
+        'requires sign-in on every board it does not manage'
+      )
     }
     // The other tiers stay available.
     expect(screen.getByRole('button', { name: 'View: Team only' })).not.toBeDisabled()
