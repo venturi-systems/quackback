@@ -31,14 +31,102 @@
  *   - a 5xx raised after the function started, such as a result that cannot
  *     be serialized, which stays a server error;
  *   - 404 (notFound), 405 (wrong method) and the CSRF 403;
- *   - thrown errors, such as an unknown function id, which reject `next()`
- *     before any response exists.
+ *   - thrown errors other than the unknown-id ones below; they reject
+ *     `next()` before any response exists.
+ *
+ * Unknown function ids. `handleServerAction` resolves the id with
+ * `getServerFnById` before its `try`, so an id that names no function throws
+ * out of the handler and h3 answers 500 (`{"status":500,"unhandled":true,
+ * "message":"HTTPError"}` on feedback.venturi.systems, 2026-09-24). The
+ * resolver's error for that case is exactly one of `UNKNOWN_SERVER_FN_MESSAGES`
+ * followed by the id. The guard answers `404 Not Found` only when the thrown
+ * message equals one of those strings for this request's own id and the
+ * function never started; any other throw, such as a function module that
+ * failed to import, still propagates as a server error. If a framework
+ * upgrade rewords the messages, the guard stops matching and the old 500
+ * returns. One dev-server-only caveat: when a function file fails to compile
+ * before its ids were ever registered, the dev id validator swallows that
+ * error and reports "Invalid server function ID", so that case answers 404
+ * on the dev server.
+ *
+ * A request for the bare `/_serverFn/` names no id at all. The framework
+ * throws for it before any request middleware runs, so the server entry
+ * (src/server.ts) answers it with `isServerFnRequestWithoutId` and
+ * `serverFnNotFound` instead.
  */
 import { createMiddleware } from '@tanstack/react-start'
 import { getRequest } from '@tanstack/react-start/server'
 
 /** Header TanStack Start sets on every response body it serialized itself. */
 const TSS_SERIALIZED_HEADER = 'x-tss-serialized'
+
+/**
+ * Where TanStack Start serves server functions: its default `serverFns.base`
+ * under the fork's router basepath `/`. vite.config.ts sets neither.
+ */
+export const SERVER_FN_BASE = '/_serverFn/'
+
+/**
+ * What the framework's server-function resolver throws, followed by the id,
+ * when that id names no function the client may call
+ * (@tanstack/start-plugin-core 1.171.46):
+ *   - production build, the id is not in the manifest;
+ *   - production build, the function exists but is not client-callable;
+ *   - dev server, the `validate-server-fn-id` virtual module rejects the id.
+ */
+export const UNKNOWN_SERVER_FN_MESSAGES = [
+  'Server function info not found for ',
+  'Server function not accessible from client: ',
+  'Invalid server function ID: ',
+] as const
+
+/**
+ * The server-function id in `pathname`, exactly as the framework slices it
+ * (the first segment after `SERVER_FN_BASE`). `''` when the segment is empty;
+ * `undefined` when the path is not a server-function path.
+ */
+export function serverFnIdFromPathname(pathname: string): string | undefined {
+  if (!pathname.startsWith(SERVER_FN_BASE)) return undefined
+  return pathname.slice(SERVER_FN_BASE.length).split('/')[0]
+}
+
+/**
+ * True when `error` is the resolver's own "no such function" error for
+ * `serverFnId`. The message must equal one of `UNKNOWN_SERVER_FN_MESSAGES`
+ * plus this request's id, so no other failure can match.
+ */
+export function isUnknownServerFnError(error: unknown, serverFnId: string | undefined): boolean {
+  if (!serverFnId) return false
+  const message = (error as { message?: unknown } | null | undefined)?.message
+  if (typeof message !== 'string') return false
+  return UNKNOWN_SERVER_FN_MESSAGES.some((prefix) => message === prefix + serverFnId)
+}
+
+/**
+ * True for a request to the bare server-function base (`/_serverFn/`, or an
+ * empty first segment such as `/_serverFn//x`). The framework throws "Invalid
+ * server action param for serverFnId" for it before any middleware runs.
+ */
+export function isServerFnRequestWithoutId(request: Request): boolean {
+  let pathname: string
+  try {
+    pathname = new URL(request.url).pathname
+  } catch {
+    return false
+  }
+  return serverFnIdFromPathname(pathname) === ''
+}
+
+/** The 404 answer for a server-function id that names no function. No detail. */
+export function serverFnNotFound(): Response {
+  return new Response('Not Found', {
+    status: 404,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  })
+}
 
 interface DispatchProbe {
   dispatched: boolean
@@ -92,14 +180,17 @@ interface NextResult {
 /**
  * Core of the request middleware, decoupled from the framework so it can be
  * unit tested. Returns the framework's result unchanged unless the call
- * failed before its function started.
+ * failed before its function started. `pathname` is the framework's own
+ * (normalized) request path; it defaults to the request URL's path.
  */
 export async function guardServerFnDecode<T extends NextResult>({
   request,
+  pathname,
   handlerType,
   next,
 }: {
   request: Request
+  pathname?: string
   handlerType: 'serverFn' | 'router'
   next: () => Promise<T>
 }): Promise<T | Response> {
@@ -110,6 +201,17 @@ export async function guardServerFnDecode<T extends NextResult>({
   let result: T
   try {
     result = await next()
+  } catch (error) {
+    if (
+      !probe.dispatched &&
+      isUnknownServerFnError(
+        error,
+        serverFnIdFromPathname(pathname ?? new URL(request.url).pathname)
+      )
+    ) {
+      return serverFnNotFound()
+    }
+    throw error
   } finally {
     inFlight.delete(request)
   }
@@ -125,11 +227,17 @@ export async function guardServerFnDecode<T extends NextResult>({
 
 /**
  * Global request middleware: answers 400 for a server-function request whose
- * payload could not be decoded. Register it after CSRF.
+ * payload could not be decoded, and 404 for one whose id names no function.
+ * Register it after CSRF, so a cross-site request is still refused 403 first.
  */
 export const serverFnDecodeGuardMiddleware = createMiddleware().server(
-  ({ request, handlerType, next }) =>
-    guardServerFnDecode({ request, handlerType, next: () => Promise.resolve(next()) })
+  ({ request, pathname, handlerType, next }) =>
+    guardServerFnDecode({
+      request,
+      pathname,
+      handlerType,
+      next: () => Promise.resolve(next()),
+    })
 )
 
 /**

@@ -17,6 +17,7 @@ import {
   projectChangelogPreview,
   projectArticlePreview,
   resolveEmbed,
+  resolveEmbedArticle,
 } from '../embeds'
 import type { EmbedResolverDeps } from '../embeds'
 
@@ -281,5 +282,37 @@ describe('resolveEmbed — article', () => {
       BASE
     )
     expect(r).toEqual({ unavailable: true })
+  })
+})
+
+describe('resolveEmbedArticle (REQ-17: the Help Center read gate)', () => {
+  it('serves the article while the Help Center is on and readable', async () => {
+    const getPublicArticle = vi.fn(async () => ARTICLE_INPUT)
+    const r = await resolveEmbedArticle('how-to-reset-password', {
+      isHelpCenterReadable: async () => true,
+      getPublicArticle,
+    })
+    expect(r).toBe(ARTICLE_INPUT)
+    expect(getPublicArticle).toHaveBeenCalledWith('how-to-reset-password')
+  })
+
+  it('yields null without reading the article while the Help Center is off or gated', async () => {
+    const getPublicArticle = vi.fn(async () => ARTICLE_INPUT)
+    const r = await resolveEmbedArticle('how-to-reset-password', {
+      isHelpCenterReadable: async () => false,
+      getPublicArticle,
+    })
+    expect(r).toBeNull()
+    expect(getPublicArticle).not.toHaveBeenCalled()
+  })
+
+  it('yields null when the article is absent, private or unpublished', async () => {
+    const r = await resolveEmbedArticle('private', {
+      isHelpCenterReadable: async () => true,
+      getPublicArticle: async () => {
+        throw new Error('HELP_CENTER_NOT_FOUND')
+      },
+    })
+    expect(r).toBeNull()
   })
 })

@@ -155,15 +155,18 @@ export function SettingsNav() {
                 <Link
                   key={item.to}
                   to={item.to}
+                  // 44px tall on a touch screen (--ds-component-touch-minimum).
+                  // The label wraps rather than truncates (v6.6: no ellipsis on
+                  // authored text).
                   className={cn(
-                    'flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors',
+                    'flex items-center gap-2 px-2.5 py-1.5 pointer-coarse:min-h-(--ds-component-touch-minimum) rounded-md text-xs font-medium transition-colors',
                     isActive
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   )}
                 >
                   <Icon className={cn('h-3.5 w-3.5 shrink-0', isActive && 'text-primary')} />
-                  <span className="truncate flex-1">{item.label}</span>
+                  <span className="min-w-0 flex-1">{item.label}</span>
                 </Link>
               )
             })}
