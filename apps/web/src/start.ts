@@ -16,6 +16,7 @@ import {
   serverFnDecodeGuardMiddleware,
   serverFnDispatchMarker,
 } from '@/lib/server/middleware/serverfn-decode-guard'
+import { serverFnNulGuard } from '@/lib/server/middleware/serverfn-nul-guard'
 
 /**
  * Same-origin protection for server functions, matching the framework default.
@@ -37,8 +38,10 @@ export const startInstance = createStart(() => {
     // it answers 400, not the framework's 500, when a server-function payload
     // cannot be decoded (DEF-59).
     requestMiddleware: [requestContextMiddleware, csrfMiddleware, serverFnDecodeGuardMiddleware],
-    // Must stay first: it tells the decode guard that the function started,
-    // i.e. that the payload decoded. It adds no context.
-    functionMiddleware: [serverFnDispatchMarker],
+    // The dispatch marker must stay first: it tells the decode guard that the
+    // function started, i.e. that the payload decoded. It adds no context.
+    // The NUL guard then refuses any input holding a NUL, which Postgres
+    // cannot store, before the function's own validator runs (DEF-45).
+    functionMiddleware: [serverFnDispatchMarker, serverFnNulGuard],
   }
 })
