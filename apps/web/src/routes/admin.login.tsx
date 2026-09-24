@@ -1,14 +1,15 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { z } from 'zod'
 import { safeSigninRedirect } from '@/lib/shared/auth-prompt'
-
-const searchSchema = z.object({ callbackUrl: z.string().optional(), error: z.string().optional() })
+import { signinRedirectSearch } from '@/lib/shared/auth-route-search'
 
 export function adminLoginRedirectTarget(d: { callbackUrl?: string; error?: string }) {
   return safeSigninRedirect(d, '/admin')
 }
 
 export const Route = createFileRoute('/admin/login')({
-  validateSearch: searchSchema,
-  beforeLoad: ({ search }) => { throw redirect(adminLoginRedirectTarget(search)) },
+  // Tolerant: `?error=123` or `?callbackUrl=123` reads as text, never a 500.
+  validateSearch: signinRedirectSearch,
+  beforeLoad: ({ search }) => {
+    throw redirect(adminLoginRedirectTarget(search))
+  },
 })

@@ -15,18 +15,26 @@ import { isTeamMember } from '@/lib/shared/roles'
 import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { logger } from '@/lib/server/logger'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
+import { teamSigninCallback } from '@/lib/shared/routing'
 
 const log = logger.child({ component: 'workspace-utils' })
 
 const requireWorkspaceRoleSchema = z.object({
   allowedRoles: z.array(z.string()),
+  /**
+   * The team page the caller asked for (path, query and fragment), so a
+   * sign-in sends them back to it rather than to the admin home. Kept only
+   * when it is a same-origin team path; anything else falls back to `/admin`.
+   */
+  callbackUrl: z.string().optional(),
 })
 
 /**
  * Route guard: require authenticated user with specific workspace role.
  * Unauthenticated callers on team-only routes are sent to the portal
- * sign-in dialog with `callbackUrl=/admin`. Callers on routes that also
- * allow role='user' (public portal) fall back to '/'.
+ * sign-in dialog with the team page they asked for as `callbackUrl`
+ * (`/admin` when none was passed). Callers on routes that also allow
+ * role='user' (public portal) fall back to '/'.
  *
  * Use in route beforeLoad:
  * @example
@@ -42,10 +50,12 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
   .handler(async ({ data }) => {
     log.debug({ allowed_roles: data.allowedRoles }, 'require workspace role')
     // Team-only routes send unauthenticated callers to the sign-in dialog
-    // with a /admin callback. Routes that also allow role='user' (public
-    // portal) fall back to '/' for the regular sign-in flow.
+    // with the requested team page (or /admin) as the callback. Routes that
+    // also allow role='user' (public portal) fall back to '/' for the
+    // regular sign-in flow.
     const teamOnly = data.allowedRoles.every(isTeamMember)
-    const unauthRedirect = teamOnly ? buildSigninRedirect('/admin') : { to: '/' as const }
+    const callbackUrl = teamSigninCallback(data.callbackUrl)
+    const unauthRedirect = teamOnly ? buildSigninRedirect(callbackUrl) : { to: '/' as const }
     try {
       const session = await getSession()
       if (!session?.user) {
@@ -89,7 +99,7 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
           principalRecord.type === 'user' && isTeamMember(principalRecord.role)
             ? 'team_identity_required'
             : 'not_team_member'
-        throw redirect(buildSigninRedirect('/admin', { error }))
+        throw redirect(buildSigninRedirect(callbackUrl, { error }))
       }
 
       return {

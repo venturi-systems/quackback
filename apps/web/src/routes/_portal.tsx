@@ -22,6 +22,7 @@ import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { useAutoOpenAuthDialog } from '@/components/auth/use-auto-open-auth'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { resolveInstantSsoRedirectFn } from '@/lib/server/functions/instant-sso'
+import { gateHead, statusPageTitle } from '@/lib/shared/route-head'
 import { FormattedMessage } from 'react-intl'
 
 export const Route = createFileRoute('/_portal')({
@@ -112,6 +113,9 @@ export const Route = createFileRoute('/_portal')({
         userEmail: accessResult.reason === 'unauthorized' ? (session?.user?.email ?? null) : null,
         callbackUrl: prompt.callbackUrl,
         autoOpenSignin: prompt.mode,
+        // A refused sign-in lands here as ?error=<code>. Without it the
+        // anonymous gate showed the bare form and no reason (DEF-47).
+        error: prompt.error,
         authConfig: {
           found: !!settings?.publicPortalConfig,
           oauth: settings?.publicAuthConfig?.oauth ?? DEFAULT_AUTH_CONFIG.oauth,
@@ -204,14 +208,13 @@ export const Route = createFileRoute('/_portal')({
       gate: null,
     }
   },
-  head: ({ loaderData }) => {
+  head: ({ loaderData, matches }) => {
     // Access gate: a valid 200 sign-in page, but keep it out of search indexes.
+    // Child pages with their own head return the same gate head (see
+    // portalGateHead), because the last title along the matches wins.
     if (loaderData?.gate) {
       return {
-        meta: [
-          { title: `Sign in · ${loaderData.gate.workspaceName}` },
-          { name: 'robots', content: 'noindex, nofollow' },
-        ],
+        ...gateHead(loaderData.gate),
         links: [{ rel: 'icon', href: loaderData.gate.logoUrl || '/venturi-mark.svg' }],
       }
     }
@@ -225,7 +228,9 @@ export const Route = createFileRoute('/_portal')({
     const logoUrl = loaderData?.brandingData?.logoUrl || '/venturi-mark.svg'
 
     const meta: Array<Record<string, string>> = [
-      { title: workspaceName },
+      // A portal page that is not found, or failed to load, says so in the
+      // server-rendered title rather than naming the workspace (DEF-44).
+      { title: statusPageTitle(matches) ?? workspaceName },
       { name: 'description', content: description },
       { property: 'og:site_name', content: workspaceName },
       { property: 'og:title', content: workspaceName },
@@ -262,6 +267,7 @@ function PortalLayout() {
         locale={gate.locale}
         callbackUrl={gate.callbackUrl}
         autoOpenSignin={gate.autoOpenSignin}
+        error={gate.error}
       />
     )
   }

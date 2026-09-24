@@ -10,6 +10,7 @@ import { ArrowPathIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { getInviteBrandingFn } from '@/lib/server/functions/invitations'
 import { parseInvitationId } from '@/lib/shared/parse-invitation-id'
+import { magicLinkSearch } from '@/lib/shared/auth-route-search'
 
 interface InviteBranding {
   workspaceName: string
@@ -25,11 +26,8 @@ const FEATURES = [
 ] as const
 
 export const Route = createFileRoute('/verify-magic-link')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    token: (search.token as string) || undefined,
-    callbackURL: (search.callbackURL as string) || undefined,
-    errorCallbackURL: (search.errorCallbackURL as string) || undefined,
-  }),
+  // Each value as text, or absent: a list or object never reaches the verify URL.
+  validateSearch: magicLinkSearch,
   component: VerifyMagicLinkPage,
 })
 

@@ -68,6 +68,26 @@ describe('isSafeCallbackUrl', () => {
   it('still accepts "/admin" (regression)', () => {
     expect(isSafeCallbackUrl('/admin')).toBe(true)
   })
+
+  // A browser strips tab, CR and LF before resolving a URL, so each of these
+  // would navigate as `//evil.com`, another origin.
+  it.each(['/\t/evil.com', '/\n/evil.com', '/\r/evil.com', '/\t\t/evil.com'])(
+    'rejects %j, which a browser reads as protocol-relative',
+    (url) => {
+      expect(isSafeCallbackUrl(url)).toBe(false)
+    }
+  )
+
+  it('rejects any other control character', () => {
+    expect(isSafeCallbackUrl('/admin\u0000')).toBe(false)
+    expect(isSafeCallbackUrl('/admin\u007f')).toBe(false)
+    expect(isSafeCallbackUrl('/admin\u001b[0m')).toBe(false)
+  })
+
+  it('keeps a deep link with its query and fragment', () => {
+    expect(isSafeCallbackUrl('/admin/settings?tab=sign-in#oidc')).toBe(true)
+    expect(isSafeCallbackUrl('/admin/feedback?board=%5B%22ideas%22%5D')).toBe(true)
+  })
 })
 
 describe('isTeamCallback', () => {

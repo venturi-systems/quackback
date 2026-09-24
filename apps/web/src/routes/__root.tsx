@@ -20,6 +20,7 @@ import { DefaultErrorPage } from '@/components/shared/error-page'
 import { OttHandler } from '@/components/shared/ott-handler'
 import { documentLocale, htmlLangDir } from '@/lib/shared/document-locale'
 import { normalizeLocale, DEFAULT_LOCALE, type SupportedLocale } from '@/lib/shared/i18n'
+import { SITE_TITLE, statusPageTitle } from '@/lib/shared/route-head'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -98,7 +99,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       acceptLanguageLocale,
     }
   },
-  head: () => ({
+  // A not-found or error page is titled in the server-rendered head, not only
+  // after hydration (DEF-44). Child routes that set their own title win.
+  head: ({ matches }) => ({
     meta: [
       {
         charSet: 'utf-8',
@@ -116,7 +119,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         content: 'light',
       },
       {
-        title: 'Venturi Feedback',
+        title: statusPageTitle(matches) ?? SITE_TITLE,
       },
       {
         name: 'description',
@@ -216,7 +219,7 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   // iframe document advertises the widget's actual language, not just the
   // Accept-Language one. Only the widget route reads this param.
   const widgetLocaleParam = useRouterState({
-    select: (s) => (s.location.search as { locale?: string }).locale,
+    select: (s) => (s.location.search as { locale?: unknown }).locale,
   })
 
   // Venturi public portal routes use the corpus-governed light Web Standard.
@@ -234,8 +237,11 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   // out LTR until hydration). Decided from the matched route IDs so only
   // actually-localized routes are tagged; see documentLocale. On the widget a
   // valid `?locale=` override wins, matching what the widget itself renders.
+  // The parsed query can hold a number or a list here; only text is a locale.
   const widgetOverride =
-    routeIds.includes('/widget') && widgetLocaleParam ? normalizeLocale(widgetLocaleParam) : null
+    routeIds.includes('/widget') && typeof widgetLocaleParam === 'string' && widgetLocaleParam
+      ? normalizeLocale(widgetLocaleParam)
+      : null
   const resolvedLocale = widgetOverride ?? acceptLanguageLocale ?? DEFAULT_LOCALE
   const { lang, dir } = htmlLangDir(documentLocale(routeIds, resolvedLocale))
   const documentThemeAttrs = forcedTheme

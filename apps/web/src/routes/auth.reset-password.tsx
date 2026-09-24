@@ -9,12 +9,11 @@ import { authClient } from '@/lib/client/auth-client'
 import { PortalAuthShell } from '@/components/auth/portal-auth-shell'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { loadPortalIntl } from '@/lib/server/functions/locale'
+import { resetPasswordSearch } from '@/lib/shared/auth-route-search'
 
 export const Route = createFileRoute('/auth/reset-password')({
-  validateSearch: (search: Record<string, unknown>) => ({
-    token: (search.token as string) || '',
-    error: (search.error as string) || '',
-  }),
+  // Both values as text (empty when absent or malformed), never a cast.
+  validateSearch: resetPasswordSearch,
   loader: async () => await loadPortalIntl(),
   component: ResetPasswordPage,
 })
