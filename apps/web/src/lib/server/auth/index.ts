@@ -94,6 +94,7 @@ async function createAuth() {
     await import('@/lib/server/domains/settings/identity-providers.service')
   const { buildGenericOAuthConfigs } = await import('./build-oauth-configs')
   const { pinCustomOidcFetches } = await import('./custom-oidc-plugin')
+  const { pinSelfHostedGitlab } = await import('./self-hosted-gitlab')
 
   // OIDC `locale` claim: shipped by Google, Microsoft, and most generic
   // OIDC IdPs. Pass it through so `user.locale` populates from sign-in
@@ -476,6 +477,11 @@ async function createAuth() {
       ...(genericOAuthConfigs.length > 0
         ? [pinCustomOidcFetches(genericOAuth({ config: genericOAuthConfigs }), genericOAuthConfigs)]
         : []),
+
+      // A self-hosted GitLab's issuer is admin-supplied, like a custom OIDC
+      // URL: its code exchange, refresh and user lookup go through safeFetch
+      // too. See self-hosted-gitlab.ts.
+      ...(socialProviders.gitlab?.issuer ? [pinSelfHostedGitlab()] : []),
 
       // Anonymous authentication plugin — enables voting without sign-up
       anonymous({

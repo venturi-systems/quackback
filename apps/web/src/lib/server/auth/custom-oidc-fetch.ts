@@ -115,6 +115,19 @@ async function readJsonObject(res: Response, what: string): Promise<Record<strin
 }
 
 /**
+ * Fetch `url` through `safeFetch` and return its JSON object body. Rejects on
+ * anything `safeFetch` refuses, a non-2xx status or a body that is not a JSON
+ * object.
+ */
+export async function fetchPinnedJson(
+  url: string,
+  init: SafeFetchInit,
+  what: string
+): Promise<Record<string, unknown>> {
+  return readJsonObject(await pinnedFetch(url, init), what)
+}
+
+/**
  * A form POST with an explicit Content-Length, as the plugin's fetch sent it.
  * `URLSearchParams` percent-encodes every non-ASCII byte, so the string length
  * is the byte length.
