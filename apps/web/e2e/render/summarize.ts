@@ -81,12 +81,15 @@ interface KeyboardResult {
 const KEYBOARD_CONTEXTS = ['phone-coarse', 'desktop-fine']
 const MAX_ROWS = 80
 
+// A table cell: one line, backslashes escaped before pipes so a value can
+// neither end the cell early nor turn the escape itself into a literal.
 const cell = (value: unknown): string =>
   String(value ?? '')
     .replace(/\s+/g, ' ')
-    .replace(/\|/g, '\\|')
     .trim()
     .slice(0, 160)
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
 
 const readJson = <T>(file: string): T | null => {
   try {

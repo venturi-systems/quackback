@@ -3,13 +3,15 @@
 The CI job `Signed-in render check` (`.github/workflows/ci.yml`, job `signed_in_render`) renders the built portal as seeded fixture identities and measures it with two checks:
 
 1. **Typography.** The Venturi design suite v6.6.0 text-quality checker, unmodified, on every route at every width in the suite's policy (`viewports.responsiveWidthsCssPx`), each as rendered and with the WCAG 1.4.12 text-spacing stress.
-2. **Keyboard.** A Tab and Shift+Tab walk of every route on a 390px coarse-pointer phone and a 1440px fine-pointer desktop. It checks for visible focus, document order and focus traps. It also checks target size: 44px (`--ds-component-touch-minimum`) on a coarse pointer and 24px (WCAG 2.5.8) on a fine pointer.
+2. **Keyboard.** A Tab and Shift+Tab walk of every route on a 390px coarse-pointer phone and a 1440px fine-pointer desktop. It checks for visible focus, document order and focus traps. It also checks target size: 44px (`--ds-component-touch-minimum`) on a coarse pointer and 24px (WCAG 2.5.8) on a fine pointer. A focus indicator counts when it is on the element, beside it, or on the frame that tightly encloses it (up to six ancestors out, at most four times the element's area), as the composer card and the team comment form draw theirs.
 
 It runs on pull requests that touch `apps/web` or `ci.yml`, and on `workflow_dispatch`. It is not part of the required `portability-gate`.
 
 ## Identities and routes
 
-`plan.ts` lists every route, the identity that renders it, and the surfaces it must show. Those surfaces are the ones quackback #131 changed. A route fails when one of its surfaces is missing, so the check cannot silently measure a page that no longer has them.
+`plan.ts` lists every route, the identity that renders it, and the surfaces it must show. Those surfaces are the ones quackback #131 changed. A route fails when one of its surfaces is missing, so the check cannot silently measure a page that no longer has them. A surface the layout hides below a width (the post sidebar, from 1024px) is probed only from that width.
+
+The seed assigns roadmaps and comments at random, so `find-render-post.ts` picks the post the post routes render: a post on a public roadmap (so the sidebar's roadmap links render), with a visible root comment, on a board anyone can read and comment on. It prefers a post where the administrator has a root comment.
 
 | Identity  | Session source                                                                       |
 | --------- | ------------------------------------------------------------------------------------ |
