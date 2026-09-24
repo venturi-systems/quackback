@@ -181,7 +181,7 @@ interface Board {
 interface BoardAccessFormProps {
   board: Board
   /** Board access is owned by the deployment configuration
-   *  (POLICY_MANAGED_SETTINGS `boards.access`): render read-only. */
+   *  (POLICY_MANAGED_SETTINGS `boards.<slug>.access`): render read-only. */
   managed?: boolean
 }
 

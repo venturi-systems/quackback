@@ -276,3 +276,62 @@ describe('updateAuthConfigFn policy-managed providers', () => {
     expect(hoisted.mockUpdateAuthConfig).not.toHaveBeenCalled()
   })
 })
+
+describe('updateAuthConfigFn policy-managed open sign-up', () => {
+  it('refuses a change to open sign-up when auth.openSignup is managed, before writing', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    hoisted.mockGetAuthConfig.mockResolvedValue({ oauth: { google: true }, openSignup: true })
+    hoisted.mockAssertNotManaged.mockImplementation(async (path: string) => {
+      if (path === 'auth.openSignup') {
+        throw new ForbiddenError('FIELD_MANAGED', `Field "${path}" is managed`)
+      }
+    })
+
+    await expect(updateAuthConfig({ data: { openSignup: false } })).rejects.toMatchObject({
+      code: 'FIELD_MANAGED',
+    })
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('auth.openSignup')
+    expect(hoisted.mockUpdateAuthConfig).not.toHaveBeenCalled()
+  })
+
+  it('passes an open sign-up value that does not change without consulting the list', async () => {
+    hoisted.mockGetAuthConfig.mockResolvedValue({ oauth: { google: true }, openSignup: true })
+
+    await updateAuthConfig({ data: { openSignup: true } })
+
+    expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
+    expect(hoisted.mockUpdateAuthConfig).toHaveBeenCalledOnce()
+  })
+
+  it('leaves unmanaged fields editable in the same payload shape', async () => {
+    hoisted.mockGetAuthConfig.mockResolvedValue({ oauth: { google: true }, openSignup: true })
+
+    await updateAuthConfig({ data: { twoFactor: { required: true } } })
+
+    expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
+    expect(hoisted.mockUpdateAuthConfig).toHaveBeenCalledOnce()
+  })
+})
+
+describe('updateAuthConfigFn policy-managed ordering', () => {
+  it('answers FIELD_MANAGED for a managed method even when it is the last working one', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    const availability = await import('@/lib/server/auth/sign-in-method-availability')
+    const lastMethod = vi.mocked(availability.wouldLeaveNoWorkingSignInMethod)
+    lastMethod.mockResolvedValue(true)
+    hoisted.mockGetAuthConfig.mockResolvedValue({ oauth: { github: true } })
+    hoisted.mockAssertNotManaged.mockRejectedValue(
+      new ForbiddenError('FIELD_MANAGED', 'Field "auth.oauth.github" is managed')
+    )
+
+    try {
+      await expect(updateAuthConfig({ data: { oauth: { github: false } } })).rejects.toMatchObject({
+        code: 'FIELD_MANAGED',
+      })
+      expect(lastMethod).not.toHaveBeenCalled()
+      expect(hoisted.mockUpdateAuthConfig).not.toHaveBeenCalled()
+    } finally {
+      lastMethod.mockResolvedValue(false)
+    }
+  })
+})

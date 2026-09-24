@@ -21,6 +21,9 @@ export interface OAuthProviderGridProps {
   // elsewhere — generic OIDC for team lives in the Single sign-on panel).
   excludeProviderIds?: readonly AuthProviderId[]
   saving?: boolean
+  // True when the deployment configuration owns this provider's toggle
+  // (POLICY_MANAGED_SETTINGS): the switch is read-only; credentials stay editable.
+  isLocked?: (providerId: string) => boolean
   onToggle: (providerId: string, checked: boolean) => void
   onConfigure: (provider: AuthProvider) => void
 }
@@ -31,6 +34,7 @@ export function OAuthProviderGrid({
   isLastMethod,
   excludeProviderIds,
   saving = false,
+  isLocked,
   onToggle,
   onConfigure,
 }: OAuthProviderGridProps) {
@@ -150,7 +154,7 @@ export function OAuthProviderGrid({
                 id={`${provider.id}-toggle`}
                 checked={isEnabled}
                 onCheckedChange={(checked) => onToggle(provider.id, checked)}
-                disabled={saving || lastMethod}
+                disabled={saving || lastMethod || isLocked?.(provider.id) === true}
                 className="flex-shrink-0"
               />
             </div>

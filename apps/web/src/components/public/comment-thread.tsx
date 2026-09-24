@@ -728,7 +728,7 @@ function CommentItem({
           )}
 
           {/* Actions row: expand/collapse, reactions, reply - always visible */}
-          <div className="flex items-center gap-1 mt-2 ms-10">
+          <div className="flex flex-wrap items-center gap-1 mt-2 ms-10">
             {/* Expand/Collapse button - first item, icon only */}
             {hasReplies && (
               <Button
