@@ -75,3 +75,18 @@ the fork-side steps are:
    step 2 cannot pass (for example the provider reports the address as
    unverified), no one can administer through the app until it does; nothing
    in the app can create an administrator any other way.
+
+## Never zero administrators
+
+The onboarding bootstrap claim (`claimBootstrapAdmin` in
+`lib/server/functions/onboarding.ts`, DEF-05) refuses every caller once any
+human `admin` row exists. It counts stored rows, including one this rule marks
+Inactive, so the password bootstrap row keeps the claim closed until step 3,
+and step 3 is allowed only after step 2 produced a qualifying administrator.
+Every role writer keeps at least one human administrator row, so the claim
+stays closed.
+
+That guard assumes at least one human administrator row always exists. Never
+remove the last one outside the app (for example by SQL): with no human
+`admin` row, the first account that satisfies the rule and calls the
+onboarding functions becomes administrator.
