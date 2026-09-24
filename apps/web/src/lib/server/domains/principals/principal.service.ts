@@ -21,7 +21,6 @@ import {
 import type { ServiceMetadata } from '@/lib/server/db'
 import type { PrincipalId, UserId } from '@quackback/ids'
 import { InternalError, ForbiddenError, NotFoundError } from '@/lib/shared/errors'
-import { isTeamMember, isAdmin } from '@/lib/shared/roles'
 import { cacheDel, CACHE_KEYS } from '@/lib/server/redis'
 import { recordAuditEvent, type AuditActor } from '@/lib/server/audit/log'
 import type { TeamMember } from './principal.types'
@@ -211,8 +210,13 @@ export async function countMembers(): Promise<number> {
 
 /**
  * Update a team member's role
+ *
+ * Runs under the team-role lock (team-designation.ts): a promotion to admin
+ * needs an identity that satisfies the team identity rule, and a demotion
+ * needs another eligible human administrator to remain.
  * @throws ForbiddenError if trying to modify own role
- * @throws ForbiddenError if this would leave no admins
+ * @throws ForbiddenError if this would leave no eligible admin
+ * @throws ForbiddenError TEAM_IDENTITY_REQUIRED if the promotion's identity does not qualify
  * @throws NotFoundError if principal not found or not a team member
  */
 export async function updateMemberRole(
@@ -222,44 +226,17 @@ export async function updateMemberRole(
   actor: AuditActor | null = null,
   headers?: Headers
 ): Promise<void> {
-  // Cannot modify own role
-  if (principalId === actingPrincipalId) {
-    throw new ForbiddenError('CANNOT_MODIFY_SELF', 'You cannot change your own role')
-  }
-
   try {
-    // Find the target principal
-    const targetMember = await db.query.principal.findFirst({
-      where: eq(principal.id, principalId),
+    const { changeTeamRole } = await import('./team-designation')
+    const result = await changeTeamRole({
+      principalId,
+      newRole,
+      actingPrincipalId,
+      requireTeamTarget: true,
     })
 
-    if (!targetMember) {
-      throw new NotFoundError('MEMBER_NOT_FOUND', 'Team member not found')
-    }
-
-    // Ensure target is a team member (admin or member), not a portal user
-    if (!isTeamMember(targetMember.role)) {
-      throw new NotFoundError('MEMBER_NOT_FOUND', 'Team member not found')
-    }
-
-    // If demoting an admin to member, ensure at least one human admin remains
-    if (isAdmin(targetMember.role) && newRole === 'member') {
-      const adminCount = await db
-        .select({ count: sql<number>`count(*)`.as('count') })
-        .from(principal)
-        .where(and(eq(principal.role, 'admin'), eq(principal.type, 'user')))
-
-      if (Number(adminCount[0]?.count ?? 0) <= 1) {
-        throw new ForbiddenError('LAST_ADMIN', 'Cannot demote the last admin')
-      }
-    }
-
-    const previousRole = targetMember.role
-
-    // Update the role
-    await db.update(principal).set({ role: newRole }).where(eq(principal.id, principalId))
-    if (targetMember.userId) {
-      await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(targetMember.userId))
+    if (result.userId) {
+      await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(result.userId))
     }
 
     // Audit the role change. Already audited from the SSO/JIT path
@@ -272,7 +249,7 @@ export async function updateMemberRole(
         actor,
         headers,
         target: { type: 'principal', id: principalId },
-        before: { role: previousRole },
+        before: { role: result.previousRole },
         after: { role: newRole },
       })
     }
@@ -286,9 +263,60 @@ export async function updateMemberRole(
 }
 
 /**
+ * Give an existing account a team role (Admin > Team designation).
+ *
+ * The target is a person who already signed in; the server refuses anyone
+ * whose identity does not satisfy the team identity rule. Also used to move a
+ * team member between member and admin.
+ */
+export async function designateTeamMember(
+  principalId: PrincipalId,
+  newRole: 'admin' | 'member',
+  actingPrincipalId: PrincipalId,
+  actor: AuditActor | null = null,
+  headers?: Headers
+): Promise<{ previousRole: string; newRole: 'admin' | 'member' }> {
+  try {
+    const { changeTeamRole } = await import('./team-designation')
+    const result = await changeTeamRole({
+      principalId,
+      newRole,
+      actingPrincipalId,
+      requireTeamTarget: false,
+    })
+
+    if (result.userId) {
+      await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(result.userId))
+    }
+
+    if (actor && result.changed) {
+      await recordAuditEvent({
+        event: 'user.role.changed',
+        actor,
+        headers,
+        target: { type: 'principal', id: principalId },
+        before: { role: result.previousRole },
+        after: { role: newRole },
+        metadata: { source: 'admin_team_designation' },
+      })
+    }
+    return { previousRole: result.previousRole, newRole }
+  } catch (error) {
+    if (error instanceof ForbiddenError || error instanceof NotFoundError) {
+      throw error
+    }
+    log.error({ err: error }, 'failed to designate team member')
+    throw new InternalError('DATABASE_ERROR', 'Failed to designate team member', error)
+  }
+}
+
+/**
  * Remove a team member (converts them to a portal user)
+ *
+ * Runs under the team-role lock: removing an administrator needs another
+ * eligible human administrator to remain.
  * @throws ForbiddenError if trying to remove self
- * @throws ForbiddenError if this would leave no admins
+ * @throws ForbiddenError if this would leave no eligible admin
  * @throws NotFoundError if principal not found or not a team member
  */
 export async function removeTeamMember(
@@ -297,44 +325,17 @@ export async function removeTeamMember(
   actor: AuditActor | null = null,
   headers?: Headers
 ): Promise<void> {
-  // Cannot remove self
-  if (principalId === actingPrincipalId) {
-    throw new ForbiddenError('CANNOT_REMOVE_SELF', 'You cannot remove yourself from the team')
-  }
-
   try {
-    // Find the target principal
-    const targetMember = await db.query.principal.findFirst({
-      where: eq(principal.id, principalId),
+    const { changeTeamRole } = await import('./team-designation')
+    const result = await changeTeamRole({
+      principalId,
+      newRole: 'user',
+      actingPrincipalId,
+      requireTeamTarget: true,
     })
 
-    if (!targetMember) {
-      throw new NotFoundError('MEMBER_NOT_FOUND', 'Team member not found')
-    }
-
-    // Ensure target is a team member (admin or member), not a portal user
-    if (!isTeamMember(targetMember.role)) {
-      throw new NotFoundError('MEMBER_NOT_FOUND', 'Team member not found')
-    }
-
-    // If removing an admin, ensure at least one human admin remains
-    if (isAdmin(targetMember.role)) {
-      const adminCount = await db
-        .select({ count: sql<number>`count(*)`.as('count') })
-        .from(principal)
-        .where(and(eq(principal.role, 'admin'), eq(principal.type, 'user')))
-
-      if (Number(adminCount[0]?.count ?? 0) <= 1) {
-        throw new ForbiddenError('LAST_ADMIN', 'Cannot remove the last admin')
-      }
-    }
-
-    const previousRole = targetMember.role
-
-    // Convert to portal user by setting role to 'user'
-    await db.update(principal).set({ role: 'user' }).where(eq(principal.id, principalId))
-    if (targetMember.userId) {
-      await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(targetMember.userId))
+    if (result.userId) {
+      await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(result.userId))
     }
 
     // Audit the removal. The audit-event taxonomy already reserves
@@ -347,7 +348,7 @@ export async function removeTeamMember(
         actor,
         headers,
         target: { type: 'principal', id: principalId },
-        before: { role: previousRole },
+        before: { role: result.previousRole },
         after: { role: 'user' },
       })
     }

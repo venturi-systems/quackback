@@ -414,6 +414,7 @@ jobs:
           PORT=3000
           SECRET_KEY=$SECRET_KEY
           REDIS_URL=$REDIS_URL
+          VENTURI_TEAM_EMAIL_DOMAINS=example.com
           EOF
 
       - run: bun run --filter @quackback/widget build

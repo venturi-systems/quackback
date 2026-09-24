@@ -202,27 +202,49 @@ export const acceptInvitationFn = createServerFn({ method: 'POST' })
         )
       }
 
-      const role = claimed.role || 'member'
+      const role = claimed.role === 'admin' ? 'admin' : 'member'
       const displayName = name?.trim() || undefined
+
+      // Team identity rule: the invited role takes effect only for a verified
+      // address at a team domain from a linked Google or GitHub account. A
+      // magic-link session alone does not qualify, so the invitation stays
+      // pending and applies automatically at the next Google or GitHub
+      // sign-in with this address (team-designation.ts).
+      const { loadTeamIdentity, teamIdentityGap } =
+        await import('@/lib/server/domains/principals/team-identity')
+      const identity = await loadTeamIdentity(userId)
+      const gap = identity ? teamIdentityGap(identity) : 'email_missing'
+      if (gap !== null) {
+        const { teamIdentityRequiredMessage } =
+          await import('@/lib/server/domains/principals/team-designation')
+        await rollbackAndThrow(
+          `${teamIdentityRequiredMessage(gap)} Sign in with Google or GitHub using ${claimed.email}; the invitation applies automatically.`
+        )
+      }
 
       const existingPrincipal = await db.query.principal.findFirst({
         where: eq(principal.userId, userId),
       })
 
       if (existingPrincipal) {
-        // Update existing principal's role if the invitation grants a higher role
+        // Raise the role (never lower it) under the team-role lock, so a
+        // concurrent role change cannot interleave with this one.
         const roleHierarchy = ['user', 'member', 'admin']
-        const existingRoleIndex = roleHierarchy.indexOf(existingPrincipal.role)
-        const newRoleIndex = roleHierarchy.indexOf(role)
-
-        const updates: Record<string, unknown> = {}
-        if (newRoleIndex > existingRoleIndex) updates.role = role
-        if (displayName) updates.displayName = displayName
-
-        if (Object.keys(updates).length > 0) {
+        if (roleHierarchy.indexOf(role) > roleHierarchy.indexOf(existingPrincipal.role)) {
+          const { changeTeamRole } =
+            await import('@/lib/server/domains/principals/team-designation')
+          await changeTeamRole({
+            principalId: existingPrincipal.id as PrincipalId,
+            newRole: role,
+            requireTeamTarget: false,
+          })
+          const { cacheDel, CACHE_KEYS } = await import('@/lib/server/redis')
+          await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(userId))
+        }
+        if (displayName) {
           await db
             .update(principal)
-            .set(updates)
+            .set({ displayName })
             .where(eq(principal.id, existingPrincipal.id as PrincipalId))
         }
       } else {

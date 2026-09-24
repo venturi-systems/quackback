@@ -60,6 +60,13 @@ vi.mock('@/lib/server/db', () => ({
   sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values }),
 }))
 
+// Team identity rule: stubbed here (team-designation.test.ts covers it). By
+// default the signed-in account qualifies; one test below makes it fail.
+const mockTeamRoleGap = vi.fn(async (): Promise<string | null> => null)
+vi.mock('@/lib/server/domains/principals/team-designation', () => ({
+  teamRoleGapForUser: () => mockTeamRoleGap(),
+}))
+
 const { handleSsoCallbackAfter: realHandleSsoCallbackAfter, shouldBootstrapPromote } =
   await import('../hooks')
 
@@ -106,6 +113,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mockExecute.mockResolvedValue(undefined)
   mockTxFindFirst.mockResolvedValue(null)
+  mockTeamRoleGap.mockResolvedValue(null)
 })
 
 describe('handleSsoCallbackAfter — guards', () => {
@@ -161,6 +169,23 @@ describe('handleSsoCallbackAfter — bootstrap admin promotion', () => {
     expect(mockTxUpdateSet).toHaveBeenNthCalledWith(1, { role: 'admin' })
     expect(mockTxUpdateSet.mock.calls[1][0]).toHaveProperty('lastSsoSignInAt')
     expect(mockTxUpdateSet.mock.calls[1][0].lastSsoSignInAt).toBeInstanceOf(Date)
+  })
+
+  it('does NOT promote an OIDC account that fails the team identity rule', async () => {
+    mockTxFindFirst.mockResolvedValue(null)
+    mockTeamRoleGap.mockResolvedValue('provider_missing')
+
+    await handleSsoCallbackAfter(
+      ctxFor({
+        path: '/oauth2/callback/:providerId',
+        providerParam: 'sso',
+        userId: 'user_first',
+      })
+    )
+
+    // Only the lastSsoSignInAt stamp: no admin write.
+    expect(mockTxUpdateSet).toHaveBeenCalledTimes(1)
+    expect(mockTxUpdateSet).not.toHaveBeenCalledWith({ role: 'admin' })
   })
 
   it('does NOT promote when a human admin already exists', async () => {

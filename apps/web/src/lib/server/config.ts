@@ -365,6 +365,23 @@ export const config = {
     return parsePolicyManagedSettings(process.env.POLICY_MANAGED_SETTINGS)
   },
 
+  // Email domains whose accounts may hold a team role (member or admin), and
+  // only when the account signed in through Google or GitHub with a verified
+  // address (lib/server/domains/principals/team-identity.ts). Comma-separated
+  // exact hostnames; subdomains never match. Unset or empty means the Venturi
+  // default, so the rule can never be switched off by omission.
+  get teamEmailDomains(): string[] {
+    return parseTeamEmailDomains(process.env.VENTURI_TEAM_EMAIL_DOMAINS)
+  },
+
+  // Addresses promoted to admin at their next qualifying Google or GitHub
+  // sign-in or authenticated request. Promotion only: removing an address
+  // demotes no one. Comma-separated; entries outside the team domains are
+  // ignored because they could never qualify.
+  get teamAdminEmails(): string[] {
+    return parseTeamAdminEmails(process.env.VENTURI_TEAM_ADMIN_EMAILS)
+  },
+
   // The admin "new version available" banner polls api.github.com for the
   // upstream Quackback release. Off unless explicitly enabled: this fork is
   // pinned and released through its own review, so an upstream prompt is noise
@@ -426,6 +443,38 @@ export function resetConfig(): void {
 export type { Config }
 
 export { POLICY_MANAGED_PATH_OPTIONS }
+
+/** The team email domain when VENTURI_TEAM_EMAIL_DOMAINS is unset or empty. */
+export const DEFAULT_TEAM_EMAIL_DOMAINS: readonly string[] = ['venturi.systems']
+
+// A hostname label list: letters, digits and inner hyphens, at least one dot.
+const TEAM_DOMAIN_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z][a-z0-9-]*[a-z0-9]$/
+
+/**
+ * Parse VENTURI_TEAM_EMAIL_DOMAINS: comma-separated, trimmed, lower-cased,
+ * valid hostnames only. Falls back to the default when nothing valid remains,
+ * so a typo can narrow the list but never empty it (which would lock every
+ * administrator out rather than open anything).
+ */
+export function parseTeamEmailDomains(raw: string | undefined): string[] {
+  const domains = new Set<string>()
+  for (const entry of (raw ?? '').split(',')) {
+    const domain = entry.trim().toLowerCase()
+    if (TEAM_DOMAIN_PATTERN.test(domain)) domains.add(domain)
+  }
+  return domains.size > 0 ? [...domains] : [...DEFAULT_TEAM_EMAIL_DOMAINS]
+}
+
+/** Parse VENTURI_TEAM_ADMIN_EMAILS: comma-separated addresses, lower-cased. */
+export function parseTeamAdminEmails(raw: string | undefined): string[] {
+  const emails = new Set<string>()
+  for (const entry of (raw ?? '').split(',')) {
+    const email = entry.trim().toLowerCase()
+    const at = email.lastIndexOf('@')
+    if (at > 0 && at < email.length - 1 && !/\s/.test(email)) emails.add(email)
+  }
+  return [...emails]
+}
 
 // Warn once per distinct raw value: the getter runs on every request.
 const warnedPolicyManagedValues = new Set<string>()

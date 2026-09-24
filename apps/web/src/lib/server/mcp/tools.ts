@@ -100,7 +100,6 @@ import type {
   PostId,
   BoardId,
   TagId,
-  StatusId,
   PrincipalId,
   CommentId,
   ChangelogId,
@@ -361,7 +360,6 @@ const getDetailsSchema = {
 
 const triagePostSchema = {
   postId: z.string().describe('Post TypeID to update'),
-  statusId: z.string().optional().describe('New status TypeID'),
   tagIds: z.array(z.string()).optional().describe('Replace all tags with these TypeIDs'),
   ownerPrincipalId: z
     .string()
@@ -395,7 +393,6 @@ const createPostSchema = {
     .describe(
       'Post content (max 10,000 characters). Markdown (GFM). Images via ![alt](url) are auto-rehosted to workspace storage on save. See tool description for full format details.'
     ),
-  statusId: z.string().optional().describe('Initial status TypeID (defaults to board default)'),
   tagIds: z.array(z.string()).optional().describe('Tag TypeIDs to apply'),
 }
 
@@ -525,7 +522,6 @@ const acceptSuggestionSchema = {
       title: z.string().optional(),
       body: z.string().optional(),
       boardId: z.string().optional(),
-      statusId: z.string().optional(),
     })
     .optional()
     .describe('Optional edits to apply before accepting (create_post type only)'),
@@ -641,7 +637,6 @@ type GetDetailsArgs = { id: string }
 
 type TriagePostArgs = {
   postId: string
-  statusId?: string
   tagIds?: string[]
   ownerPrincipalId?: string | null
 }
@@ -657,7 +652,6 @@ type CreatePostArgs = {
   boardId: string
   title: string
   content?: string
-  statusId?: string
   tagIds?: string[]
 }
 
@@ -733,7 +727,6 @@ type AcceptSuggestionArgs = {
     title?: string
     body?: string
     boardId?: string
-    statusId?: string
   }
   swapDirection?: boolean
 }
@@ -922,10 +915,9 @@ Examples:
   // triage_post
   server.tool(
     'triage_post',
-    `Update a post: set status, tags, and/or owner. All fields optional — only provided fields are updated.
+    `Update a post: set tags and/or owner. All fields optional — only provided fields are updated. Status changes are not available over MCP: a status change emails subscribers, so a signed-in team member makes it in the admin inbox.
 
 Examples:
-- Change status: triage_post({ postId: "post_01abc...", statusId: "status_01xyz..." })
 - Assign owner: triage_post({ postId: "post_01abc...", ownerPrincipalId: "principal_01xyz..." })
 - Replace tags: triage_post({ postId: "post_01abc...", tagIds: ["tag_01a...", "tag_01b..."] })`,
     triagePostSchema,
@@ -939,7 +931,6 @@ Examples:
         const result = await updatePost(
           args.postId as PostId,
           {
-            statusId: args.statusId as StatusId | undefined,
             tagIds: args.tagIds as TagId[] | undefined,
             ownerPrincipalId: args.ownerPrincipalId as PrincipalId | null | undefined,
           },
@@ -1142,11 +1133,11 @@ Examples:
   // create_post
   server.tool(
     'create_post',
-    `Submit new feedback on a board. Requires board and title; content/status/tags optional.
+    `Submit new feedback on a board. Requires board and title; content/tags optional. The post starts in the board's default status: MCP never sets a status.
 
 Examples:
 - Minimal: create_post({ boardId: "board_01abc...", title: "Add dark mode" })
-- Full: create_post({ boardId: "board_01abc...", title: "Add dark mode", content: "Would love a dark theme option.", statusId: "status_01xyz...", tagIds: ["tag_01a..."] })${CONTENT_FORMAT_BLOCK}`,
+- Full: create_post({ boardId: "board_01abc...", title: "Add dark mode", content: "Would love a dark theme option.", tagIds: ["tag_01a..."] })${CONTENT_FORMAT_BLOCK}`,
     createPostSchema,
     WRITE,
     async (args: CreatePostArgs): Promise<CallToolResult> => {
@@ -1171,7 +1162,6 @@ Examples:
             boardId: args.boardId as BoardId,
             title: args.title,
             content: args.content ?? '',
-            statusId: args.statusId as StatusId | undefined,
             tagIds: args.tagIds as TagId[] | undefined,
           },
           {

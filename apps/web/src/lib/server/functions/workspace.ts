@@ -5,7 +5,7 @@
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { db, principal, eq } from '@/lib/server/db'
 import { getSession } from '@/lib/server/auth/session'
-import { effectiveRole } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'workspace' })
@@ -54,7 +54,7 @@ export const getCurrentUserRole = createServerFn({ method: 'GET' }).handler(
         log.debug('no principal')
         return null
       }
-      const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
+      const role = await resolveSessionRole(principalRecord, session.user)
       log.debug({ role }, 'current user role')
       return role
     } catch (error) {
@@ -95,11 +95,11 @@ export const validateApiWorkspaceAccess = createServerOnlyFn(async () => {
     return {
       success: true as const,
       settings: appSettings,
-      // Callers gate on principal.role; a team role only counts on a human
-      // principal (see effectiveRole), so cap it before returning.
+      // Callers gate on principal.role; resolve it with the same rule as
+      // requireAuth (human principal, team identity rule) before returning.
       principal: {
         ...principalRecord,
-        role: effectiveRole(principalRecord.role, principalRecord.type) ?? 'user',
+        role: await resolveSessionRole(principalRecord, session.user),
       },
       user: session.user,
     }

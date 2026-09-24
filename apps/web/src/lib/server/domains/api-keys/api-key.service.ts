@@ -11,6 +11,7 @@ import { NotFoundError, ValidationError } from '@/lib/shared/errors'
 import { isAdmin } from '@/lib/shared/roles'
 import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { createServicePrincipal } from '@/lib/server/domains/principals/principal.service'
+import { API_KEY_SCOPES, isApiKeyScope, parseStoredApiKeyScopes } from '@/lib/shared/api-key-scopes'
 import type { ApiKey, ApiKeyId, CreateApiKeyInput, CreateApiKeyResult } from './api-key.types'
 export type { ApiKey, ApiKeyId, CreateApiKeyInput, CreateApiKeyResult }
 
@@ -20,8 +21,9 @@ const API_KEY_PREFIX = 'qb_'
 /** Length of the random part of the key (in bytes, will be hex encoded) */
 const KEY_RANDOM_BYTES = 24 // 48 hex chars
 
-/** Map a database row to the public ApiKey shape (strips keyHash). */
-function toApiKey(row: ApiKey & Record<string, unknown>): ApiKey {
+/** Map a database row to the public ApiKey shape (strips keyHash and internal scopes). */
+function toApiKey(row: Omit<ApiKey, 'scopes'> & Record<string, unknown>): ApiKey {
+  const parsed = parseStoredApiKeyScopes((row.scopes as string | null | undefined) ?? null)
   return {
     id: row.id,
     name: row.name,
@@ -32,6 +34,7 @@ function toApiKey(row: ApiKey & Record<string, unknown>): ApiKey {
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,
     revokedAt: row.revokedAt,
+    scopes: parsed.legacyFullAccess ? null : parsed.scopes,
   }
 }
 
@@ -84,6 +87,17 @@ export async function createApiKey(
   if (input.name.length > 255) {
     throw new ValidationError('VALIDATION_ERROR', 'API key name must be 255 characters or less')
   }
+  let scopesJson: string | null = null
+  if (input.scopes !== undefined) {
+    const scopes = [...new Set(input.scopes)]
+    if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {
+      throw new ValidationError(
+        'VALIDATION_ERROR',
+        `Choose at least one scope from: ${API_KEY_SCOPES.join(', ')}`
+      )
+    }
+    scopesJson = JSON.stringify(scopes)
+  }
 
   // Generate the key
   const plainTextKey = generateApiKey()
@@ -114,6 +128,7 @@ export async function createApiKey(
       createdById,
       principalId: servicePrincipal.id,
       expiresAt: input.expiresAt ?? null,
+      scopes: scopesJson,
     })
     .returning()
 

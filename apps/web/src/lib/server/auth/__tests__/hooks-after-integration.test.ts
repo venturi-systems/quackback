@@ -123,6 +123,14 @@ vi.mock('@tanstack/react-start/server', () => ({
   getRequestHeaders: () => new Headers(),
 }))
 
+// The team identity rule (team-designation.test.ts) is stubbed as satisfied:
+// this suite covers the ordering of the SSO after-hooks, not the rule.
+vi.mock('@/lib/server/domains/principals/team-designation', () => ({
+  teamRoleGapForUser: async () => null,
+  changeTeamRole: async () => ({ changed: true }),
+  applyTeamDesignation: async () => null,
+}))
+
 vi.mock('@/lib/server/domains/platform-credentials/platform-credential.service', () => ({
   hasPlatformCredentials: (type: string) => mockHasPlatformCredentials(type),
 }))

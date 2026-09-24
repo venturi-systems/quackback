@@ -3,7 +3,9 @@
  *
  * Verifies that updateMemberRole and removeTeamMember invalidate the
  * PRINCIPAL_BY_USER cache so the SSR bootstrap sees role changes
- * without waiting for the 5min TTL.
+ * without waiting for the 5min TTL. The role write itself (lock, team
+ * identity rule, last-admin check) is team-designation.ts, covered by
+ * team-designation.test.ts; here it is stubbed to report the changed row.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -21,6 +23,11 @@ vi.mock('@/lib/server/redis', () => ({
 const mockFindFirst = vi.fn()
 const mockSelect = vi.fn()
 const mockUpdate = vi.fn()
+const mockChangeTeamRole = vi.fn()
+
+vi.mock('../team-designation', () => ({
+  changeTeamRole: (...args: unknown[]) => mockChangeTeamRole(...args),
+}))
 
 vi.mock('@/lib/server/db', () => ({
   db: {
@@ -64,44 +71,62 @@ beforeEach(() => {
 
 describe('updateMemberRole', () => {
   it('invalidates PRINCIPAL_BY_USER for the target user after role change', async () => {
-    mockFindFirst.mockResolvedValue({
-      id: TARGET,
+    mockChangeTeamRole.mockResolvedValue({
+      previousRole: 'admin',
+      newRole: 'member',
       userId: TARGET_USER,
-      type: 'user',
-      role: 'admin',
+      changed: true,
     })
 
     await updateMemberRole(TARGET, 'member', ACTING)
 
+    expect(mockChangeTeamRole).toHaveBeenCalledWith({
+      principalId: TARGET,
+      newRole: 'member',
+      actingPrincipalId: ACTING,
+      requireTeamTarget: true,
+    })
     expect(mockCacheDel).toHaveBeenCalledWith(`principal:user:${TARGET_USER}`)
   })
 
   it('does not call cacheDel when the target principal has no userId', async () => {
     // Service principals (API keys) have userId=null; nothing to invalidate.
-    mockFindFirst.mockResolvedValue({
-      id: TARGET,
+    mockChangeTeamRole.mockResolvedValue({
+      previousRole: 'admin',
+      newRole: 'member',
       userId: null,
-      type: 'service',
-      role: 'admin',
+      changed: true,
     })
 
     await updateMemberRole(TARGET, 'member', ACTING)
 
     expect(mockCacheDel).not.toHaveBeenCalled()
   })
+
+  it('passes a refusal from the role writer through unchanged', async () => {
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    mockChangeTeamRole.mockRejectedValue(new ForbiddenError('LAST_ADMIN', 'Cannot demote'))
+    await expect(updateMemberRole(TARGET, 'member', ACTING)).rejects.toMatchObject({
+      code: 'LAST_ADMIN',
+    })
+    expect(mockCacheDel).not.toHaveBeenCalled()
+  })
 })
 
 describe('removeTeamMember', () => {
   it('invalidates PRINCIPAL_BY_USER for the target user after removal', async () => {
-    mockFindFirst.mockResolvedValue({
-      id: TARGET,
+    mockChangeTeamRole.mockResolvedValue({
+      previousRole: 'member',
+      newRole: 'user',
       userId: TARGET_USER,
-      type: 'user',
-      role: 'member',
+      changed: true,
     })
 
     await removeTeamMember(TARGET, ACTING)
 
+    expect(mockChangeTeamRole).toHaveBeenCalledWith(
+      expect.objectContaining({ principalId: TARGET, newRole: 'user', requireTeamTarget: true })
+    )
     expect(mockCacheDel).toHaveBeenCalledWith(`principal:user:${TARGET_USER}`)
   })
 })

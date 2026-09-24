@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { requireApiKey, withApiKeyAuth, type AuthLevel } from '../auth'
+import {
+  requireApiKey,
+  withApiKeyAuth,
+  requiredRestScope,
+  assertNoStatusChange,
+  type AuthLevel,
+} from '../auth'
+import { API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
 import type { ApiKey } from '@/lib/server/domains/api-keys'
 import type { PrincipalId, ApiKeyId } from '@quackback/ids'
 import { UnauthorizedError, ForbiddenError } from '@/lib/shared/errors'
@@ -13,6 +20,18 @@ vi.mock('@/lib/server/domains/api-keys/api-key.service', () => ({
 const { mockFindFirst } = vi.hoisted(() => ({
   mockFindFirst: vi.fn().mockResolvedValue({ role: 'admin' }),
 }))
+// Creator-bound role capping is api-key-authority.ts (its own suite). Here it
+// passes the key principal's stored role through unless a test caps it.
+const { mockResolveApiKeyRole } = vi.hoisted(() => ({
+  mockResolveApiKeyRole: vi.fn(async (_key: unknown, role: string | null | undefined) =>
+    role === 'admin' || role === 'member' ? role : 'user'
+  ),
+}))
+vi.mock('@/lib/server/domains/api-keys/api-key-authority', () => ({
+  resolveApiKeyRole: (key: unknown, role: string | null | undefined) =>
+    mockResolveApiKeyRole(key, role),
+}))
+
 vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
@@ -38,6 +57,7 @@ describe('API Auth', () => {
     lastUsedAt: null,
     expiresAt: null,
     revokedAt: null,
+    scopes: null,
   }
 
   beforeEach(() => {
@@ -97,6 +117,7 @@ describe('API Auth', () => {
         apiKey: mockApiKey,
         principalId: mockApiKey.principalId,
         role: 'admin',
+        scopes: [...API_KEY_SCOPES],
         importMode: false,
       })
     })
@@ -166,6 +187,7 @@ describe('API Auth', () => {
         apiKey: mockApiKey,
         principalId: mockApiKey.principalId,
         role: 'admin',
+        scopes: [...API_KEY_SCOPES],
         importMode: false,
       })
     })
@@ -226,6 +248,102 @@ describe('API Auth', () => {
         expect(result).toBeDefined()
         expect(result.role).toBe('admin')
       }
+    })
+
+    it('caps the key at its creator\u2019s current role (team identity rule)', async () => {
+      const { verifyApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      vi.mocked(verifyApiKey).mockResolvedValue(mockApiKey)
+      mockFindFirst.mockResolvedValue({ role: 'admin' })
+      mockResolveApiKeyRole.mockResolvedValueOnce('user')
+
+      const request = new Request('https://example.com/api', {
+        method: 'GET',
+        headers: { Authorization: 'Bearer qb_valid_key' },
+      })
+
+      await expect(withApiKeyAuth(request, { role: 'team' })).rejects.toThrow(
+        'Team member access required'
+      )
+    })
+  })
+
+  describe('per-key scopes', () => {
+    async function keyWith(scopes: string[] | null) {
+      const { verifyApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      vi.mocked(verifyApiKey).mockResolvedValue({ ...mockApiKey, scopes } as ApiKey)
+      mockFindFirst.mockResolvedValue({ role: 'admin' })
+    }
+    const req = (method: string, path: string) =>
+      new Request(`https://example.com${path}`, {
+        method,
+        headers: { Authorization: 'Bearer qb_valid_key' },
+      })
+
+    it('lets a read-only key read', async () => {
+      await keyWith(['read:feedback'])
+      await expect(
+        withApiKeyAuth(req('GET', '/api/v1/posts'), { role: 'team' })
+      ).resolves.toBeDefined()
+    })
+
+    it('refuses a write to a read-only key', async () => {
+      await keyWith(['read:feedback'])
+      await expect(
+        withApiKeyAuth(req('PATCH', '/api/v1/posts/post_1'), { role: 'team' })
+      ).rejects.toThrow(/write:feedback/)
+    })
+
+    it('refuses administrator routes to a key without admin:workspace', async () => {
+      await keyWith(['read:feedback', 'write:feedback'])
+      await expect(
+        withApiKeyAuth(req('GET', '/api/v1/webhooks'), { role: 'admin' })
+      ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+    })
+
+    it('keeps every scope for a legacy key stored without scopes', async () => {
+      await keyWith(null)
+      await expect(
+        withApiKeyAuth(req('DELETE', '/api/v1/webhooks/w1'), { role: 'admin' })
+      ).resolves.toBeDefined()
+    })
+
+    it('skips the method check when the caller enforces scopes itself (MCP)', async () => {
+      await keyWith(['read:feedback'])
+      await expect(
+        withApiKeyAuth(req('POST', '/api/mcp'), { role: 'team', scope: null })
+      ).resolves.toBeDefined()
+    })
+  })
+
+  describe('requiredRestScope', () => {
+    const req = (method: string, path: string) =>
+      new Request(`https://example.com${path}`, { method })
+
+    it('maps resource families and methods to scopes', () => {
+      expect(requiredRestScope(req('GET', '/api/v1/posts'), 'team')).toBe('read:feedback')
+      expect(requiredRestScope(req('POST', '/api/v1/posts'), 'team')).toBe('write:feedback')
+      expect(requiredRestScope(req('GET', '/api/v1/help-center/articles'), 'team')).toBe(
+        'read:article'
+      )
+      expect(requiredRestScope(req('PATCH', '/api/v1/help-center/articles/a'), 'team')).toBe(
+        'write:article'
+      )
+      expect(requiredRestScope(req('GET', '/api/v1/conversations'), 'team')).toBe('read:chat')
+      expect(requiredRestScope(req('POST', '/api/v1/changelog'), 'team')).toBe('write:changelog')
+      expect(requiredRestScope(req('GET', '/api/v1/changelog'), 'team')).toBe('read:feedback')
+      expect(requiredRestScope(req('GET', '/api/v1/webhooks'), 'admin')).toBe('admin:workspace')
+    })
+  })
+
+  describe('assertNoStatusChange', () => {
+    it('refuses any status in a request body', () => {
+      expect(() => assertNoStatusChange('status_done')).toThrow(ForbiddenError)
+      expect(() => assertNoStatusChange('status_done')).toThrow(/cannot change a status/)
+    })
+
+    it('allows a body without a status', () => {
+      expect(() => assertNoStatusChange(undefined)).not.toThrow()
+      expect(() => assertNoStatusChange(null)).not.toThrow()
     })
   })
 })

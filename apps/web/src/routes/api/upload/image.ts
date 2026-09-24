@@ -2,7 +2,8 @@ import { createFileRoute } from '@tanstack/react-router'
 import type { UserId } from '@quackback/ids'
 import { auth } from '@/lib/server/auth'
 import { db, eq, principal } from '@/lib/server/db'
-import { effectiveRole, isTeamMember } from '@/lib/shared/roles'
+import { isTeamMember } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { isS3Configured, uploadImageFromFormData } from '@/lib/server/storage/s3'
 
 const ALLOWED_PREFIXES = new Set([
@@ -21,13 +22,13 @@ export async function handleAdminUpload({ request }: { request: Request }): Prom
   }
   const principalRecord = await db.query.principal.findFirst({
     where: eq(principal.userId, session.user.id as UserId),
-    columns: { role: true, type: true },
+    columns: { id: true, userId: true, role: true, type: true },
   })
-  // A team role only counts on a human principal (see effectiveRole): an
-  // anonymous principal carrying admin/member is a portal user here too.
+  // Same rule as requireAuth: a team role counts only on a human principal
+  // whose identity satisfies the team identity rule.
   if (
     !principalRecord ||
-    !isTeamMember(effectiveRole(principalRecord.role, principalRecord.type))
+    !isTeamMember(await resolveSessionRole(principalRecord, session.user, request.headers))
   ) {
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }

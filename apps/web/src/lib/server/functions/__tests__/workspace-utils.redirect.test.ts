@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { db } from '@/lib/server/db'
 
 /**
@@ -14,13 +14,24 @@ import { db } from '@/lib/server/db'
 
 const hoisted = vi.hoisted(() => ({
   mockGetSession: vi.fn(),
+  providers: ['github'] as string[],
 }))
 
 vi.mock('@/lib/server/auth/session', () => ({ getSession: hoisted.mockGetSession }))
 
 vi.mock('@/lib/server/db', () => ({
-  db: { query: { settings: { findFirst: vi.fn() }, principal: { findFirst: vi.fn() } } },
+  db: {
+    query: {
+      settings: { findFirst: vi.fn() },
+      principal: { findFirst: vi.fn() },
+      account: {
+        findMany: async () => hoisted.providers.map((providerId) => ({ providerId })),
+      },
+    },
+  },
   principal: {},
+  account: { userId: 'account.userId' },
+  user: { id: 'user.id' },
   eq: vi.fn(),
 }))
 
@@ -54,10 +65,24 @@ type RedirectErr = {
 
 let requireWorkspaceRole: AnyHandler
 
+/** A signed-in session for a verified team-domain account. */
+const teamSession = (id: string) => ({
+  user: { id, email: `${id}@acme.example`, emailVerified: true },
+})
+
+const savedDomains = process.env.VENTURI_TEAM_EMAIL_DOMAINS
+
 beforeEach(async () => {
   vi.clearAllMocks()
+  hoisted.providers = ['github']
+  process.env.VENTURI_TEAM_EMAIL_DOMAINS = 'acme.example'
   if (handlers.length === 0) await import('../workspace-utils')
   requireWorkspaceRole = handlers[0]
+})
+
+afterEach(() => {
+  if (savedDomains === undefined) delete process.env.VENTURI_TEAM_EMAIL_DOMAINS
+  else process.env.VENTURI_TEAM_EMAIL_DOMAINS = savedDomains
 })
 
 describe('requireWorkspaceRole redirect target', () => {
@@ -85,7 +110,7 @@ describe('requireWorkspaceRole redirect target', () => {
   })
 
   it('redirects wrong-role callers to sign-in dialog with not_team_member error', async () => {
-    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_001' } })
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_001'))
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
     ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ role: 'user' })
 
@@ -101,7 +126,7 @@ describe('requireWorkspaceRole redirect target', () => {
   })
 
   it('redirects an anonymous principal that carries a stored admin role (team role cap)', async () => {
-    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_anon' } })
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_anon'))
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
     ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
       role: 'admin',
@@ -117,7 +142,7 @@ describe('requireWorkspaceRole redirect target', () => {
   })
 
   it('sends a team member on an administrator-only route to the durable settings notice', async () => {
-    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_member' } })
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_member'))
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
     ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
       role: 'member',
@@ -136,7 +161,7 @@ describe('requireWorkspaceRole redirect target', () => {
   })
 
   it('still sends a portal user on an administrator-only route to sign-in with not_team_member', async () => {
-    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_portal' } })
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_portal'))
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
     ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
       role: 'user',
@@ -155,7 +180,7 @@ describe('requireWorkspaceRole redirect target', () => {
   it.each(['user', 'member', 'admin'])(
     'does not expose raw settings when a %s caller supplies its own allowed role',
     async (role) => {
-      hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_001' } })
+      hoisted.mockGetSession.mockResolvedValue(teamSession('user_001'))
       ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: 1,
         widgetSecret: 'private-signing-secret',
@@ -176,7 +201,7 @@ describe('requireWorkspaceRole redirect target', () => {
   )
 
   it('lets a human admin through with its role intact', async () => {
-    hoisted.mockGetSession.mockResolvedValue({ user: { id: 'user_admin' } })
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_admin'))
     ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
     ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
       role: 'admin',
@@ -189,5 +214,44 @@ describe('requireWorkspaceRole redirect target', () => {
       principal: { role: string }
     }
     expect(result.principal.role).toBe('admin')
+  })
+
+  it('sends a stored admin whose identity fails the team rule to sign-in with the reason', async () => {
+    hoisted.providers = ['credential']
+    hoisted.mockGetSession.mockResolvedValue(teamSession('user_bootstrap'))
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'principal_bootstrap',
+      role: 'admin',
+      type: 'user',
+      userId: 'user_bootstrap',
+    })
+
+    const err = await requireWorkspaceRole({ data: { allowedRoles: ['admin', 'member'] } })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    const search = err?.search ?? err?.options?.search
+    expect(search?.auth).toBe('signin')
+    expect(search?.error).toBe('team_identity_required')
+  })
+
+  it('refuses a stored admin at an address outside the team domains', async () => {
+    hoisted.mockGetSession.mockResolvedValue({
+      user: { id: 'user_x', email: 'x@gmail.com', emailVerified: true },
+    })
+    ;(db.query.settings.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 1 })
+    ;(db.query.principal.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'principal_x',
+      role: 'admin',
+      type: 'user',
+      userId: 'user_x',
+    })
+
+    const err = await requireWorkspaceRole({ data: { allowedRoles: ['admin'] } })
+      .then(() => null)
+      .catch((e) => e as RedirectErr)
+
+    expect((err?.search ?? err?.options?.search)?.error).toBe('team_identity_required')
   })
 })

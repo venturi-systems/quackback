@@ -357,6 +357,18 @@ async function seed() {
       createdAt: new Date(),
       updatedAt: new Date(),
     })
+    // Team identity rule (apps/web team-identity.ts): a team role takes effect
+    // only for a verified team-domain address with a linked Google or GitHub
+    // account. Local development and CI set VENTURI_TEAM_EMAIL_DOMAINS to
+    // example.com; this stand-in GitHub link lets the demo admin qualify.
+    await db.insert(account).values({
+      id: crypto.randomUUID(),
+      accountId: `seed-github-${demoUserId}`,
+      providerId: 'github',
+      userId: demoUserId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
     principals.push({ id: demoPrincipalId, name: DEMO_USER.name })
 
     // Create sample users
@@ -381,6 +393,17 @@ async function seed() {
         displayName: name,
         createdAt: randomDate(90),
       })
+      if (i < 3) {
+        // Stand-in GitHub link so the sample admins satisfy the team identity rule.
+        await db.insert(account).values({
+          id: crypto.randomUUID(),
+          accountId: `seed-github-${userId}`,
+          providerId: 'github',
+          userId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+      }
       principals.push({ id: principalId, name })
     }
     console.log(`Created ${principals.length} users`)
