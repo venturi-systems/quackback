@@ -9,8 +9,9 @@ import { defineConfig, devices } from '@playwright/test'
  * with the keyboard. The design suite checker runs after this, outside
  * Playwright (e2e/render/run-checker.ts).
  *
- * There is no webServer: the lane measures the BUILT app, which the workflow
- * starts before this runs (`bun run start`). Locally, start the app first.
+ * There is no webServer: the lane measures the production image built from
+ * apps/web/Dockerfile, which the workflow starts before this runs. Locally,
+ * serve the app first.
  */
 const outDir = path.resolve(process.env.RENDER_OUT_DIR || 'test-results/render')
 

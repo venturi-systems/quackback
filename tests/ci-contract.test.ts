@@ -156,9 +156,10 @@ describe('QB-CI-002 signed-in render lane', () => {
     expect(job).toContain('bun e2e/render/run-checker.ts')
     expect(job).toContain('bun e2e/render/summarize.ts')
     expect(job).toContain('path: ${{ runner.temp }}/render')
-    // It measures the built app, never the dev server.
-    expect(job).toContain('bun run build')
-    expect(job).toContain('bun run start')
+    // It measures the production image built from this commit, never the dev
+    // server or a host build that production does not run.
+    expect(job).toContain('docker build --file apps/web/Dockerfile')
+    expect(job).toContain('docker run --detach --name quackback-render --network host')
     // The path filter is fail-closed like the e2e one: every non-PR event and
     // any diff failure answers "run".
     expect(ci.match(/echo "render=true" >> "\$GITHUB_OUTPUT"/g)).toHaveLength(3)

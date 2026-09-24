@@ -37,7 +37,7 @@ The job fails on any checker `FAIL`, or on any keyboard finding. A checker `NEED
 
 ## Running it locally
 
-Start the built app on `http://acme.localhost:3000` with the seeded database, as the job does. Then, from `apps/web`:
+Serve the production image (`apps/web/Dockerfile`) on `http://acme.localhost:3000` against a migrated and seeded database, as the job does. Then, from `apps/web`:
 
 ```sh
 bun run test:render            # sign in, write the plan, walk the keyboard
