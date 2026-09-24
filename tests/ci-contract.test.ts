@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildUpstreamIntakeRecord } from '../scripts/upstream-intake-ledger'
 
@@ -34,6 +35,7 @@ describe('QB-CI-001 consolidated validation contract', () => {
       '  database_tests:',
       '  changed_paths:',
       '  e2e_tests:',
+      '  signed_in_render:',
       '  portability_gate:',
     ])
     expect(ci).toContain('name: Static analysis')
@@ -108,6 +110,59 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci.match(/queue_reuse != 'true'/g)).toHaveLength(1)
     expect(ci).not.toContain('continue-on-error')
     expect(ci.toLowerCase()).not.toContain('codebuild-')
+  })
+})
+
+describe('QB-CI-002 signed-in render lane', () => {
+  const suiteDir = join(process.cwd(), 'apps', 'web', 'e2e', 'render', 'design-suite')
+  const pin = JSON.parse(readFileSync(join(suiteDir, 'suite-pin.json'), 'utf8')) as {
+    release: string
+    files: { path: string; bytes: number; sha256: string }[]
+  }
+
+  function filesUnder(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? filesUnder(join(dir, entry.name)) : [join(dir, entry.name)]
+    )
+  }
+
+  it('vendors the design suite checker byte for byte, exactly as pinned', () => {
+    expect(pin.release).toBe('6.6.0')
+    const present = filesUnder(suiteDir)
+      .map((file) => relative(suiteDir, file))
+      .filter((file) => file !== 'suite-pin.json')
+      .sort()
+    expect(present).toEqual(pin.files.map((file) => file.path).sort())
+    for (const file of pin.files) {
+      const bytes = readFileSync(join(suiteDir, file.path))
+      expect(bytes.length, file.path).toBe(file.bytes)
+      expect(createHash('sha256').update(bytes).digest('hex'), file.path).toBe(file.sha256)
+    }
+  })
+
+  it('runs as an advisory pull-request and manual lane beside the required gate', () => {
+    const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+    const job =
+      ci.split('\n  signed_in_render:\n', 2)[1]?.split('\n  portability_gate:\n', 1)[0] ?? ''
+    expect(job).toContain('name: Signed-in render check')
+    expect(job).toContain(
+      "if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')"
+    )
+    expect(job).toContain('runs-on: ubuntu-latest')
+    expect(job).toContain('timeout-minutes: 45')
+    // The checker runs unmodified: the job refuses any bytes but the pinned ones.
+    expect(job).toContain('sha256sum --check --strict')
+    expect(job).toContain('bun run test:render')
+    expect(job).toContain('bun e2e/render/run-checker.ts')
+    expect(job).toContain('bun e2e/render/summarize.ts')
+    expect(job).toContain('path: ${{ runner.temp }}/render')
+    // It measures the built app, never the dev server.
+    expect(job).toContain('bun run build')
+    expect(job).toContain('bun run start')
+    // The path filter is fail-closed like the e2e one: every non-PR event and
+    // any diff failure answers "run".
+    expect(ci.match(/echo "render=true" >> "\$GITHUB_OUTPUT"/g)).toHaveLength(3)
+    expect(ci).toContain("grep -E '^(apps/web/|\\.github/workflows/ci\\.yml$)'")
   })
 })
 

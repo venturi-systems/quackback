@@ -28,6 +28,10 @@ export default tseslint.config(
       "**/*.config.js",
       "**/*.config.mjs",
       "**/next-env.d.ts",
+      // Byte-for-byte copy of the Venturi design suite's checker, pinned by
+      // sha256 in its suite-pin.json. Vendored and never edited, so it is not
+      // linted against this repository's rules.
+      "apps/web/e2e/render/design-suite/**",
     ],
   },
   {
