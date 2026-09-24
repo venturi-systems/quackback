@@ -169,3 +169,78 @@ test.describe('Server-function payloads that cannot be decoded (DEF-59)', () => 
     })
   }
 })
+
+async function expectNotFound(
+  res: Awaited<ReturnType<APIRequestContext['get']>>,
+  label: string
+): Promise<void> {
+  const body = await res.text()
+  expect(res.status(), `${label}: status (body: ${body.slice(0, 200)})`).toBe(404)
+  expect(body, `${label}: body`).toBe('Not Found')
+  expect(res.headers()['x-tss-serialized'], `${label}: not a serialized error`).toBeUndefined()
+  expect(res.headers()['content-type'] ?? '', `${label}: content type`).toContain('text/plain')
+}
+
+/**
+ * Before this guard an id that names no function threw out of the framework
+ * before its `try`, and h3 answered 500 `{"status":500,"unhandled":true,
+ * "message":"HTTPError"}` (feedback.venturi.systems, 2026-09-24). So did the
+ * bare `/_serverFn/`, even with no RPC headers at all.
+ */
+test.describe('Server-function ids that name no function (DEF-59)', () => {
+  const unknownIds: Array<[string, string]> = [
+    ['an id that is not a function id', 'not-a-real-server-fn'],
+    [
+      'a well-formed dev id for an export that does not exist',
+      devFunctionId(
+        `${FUNCTIONS_MODULE}?tss-serverfn-split`,
+        'noSuchExport_createServerFn_handler'
+      ),
+    ],
+  ]
+  for (const [label, id] of unknownIds) {
+    test(`GET with ${label} answers 404`, async ({ request }) => {
+      const res = await request.get(`/_serverFn/${id}`, { headers: RPC_HEADERS })
+      await expectNotFound(res, `GET ${label}`)
+    })
+
+    test(`POST with ${label} answers 404`, async ({ request }) => {
+      const res = await request.post(`/_serverFn/${id}`, {
+        headers: { ...RPC_HEADERS, 'content-type': 'application/json' },
+        data: JSON.stringify(LIST_ALL),
+      })
+      await expectNotFound(res, `POST ${label}`)
+    })
+  }
+
+  test('a cross-site request to an unknown id is still refused 403 by CSRF first', async ({
+    request,
+  }) => {
+    const res = await request.get('/_serverFn/not-a-real-server-fn', {
+      headers: { 'x-tsr-serverFn': 'true', 'sec-fetch-site': 'cross-site' },
+    })
+    expect(res.status()).toBe(403)
+  })
+
+  test('the bare /_serverFn/ answers 404 with RPC headers', async ({ request }) => {
+    const res = await request.get('/_serverFn/', { headers: RPC_HEADERS })
+    await expectNotFound(res, 'GET /_serverFn/ with RPC headers')
+  })
+
+  test('the bare /_serverFn/ answers 404 with no headers', async ({ request }) => {
+    const get = await request.get('/_serverFn/')
+    await expectNotFound(get, 'GET /_serverFn/')
+    const post = await request.post('/_serverFn/', { data: '' })
+    await expectNotFound(post, 'POST /_serverFn/')
+  })
+
+  test('a known id still resolves after the unknown-id checks', async ({ request }) => {
+    const { get } = await urls(request)
+    const res = await request.get(
+      `${get}?payload=${encodeURIComponent(JSON.stringify(LIST_ALL))}`,
+      { headers: RPC_HEADERS }
+    )
+    expect(res.status()).toBe(200)
+    expect(res.headers()['x-tss-serialized']).toBe('true')
+  })
+})
