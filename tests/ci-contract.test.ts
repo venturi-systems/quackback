@@ -94,12 +94,12 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toMatch(/is not acceptable[^\n]*\n\s+exit 1/)
     // The merge-queue reuse probe is fail-closed in shape: it defaults to
     // false, only runs on merge_group, demands ALL 8 e2e shards succeeded on
-    // the PR head (a path-filtered PR has nothing to reuse), and compares git
+    // the actual PR merge checkout (a filtered PR has nothing to reuse), and compares git
     // TREE shas, not commit shas.
     expect(ci).toContain("core.setOutput('reuse', 'false');")
     expect(ci).toContain("if: github.event_name == 'merge_group'")
     expect(ci).toContain('shards.length !== 8 || green.length !== 8')
-    expect(ci).toContain('queueCommit.data.commit.tree.sha !== prCommit.data.commit.tree.sha')
+    expect(ci).toContain('queueCommit.data.commit.tree.sha !== first.tree')
     // Only the e2e lane is reuse-gated. Static analysis and the database lane
     // keep running in the queue as belt-and-braces on the exact tree.
     expect(ci).toContain(
