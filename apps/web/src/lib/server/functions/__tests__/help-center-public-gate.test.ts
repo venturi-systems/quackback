@@ -6,6 +6,7 @@
  * empty / not-found shape, never content.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { generateId } from '@quackback/ids'
 
 const hoisted = vi.hoisted(() => ({
   tenant: null as null | Record<string, unknown>,
@@ -182,6 +183,61 @@ describe('help center public reads when enabled and the caller is granted', () =
     expect(await fn('searchPublicArticlesFn')({ data: { query: 'start' } })).toHaveLength(1)
     await fn('recordArticleFeedbackFn')({ data: { articleId: 'article_1', helpful: true } })
     expect(hoisted.service.recordArticleFeedback).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('public help-center read inputs (DEF-45)', () => {
+  // Reachable without signing in. The category and article id columns take
+  // only a TypeID of their entity, and Postgres rejects a NUL in the search
+  // text or a slug, so each validator refuses those before any query runs.
+  const CATEGORY_ID = generateId('category')
+  const ARTICLE_ID = generateId('article')
+
+  function inputOf(name: keyof typeof hc) {
+    const input = hoisted.inputs.get(hc[name])
+    if (!input) throw new Error(`${String(name)} has no validator`)
+    return input
+  }
+
+  it.each<[name: keyof typeof hc, accepted: unknown[], refused: unknown[]]>([
+    [
+      'listPublicArticlesFn',
+      [{}, { categoryId: CATEGORY_ID, search: 'reset password', cursor: ARTICLE_ID, limit: 20 }],
+      [
+        { categoryId: 'category_1' },
+        { categoryId: ARTICLE_ID },
+        { cursor: 'article_1' },
+        { cursor: CATEGORY_ID },
+        { search: 'reset\u0000password' },
+      ],
+    ],
+    [
+      'listPublicArticlesForCategoryFn',
+      [{ categoryId: CATEGORY_ID }],
+      [{ categoryId: 'category_1' }, { categoryId: ARTICLE_ID }, {}],
+    ],
+    ['getPublicCategoryBySlugFn', [{ slug: 'basics' }], [{ slug: 'bas\u0000ics' }, { slug: '' }]],
+    [
+      'getPublicArticleBySlugFn',
+      [{ slug: 'getting-started' }],
+      [{ slug: 'getting\u0000started' }, { slug: '' }],
+    ],
+    [
+      'recordArticleFeedbackFn',
+      [{ articleId: ARTICLE_ID, helpful: true }],
+      [
+        { articleId: 'article_1', helpful: true },
+        { articleId: CATEGORY_ID, helpful: false },
+      ],
+    ],
+  ])('%s takes what the app sends and refuses the rest', (name, accepted, refused) => {
+    const input = inputOf(name)
+    for (const value of accepted) {
+      expect(input.safeParse(value).success, JSON.stringify(value)).toBe(true)
+    }
+    for (const value of refused) {
+      expect(input.safeParse(value).success, JSON.stringify(value)).toBe(false)
+    }
   })
 })
 

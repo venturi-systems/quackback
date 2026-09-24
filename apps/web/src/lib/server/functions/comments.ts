@@ -27,36 +27,50 @@ import {
 } from '@/lib/server/domains/comments/comment.pin'
 import { NotFoundError } from '@/lib/shared/errors'
 import { getOptionalAuth, requireAuth, hasAuthCredentials } from './auth-helpers'
+import { filterId, filterText } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'comments' })
 
 // Schemas
+//
+// Every post, comment and status id goes to a TypeID id column, which throws on
+// anything but a TypeID, and Postgres rejects a NUL in text. The validators
+// refuse either before any query runs (DEF-45).
+
+/**
+ * An optional id where an empty string also means "none", as the comment
+ * service has always read it (`if (input.parentId)`).
+ */
+function optionalIdOrEmpty(prefix: 'comment' | 'status') {
+  return z.union([z.literal('').transform(() => undefined), filterId(prefix)]).optional()
+}
+
 const createCommentSchema = z.object({
-  postId: z.string(),
-  content: z.string().min(1).max(5000),
+  postId: filterId('post'),
+  content: filterText().min(1).max(5000),
   contentJson: z.unknown().nullable().optional(),
-  parentId: z.string().optional(),
-  statusId: z.string().optional(),
+  parentId: optionalIdOrEmpty('comment'),
+  statusId: optionalIdOrEmpty('status'),
   isPrivate: z.boolean().optional(),
 })
 
 const reactionSchema = z.object({
-  commentId: z.string(),
-  emoji: z.string(),
+  commentId: filterId('comment'),
+  emoji: filterText(),
 })
 
 const getCommentPermissionsSchema = z.object({
-  commentId: z.string(),
+  commentId: filterId('comment'),
 })
 
 const userEditCommentSchema = z.object({
-  commentId: z.string(),
-  content: z.string(),
+  commentId: filterId('comment'),
+  content: filterText(),
   contentJson: z.unknown().nullable().optional(),
 })
 
 const userDeleteCommentSchema = z.object({
-  commentId: z.string(),
+  commentId: filterId('comment'),
 })
 
 // Types
@@ -117,8 +131,7 @@ export const createCommentFn = createServerFn({ method: 'POST' })
           postId: data.postId as PostId,
           content: data.content,
           contentJson: (data.contentJson ?? undefined) as
-            | import('@/lib/shared/db-types').TiptapContent
-            | undefined,
+            import('@/lib/shared/db-types').TiptapContent | undefined,
           parentId: data.parentId as CommentId | undefined,
           statusId: data.statusId as StatusId | undefined,
           isPrivate: data.isPrivate,
@@ -267,8 +280,7 @@ export const userEditCommentFn = createServerFn({ method: 'POST' })
 
       const result = await userEditComment(data.commentId as CommentId, data.content, actor, {
         contentJson: (data.contentJson ?? undefined) as
-          | import('@/lib/shared/db-types').TiptapContent
-          | undefined,
+          import('@/lib/shared/db-types').TiptapContent | undefined,
       })
       log.info({ comment_id: data.commentId }, 'comment edited')
       return result
@@ -306,7 +318,7 @@ export const userDeleteCommentFn = createServerFn({ method: 'POST' })
 
 // Restore Operations
 const restoreCommentSchema = z.object({
-  commentId: z.string(),
+  commentId: filterId('comment'),
 })
 
 export type RestoreCommentInput = z.infer<typeof restoreCommentSchema>
@@ -332,15 +344,15 @@ export const restoreCommentFn = createServerFn({ method: 'POST' })
 
 // Pin/Unpin Operations
 const pinCommentSchema = z.object({
-  commentId: z.string(),
+  commentId: filterId('comment'),
 })
 
 const unpinCommentSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const canPinCommentSchema = z.object({
-  commentId: z.string(),
+  commentId: filterId('comment'),
 })
 
 export type PinCommentInput = z.infer<typeof pinCommentSchema>

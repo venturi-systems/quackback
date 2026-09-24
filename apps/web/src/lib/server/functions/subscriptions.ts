@@ -6,28 +6,31 @@ import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
 import { type PostId, type PrincipalId } from '@quackback/ids'
 import { requireAuth } from './auth-helpers'
+import { filterId } from '@/lib/shared/schemas/list-filters'
 import type { SubscriptionLevel } from '@/lib/server/domains/subscriptions/subscription.service'
 import { db, votes, eq, and } from '@/lib/server/db'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'subscriptions' })
 
+// Every post and principal id below goes to a TypeID id column, which throws
+// on anything but a TypeID. The validator refuses one first (DEF-45).
 const getSubscriptionStatusSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const subscribeToPostSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
   reason: z.enum(['manual', 'author', 'vote', 'comment']).optional().default('manual'),
   level: z.enum(['all', 'status_only']).optional().default('all'),
 })
 
 const unsubscribeFromPostSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const updateSubscriptionLevelSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
   level: z.enum(['all', 'status_only', 'none']),
 })
 
@@ -148,8 +151,8 @@ export const updateSubscriptionLevelFn = createServerFn({ method: 'POST' })
 
 // Admin mutation: update any voter's subscription level
 const adminUpdateVoterSubscriptionSchema = z.object({
-  postId: z.string(),
-  principalId: z.string(),
+  postId: filterId('post'),
+  principalId: filterId('principal'),
   level: z.enum(['all', 'status_only', 'none']),
 })
 

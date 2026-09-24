@@ -6,6 +6,7 @@
 
 import { z } from 'zod'
 import { tiptapContentSchema } from './posts'
+import { filterId } from './list-filters'
 
 /**
  * Publish state schema
@@ -46,29 +47,33 @@ export const updateChangelogSchema = z.object({
  */
 export const listChangelogsSchema = z.object({
   status: z.enum(['draft', 'scheduled', 'published', 'all']).optional(),
-  cursor: z.string().optional(),
+  // The id of the last entry on the previous page.
+  cursor: filterId('changelog').optional(),
   limit: z.number().int().positive().max(100).optional(),
 })
 
 /**
- * Get changelog by ID schema
+ * Get changelog by ID schema. The public changelog entry page reads through it
+ * too, so the id is held to what the changelog id column takes: a TypeID
+ * (DEF-45).
  */
 export const getChangelogSchema = z.object({
-  id: z.string().min(1),
+  id: filterId('changelog'),
 })
 
 /**
  * Delete changelog schema
  */
 export const deleteChangelogSchema = z.object({
-  id: z.string().min(1),
+  id: filterId('changelog'),
 })
 
 /**
  * List public changelogs params schema
  */
 export const listPublicChangelogsSchema = z.object({
-  cursor: z.string().optional(),
+  // The id of the last entry on the previous page.
+  cursor: filterId('changelog').optional(),
   limit: z.number().int().positive().max(100).optional(),
 })
 

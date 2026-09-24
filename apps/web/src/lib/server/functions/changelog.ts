@@ -33,6 +33,7 @@ import {
   listPublicChangelogsSchema,
 } from '@/lib/shared/schemas/changelog'
 import { toIsoString, toIsoStringOrNull } from '@/lib/shared/utils'
+import { filterId, filterText } from '@/lib/shared/schemas/list-filters'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'changelog' })
@@ -265,9 +266,12 @@ export const listPublicChangelogsFn = createServerFn({ method: 'GET' })
 // Shipped Posts Search (for linking)
 // ============================================================================
 
+// The query text reaches a text search and the board id the board id column:
+// Postgres rejects a NUL in the one, and the column throws on anything but a
+// TypeID (DEF-45).
 const searchShippedPostsSchema = z.object({
-  query: z.string().optional(),
-  boardId: z.string().optional(),
+  query: filterText().optional(),
+  boardId: filterId('board').optional(),
   limit: z.number().int().positive().max(50).optional(),
 })
 
