@@ -359,6 +359,11 @@ function CommentItem({
   const isDeleted = !!comment.deletedAt
   const canNest = depth < MAX_NESTING_DEPTH
   const hasReplies = comment.replies.length > 0
+  // The toggle is icon-only: name it, so a screen reader announces what it
+  // does and not just "button".
+  const replyToggleLabel = isCollapsed
+    ? intl.formatMessage({ id: 'portal.commentThread.showReplies', defaultMessage: 'Show replies' })
+    : intl.formatMessage({ id: 'portal.commentThread.hideReplies', defaultMessage: 'Hide replies' })
   const isPinned = pinnedCommentId === comment.id
   // Can pin: admin mode enabled, team member comment, root-level (no parent), not deleted, not private
   const canPin =
@@ -454,6 +459,8 @@ function CommentItem({
                   size="icon"
                   className="h-6 w-6 text-muted-foreground hover:text-foreground"
                   onClick={() => setIsCollapsed(!isCollapsed)}
+                  aria-expanded={!isCollapsed}
+                  aria-label={replyToggleLabel}
                 >
                   {isCollapsed ? (
                     <ChevronRightIcon className="h-4 w-4" />
@@ -472,6 +479,10 @@ function CommentItem({
               gridTemplateRows: !isCollapsed && hasReplies ? '1fr' : '0fr',
               opacity: !isCollapsed && hasReplies ? 1 : 0,
             }}
+            // Collapsed replies stay mounted for the grid animation; inert keeps
+            // their controls out of the tab order and the accessibility tree
+            // while nothing of them is visible.
+            inert={isCollapsed || !hasReplies}
           >
             <div className="overflow-hidden">
               <div className="space-y-3">
@@ -736,6 +747,8 @@ function CommentItem({
                 size="icon"
                 className="h-6 w-6 text-muted-foreground hover:text-foreground"
                 onClick={() => setIsCollapsed(!isCollapsed)}
+                aria-expanded={!isCollapsed}
+                aria-label={replyToggleLabel}
               >
                 {isCollapsed ? (
                   <ChevronRightIcon className="h-4 w-4" />
@@ -891,6 +904,10 @@ function CommentItem({
               gridTemplateRows: showReplyForm ? '1fr' : '0fr',
               opacity: showReplyForm ? 1 : 0,
             }}
+            // The closed reply form stays mounted for the grid animation. Inert
+            // keeps its editor and buttons out of the tab order: a keyboard user
+            // otherwise tabbed through every comment's invisible reply form.
+            inert={!showReplyForm}
           >
             <div className="overflow-hidden">
               <div className="mt-3 ms-10 max-w-lg p-3 bg-muted/30 [border-radius:var(--radius)] border border-border/30">
@@ -916,6 +933,10 @@ function CommentItem({
             gridTemplateRows: !isCollapsed && hasReplies ? '1fr' : '0fr',
             opacity: !isCollapsed && hasReplies ? 1 : 0,
           }}
+          // Collapsed replies stay mounted for the grid animation; inert keeps
+          // their controls out of the tab order and the accessibility tree
+          // while nothing of them is visible.
+          inert={isCollapsed || !hasReplies}
         >
           <div className="overflow-hidden">
             <div className="space-y-3">

@@ -28,6 +28,8 @@ export interface SurfaceProbe {
   text?: string
   /** `attached` for controls that are hidden until focused (the skip link). */
   state?: 'visible' | 'attached'
+  /** Only probed at this viewport width or wider (a surface the layout hides below it). */
+  minWidth?: number
 }
 
 export interface RouteSpec {
@@ -84,12 +86,20 @@ const skipLink: SurfaceProbe = {
   state: 'attached',
 }
 
+/** The post sidebar is `hidden lg:block`: its links exist from 1024px up. */
+const sidebarRoadmapLink: SurfaceProbe = {
+  label: 'post sidebar roadmap link',
+  css: 'aside a[href="/roadmap"]',
+  minWidth: 1024,
+}
+
 /** Stands in for the seeded post's path until the database resolves it. */
 export const SEEDED_POST_PATH = '{seeded-post}'
 
 /**
  * The route matrix. The seeded post's path is resolved from the database at
- * run time (resolveRoutes), because seeded identifiers differ on every run.
+ * run time (resolveRoutes, find-render-post.ts), because seeded identifiers
+ * differ on every run.
  * The ids are static so the keyboard walk can declare one test per route
  * before the plan exists.
  */
@@ -124,6 +134,7 @@ export const ROUTES: readonly RouteSpec[] = [
       skipLink,
       { label: 'post detail', testId: 'post-detail' },
       { label: 'comment thread', css: '[id^="comment-"]' },
+      sidebarRoadmapLink,
     ],
   },
   {
@@ -158,6 +169,7 @@ export const ROUTES: readonly RouteSpec[] = [
       skipLink,
       { label: 'post detail', testId: 'post-detail' },
       { label: 'comment sign-in prompt', text: 'Sign in to comment' },
+      sidebarRoadmapLink,
     ],
   },
 ]

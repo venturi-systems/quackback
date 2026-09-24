@@ -210,6 +210,9 @@ function WidgetCommentItem({
             gridTemplateRows: !isCollapsed && hasReplies && canShowReplies ? '1fr' : '0fr',
             opacity: !isCollapsed && hasReplies && canShowReplies ? 1 : 0,
           }}
+          // Collapsed replies stay mounted for the grid animation; inert keeps
+          // their controls out of the tab order while nothing of them is visible.
+          inert={isCollapsed || !hasReplies || !canShowReplies}
         >
           <div className="overflow-hidden">
             <div className="space-y-2">
@@ -356,6 +359,9 @@ function WidgetCommentItem({
             gridTemplateRows: showReplyForm ? '1fr' : '0fr',
             opacity: showReplyForm ? 1 : 0,
           }}
+          // The closed reply form stays mounted for the grid animation; inert
+          // keeps its editor and buttons out of the tab order.
+          inert={!showReplyForm}
         >
           <div className="overflow-hidden">
             <div className="mt-2 ms-7 p-2 bg-muted/30 rounded-md border border-border/30">
@@ -426,6 +432,9 @@ function WidgetCommentItem({
           gridTemplateRows: !isCollapsed && hasReplies && canShowReplies ? '1fr' : '0fr',
           opacity: !isCollapsed && hasReplies && canShowReplies ? 1 : 0,
         }}
+        // Collapsed replies stay mounted for the grid animation; inert keeps
+        // their controls out of the tab order while nothing of them is visible.
+        inert={isCollapsed || !hasReplies || !canShowReplies}
       >
         <div className="overflow-hidden">
           <div className="space-y-2 mt-1">

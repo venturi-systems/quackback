@@ -12,6 +12,10 @@ import type { PostId } from '@quackback/ids'
  * A related post: a link to it, never a voting control. The vote count is
  * stated in words and the status by name, so neither relies on an upvote
  * chevron or a colored dot alone (v6.6 voting and status-badge rules).
+ *
+ * The title is a block of its own and the count and status are separate
+ * labels, not one sentence: on a narrow post column the status may wrap onto
+ * its own line beside nothing, which is a label, not a stranded word.
  */
 function SimilarPostRow({ post }: { post: SimilarPost }) {
   return (
@@ -20,9 +24,9 @@ function SimilarPostRow({ post }: { post: SimilarPost }) {
       params={{ slug: post.boardSlug, postId: post.id }}
       className="flex min-h-11 flex-col justify-center gap-0.5 rounded-md px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60"
     >
-      <span className="text-foreground/80 break-words" data-text-origin="user">
+      <p className="text-foreground/80 break-words" data-text-origin="user">
         {post.title}
-      </span>
+      </p>
       <span className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
         <span className="tabular-nums">
           <FormattedMessage

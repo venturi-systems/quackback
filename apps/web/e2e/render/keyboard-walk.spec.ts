@@ -10,7 +10,8 @@
  *     measure a page that no longer shows what it exists to measure);
  *   - the session is not the identity the plan says (a silent sign-out would
  *     otherwise turn the signed-in check into a signed-out one);
- *   - a stop shows no visible focus indicator, is not :focus-visible, has no
+ *   - a stop shows no visible focus indicator (on the element, beside it, or
+ *     on the frame that tightly encloses it), is not :focus-visible, has no
  *     box on screen, or is entirely covered by another element (WCAG 2.4.7,
  *     2.4.11);
  *   - focus moves backwards in document order, or any element carries a
@@ -154,24 +155,51 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       ),
     }
   }
-  const related = (el: Element): Element[] => {
+  // A control's indicator may be drawn by its own frame: a field or card that
+  // rings itself with :focus-within or :has() while the control inside it has
+  // focus (the composer card, the team comment form). The two nearest
+  // ancestors always count. Farther ancestors, up to FRAME_LEVELS out, count
+  // only while they tightly enclose the control (at most FRAME_AREA_RATIO
+  // times its area), so a style change on a whole region never passes for the
+  // focus indicator of one control inside it.
+  const FRAME_LEVELS = 6
+  const FRAME_AREA_RATIO = 4
+  const ancestorsOf = (el: Element): Element[] => {
     const list: Element[] = []
-    if (el.parentElement) list.push(el.parentElement)
-    if (el.parentElement?.parentElement) list.push(el.parentElement.parentElement)
+    let ancestor = el.parentElement
+    while (ancestor && list.length < FRAME_LEVELS) {
+      if (ancestor === document.body || ancestor === document.documentElement) break
+      list.push(ancestor)
+      ancestor = ancestor.parentElement
+    }
+    return list
+  }
+  const related = (el: Element): Element[] => {
+    const own = el.getBoundingClientRect()
+    const ownArea = Math.max(1, own.width * own.height)
+    const list = ancestorsOf(el).filter((ancestor, index) => {
+      if (index < 2) return true
+      const box = ancestor.getBoundingClientRect()
+      return box.width * box.height <= ownArea * FRAME_AREA_RATIO
+    })
     list.push(...Array.from(el.children).slice(0, 4))
     const labels = (el as HTMLInputElement).labels
     if (labels) list.push(...Array.from(labels))
     return list
   }
   // Resting styles, taken before any element has focus, so a focused style can
-  // be compared with the same element at rest.
+  // be compared with the same element at rest. Every candidate frame is
+  // recorded here; whether it encloses the control tightly enough to count is
+  // decided when the control has focus, at its layout then.
   const base = new Map<Element, Snapshot>()
   const remember = (el: Element | null | undefined) => {
     if (el && !base.has(el)) base.set(el, snap(el))
   }
   for (const el of Array.from(document.querySelectorAll(FOCUSABLE))) {
     remember(el)
-    for (const other of related(el)) remember(other)
+    for (const other of ancestorsOf(el)) remember(other)
+    for (const other of Array.from(el.children).slice(0, 4)) remember(other)
+    for (const label of Array.from((el as HTMLInputElement).labels ?? [])) remember(label)
   }
   const locator = (start: Element): string => {
     let e: Element | null = start
@@ -457,7 +485,8 @@ async function walk(page: Page, direction: 'forward' | 'reverse'): Promise<WalkR
   return { direction, end: 'limit', detail: `no end after ${MAX_STOPS} stops`, stops }
 }
 
-async function probeSurface(page: Page, surface: SurfaceProbe): Promise<boolean> {
+async function probeSurface(page: Page, surface: SurfaceProbe, width: number): Promise<boolean> {
+  if (surface.minWidth && width < surface.minWidth) return true
   const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const locator = surface.testId
     ? page.getByTestId(surface.testId)
@@ -490,7 +519,8 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
         findings.push({
           ...at,
           kind: 'focus-not-visible',
-          detail: 'no outline, shadow, colour or surface change on the element or beside it',
+          detail:
+            'no outline, shadow, colour or surface change on the element, its frame or beside it',
         })
       }
       if (stop.visibility === 'no-box' || stop.visibility === 'offscreen') {
@@ -599,7 +629,7 @@ for (const route of ROUTES) {
         }
 
         for (const surface of planned.surfaces) {
-          if (!(await probeSurface(page, surface))) {
+          if (!(await probeSurface(page, surface, ctx.width))) {
             findings.push({
               kind: 'surface-missing',
               detail: `${surface.label} is not on the page`,

@@ -5,15 +5,17 @@
  * which signs demo@example.com in as the administrator and saves
  * e2e/.auth/admin.json. This file adds one team member through the suite's
  * loginViaMagicLink helper, the same fixture the board-access matrix uses, and
- * resolves the seeded post the post-detail routes need. No real credential is
- * read or used anywhere: every session comes from a magic-link token the test
- * database itself issued.
+ * picks the seeded post the post-detail routes need (find-render-post.ts). No
+ * real credential is read or used anywhere: every session comes from a
+ * magic-link token the test database itself issued.
  */
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test as setup, expect } from '@playwright/test'
 import { loginViaMagicLink, setPortalVisibility } from '../utils/access-helpers'
-import { getPostWithOwnComment } from '../utils/db-helpers'
+import { E2E_SCRIPT_KILL_SIGNAL, E2E_SCRIPT_TIMEOUT_MS } from '../utils/db-helpers'
 import {
   BASE_URL,
   IDENTITY_EMAILS,
@@ -21,9 +23,23 @@ import {
   OUT_DIR,
   PLAN_PATH,
   STORAGE_STATES,
+  WEB_ROOT,
   resolveRoutes,
   type RenderPlan,
 } from './plan'
+
+const FIND_POST = path.join(path.dirname(fileURLToPath(import.meta.url)), 'find-render-post.ts')
+
+/** The seeded post the post routes render (find-render-post.ts says which). */
+function findRenderPost(adminEmail: string): { path: string; ownComment: boolean } {
+  const out = execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', FIND_POST, adminEmail], {
+    encoding: 'utf-8',
+    cwd: WEB_ROOT,
+    timeout: E2E_SCRIPT_TIMEOUT_MS,
+    killSignal: E2E_SCRIPT_KILL_SIGNAL,
+  })
+  return JSON.parse(out.trim()) as { path: string; ownComment: boolean }
+}
 
 setup('sign in the render identities and write the route plan', async ({ browser }) => {
   // The signed-out surfaces (the share-idea note, the comment sign-in prompt)
@@ -49,7 +65,7 @@ setup('sign in the render identities and write the route plan', async ({ browser
   const adminState = STORAGE_STATES.admin
   expect(adminState && fs.existsSync(adminState), 'e2e/global-setup.ts saved the admin').toBe(true)
 
-  const post = getPostWithOwnComment(IDENTITY_EMAILS.admin ?? 'demo@example.com')
+  const post = findRenderPost(IDENTITY_EMAILS.admin ?? 'demo@example.com')
   const plan: RenderPlan = {
     generatedAt: new Date().toISOString(),
     baseURL: BASE_URL,

@@ -197,10 +197,13 @@ export function FeedbackContainer({
     },
   })
 
+  // The portal footer follows the feed: a keyboard user tabbing into it must
+  // not have the next page load above it and push the focused link away.
   const sentinelRef = useInfiniteScroll({
     hasMore: hasNextPage,
     isFetching: isFetchingNextPage,
     onLoadMore: fetchNextPage,
+    holdWhileFocusFollows: true,
   })
 
   function handleSortChange(sort: 'top' | 'new' | 'trending'): void {

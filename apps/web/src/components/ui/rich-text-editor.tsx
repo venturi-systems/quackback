@@ -1312,6 +1312,11 @@ function RichTextEditorBase({
           ref={containerRef}
           className={cn(
             !borderless && 'overflow-hidden rounded-md border border-input bg-background',
+            // The editable area sets focus:outline-none, so a bordered editor
+            // shows the v6.6 focus ring on its frame while the text has focus
+            // (a borderless editor's card does the same, e.g. the composer).
+            !borderless &&
+              'has-[.ProseMirror-focused]:outline-2 has-[.ProseMirror-focused]:outline-offset-2 has-[.ProseMirror-focused]:outline-(--ds-color-interactive-focus-ring)',
             disabled && 'opacity-50 cursor-not-allowed',
             className
           )}

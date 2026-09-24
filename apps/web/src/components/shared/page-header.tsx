@@ -45,7 +45,12 @@ export function PageHeader({
           >
             {title}
           </h1>
-          {description && <p className="text-xs text-muted-foreground">{description}</p>}
+          {/* Balanced, like the settings cards, so a description that wraps at
+              phone widths never strands a short final line (v6.6 short-copy
+              rule; measured at 320 and 390px on the statuses page). */}
+          {description && (
+            <p className="text-xs text-balance text-muted-foreground">{description}</p>
+          )}
         </div>
       </div>
       {action}

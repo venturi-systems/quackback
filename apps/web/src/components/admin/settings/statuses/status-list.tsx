@@ -486,80 +486,95 @@ function SortableStatusItem({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/50 group"
+      // The actions wrap under the name when the row is narrow, so a status
+      // name keeps a readable width instead of breaking word by word.
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1.5 px-2 rounded-md hover:bg-muted/50 group"
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="touch-none cursor-grab active:cursor-grabbing"
-      >
-        <Bars3Icon className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100" />
-      </button>
+      <div className="flex min-w-48 flex-1 items-center gap-2">
+        {/* 24px targets (WCAG 2.5.8) around the 14px grip and the 12px color
+            dot; on a coarse pointer the global rule makes them 44px. */}
+        <button
+          {...attributes}
+          {...listeners}
+          aria-label={`Reorder ${status.name}`}
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-md touch-none cursor-grab active:cursor-grabbing"
+        >
+          <Bars3Icon className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100" />
+        </button>
 
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            className="h-3 w-3 rounded-full shrink-0 cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-muted-foreground/50"
-            style={{ backgroundColor: status.color }}
-          />
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-2 space-y-2" align="start">
-          <ColorPickerGrid selectedColor={status.color} onColorChange={onColorChange} />
-          <ColorHexInput color={status.color} onColorChange={onColorChange} />
-        </PopoverContent>
-      </Popover>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              aria-label={`Change the color of ${status.name}`}
+              className="group/color inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full"
+            >
+              <span
+                className="h-3 w-3 rounded-full group-hover/color:ring-2 group-hover/color:ring-offset-1 group-hover/color:ring-muted-foreground/50"
+                style={{ backgroundColor: status.color }}
+              />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-2 space-y-2" align="start">
+            <ColorPickerGrid selectedColor={status.color} onColorChange={onColorChange} />
+            <ColorHexInput color={status.color} onColorChange={onColorChange} />
+          </PopoverContent>
+        </Popover>
 
-      <span className="text-sm flex-1 flex items-center gap-1.5">
-        {status.name}
-        {status.isDefault && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <LockClosedIcon className="h-3 w-3 text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Default status for new posts and cannot be removed</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+        <span className="text-sm flex-1 flex items-center gap-1.5">
+          {status.name}
+          {status.isDefault && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <LockClosedIcon className="h-3 w-3 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Default status for new posts and cannot be removed</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </span>
+      </div>
+
+      <div className="ms-auto flex items-center gap-2">
+        {/* Edit button: revealed on hover, and always shown to keyboard focus
+            and to touch, where there is no hover. */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+          onClick={onEdit}
+          title="Edit status"
+        >
+          <PencilSquareIcon className="h-3.5 w-3.5" />
+        </Button>
+
+        {/* Roadmap toggle */}
+        {(savingField === `roadmap-${status.id}` || savingField === `color-${status.id}`) && (
+          <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         )}
-      </span>
+        <Switch
+          checked={status.showOnRoadmap}
+          onCheckedChange={onToggleRoadmap}
+          aria-label={`Show ${status.name} on the roadmap`}
+        />
 
-      {/* Edit button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground opacity-0 group-hover:opacity-100"
-        onClick={onEdit}
-        title="Edit status"
-      >
-        <PencilSquareIcon className="h-3.5 w-3.5" />
-      </Button>
-
-      {/* Roadmap toggle */}
-      {(savingField === `roadmap-${status.id}` || savingField === `color-${status.id}`) && (
-        <ArrowPathIcon className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-      )}
-      <Switch
-        checked={status.showOnRoadmap}
-        onCheckedChange={onToggleRoadmap}
-        className="scale-90"
-      />
-
-      {/* Delete button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn(
-          'h-7 w-7 text-muted-foreground hover:text-destructive',
-          !canDelete && 'opacity-50 cursor-not-allowed'
-        )}
-        onClick={onDelete}
-        disabled={!canDelete}
-        title={getDeleteTitle()}
-      >
-        <TrashIcon className="h-3.5 w-3.5" />
-      </Button>
+        {/* Delete button */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            'h-7 w-7 text-muted-foreground hover:text-destructive',
+            !canDelete && 'opacity-50 cursor-not-allowed'
+          )}
+          onClick={onDelete}
+          disabled={!canDelete}
+          title={getDeleteTitle()}
+        >
+          <TrashIcon className="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
   )
 }
