@@ -12,18 +12,62 @@ import { UnauthorizedError, ForbiddenError, RateLimitError } from '@/lib/shared/
 import { db, principal, eq } from '@/lib/server/db'
 import type { PrincipalId } from '@quackback/ids'
 import { isAdmin, isTeamMember } from '@/lib/shared/roles'
+import { API_KEY_SCOPES, hasApiKeyScope, type ApiKeyScope } from '@/lib/shared/api-key-scopes'
 
 export type MemberRole = 'admin' | 'member' | 'user'
 
 export interface ApiAuthContext {
   /** The validated API key */
   apiKey: ApiKey
-  /** The principal ID of the key creator (for audit logging) */
+  /** The key's service principal (for attribution and audit logging) */
   principalId: PrincipalId
-  /** The role of the member who created the key */
+  /**
+   * The role the key may exercise: its stored role, capped by its creator's
+   * current role under the team identity rule (api-key-authority.ts).
+   */
   role: MemberRole
+  /** Scopes the key carries (every scope for a legacy key created without any). */
+  scopes: readonly ApiKeyScope[]
   /** Whether the request is in import mode (suppresses side effects, raises rate limit) */
   importMode: boolean
+}
+
+/** Pathname of a request URL, or '' when the URL cannot be parsed. */
+function requestPath(request: Request): string {
+  try {
+    return new URL(request.url).pathname
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * The scope a REST call needs. Administrator-only routes need
+ * `admin:workspace`; other routes need the read or write scope of their
+ * resource family, by HTTP method.
+ */
+export function requiredRestScope(request: Request, level: AuthLevel): ApiKeyScope {
+  if (level === 'admin') return 'admin:workspace'
+  const path = requestPath(request)
+  const read = request.method === 'GET' || request.method === 'HEAD'
+  if (path.startsWith('/api/v1/help-center')) return read ? 'read:article' : 'write:article'
+  if (path.startsWith('/api/v1/conversations')) return read ? 'read:chat' : 'write:chat'
+  if (path.startsWith('/api/v1/changelog') && !read) return 'write:changelog'
+  return read ? 'read:feedback' : 'write:feedback'
+}
+
+/**
+ * Status changes email subscribers, so only a signed-in team member makes
+ * one. No API key or MCP client can, whatever its scopes (landing-page#2309).
+ */
+export const STATUS_CHANGE_REFUSAL =
+  'Status changes are made by a signed-in team member in the admin inbox. API keys and agents cannot change a status.'
+
+/** Refuse a request body that would set or change a post status. */
+export function assertNoStatusChange(statusId: unknown): void {
+  if (statusId !== undefined && statusId !== null) {
+    throw new ForbiddenError('STATUS_CHANGE_NOT_ALLOWED', STATUS_CHANGE_REFUSAL)
+  }
 }
 
 /**
@@ -66,13 +110,16 @@ export async function requireApiKey(request: Request): Promise<ApiAuthContext | 
     columns: { role: true },
   })
 
-  // Default to most restrictive role if principal not found
-  const role = (principalRecord?.role as MemberRole) ?? 'user'
+  // The key's stored role, capped by its creator's current role under the
+  // team identity rule. A missing principal is the most restrictive role.
+  const { resolveApiKeyRole } = await import('@/lib/server/domains/api-keys/api-key-authority')
+  const role = await resolveApiKeyRole(apiKey, principalRecord?.role)
 
   return {
     apiKey,
     principalId: apiKey.principalId,
     role,
+    scopes: apiKey.scopes ?? [...API_KEY_SCOPES],
     importMode: false,
   }
 }
@@ -91,7 +138,15 @@ export type AuthLevel = 'team' | 'admin'
  */
 export async function withApiKeyAuth(
   request: Request,
-  options: { role: AuthLevel }
+  options: {
+    role: AuthLevel
+    /**
+     * Scope the call needs. Defaults to the route's resource family and HTTP
+     * method (requiredRestScope). `null` means the caller enforces scopes
+     * itself, per operation (the MCP handler does, per tool).
+     */
+    scope?: ApiKeyScope | null
+  }
 ): Promise<ApiAuthContext> {
   const clientIp = getClientIp(request)
   const wantsImportMode = request.headers.get('x-import-mode') === 'true'
@@ -115,6 +170,15 @@ export async function withApiKeyAuth(
 
   if (options.role === 'team' && !isTeamMember(auth.role)) {
     throw new ForbiddenError('FORBIDDEN', 'Team member access required for this operation')
+  }
+
+  const scope =
+    options.scope === undefined ? requiredRestScope(request, options.role) : options.scope
+  if (scope !== null && !hasApiKeyScope(auth.scopes, scope)) {
+    throw new ForbiddenError(
+      'INSUFFICIENT_SCOPE',
+      `This API key does not carry the ${scope} scope required for this operation`
+    )
   }
 
   if (wantsImportMode && isAdmin(auth.role)) {

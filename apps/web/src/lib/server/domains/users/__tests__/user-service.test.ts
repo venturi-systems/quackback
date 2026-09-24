@@ -8,7 +8,7 @@
  * - updatePortalUser: update existing user (mocked DB)
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { PrincipalId, UserId } from '@quackback/ids'
 
 // --- Mock tracking ---
@@ -49,15 +49,14 @@ function createUpdateChain() {
 
 const mockFindFirst = vi.fn()
 const mockSelectFrom = vi.fn()
+const mockPrincipalFindFirst = vi.fn()
 
 vi.mock('@/lib/server/db', () => ({
   db: {
     query: {
       user: { findFirst: (...args: unknown[]) => mockFindFirst(...args) },
       principal: {
-        findFirst: vi.fn().mockResolvedValue({
-          id: 'principal_abc' as PrincipalId,
-        }),
+        findFirst: (...args: unknown[]) => mockPrincipalFindFirst(...args),
       },
     },
     insert: vi.fn(() => createInsertChain()),
@@ -124,6 +123,13 @@ vi.mock('@/lib/shared/errors', () => ({
       this.code = code
     }
   },
+  ForbiddenError: class ForbiddenError extends Error {
+    code: string
+    constructor(code: string, message: string) {
+      super(message)
+      this.code = code
+    }
+  },
 }))
 
 describe('user.service', () => {
@@ -131,6 +137,13 @@ describe('user.service', () => {
     insertValuesCalls.length = 0
     updateSetCalls.length = 0
     vi.clearAllMocks()
+    // Pin the team domain so these cases do not depend on the runner's env.
+    vi.stubEnv('VENTURI_TEAM_EMAIL_DOMAINS', 'venturi.systems')
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_abc' as PrincipalId, role: 'user' })
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
   })
 
   // ============================================
@@ -372,6 +385,132 @@ describe('user.service', () => {
       const metadata = JSON.parse(setArgs.metadata as string)
       expect(metadata.plan).toBe('pro')
       expect(metadata).not.toHaveProperty('_externalUserId')
+    })
+  })
+
+  // ============================================
+  // Team identity lock (REST identify / user update)
+  // ============================================
+
+  describe('team identity lock', () => {
+    const teamAdmin = {
+      id: 'user_owner' as UserId,
+      name: 'Owner',
+      email: 'owner@venturi.systems',
+      image: null,
+      emailVerified: true,
+      metadata: null,
+      createdAt: new Date('2024-01-01'),
+    }
+
+    it('refuses to clear the verification flag of a team-domain account', async () => {
+      mockFindFirst.mockResolvedValueOnce(teamAdmin)
+      mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_owner', role: 'admin' })
+
+      const { identifyPortalUser } = await import('../user.identify')
+      await expect(
+        identifyPortalUser({ email: 'owner@venturi.systems', emailVerified: false })
+      ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_LOCKED' })
+
+      // Nothing was written: the flag and the role are unchanged.
+      expect(updateSetCalls).toHaveLength(0)
+      expect(insertValuesCalls).toHaveLength(0)
+    })
+
+    it('refuses to change the flag of a stored team role outside the team domains', async () => {
+      mockFindFirst.mockResolvedValueOnce({
+        ...teamAdmin,
+        id: 'user_legacy' as UserId,
+        email: 'legacy-admin@example.com',
+      })
+      mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_legacy', role: 'admin' })
+
+      const { identifyPortalUser } = await import('../user.identify')
+      await expect(
+        identifyPortalUser({ email: 'legacy-admin@example.com', emailVerified: false })
+      ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_LOCKED' })
+      expect(updateSetCalls).toHaveLength(0)
+    })
+
+    it('refuses to mark an unverified team-domain address verified', async () => {
+      mockFindFirst.mockResolvedValueOnce({
+        ...teamAdmin,
+        id: 'user_bootstrap' as UserId,
+        email: 'bootstrap@venturi.systems',
+        emailVerified: false,
+      })
+      mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_bootstrap', role: 'user' })
+
+      const { identifyPortalUser } = await import('../user.identify')
+      await expect(
+        identifyPortalUser({ email: 'bootstrap@venturi.systems', emailVerified: true })
+      ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_LOCKED' })
+      expect(updateSetCalls).toHaveLength(0)
+    })
+
+    it('refuses to create an account at a team domain', async () => {
+      mockFindFirst.mockResolvedValueOnce(undefined)
+
+      const { identifyPortalUser } = await import('../user.identify')
+      await expect(
+        identifyPortalUser({ email: 'newhire@venturi.systems', emailVerified: true })
+      ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_LOCKED' })
+      await expect(identifyPortalUser({ email: 'NewHire@Venturi.Systems' })).rejects.toMatchObject({
+        code: 'TEAM_IDENTITY_LOCKED',
+      })
+      expect(insertValuesCalls).toHaveLength(0)
+    })
+
+    it('still updates a team account when the flag is left as it is', async () => {
+      mockFindFirst.mockResolvedValueOnce(teamAdmin).mockResolvedValueOnce(teamAdmin)
+      mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_owner', role: 'admin' })
+
+      const { identifyPortalUser } = await import('../user.identify')
+      await identifyPortalUser({
+        email: 'owner@venturi.systems',
+        name: 'Owner Renamed',
+        emailVerified: true,
+      })
+
+      const setArgs = updateSetCalls[0][0] as Record<string, unknown>
+      expect(setArgs.name).toBe('Owner Renamed')
+      expect(setArgs).not.toHaveProperty('emailVerified')
+    })
+
+    it('still lets a customer account outside the team domains change its flag', async () => {
+      const customer = {
+        ...teamAdmin,
+        id: 'user_customer' as UserId,
+        email: 'customer@example.com',
+        emailVerified: false,
+      }
+      mockFindFirst.mockResolvedValueOnce(customer).mockResolvedValueOnce(customer)
+
+      const { identifyPortalUser } = await import('../user.identify')
+      await identifyPortalUser({ email: 'customer@example.com', emailVerified: true })
+
+      const setArgs = updateSetCalls[0][0] as Record<string, unknown>
+      expect(setArgs.emailVerified).toBe(true)
+    })
+
+    it('updatePortalUser refuses to change the flag of a team-domain address', async () => {
+      mockSelectFrom.mockReturnValueOnce({
+        where: () => ({
+          limit: async () => [{ principalId: 'principal_bootstrap', userId: 'user_bootstrap' }],
+        }),
+      })
+      mockFindFirst.mockResolvedValueOnce({
+        ...teamAdmin,
+        id: 'user_bootstrap' as UserId,
+        email: 'bootstrap@venturi.systems',
+        emailVerified: false,
+      })
+
+      const { updatePortalUser } = await import('../user.identify')
+      await expect(
+        updatePortalUser('principal_bootstrap' as PrincipalId, { emailVerified: true })
+      ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_LOCKED' })
+      expect(updateSetCalls).toHaveLength(0)
     })
   })
 })

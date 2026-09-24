@@ -8,7 +8,11 @@
 import { db, eq, and, principal, user } from '@/lib/server/db'
 import type { PrincipalId, UserId } from '@quackback/ids'
 import { generateId } from '@quackback/ids'
-import { NotFoundError } from '@/lib/shared/errors'
+import { ForbiddenError, NotFoundError } from '@/lib/shared/errors'
+import {
+  isTeamDomainEmail,
+  TEAM_IDENTITY_LOCKED_MESSAGE,
+} from '@/lib/server/domains/principals/team-identity'
 import type {
   IdentifyPortalUserInput,
   IdentifyPortalUserResult,
@@ -24,11 +28,42 @@ import {
   validateInputAttributes,
 } from './user.attributes'
 
+/** True when the user's principal holds a stored team role (admin or member). */
+async function holdsTeamRole(userId: UserId): Promise<boolean> {
+  const row = await db.query.principal.findFirst({
+    where: eq(principal.userId, userId),
+    columns: { role: true },
+  })
+  return row?.role === 'admin' || row?.role === 'member'
+}
+
+/**
+ * The team identity rule reads `user.emailVerified` (team-identity.ts). An API
+ * key must not be able to set it for a team account or a team-domain address:
+ * clearing it would switch off a working administrator, and setting it would
+ * stand in for a verification Google or GitHub never made. A request that
+ * leaves the flag as it is stays allowed, so idempotent callers keep working.
+ */
+async function assertVerificationWritable(
+  record: { id: UserId; email: string | null; emailVerified: boolean },
+  requested: boolean | undefined
+): Promise<void> {
+  if (requested === undefined || requested === record.emailVerified) return
+  if (isTeamDomainEmail(record.email) || (await holdsTeamRole(record.id))) {
+    throw new ForbiddenError('TEAM_IDENTITY_LOCKED', TEAM_IDENTITY_LOCKED_MESSAGE)
+  }
+}
+
 /**
  * Identify (create or update) a portal user by email.
  *
  * - If the user exists: update name, image, emailVerified, and merge attributes.
- * - If the user does not exist: create user + principal with role='user'.
+ *   The verification flag of a team account or team-domain address cannot be
+ *   changed here (TEAM_IDENTITY_LOCKED).
+ * - If the user does not exist: create user + principal with role='user'. An
+ *   address at a team domain is refused (TEAM_IDENTITY_LOCKED): that account is
+ *   created by its owner's first Google or GitHub sign-in, which an unverified
+ *   row made here would block.
  *
  * Attributes must be configured in Settings > User Attributes before they can be set.
  */
@@ -50,6 +85,8 @@ export async function identifyPortalUser(
     metadata: string | null
     createdAt: Date
   }) {
+    await assertVerificationWritable(record, input.emailVerified)
+
     const userUpdates: Record<string, unknown> = {}
     if (input.name !== undefined && input.name !== record.name) userUpdates.name = input.name
     if (input.image !== undefined && input.image !== record.image) userUpdates.image = input.image
@@ -105,6 +142,10 @@ export async function identifyPortalUser(
   if (userRecord) {
     userRecord = await applyUpdates(userRecord)
   } else {
+    if (isTeamDomainEmail(normalizedEmail)) {
+      throw new ForbiddenError('TEAM_IDENTITY_LOCKED', TEAM_IDENTITY_LOCKED_MESSAGE)
+    }
+
     const initialMeta: Record<string, unknown> = { ...validAttrs }
     if (input.externalId) initialMeta[EXTERNAL_ID_KEY] = input.externalId
     const metadata = Object.keys(initialMeta).length > 0 ? JSON.stringify(initialMeta) : null
@@ -208,6 +249,10 @@ export async function updatePortalUser(
   if (!userRecord) {
     throw new NotFoundError('MEMBER_NOT_FOUND', 'User record not found')
   }
+
+  // Only role='user' principals reach here, so the team-role half of the check
+  // cannot fire; the team-domain half still guards the verification flag.
+  await assertVerificationWritable(userRecord, input.emailVerified)
 
   const userUpdates: Record<string, unknown> = {}
   if (input.name !== undefined && input.name !== userRecord.name) userUpdates.name = input.name

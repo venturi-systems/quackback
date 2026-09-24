@@ -5,7 +5,6 @@ import type { Session, PrincipalType } from '@/lib/server/auth/session'
 import type { TenantSettings } from '@/lib/server/domains/settings'
 import type { SessionId, UserId } from '@quackback/ids'
 import { redactTenantSettingsForClient } from '@/lib/shared/redact-portal-config'
-import { effectiveRole } from '@/lib/shared/roles'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'bootstrap' })
@@ -72,15 +71,33 @@ async function getSessionAndRole(): Promise<{
     // api-key.service.ts, auth/index.ts anon-link) invalidate explicitly;
     // the 5min TTL backstops anything we miss.
     const cacheKey = CACHE_KEYS.PRINCIPAL_BY_USER(userId)
-    let principalRecord = await cacheGet<{ type: string; role: string }>(cacheKey)
+    let principalRecord = await cacheGet<{ id?: string; type: string; role: string }>(cacheKey)
     if (!principalRecord) {
       principalRecord =
         (await db.query.principal.findFirst({
           where: eq(principal.userId, userId),
-          columns: { type: true, role: true },
+          columns: { id: true, type: true, role: true },
         })) ?? null
       if (principalRecord) await cacheSet(cacheKey, principalRecord, 300)
     }
+
+    // Same rule as requireAuth: a team role counts only on a human principal
+    // whose identity satisfies the team identity rule, and a designated
+    // address is promoted on this request. The cache holds the stored role
+    // only, so the identity is always checked fresh for a team role.
+    const { resolveSessionRole } = await import('@/lib/server/domains/principals/session-role')
+    const role = principalRecord
+      ? await resolveSessionRole(
+          {
+            id: principalRecord.id ?? userId,
+            role: principalRecord.role,
+            type: principalRecord.type,
+            userId,
+          },
+          session.user,
+          headers
+        )
+      : null
 
     return {
       session: {
@@ -103,8 +120,7 @@ async function getSessionAndRole(): Promise<{
           updatedAt: session.user.updatedAt.toISOString(),
         },
       },
-      // A team role only counts on a human principal (see effectiveRole).
-      role: principalRecord ? effectiveRole(principalRecord.role, principalRecord.type) : null,
+      role,
     }
   } catch (error) {
     // During SSR, auth might fail due to env var issues

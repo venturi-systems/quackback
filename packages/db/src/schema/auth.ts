@@ -110,6 +110,12 @@ export const twoFactor = pgTable('two_factor', {
   backupCodes: text('backup_codes').notNull(),
   verified: boolean('verified').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // Better Auth 1.6.30 twoFactor account-lockout fields, written on every TOTP
+  // verify. Without them the adapter emits an empty SET and enrolment and
+  // sign-in fail with 500 (upstream QuackbackIO/quackback bcd4e6b76, #536).
+  // Added by 9001_venturi_two_factor_lockout.
+  failedVerificationCount: integer('failed_verification_count').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
 })
 
 export const session = pgTable(

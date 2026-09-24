@@ -60,6 +60,29 @@ const FILTER_EVENT_TYPES: FilterEventOption[] = [
   { label: 'Email sign-in enabled', value: 'auth.magic_link.enabled' },
   { label: 'Email sign-in disabled', value: 'auth.magic_link.disabled' },
   { label: 'Two-factor reset by admin', value: 'two_factor.reset_by_admin' },
+  // Workspace changes (landing-page#2309)
+  { group: 'Workspace', label: 'Team role changed', value: 'user.role.changed' },
+  { group: 'Workspace', label: 'Removed from team', value: 'user.removed' },
+  { group: 'Workspace', label: 'Board created', value: 'board.created' },
+  { group: 'Workspace', label: 'Board updated', value: 'board.updated' },
+  { group: 'Workspace', label: 'Board deleted', value: 'board.deleted' },
+  { group: 'Workspace', label: 'Board access changed', value: 'board.access.changed' },
+  { group: 'Workspace', label: 'Post status changed', value: 'post.status.changed' },
+  { group: 'Workspace', label: 'Status created', value: 'status.created' },
+  { group: 'Workspace', label: 'Status updated', value: 'status.updated' },
+  { group: 'Workspace', label: 'Status deleted', value: 'status.deleted' },
+  { group: 'Workspace', label: 'Statuses reordered', value: 'status.reordered' },
+  { group: 'Workspace', label: 'Settings changed', value: 'settings.changed' },
+  { group: 'Workspace', label: 'Widget secret regenerated', value: 'widget.secret.regenerated' },
+  { group: 'Developers', label: 'API key created', value: 'api_key.created' },
+  { group: 'Developers', label: 'API key rotated', value: 'api_key.rotated' },
+  { group: 'Developers', label: 'API key renamed', value: 'api_key.renamed' },
+  { group: 'Developers', label: 'API key revoked', value: 'api_key.revoked' },
+  { group: 'Developers', label: 'Webhook created', value: 'webhook.created' },
+  { group: 'Developers', label: 'Webhook updated', value: 'webhook.updated' },
+  { group: 'Developers', label: 'Webhook deleted', value: 'webhook.deleted' },
+  { group: 'Developers', label: 'Webhook secret rotated', value: 'webhook.secret_rotated' },
+  { group: 'Developers', label: 'Audit log exported', value: 'audit.exported' },
   // Portal events
   {
     group: 'Portal',
@@ -144,57 +167,6 @@ function formatTimestamp(iso: string): { date: string; time: string; full: strin
   }
 }
 
-/**
- * Render the audit-log query result as CSV.
- *
- * Exported for testability — the CSV is the operator's primary
- * offline-forensics tool, so the column set is worth pinning with
- * unit tests rather than only exercising via the click path.
- */
-export function rowsToCsv(rows: AuditEventRow[]): string {
-  const headers = [
-    'occurred_at',
-    'event_type',
-    'outcome',
-    'actor_email',
-    'actor_role',
-    'actor_type',
-    'auth_method',
-    'actor_ip',
-    'target_type',
-    'target_id',
-    'request_id',
-    'metadata',
-  ]
-  const escape = (v: unknown): string => {
-    if (v === null || v === undefined) return ''
-    const s = typeof v === 'string' ? v : JSON.stringify(v)
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const lines = [
-    headers.join(','),
-    ...rows.map((r) =>
-      [
-        r.occurredAt,
-        r.eventType,
-        r.eventOutcome,
-        r.actorEmail,
-        r.actorRole,
-        r.actorType,
-        r.authMethod,
-        r.actorIp,
-        r.targetType,
-        r.targetId,
-        r.requestId,
-        r.metadata,
-      ]
-        .map(escape)
-        .join(',')
-    ),
-  ]
-  return lines.join('\n')
-}
-
 function ActorCell({ row }: { row: AuditEventRow }) {
   // Anonymous + service principals don't have an email — fall back to
   // actorType so the row isn't a bare em-dash. This is the in-table
@@ -246,17 +218,22 @@ function OutcomeBadge({ outcome }: { outcome: AuditEventRow['eventOutcome'] }) {
   )
 }
 
-function downloadCsv(rows: AuditEventRow[]): void {
-  const csv = rowsToCsv(rows)
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+/**
+ * The server-side export URL for the current filters. The server pages
+ * through every matching row (not only the ones loaded here) and includes
+ * before and after values, as formula-safe CSV (routes/api/audit-log/export.ts).
+ */
+export function auditExportUrl(filters: {
+  eventType?: string
+  actorEmail?: string
+  from?: string
+}): string {
+  const params = new URLSearchParams()
+  if (filters.eventType) params.set('eventType', filters.eventType)
+  if (filters.actorEmail) params.set('actorEmail', filters.actorEmail)
+  if (filters.from) params.set('from', filters.from)
+  const query = params.toString()
+  return `/api/audit-log/export${query ? `?${query}` : ''}`
 }
 
 export function AuditLogPage() {
@@ -354,15 +331,15 @@ export function AuditLogPage() {
             aria-label="Filter audit events by actor email"
           />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => downloadCsv(rows)}
-          disabled={rows.length === 0}
-          className="h-9"
-        >
-          <ArrowDownTrayIcon className="size-3.5" />
-          Export CSV
+        <Button variant="outline" size="sm" className="h-9" asChild>
+          <a
+            href={auditExportUrl(filters)}
+            download
+            aria-label="Export every matching audit event as CSV"
+          >
+            <ArrowDownTrayIcon className="size-3.5" />
+            Export CSV
+          </a>
         </Button>
       </div>
 

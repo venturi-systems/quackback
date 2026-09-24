@@ -22,7 +22,7 @@ import {
   getNotificationPreferences,
   updateNotificationPreferences,
 } from '@/lib/server/domains/subscriptions/subscription.service'
-import { effectiveRole } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'user' })
@@ -145,12 +145,13 @@ export const getProfileFn = createServerFn({ method: 'GET' }).handler(
       // Get principal record to determine userType
       const principalRecord = await db.query.principal.findFirst({
         where: eq(principal.userId, session.user.id as UserId),
-        columns: { role: true, type: true },
+        columns: { id: true, role: true, type: true, userId: true },
       })
 
-      // A team role only counts on a human principal (see effectiveRole).
+      // Same rule as requireAuth: a team role counts only on a human principal
+      // whose identity satisfies the team identity rule.
       const principalRole = principalRecord
-        ? effectiveRole(principalRecord.role, principalRecord.type)
+        ? await resolveSessionRole(principalRecord, session.user)
         : undefined
       let userType: 'team' | 'portal' | undefined
       if (principalRole === 'user') {

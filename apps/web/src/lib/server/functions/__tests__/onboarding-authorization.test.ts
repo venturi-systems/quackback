@@ -16,7 +16,7 @@
  * drizzle operator shapes the code uses, so the real requireAuth and the real
  * bootstrap-claim transaction run against it.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Row = Record<string, unknown>
 type Cond =
@@ -27,11 +27,16 @@ type Cond =
 const store = vi.hoisted(() => ({
   principals: [] as Array<Record<string, unknown>>,
   users: [] as Array<Record<string, unknown>>,
+  accounts: [] as Array<Record<string, unknown>>,
   settingsWrites: [] as Array<Record<string, unknown>>,
   settingsInserts: [] as Array<Record<string, unknown>>,
   settingsRow: null as Record<string, unknown> | null,
-  session: null as null | { user: { id: string; principalType: string } },
-  authSession: null as null | { user: { id: string; email: string; name: string } },
+  session: null as null | {
+    user: { id: string; principalType: string; email?: string; emailVerified?: boolean }
+  },
+  authSession: null as null | {
+    user: { id: string; email: string; name: string; emailVerified?: boolean }
+  },
   lockCalls: 0,
 }))
 
@@ -53,6 +58,7 @@ function matches(row: Row, table: string, cond: Cond | undefined): boolean {
 function tableRows(table: string): Row[] {
   if (table === 'principal') return store.principals
   if (table === 'user') return store.users
+  if (table === 'account') return store.accounts
   return []
 }
 
@@ -65,6 +71,10 @@ function makeDb() {
     user: {
       findFirst: async ({ where }: { where?: Cond } = {}) =>
         store.users.find((r) => matches(r, 'user', where)),
+    },
+    account: {
+      findMany: async ({ where }: { where?: Cond } = {}) =>
+        store.accounts.filter((r) => matches(r, 'account', where)),
     },
     postStatuses: { findFirst: async () => ({ id: 'status_1' }) },
   }
@@ -128,6 +138,7 @@ vi.mock('@/lib/server/db', () => {
     settings: col('settings'),
     principal: col('principal'),
     user: col('user'),
+    account: col('account'),
     postStatuses: col('postStatuses'),
     eq: (c: string, val: unknown) => ({ op: 'eq', col: c, val }),
     and: (...conds: Cond[]) => ({ op: 'and', conds }),
@@ -229,9 +240,24 @@ const PERSONAS: Record<
   admin: { id: 'user_admin', role: 'admin', type: 'user' },
 }
 
+/**
+ * Seed a person. Human personas carry a verified team-domain address and a
+ * GitHub link, so they satisfy the team identity rule unless a test says not.
+ */
 function seedPrincipal(id: string, role: string, type: string) {
   store.principals.push({ id: `principal_${id}`, userId: id, role, type })
-  store.users.push({ id, isAnonymous: type === 'anonymous' })
+  seedUser(id, type === 'anonymous')
+}
+
+function seedUser(id: string, isAnonymous = false, providers: string[] = ['github']) {
+  store.users.push({
+    id,
+    isAnonymous,
+    email: `${id}@acme.example`,
+    emailVerified: !isAnonymous,
+  })
+  if (!isAnonymous)
+    for (const providerId of providers) store.accounts.push({ userId: id, providerId })
 }
 
 function actAs(persona: Persona) {
@@ -241,15 +267,25 @@ function actAs(persona: Persona) {
     return
   }
   const p = PERSONAS[persona]
-  store.session = { user: { id: p.id, principalType: p.type } }
-  store.authSession = { user: { id: p.id, email: `${p.id}@acme.example`, name: p.id } }
+  const email = `${p.id}@acme.example`
+  const emailVerified = p.type !== 'anonymous'
+  store.session = { user: { id: p.id, principalType: p.type, email, emailVerified } }
+  store.authSession = { user: { id: p.id, email, name: p.id, emailVerified } }
 }
 
 const roleOf = (userId: string) => store.principals.find((r) => r.userId === userId)?.role
 
+const savedDomains = process.env.VENTURI_TEAM_EMAIL_DOMAINS
+afterEach(() => {
+  if (savedDomains === undefined) delete process.env.VENTURI_TEAM_EMAIL_DOMAINS
+  else process.env.VENTURI_TEAM_EMAIL_DOMAINS = savedDomains
+})
+
 beforeEach(() => {
+  process.env.VENTURI_TEAM_EMAIL_DOMAINS = 'acme.example'
   store.principals.length = 0
   store.users.length = 0
+  store.accounts.length = 0
   store.settingsWrites.length = 0
   store.settingsInserts.length = 0
   store.settingsRow = { id: 'workspace_1', slug: 'venturi', name: 'Venturi', setupState: COMPLETE }
@@ -392,12 +428,42 @@ describe('saveUseCaseFn: no promotion outside the bootstrap window', () => {
     expect(store.settingsInserts).toEqual([])
   })
 
+  it('refuses the bootstrap claim for an identity that fails the team identity rule', async () => {
+    store.principals.length = 0
+    store.users.length = 0
+    store.accounts.length = 0
+    // A password-only account at the team domain: no Google or GitHub link.
+    seedUser('user_first', false, ['credential'])
+    store.settingsRow = null
+    store.session = {
+      user: {
+        id: 'user_first',
+        principalType: 'user',
+        email: 'user_first@acme.example',
+        emailVerified: true,
+      },
+    }
+    await expect(saveUseCaseFn({ data: { useCase: 'saas' } })).rejects.toMatchObject({
+      code: 'TEAM_IDENTITY_REQUIRED',
+    })
+    expect(store.principals).toEqual([])
+    expect(store.settingsInserts).toEqual([])
+  })
+
   it('creates settings on a fresh install only after the caller claimed admin', async () => {
     store.principals.length = 0
     store.users.length = 0
-    store.users.push({ id: 'user_first', isAnonymous: false })
+    store.accounts.length = 0
+    seedUser('user_first')
     store.settingsRow = null
-    store.session = { user: { id: 'user_first', principalType: 'user' } }
+    store.session = {
+      user: {
+        id: 'user_first',
+        principalType: 'user',
+        email: 'user_first@acme.example',
+        emailVerified: true,
+      },
+    }
     await saveUseCaseFn({ data: { useCase: 'saas' } })
     expect(store.principals).toEqual([
       expect.objectContaining({ userId: 'user_first', role: 'admin', type: 'user' }),

@@ -13,6 +13,9 @@ import crypto from 'crypto'
 const h = vi.hoisted(() => ({
   safeFetch: vi.fn(),
   claim: vi.fn(async (..._args: unknown[]) => true),
+  release: vi.fn(async (..._args: unknown[]) => undefined),
+  complete: vi.fn(async (..._args: unknown[]) => undefined),
+  fail: vi.fn(async (..._args: unknown[]) => undefined),
 }))
 
 // Mock the db import before importing the handler
@@ -35,7 +38,12 @@ vi.mock('@/lib/server/content/ssrf-guard', async (orig) => {
   const actual = await orig<typeof import('@/lib/server/content/ssrf-guard')>()
   return { ...actual, safeFetch: (...a: unknown[]) => h.safeFetch(...a) }
 })
-vi.mock('../hook-idempotency', () => ({ claimHookDelivery: (...a: unknown[]) => h.claim(...a) }))
+vi.mock('../hook-idempotency', () => ({
+  claimHookDelivery: (...a: unknown[]) => h.claim(...a),
+  releaseHookDelivery: (...a: unknown[]) => h.release(...a),
+  completeHookDelivery: (...a: unknown[]) => h.complete(...a),
+  failHookDelivery: (...a: unknown[]) => h.fail(...a),
+}))
 
 import { webhookHook } from '../handlers/webhook'
 import { SsrfError, TimeoutError } from '@/lib/server/content/ssrf-guard'
@@ -139,6 +147,72 @@ describe('Webhook Handler', () => {
       expect(await webhookHook.run!(event, target, config)).toMatchObject({ shouldRetry: true })
       h.safeFetch.mockResolvedValue(resp(400))
       expect(await webhookHook.run!(event, target, config)).toMatchObject({ shouldRetry: false })
+    })
+  })
+
+  // Upstream 01cd9b96b (A1): the delivery claim is an outcome-aware lease. A
+  // retryable failure must RELEASE it, or BullMQ's retry of the same job id is
+  // skipped as a duplicate and the delivery is silently lost.
+  describe('delivery lease outcomes', () => {
+    const event = {
+      id: 'evt_lease',
+      type: 'post.created',
+      timestamp: '2026-01-01T00:00:00Z',
+      actor: { type: 'user' },
+      data: { post: { id: 'post_1' } },
+    } as never
+    const target = { url: 'https://hooks.example.com/deliver' }
+    const config = { secret: 'whsec_test', webhookId: 'webhook_1' }
+    const ctx = { jobId: 'job_42' } as never
+    const resp = (status: number): Response =>
+      ({ ok: status >= 200 && status < 300, status }) as Response
+
+    beforeEach(() => {
+      vi.clearAllMocks()
+      h.claim.mockResolvedValue(true)
+    })
+
+    it('completes the lease on success', async () => {
+      h.safeFetch.mockResolvedValue(resp(200))
+      await webhookHook.run!(event, target, config, ctx)
+      expect(h.complete).toHaveBeenCalledWith('job_42')
+      expect(h.release).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['a 5xx response', () => h.safeFetch.mockResolvedValue(resp(502))],
+      ['a 429 response', () => h.safeFetch.mockResolvedValue(resp(429))],
+      ['a timeout', () => h.safeFetch.mockRejectedValue(new TimeoutError(5000))],
+    ])('releases the lease after %s so the retry delivers', async (_label, arrange) => {
+      arrange()
+      const res = await webhookHook.run!(event, target, config, ctx)
+      expect(res.shouldRetry).toBe(true)
+      expect(h.release).toHaveBeenCalledWith('job_42')
+      expect(h.fail).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['a 4xx response', () => h.safeFetch.mockResolvedValue(resp(404))],
+      ['an SSRF block', () => h.safeFetch.mockRejectedValue(new SsrfError('ssrf-rejected'))],
+    ])('fails the lease after %s (no retry)', async (_label, arrange) => {
+      arrange()
+      await webhookHook.run!(event, target, config, ctx)
+      expect(h.fail).toHaveBeenCalledWith('job_42')
+      expect(h.release).not.toHaveBeenCalled()
+    })
+
+    it('skips the POST when another attempt holds or finished the job', async () => {
+      h.claim.mockResolvedValue(false)
+      expect(await webhookHook.run!(event, target, config, ctx)).toEqual({ success: true })
+      expect(h.safeFetch).not.toHaveBeenCalled()
+    })
+
+    it('keeps the event id stable across attempts', async () => {
+      h.safeFetch.mockResolvedValue(resp(502))
+      await webhookHook.run!(event, target, config, ctx)
+      await webhookHook.run!(event, target, config, ctx)
+      const ids = h.safeFetch.mock.calls.map((call) => JSON.parse(call[1].body).id)
+      expect(ids).toEqual(['evt_lease', 'evt_lease'])
     })
   })
 

@@ -8,7 +8,8 @@ const mockPrincipalFindFirst = vi.fn()
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: vi.fn(() => (opts: unknown) => ({ options: opts })),
 }))
-vi.mock('@/lib/server/domains/api/auth', () => ({
+vi.mock('@/lib/server/domains/api/auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/server/domains/api/auth')>()),
   withApiKeyAuth: (...args: unknown[]) => mockWithApiKeyAuth(...args),
 }))
 vi.mock('@/lib/server/domains/posts/post.service', () => ({
@@ -69,6 +70,24 @@ function makeRequest(body: Record<string, unknown>): Request {
     body: JSON.stringify(body),
   })
 }
+
+describe('POST /api/v1/posts never sets a status', () => {
+  beforeEach(() => {
+    mockWithApiKeyAuth.mockReset()
+    mockCreatePost.mockReset()
+  })
+
+  it('refuses a statusId from an API key, before creating anything', async () => {
+    mockWithApiKeyAuth.mockResolvedValue(adminAuth)
+    const res = await POST({
+      request: makeRequest({ boardId: BOARD_ID, title: 'T', statusId: 'status_done' }),
+    })
+    expect(res.status).toBe(403)
+    const json = await res.json()
+    expect(json.error.message).toMatch(/cannot change a status/)
+    expect(mockCreatePost).not.toHaveBeenCalled()
+  })
+})
 
 describe('POST /api/v1/posts authorPrincipalId override', () => {
   beforeEach(() => {

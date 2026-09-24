@@ -21,6 +21,7 @@ import {
   searchMembers,
   updateMemberRole,
   removeTeamMember,
+  designateTeamMember,
 } from '@/lib/server/domains/principals/principal.service'
 import { listPortalUsers, removePortalUser } from '@/lib/server/domains/users/user.service'
 import { getPortalUserDetail } from '@/lib/server/domains/users/user.detail'
@@ -287,6 +288,38 @@ export const updateMemberRoleFn = createServerFn({ method: 'POST' })
       return { principalId: data.principalId, role: data.role }
     } catch (error) {
       log.error({ err: error }, 'update member role failed')
+      throw error
+    }
+  })
+
+/**
+ * Admin > Team designation: give an existing account a team role.
+ *
+ * The account must already exist (the person signed in once) and its identity
+ * must satisfy the team identity rule: a verified address at a team domain
+ * from a linked Google or GitHub account. The server refuses anything else
+ * with TEAM_IDENTITY_REQUIRED, whatever the UI offered.
+ */
+export const designateTeamMemberFn = createServerFn({ method: 'POST' })
+  .validator(updatePrincipalRoleSchema)
+  .handler(async ({ data }) => {
+    log.info({ principal_id: data.principalId, role: data.role }, 'designate team member')
+    try {
+      const auth = await requireAuth({ roles: ['admin'] })
+      const { actorFromAuth } = await import('@/lib/server/audit/log')
+
+      const result = await designateTeamMember(
+        data.principalId as PrincipalId,
+        data.role,
+        auth.principal.id,
+        actorFromAuth(auth),
+        getRequestHeaders()
+      )
+
+      log.info({ principal_id: data.principalId, role: data.role }, 'team member designated')
+      return { principalId: data.principalId, role: result.newRole }
+    } catch (error) {
+      log.error({ err: error }, 'designate team member failed')
       throw error
     }
   })
@@ -653,6 +686,10 @@ export const getPortalUserFn = createServerFn({ method: 'GET' })
     }
   })
 
+/** Refusal text when an administrator types a team-domain address onto a portal user. */
+const TEAM_ADDRESS_ADMIN_MESSAGE =
+  'An address at a team domain gets its account only from its owner signing in with Google or GitHub. Leave the email empty, or invite the person from Admin > Team.'
+
 /**
  * Update a portal user's details (admin-only).
  */
@@ -672,9 +709,41 @@ export const updatePortalUserFn = createServerFn({ method: 'POST' })
       // Look up the principal to get userId
       const p = await db.query.principal.findFirst({
         where: eq(principal.id, data.principalId as PrincipalId),
-        columns: { userId: true },
+        columns: { userId: true, role: true },
       })
       if (!p?.userId) throw new Error('User not found')
+
+      // A team member's address is the identity the team identity rule
+      // verified through Google or GitHub. Editing it here would either
+      // forge that identity or silently revoke the member's team access
+      // (possibly the last administrator's), so it is refused.
+      if (data.email !== undefined && (p.role === 'admin' || p.role === 'member')) {
+        const { ForbiddenError } = await import('@/lib/shared/errors')
+        throw new ForbiddenError(
+          'TEAM_EMAIL_LOCKED',
+          "A team member's email address comes from their Google or GitHub account and cannot be edited here."
+        )
+      }
+
+      // An address at a team domain gets its account only from its owner's
+      // Google or GitHub sign-in. Typing one onto a contributor here would
+      // leave an unverified row on that address, which Better Auth then
+      // refuses to link the owner's own Google or GitHub sign-in to. Keeping
+      // the address the account already has is fine.
+      if (data.email) {
+        const normalized = data.email.toLowerCase().trim()
+        const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+        if (isTeamDomainEmail(normalized)) {
+          const current = await db.query.user.findFirst({
+            where: eq(user.id, p.userId),
+            columns: { email: true },
+          })
+          if ((current?.email ?? null) !== normalized) {
+            const { ForbiddenError } = await import('@/lib/shared/errors')
+            throw new ForbiddenError('TEAM_IDENTITY_LOCKED', TEAM_ADDRESS_ADMIN_MESSAGE)
+          }
+        }
+      }
 
       // Build update set
       const updates: Record<string, unknown> = {}
@@ -694,6 +763,16 @@ export const updatePortalUserFn = createServerFn({ method: 'POST' })
           updates.email = normalized
         } else {
           updates.email = null
+        }
+        // An address an administrator typed was never verified by anyone. A
+        // changed address must not inherit the old one's verification: the
+        // team identity rule reads it, and so do provider account links.
+        const current = await db.query.user.findFirst({
+          where: eq(user.id, p.userId),
+          columns: { email: true },
+        })
+        if ((current?.email ?? null) !== (updates.email ?? null)) {
+          updates.emailVerified = false
         }
       }
 
@@ -722,6 +801,7 @@ export const updatePortalUserFn = createServerFn({ method: 'POST' })
 /**
  * Create a new portal user (admin-only).
  * Used by the AuthorSelector when the admin wants to attribute feedback to someone not yet in the system.
+ * An address at a team domain is refused (TEAM_IDENTITY_LOCKED): the author can be created without one.
  */
 const createPortalUserSchema = z.object({
   name: z.string().min(1).max(200),
@@ -738,6 +818,11 @@ export const createPortalUserFn = createServerFn({ method: 'POST' })
       // Check email uniqueness if provided
       if (data.email) {
         const normalized = data.email.toLowerCase().trim()
+        const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+        if (isTeamDomainEmail(normalized)) {
+          const { ForbiddenError } = await import('@/lib/shared/errors')
+          throw new ForbiddenError('TEAM_IDENTITY_LOCKED', TEAM_ADDRESS_ADMIN_MESSAGE)
+        }
         const existing = await db
           .select({ id: user.id })
           .from(user)
@@ -835,6 +920,20 @@ export const sendInvitationFn = createServerFn({ method: 'POST' })
       await enforceSeatLimit()
 
       const email = data.email.toLowerCase()
+
+      // A team invitation can only ever be honoured for an address at a team
+      // domain (the team identity rule), so refuse any other address here
+      // instead of sending an invitation that could never take effect.
+      const { isTeamDomainEmail } = await import('@/lib/server/domains/principals/team-identity')
+      if (!isTeamDomainEmail(email)) {
+        const { teamIdentityRequiredMessage } =
+          await import('@/lib/server/domains/principals/team-designation')
+        const { ForbiddenError } = await import('@/lib/shared/errors')
+        throw new ForbiddenError(
+          'TEAM_IDENTITY_REQUIRED',
+          teamIdentityRequiredMessage('email_domain')
+        )
+      }
 
       // Parallelize invitation and user validation queries
       const [existingInvitation, existingUser] = await Promise.all([

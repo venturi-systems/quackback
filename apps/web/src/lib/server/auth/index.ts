@@ -1,4 +1,8 @@
 import { betterAuth } from 'better-auth'
+import {
+  ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION,
+  OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES,
+} from './oauth-client-defaults'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import {
   anonymous,
@@ -16,6 +20,7 @@ import { generateId } from '@quackback/ids'
 import { config } from '@/lib/server/config'
 import { logger } from '@/lib/server/logger'
 import type { GenericOAuthConfig } from './build-oauth-configs'
+import { linkingTrustedProviderIds } from './linking-trust'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 
 const log = logger.child({ component: 'auth-config' })
@@ -121,7 +126,6 @@ async function createAuth() {
 
   // Build socialProviders config from DB-stored credentials
   const socialProviders: Record<string, Record<string, unknown>> = {}
-  const trustedProviders: string[] = []
   const genericOAuthConfigs: GenericOAuthConfig[] = []
 
   // Tier limits + tenant settings are independent reads — fire them
@@ -146,7 +150,6 @@ async function createAuth() {
     buildLoginHintParams,
   })
   genericOAuthConfigs.push(...oidcConfigs)
-  for (const c of oidcConfigs) trustedProviders.push(c.providerId)
 
   // Layer A registration filter: an OAuth provider is registered on
   // the Better-Auth instance only if creds exist AND `authConfig.oauth`
@@ -185,8 +188,16 @@ async function createAuth() {
       }
     }
     socialProviders[provider.id] = providerConfig
-    trustedProviders.push(provider.id)
   }
+
+  // Built-in social providers (Google, GitHub, ...) are deliberately NOT
+  // trusted for account linking; only administrator-registered OIDC providers
+  // are. See linking-trust.ts for why a trusted social provider would let an
+  // unverified address sign in as an existing (administrator) account.
+  const trustedProviders = linkingTrustedProviderIds({
+    oidcProviderIds: oidcConfigs.map((c) => c.providerId),
+    socialProviderIds: Object.keys(socialProviders),
+  })
 
   // BASE_URL is required for auth callbacks and redirects
   const baseURL = config.baseUrl
@@ -283,7 +294,9 @@ async function createAuth() {
     },
 
     // Account linking - allow users to link multiple OAuth providers to their account
-    // This is needed when a user signs up with email OTP, then later signs in with GitHub/Google
+    // This is needed when a user signs up with email OTP, then later signs in with GitHub/Google.
+    // Only administrator-registered OIDC providers are trusted; Google and GitHub
+    // link only when they report the address verified (linking-trust.ts).
     account: {
       accountLinking: {
         enabled: true,
@@ -408,14 +421,13 @@ async function createAuth() {
         consentPage: '/oauth/consent',
 
         // MCP clients may register themselves, but only from a signed-in
-        // human session by default (anonymous sessions are refused in
-        // hooks.before). Unauthenticated registration lets any internet
-        // caller create oauth_client rows, so it is opt-in per deployment:
-        // OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION=true restores it for
-        // MCP clients that register before sign-in. API keys (qb_...) remain
-        // the supported agent/service identity for /api/mcp.
+        // human session (anonymous sessions are refused in hooks.before).
+        // Registration without a session would let any internet caller create
+        // oauth_client rows, so this fork never allows it and offers no switch
+        // to allow it (landing-page#2309). API keys (qb_...) remain the
+        // supported agent/service identity for /api/mcp.
         allowDynamicClientRegistration: true,
-        allowUnauthenticatedClientRegistration: config.oauthAllowUnauthenticatedClientRegistration,
+        allowUnauthenticatedClientRegistration: ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION,
 
         // Quackback-specific scopes
         scopes: [
@@ -432,20 +444,10 @@ async function createAuth() {
           'write:chat',
         ],
 
-        // Default scopes for dynamically registered clients
-        clientRegistrationDefaultScopes: [
-          'openid',
-          'profile',
-          'email',
-          'read:feedback',
-          'offline_access',
-          'write:feedback',
-          'write:changelog',
-          'read:article',
-          'write:article',
-          'read:chat',
-          'write:chat',
-        ],
+        // Default scopes for dynamically registered clients: read-only. A
+        // client that needs a write scope must ask for it at registration or
+        // authorization, and the user consents to it explicitly.
+        clientRegistrationDefaultScopes: [...OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES],
 
         // MCP endpoint is a valid token audience
         validAudiences: [`${baseURL}/api/mcp`],

@@ -25,6 +25,9 @@ export interface McpAuthContext {
   email?: string
   role: 'admin' | 'member' | 'user'
   authMethod: 'oauth' | 'api-key'
-  /** Granted scopes. OAuth tokens have limited scopes; API keys get all. */
+  /**
+   * Granted scopes. OAuth tokens carry the scopes the user consented to; an
+   * API key carries its own scopes (a legacy key without scopes keeps all).
+   */
   scopes: McpScope[]
 }

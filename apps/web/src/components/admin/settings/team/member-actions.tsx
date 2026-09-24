@@ -33,6 +33,11 @@ interface MemberActionsProps {
   memberName: string
   memberRole: 'admin' | 'member'
   isLastAdmin: boolean
+  /**
+   * False when the member's identity fails the team identity rule: the server
+   * would refuse a promotion to admin, so the menu does not offer it.
+   */
+  canPromote?: boolean
 }
 
 export function MemberActions({
@@ -41,6 +46,7 @@ export function MemberActions({
   memberName,
   memberRole,
   isLastAdmin,
+  canPromote = true,
 }: MemberActionsProps) {
   const queryClient = useQueryClient()
   const [isLoading, setIsLoading] = useState(false)
@@ -50,7 +56,8 @@ export function MemberActions({
   const [forceSignOutDialogOpen, setForceSignOutDialogOpen] = useState(false)
 
   const newRole = memberRole === 'admin' ? 'member' : 'admin'
-  const canChangeRole = !(memberRole === 'admin' && isLastAdmin)
+  const canChangeRole =
+    !(memberRole === 'admin' && isLastAdmin) && (newRole !== 'admin' || canPromote)
   const canRemove = !(memberRole === 'admin' && isLastAdmin)
 
   const handleRoleChange = async () => {

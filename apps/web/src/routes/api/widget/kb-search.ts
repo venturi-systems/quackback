@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { isPublicHelpCenterReadable } from '@/lib/server/functions/help-center'
 import { hybridSearch } from '@/lib/server/domains/help-center/help-center-search.service'
 import { logger } from '@/lib/server/logger'
+import { widgetDisabledResponse } from '@/lib/server/widget/widget-enabled'
 
 const log = logger.child({ component: 'widget-kb-search' })
 
@@ -9,6 +10,8 @@ export const Route = createFileRoute('/api/widget/kb-search')({
   server: {
     handlers: {
       GET: async ({ request }) => {
+        const disabled = await widgetDisabledResponse(corsHeaders())
+        if (disabled) return disabled
         // Same gate as the portal help-center reads: flag + config enabled and
         // the caller (cookie or widget Bearer session) passes portal access.
         if (!(await isPublicHelpCenterReadable())) {

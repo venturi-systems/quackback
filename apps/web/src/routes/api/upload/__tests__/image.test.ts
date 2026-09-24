@@ -19,6 +19,16 @@ vi.mock('@/lib/server/db', () => ({
   eq: vi.fn(),
 }))
 
+// The role rule (human principal + team identity rule) is session-role.ts,
+// covered by session-role.test.ts; here it passes the stored role through.
+const mockResolveSessionRole = vi.fn(async (record: { role: string; type?: string | null }) =>
+  record.type && record.type !== 'user' ? 'user' : record.role
+)
+vi.mock('@/lib/server/domains/principals/session-role', () => ({
+  resolveSessionRole: (record: { role: string; type?: string | null }) =>
+    mockResolveSessionRole(record),
+}))
+
 vi.mock('@/lib/server/storage/s3', async () => {
   const { createS3MockFactory } = await import('../../__tests__/s3-upload-mock')
   return createS3MockFactory()
@@ -72,6 +82,15 @@ describe('POST /api/upload/image', () => {
     vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(
       mockPrincipal({ role: 'admin', type: 'anonymous' })
     )
+    const res = await handleAdminUpload({ request: makeRequest() })
+    expect(res.status).toBe(403)
+    expect(uploadObject).not.toHaveBeenCalled()
+  })
+
+  it('returns 403 for a stored admin the team identity rule refuses', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(adminSession)
+    vi.mocked(db.query.principal.findFirst).mockResolvedValueOnce(adminPrincipal)
+    mockResolveSessionRole.mockResolvedValueOnce('user')
     const res = await handleAdminUpload({ request: makeRequest() })
     expect(res.status).toBe(403)
     expect(uploadObject).not.toHaveBeenCalled()

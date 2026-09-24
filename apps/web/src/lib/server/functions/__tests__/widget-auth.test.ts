@@ -31,6 +31,18 @@ vi.mock('@/lib/server/db', () => ({
   gt: vi.fn(),
 }))
 
+// The role rule (human principal + team identity rule) is session-role.ts,
+// covered by session-role.test.ts. Here it passes the stored role through
+// (human cap only) so the suite stays about widget-session plumbing.
+const mockResolveSessionRole = vi.fn(
+  async (record: { role: string; type?: string | null }, _user?: unknown) =>
+    record.type && record.type !== 'user' ? 'user' : record.role
+)
+vi.mock('@/lib/server/domains/principals/session-role', () => ({
+  resolveSessionRole: (record: { role: string; type?: string | null }, user: unknown) =>
+    mockResolveSessionRole(record, user as never),
+}))
+
 vi.mock('@quackback/ids', () => ({
   generateId: vi.fn(() => 'principal_mock123'),
 }))
@@ -154,5 +166,24 @@ describe('getWidgetSession', () => {
     expect(result?.user.image).toBeNull()
     expect(result?.principal.role).toBe('member')
     expect(result?.principal.type).toBe('user')
+    // The widget session resolves its role with the same rule as requireAuth.
+    expect(mockResolveSessionRole).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'member', type: 'user' }),
+      expect.objectContaining({ id: 'user_1', email: 'test@test.com' })
+    )
+  })
+
+  it('reports a stored team role the identity rule refuses as a contributor', async () => {
+    mockGet.mockReturnValue('Bearer valid-token-123')
+    mockSessionFindFirst.mockResolvedValue({
+      userId: 'user_1',
+      user: { id: 'user_1', email: 'admin@gmail.com', name: 'A', image: null },
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_1', role: 'admin', type: 'user' })
+    mockResolveSessionRole.mockResolvedValueOnce('user')
+
+    const result = await getWidgetSession()
+
+    expect(result?.principal.role).toBe('user')
   })
 })

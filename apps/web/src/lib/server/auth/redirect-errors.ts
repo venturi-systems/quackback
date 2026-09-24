@@ -40,6 +40,7 @@ export type AuthBlockCode =
   | 'OAUTH_CALLBACK_ERROR'
   | 'oauth_signin_error'
   | 'not_team_member'
+  | 'team_identity_required'
 
 export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
   password_method_not_allowed:
@@ -61,6 +62,8 @@ export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
     'Sign-in failed. Your identity provider rejected the request — check the app configuration in your IdP and try again.',
   not_team_member:
     "This account doesn't have team access. Team membership is by invitation only. Please contact your administrator.",
+  team_identity_required:
+    'Team access needs a verified team email address from a Google or GitHub account. Sign in with Google or GitHub using your team address, or ask an administrator to check your account in Admin > Team.',
 }
 
 /**

@@ -23,7 +23,10 @@ import {
   asc,
 } from '@/lib/server/db'
 import type { BoardId, PostId } from '@quackback/ids'
-import { NotFoundError, ValidationError, ConflictError } from '@/lib/shared/errors'
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '@/lib/shared/errors'
+import { config } from '@/lib/server/config'
+import { isPathManaged } from '@/lib/server/config-file/managed-paths'
+import { boardAccessManagedPath } from '@/lib/shared/policy-managed-paths'
 import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './board.types'
 import { slugify } from '@/lib/shared/utils'
 import { type BoardAccess } from '@/lib/server/db'
@@ -149,6 +152,15 @@ export async function createBoard(input: CreateBoardInput): Promise<Board> {
 }
 
 /**
+ * True when POLICY_MANAGED_SETTINGS owns this board's access. Read from the
+ * environment only: board access is never a config-file managed path.
+ */
+export function isBoardAccessPolicyManaged(slug: string): boolean {
+  const managed = config.policyManagedSettings
+  return Array.isArray(managed) && isPathManaged(boardAccessManagedPath(slug), managed)
+}
+
+/**
  * Update an existing board
  */
 export async function updateBoard(id: BoardId, input: UpdateBoardInput): Promise<Board> {
@@ -204,6 +216,23 @@ export async function updateBoard(id: BoardId, input: UpdateBoardInput): Promise
         slug = newSlug
       }
     }
+  }
+
+  // DEF-35 (landing-page#2309): a board whose access an external policy owns
+  // (POLICY_MANAGED_SETTINGS `boards.<slug>.access`) is identified by its
+  // slug in that list, and the feedback reconciler identifies its boards by
+  // id plus slug. Renaming the slug would move the board out from under the
+  // lock (a later access change would pass) and break the reconciler's pair,
+  // so a managed board's slug never changes: an explicit slug change is
+  // refused and a rename keeps the slug.
+  if (slug !== existingBoard.slug && isBoardAccessPolicyManaged(existingBoard.slug)) {
+    if (input.slug !== undefined) {
+      throw new ForbiddenError(
+        'FIELD_MANAGED',
+        `The slug of board "${existingBoard.slug}" identifies it to the deployment's access policy and cannot be changed in-app.`
+      )
+    }
+    slug = existingBoard.slug
   }
 
   // Build update data

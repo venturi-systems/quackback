@@ -88,20 +88,35 @@ export const resolvePortalAccessForRequest = createServerOnlyFn(
       // Fail CLOSED on DB error: treat the session as anonymous so a lookup
       // failure never grants access to a private portal.
       let principalRecord: { type: string; role: string | null; id: string } | undefined
+      let exercisedRole: 'admin' | 'member' | 'user' | null = null
       try {
         principalRecord = await db.query.principal.findFirst({
           where: eq(principal.userId, session.user.id as UserId),
           columns: { type: true, role: true, id: true },
         })
+        // The role the caller may exercise, not the stored one: a stored team
+        // role on an identity that fails the team identity rule (for example a
+        // password-only bootstrap administrator) is a contributor here too, so
+        // it cannot take the 'team' branch of a team-only portal.
+        if (principalRecord?.role) {
+          const { resolveSessionRole } =
+            await import('@/lib/server/domains/principals/session-role')
+          exercisedRole = await resolveSessionRole(
+            { id: principalRecord.id, role: principalRecord.role, type: principalRecord.type },
+            session.user,
+            headers
+          )
+        }
       } catch {
-        // Principal lookup failed — treat caller as anonymous (fail closed).
+        // Principal lookup or role resolution failed — treat caller as
+        // anonymous (fail closed).
         isAnonymousPrincipal = true
       }
       if (!isAnonymousPrincipal) {
         if (principalRecord?.type === 'anonymous') {
           isAnonymousPrincipal = true
         }
-        role = (principalRecord?.role as 'admin' | 'member' | 'user' | null) ?? null
+        role = exercisedRole
         resolvedPrincipalId = principalRecord?.id ?? null
       }
     }

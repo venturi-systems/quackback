@@ -44,8 +44,19 @@ vi.mock('@/lib/server/audit/log', () => ({
   recordAuditEvent: (...args: unknown[]) => mockRecordAuditEvent(...args),
 }))
 
+// Team identity rule: stubbed here (team-designation.test.ts covers it). By
+// default the account qualifies for a team role.
+const mockTeamRoleGap = vi.fn(async (): Promise<string | null> => null)
+const mockChangeTeamRole = vi.fn(async (): Promise<unknown> => ({ changed: true }))
+vi.mock('@/lib/server/domains/principals/team-designation', () => ({
+  teamRoleGapForUser: () => mockTeamRoleGap(),
+  changeTeamRole: (...args: unknown[]) => mockChangeTeamRole(...(args as [])),
+}))
+
 beforeEach(() => {
   vi.clearAllMocks()
+  mockTeamRoleGap.mockResolvedValue(null)
+  mockChangeTeamRole.mockResolvedValue({ changed: true })
   mockSet.mockReturnValue({ where: mockWhere })
   mockWhere.mockResolvedValue(undefined)
   mockRecordAuditEvent.mockResolvedValue(undefined)
@@ -137,6 +148,16 @@ const callHandlerWith = async (opts: CallOpts = {}) => {
 const callHandler = (autoProvisionRole?: 'admin' | 'member' | 'user') =>
   callHandlerWith({ ssoOidc: { autoProvisionRole } })
 
+describe('handleAutoProvisionAfter -- team identity rule', () => {
+  it('refuses a team role to an OIDC account without a qualifying identity', async () => {
+    mockFindFirst.mockResolvedValue({ role: 'user' })
+    mockTeamRoleGap.mockResolvedValue('provider_missing')
+    await callHandler('admin')
+    expect(mockSet).not.toHaveBeenCalled()
+    expect(mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+})
+
 describe('handleAutoProvisionAfter -- role assignment', () => {
   it('uses autoProvisionRole=admin from config', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
@@ -206,7 +227,7 @@ describe('handleAutoProvisionAfter -- guards (no-op short-circuits)', () => {
 
 describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
   it('re-applies on every sign-in when attributeMapping.syncOnEverySignIn=true (and can demote)', async () => {
-    mockFindFirst.mockResolvedValue({ role: 'admin' })
+    mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'admin' })
     mockAccountFindFirst.mockResolvedValue({ idToken: null })
     await callHandlerWith({
       ssoOidc: {
@@ -219,11 +240,17 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
         },
       },
     })
-    expect(mockSet).toHaveBeenCalledWith({ role: 'member' })
+    // Taking admin away goes through the team-role writer (last-admin check).
+    expect(mockChangeTeamRole).toHaveBeenCalledWith({
+      principalId: 'principal_abc',
+      newRole: 'member',
+      requireTeamTarget: false,
+    })
+    expect(mockSet).not.toHaveBeenCalled()
   })
 
   it('honours a resolved role="user" under sync mode (demotes existing admin)', async () => {
-    mockFindFirst.mockResolvedValue({ role: 'admin' })
+    mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'admin' })
     mockAccountFindFirst.mockResolvedValue({ idToken: null })
     // With sync on, the resolved-from-claims role is authoritative on
     // every sign-in. attributeMapping has no rules and defaultRole='user',
@@ -240,7 +267,28 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
         },
       },
     })
-    expect(mockSet).toHaveBeenCalledWith({ role: 'user' })
+    expect(mockChangeTeamRole).toHaveBeenCalledWith(
+      expect.objectContaining({ principalId: 'principal_abc', newRole: 'user' })
+    )
+  })
+
+  it('keeps the last administrator when sync mode would demote them', async () => {
+    mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'admin' })
+    mockAccountFindFirst.mockResolvedValue({ idToken: null })
+    mockChangeTeamRole.mockRejectedValue(Object.assign(new Error('last'), { code: 'LAST_ADMIN' }))
+    await callHandlerWith({
+      ssoOidc: {
+        autoProvisionRole: 'user',
+        attributeMapping: {
+          claimPath: 'roles',
+          rules: [],
+          defaultRole: 'user',
+          syncOnEverySignIn: true,
+        },
+      },
+    })
+    expect(mockSet).not.toHaveBeenCalled()
+    expect(mockRecordAuditEvent).not.toHaveBeenCalled()
   })
 })
 

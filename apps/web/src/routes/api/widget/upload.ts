@@ -1,8 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { auth } from '@/lib/server/auth'
 import { isS3Configured, uploadImageFromFormData } from '@/lib/server/storage/s3'
+import { widgetDisabledResponse } from '@/lib/server/widget/widget-enabled'
 
 export async function handleWidgetUpload({ request }: { request: Request }): Promise<Response> {
+  const disabled = await widgetDisabledResponse()
+  if (disabled) return disabled
   // Any valid widget session may attach images — identified or anonymous. We
   // resolve the Bearer the same way server functions do: the better-auth bearer
   // plugin strips the token signature and looks up the session (a raw

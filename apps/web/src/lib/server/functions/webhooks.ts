@@ -10,6 +10,7 @@ import { requireAuth } from './auth-helpers'
 import { WEBHOOK_EVENTS } from '@/lib/server/events/integrations/webhook/constants'
 import type { WebhookId } from '@quackback/ids'
 import { logger } from '@/lib/server/logger'
+import { recordAuditSafely, sessionAuditActor } from '@/lib/server/audit/audit-safe'
 
 const log = logger.child({ component: 'webhooks' })
 
@@ -75,6 +76,32 @@ export const fetchWebhooks = createServerFn({ method: 'GET' }).handler(async () 
 // Write Operations
 // ============================================
 
+/** The webhook fields an audit row records: never its signing secret. */
+function webhookAuditView(w: {
+  url: string
+  events?: readonly string[] | null
+  boardIds?: readonly string[] | null
+  status?: string | null
+}) {
+  return {
+    url: w.url,
+    events: w.events ?? [],
+    boardIds: w.boardIds ?? null,
+    status: w.status ?? null,
+  }
+}
+
+/** Webhook state before a change, for the audit row; null if unreadable. */
+async function webhookSnapshot(id: WebhookId) {
+  try {
+    const { getWebhookById } = await import('@/lib/server/domains/webhooks/webhook.service')
+    const w = await getWebhookById(id)
+    return w ? webhookAuditView(w) : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Create a new webhook
  * Returns the webhook with secret (only shown once)
@@ -97,6 +124,15 @@ export const createWebhookFn = createServerFn({ method: 'POST' })
       )
 
       log.info({ webhook_id: result.webhook.id }, 'webhook created')
+      await recordAuditSafely(
+        {
+          event: 'webhook.created',
+          actor: sessionAuditActor(auth),
+          target: { type: 'webhook', id: result.webhook.id },
+          after: webhookAuditView(result.webhook),
+        },
+        'request'
+      )
       return result
     } catch (error) {
       log.error({ err: error }, 'create webhook failed')
@@ -112,9 +148,10 @@ export const updateWebhookFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ webhook_id: data.webhookId }, 'update webhook')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
 
       const { updateWebhook } = await import('@/lib/server/domains/webhooks/webhook.service')
+      const before = await webhookSnapshot(data.webhookId as WebhookId)
       const webhook = await updateWebhook(data.webhookId as WebhookId, {
         url: data.url,
         events: data.events,
@@ -123,6 +160,16 @@ export const updateWebhookFn = createServerFn({ method: 'POST' })
       })
 
       log.info({ webhook_id: webhook.id }, 'webhook updated')
+      await recordAuditSafely(
+        {
+          event: 'webhook.updated',
+          actor: sessionAuditActor(auth),
+          target: { type: 'webhook', id: webhook.id },
+          before,
+          after: webhookAuditView(webhook),
+        },
+        'request'
+      )
       return webhook
     } catch (error) {
       log.error({ err: error }, 'update webhook failed')
@@ -138,12 +185,22 @@ export const deleteWebhookFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ webhook_id: data.webhookId }, 'delete webhook')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
 
       const { deleteWebhook } = await import('@/lib/server/domains/webhooks/webhook.service')
+      const before = await webhookSnapshot(data.webhookId as WebhookId)
       await deleteWebhook(data.webhookId as WebhookId)
 
       log.info({ webhook_id: data.webhookId }, 'webhook deleted')
+      await recordAuditSafely(
+        {
+          event: 'webhook.deleted',
+          actor: sessionAuditActor(auth),
+          target: { type: 'webhook', id: data.webhookId },
+          before,
+        },
+        'request'
+      )
       return { id: data.webhookId as WebhookId }
     } catch (error) {
       log.error({ err: error }, 'delete webhook failed')
@@ -160,12 +217,21 @@ export const rotateWebhookSecretFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ webhook_id: data.webhookId }, 'rotate webhook secret')
     try {
-      await requireAuth({ roles: ['admin'] })
+      const auth = await requireAuth({ roles: ['admin'] })
 
       const { rotateWebhookSecret } = await import('@/lib/server/domains/webhooks/webhook.service')
       const result = await rotateWebhookSecret(data.webhookId as WebhookId)
 
       log.info({ webhook_id: data.webhookId }, 'webhook secret rotated')
+      // Never the secret: the row records that it changed and who did it.
+      await recordAuditSafely(
+        {
+          event: 'webhook.secret_rotated',
+          actor: sessionAuditActor(auth),
+          target: { type: 'webhook', id: data.webhookId },
+        },
+        'request'
+      )
       return result
     } catch (error) {
       log.error({ err: error }, 'rotate webhook secret failed')

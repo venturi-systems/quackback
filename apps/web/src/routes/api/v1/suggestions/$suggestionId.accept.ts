@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
+import { withApiKeyAuth, assertNoStatusChange } from '@/lib/server/domains/api/auth'
 import {
   successResponse,
   badRequestResponse,
@@ -40,6 +40,9 @@ export const Route = createFileRoute('/api/v1/suggestions/$suggestionId/accept')
           } catch {
             // Empty body is ok
           }
+          // An accepted suggestion starts in the board's default status; an API
+          // key never chooses a status (status changes email subscribers).
+          assertNoStatusChange(body.edits?.statusId)
 
           // Route to merge suggestion handler
           if (isTypeId(suggestionId, 'merge_sug')) {

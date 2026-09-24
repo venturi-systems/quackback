@@ -63,9 +63,10 @@ interface McpSetupGuideProps {
   endpointUrl: string
   /**
    * Whether this deployment lets MCP clients register an OAuth client before
-   * signing in (OAUTH_ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION). Claude Code
-   * and Claude Desktop need that for OAuth, so the OAuth configs are offered
-   * only when it is on; otherwise the guide shows API-key configs only.
+   * signing in. Claude Code and Claude Desktop need that for OAuth, so the
+   * OAuth configs are offered only when it is on; otherwise the guide shows
+   * API-key configs only. This fork never allows it, so the server always
+   * reports false; the prop keeps the upstream component reusable.
    */
   oauthRegistrationOpen?: boolean
 }

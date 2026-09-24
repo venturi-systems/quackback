@@ -11,7 +11,8 @@ import { z } from 'zod'
 import type { UserId } from '@quackback/ids'
 import { getSession } from '@/lib/server/auth/session'
 import { db, principal, eq } from '@/lib/server/db'
-import { effectiveRole, isTeamMember } from '@/lib/shared/roles'
+import { isTeamMember } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { logger } from '@/lib/server/logger'
 import { buildSigninRedirect } from '@/lib/shared/auth-prompt'
 
@@ -67,10 +68,12 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
         throw redirect(unauthRedirect)
       }
 
-      // A team role only counts on a human principal: an anonymous or service
-      // principal carrying admin/member is treated as a portal user here too,
-      // matching requireAuth, so the admin shell never renders for it.
-      const role = effectiveRole(principalRecord.role, principalRecord.type) ?? 'user'
+      // One resolver with requireAuth: an anonymous or service principal
+      // carrying admin/member is a portal user, a stored team role counts only
+      // while the identity satisfies the team identity rule, and a designated
+      // address (VENTURI_TEAM_ADMIN_EMAILS) is promoted here on its next
+      // request, so the admin shell renders exactly when requireAuth agrees.
+      const role = await resolveSessionRole(principalRecord, session.user)
       if (!data.allowedRoles.includes(role)) {
         // A team member on an administrator-only page is already signed in with
         // the right account, so the portal sign-in dialog would be the wrong
@@ -79,7 +82,14 @@ export const requireWorkspaceRole = createServerFn({ method: 'GET' })
         if (isTeamMember(role)) {
           throw redirect({ to: '/admin/settings', search: { error: 'not_admin' } })
         }
-        throw redirect(buildSigninRedirect('/admin', { error: 'not_team_member' }))
+        // A stored team role this identity cannot exercise (for example a
+        // password-only account, or an address outside the team domains)
+        // gets the reason instead of the generic "not a team member".
+        const error =
+          principalRecord.type === 'user' && isTeamMember(principalRecord.role)
+            ? 'team_identity_required'
+            : 'not_team_member'
+        throw redirect(buildSigninRedirect('/admin', { error }))
       }
 
       return {

@@ -13,6 +13,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const hoisted = vi.hoisted(() => ({
   mockRequireAuth: vi.fn(),
   mockUpdateFeatureFlags: vi.fn(),
+  mockGetFeatureFlags: vi.fn(),
+  mockAssertNotManaged: vi.fn(),
 }))
 
 vi.mock('@/lib/server/functions/auth-helpers', () => ({
@@ -21,6 +23,11 @@ vi.mock('@/lib/server/functions/auth-helpers', () => ({
 
 vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   updateFeatureFlags: hoisted.mockUpdateFeatureFlags,
+  getFeatureFlags: hoisted.mockGetFeatureFlags,
+}))
+
+vi.mock('@/lib/server/config-file/managed-guard', () => ({
+  assertNotManaged: hoisted.mockAssertNotManaged,
 }))
 
 type AnyHandler = (args: { data: Record<string, unknown> }) => Promise<unknown>
@@ -46,6 +53,8 @@ let updateFeatureFlagsHandler: AnyHandler
 beforeEach(async () => {
   vi.clearAllMocks()
   hoisted.mockUpdateFeatureFlags.mockResolvedValue({ aiFeedbackExtraction: true })
+  hoisted.mockGetFeatureFlags.mockResolvedValue({ helpCenter: false, aiFeedbackExtraction: false })
+  hoisted.mockAssertNotManaged.mockResolvedValue(undefined)
   if (handlers.length === 0) await import('../feature-flags')
   updateFeatureFlagsHandler = handlers[0]
 })
@@ -81,5 +90,30 @@ describe('updateFeatureFlagsFn — admin gate', () => {
     await updateFeatureFlagsHandler({ data: { aiFeedbackExtraction: true } })
 
     expect(hoisted.mockUpdateFeatureFlags).toHaveBeenCalledWith({ aiFeedbackExtraction: true })
+  })
+})
+
+describe('updateFeatureFlagsFn — Help Center policy lock', () => {
+  const admin = { user: { id: 'usr_admin' }, principal: { id: 'prn_admin', role: 'admin' } }
+
+  it('refuses to turn the Help Center on while policy holds it off', async () => {
+    hoisted.mockRequireAuth.mockResolvedValueOnce(admin)
+    const { ForbiddenError } = await import('@/lib/shared/errors')
+    hoisted.mockAssertNotManaged.mockRejectedValueOnce(
+      new ForbiddenError('FIELD_MANAGED', 'managed')
+    )
+
+    await expect(updateFeatureFlagsHandler({ data: { helpCenter: true } })).rejects.toMatchObject({
+      code: 'FIELD_MANAGED',
+    })
+    expect(hoisted.mockAssertNotManaged).toHaveBeenCalledWith('features.helpCenter')
+    expect(hoisted.mockUpdateFeatureFlags).not.toHaveBeenCalled()
+  })
+
+  it('does not consult the lock when the Help Center value is unchanged', async () => {
+    hoisted.mockRequireAuth.mockResolvedValueOnce(admin)
+    await updateFeatureFlagsHandler({ data: { helpCenter: false, linkPreviews: true } })
+    expect(hoisted.mockAssertNotManaged).not.toHaveBeenCalled()
+    expect(hoisted.mockUpdateFeatureFlags).toHaveBeenCalled()
   })
 })

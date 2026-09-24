@@ -93,7 +93,11 @@ All API endpoints require authentication using an API key. Include your API key 
 Authorization: Bearer qb_your_api_key_here
 \`\`\`
 
-API keys can be created in the Venturi Feedback admin dashboard under Settings > API Keys.
+API keys are created by an administrator in the admin dashboard under Settings > Developers > API Keys.
+
+Every key carries scopes and an expiry. A key acts with the lower of its own role and its creator's current role, so it never exceeds what the person who made it may do today. Scopes: \`read:feedback\`, \`write:feedback\`, \`write:changelog\`, \`read:article\`, \`write:article\`, \`read:chat\`, \`write:chat\` and \`admin:workspace\` (administrator-only endpoints). A write scope includes its read scope. A call without the scope it needs answers 403 INSUFFICIENT_SCOPE.
+
+No API key can change a post's status: a request that sets \`statusId\` answers 403 STATUS_CHANGE_NOT_ALLOWED. Status changes are made by a signed-in team member.
 
 ## Rate Limiting
 
@@ -138,6 +142,11 @@ Example: \`post_01h455vb4pex5vsknk084sn02q\`
       { name: 'Roadmaps', description: 'Manage roadmaps' },
       { name: 'Changelog', description: 'Manage changelog entries' },
       { name: 'Conversations', description: 'Manage support conversations' },
+      { name: 'Suggestions', description: 'Review AI feedback and merge suggestions' },
+      { name: 'Segments', description: 'Manage segment membership' },
+      { name: 'Webhooks', description: 'Manage outbound webhooks' },
+      { name: 'Help Center', description: 'Manage Help Center categories and articles' },
+      { name: 'Apps', description: 'Endpoints for integration sidebars' },
     ],
     paths: registeredPaths,
     components: {

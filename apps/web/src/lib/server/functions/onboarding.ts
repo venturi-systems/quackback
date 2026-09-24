@@ -4,6 +4,7 @@ import type { UserId, StatusId } from '@quackback/ids'
 import { generateId } from '@quackback/ids'
 import { USE_CASE_TYPES, type SetupState, type UseCaseType } from '@/lib/server/db'
 import { effectiveRole } from '@/lib/shared/roles'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
 import { getSession, type Session } from '@/lib/server/auth/session'
 import { getSettings } from './workspace'
 import { requireAuth } from './auth-helpers'
@@ -94,6 +95,12 @@ async function claimBootstrapAdmin(session: Session): Promise<void> {
       throw new Error(ONBOARDING_DENIED.notAdmin)
     }
 
+    // Team identity rule: even the first administrator must be a verified
+    // team-domain account from Google or GitHub.
+    const { assertTeamRoleAssignable } =
+      await import('@/lib/server/domains/principals/team-designation')
+    await assertTeamRoleAssignable(userId, tx)
+
     if (!existing) {
       log.info({ user_id: userId }, 'bootstrap admin: creating admin principal')
       await tx.insert(principal).values({
@@ -116,7 +123,7 @@ async function assertOnboardingAdmin(session: Session): Promise<void> {
   const principalRecord = await db.query.principal.findFirst({
     where: eq(principal.userId, session.user.id as UserId),
   })
-  if (!principalRecord || effectiveRole(principalRecord.role, principalRecord.type) !== 'admin') {
+  if (!principalRecord || (await resolveSessionRole(principalRecord, session.user)) !== 'admin') {
     throw new Error(ONBOARDING_DENIED.notAdmin)
   }
 }
@@ -524,7 +531,7 @@ export const checkOnboardingState = createServerFn({ method: 'GET' }).handler(as
     const principalRecord = await db.query.principal.findFirst({
       where: eq(principal.userId, session.user.id as UserId),
     })
-    const role = principalRecord ? effectiveRole(principalRecord.role, principalRecord.type) : null
+    const role = principalRecord ? await resolveSessionRole(principalRecord, session.user) : null
 
     if (principalRecord && principalRecord.type !== 'user') {
       return needsInvitation

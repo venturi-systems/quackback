@@ -1,21 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import {
-  successResponse,
-  noContentResponse,
-  badRequestResponse,
-  handleDomainError,
-} from '@/lib/server/domains/api/responses'
-import { NotFoundError } from '@/lib/shared/errors'
+import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import { ForbiddenError, NotFoundError } from '@/lib/shared/errors'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { PrincipalId } from '@quackback/ids'
 import { isTeamMember } from '@/lib/shared/roles'
 
-// Input validation schema for updating member role
-const updateMemberSchema = z.object({
-  role: z.enum(['admin', 'member']),
-})
+/** Why the REST API never writes a team role. */
+const ROLE_WRITE_REFUSAL =
+  'Team roles are designated by a signed-in administrator in Admin > Team. API keys cannot give, change or remove a team role.'
 
 /** Fetch a team member with user details, or throw NotFoundError. */
 async function fetchTeamMemberWithUser(principalId: PrincipalId) {
@@ -56,7 +49,11 @@ export const Route = createFileRoute('/api/v1/principals/$principalId')({
         try {
           await withApiKeyAuth(request, { role: 'team' })
 
-          const principalId = parseTypeId<PrincipalId>(params.principalId, 'principal', 'principal ID')
+          const principalId = parseTypeId<PrincipalId>(
+            params.principalId,
+            'principal',
+            'principal ID'
+          )
 
           const result = await fetchTeamMemberWithUser(principalId)
 
@@ -68,31 +65,15 @@ export const Route = createFileRoute('/api/v1/principals/$principalId')({
 
       /**
        * PATCH /api/v1/principals/:principalId
-       * Update a team member's role
+       * Refused: team roles are designated by a signed-in administrator in
+       * Admin > Team, where the team identity rule is checked. An API key is a
+       * service principal, not a designated person, so it cannot give, change
+       * or remove a team role (owner decisions 6 and 7, landing-page#2309).
        */
-      PATCH: async ({ request, params }) => {
+      PATCH: async ({ request }) => {
         try {
-          const { principalId: actingPrincipalId } = await withApiKeyAuth(request, { role: 'admin' })
-
-          const principalId = parseTypeId<PrincipalId>(params.principalId, 'principal', 'principal ID')
-
-          const body = await request.json()
-          const parsed = updateMemberSchema.safeParse(body)
-
-          if (!parsed.success) {
-            return badRequestResponse('Invalid request body', {
-              errors: parsed.error.flatten().fieldErrors,
-            })
-          }
-
-          const { updateMemberRole } =
-            await import('@/lib/server/domains/principals/principal.service')
-
-          await updateMemberRole(principalId, parsed.data.role, actingPrincipalId)
-
-          const result = await fetchTeamMemberWithUser(principalId)
-
-          return successResponse(result)
+          await withApiKeyAuth(request, { role: 'admin' })
+          throw new ForbiddenError('ROLE_DESIGNATION_REQUIRES_ADMIN_SESSION', ROLE_WRITE_REFUSAL)
         } catch (error) {
           return handleDomainError(error)
         }
@@ -100,20 +81,12 @@ export const Route = createFileRoute('/api/v1/principals/$principalId')({
 
       /**
        * DELETE /api/v1/principals/:principalId
-       * Remove a team member (converts them to a portal user)
+       * Refused for the same reason as PATCH.
        */
-      DELETE: async ({ request, params }) => {
+      DELETE: async ({ request }) => {
         try {
-          const { principalId: actingPrincipalId } = await withApiKeyAuth(request, { role: 'admin' })
-
-          const principalId = parseTypeId<PrincipalId>(params.principalId, 'principal', 'principal ID')
-
-          const { removeTeamMember } =
-            await import('@/lib/server/domains/principals/principal.service')
-
-          await removeTeamMember(principalId, actingPrincipalId)
-
-          return noContentResponse()
+          await withApiKeyAuth(request, { role: 'admin' })
+          throw new ForbiddenError('ROLE_DESIGNATION_REQUIRES_ADMIN_SESSION', ROLE_WRITE_REFUSAL)
         } catch (error) {
           return handleDomainError(error)
         }

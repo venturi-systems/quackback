@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
@@ -45,7 +46,8 @@ export const Route = createFileRoute('/api/v1/webhooks/')({
        */
       POST: async ({ request }) => {
         try {
-          const { principalId } = await withApiKeyAuth(request, { role: 'admin' })
+          const auth = await withApiKeyAuth(request, { role: 'admin' })
+          const { principalId } = auth
 
           const body = await request.json()
           const parsed = createWebhookSchema.safeParse(body)
@@ -66,6 +68,21 @@ export const Route = createFileRoute('/api/v1/webhooks/')({
               boardIds,
             },
             principalId
+          )
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'webhook.created',
+              target: { type: 'webhook', id: result.webhook.id },
+              after: {
+                url: result.webhook.url,
+                events: result.webhook.events,
+                boardIds: result.webhook.boardIds,
+                status: result.webhook.status,
+              },
+            },
+            request.headers
           )
 
           // Return with secret (only shown once)

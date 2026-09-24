@@ -155,6 +155,9 @@ describe('POST /api/widget/identify — external_id resolution (verified path)',
     expect(userInsertValues()).toBeUndefined()
     // sub is authoritative: the changed email is adopted onto the same account.
     expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ email: 'bob-new@acme.com' }))
+    // A changed address was vouched for by the host app only: it must not
+    // inherit the old address's verification (team identity rule input).
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({ emailVerified: false }))
   })
 
   it('backfills external_id when the user is first matched by email', async () => {

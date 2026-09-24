@@ -237,11 +237,10 @@ export async function handleSignInPreCheck(ctx: {
 
   const { isHardBound, isAuthMethodAllowed } = await import('./auth-restrictions')
 
-  // Look up the principal early — `isAuthMethodAllowed` below needs the
-  // role to pick the right per-audience method gate. Brand-new sign-ups
-  // (no user row yet) get role='user' so the per-domain branch still
-  // gates them via email lookup — `isHardBound` does not depend on
-  // role anymore.
+  // Look up the principal early — the redirect below is shaped by role
+  // (team roles land on the break-glass login). Brand-new sign-ups (no
+  // user row yet) get role='user': both the per-domain branch and the
+  // per-method gate apply to them exactly as to an existing contributor.
   const { db, user: userTable, principal: principalTable, eq } = await import('@/lib/server/db')
   type UserId = `user_${string}`
   const userRow = await db.query.user.findFirst({
@@ -275,8 +274,17 @@ export async function handleSignInPreCheck(ctx: {
     throw ctx.redirect('/?auth=signin&callbackUrl=/admin&error=verified_domain_requires_sso')
   }
 
-  if (!principalRow) return
-
+  // The per-method gate covers brand-new identities too. It used to return
+  // early when no principal existed, which let `POST /sign-up/email` (and a
+  // magic-link or email-OTP send for an unknown address, including the one
+  // /api/auth/portal-signin makes) through while the workspace had that
+  // method switched off: `emailAndPassword.enabled` stays true for the team
+  // break-glass form, and Better Auth's own sign-up check knows nothing about
+  // `authConfig`. Measured on production 2026-09-24 with password sign-in off:
+  // a sign-up for an unused address reached Better Auth's password-length
+  // check, i.e. past its disabled-sign-up check. It also closes an account
+  // enumeration oracle: a known and an unknown address now get the same
+  // refusal when the method is off.
   const result = await isAuthMethodAllowed(provider, role, registeredOidcIds, tenant)
   if (!result.allowed) {
     const isTeamRole = role === 'admin' || role === 'member'
@@ -341,11 +349,11 @@ type SessionResolver = (ctx: never) => Promise<{ user?: { id?: string } } | null
 /**
  * OAuth dynamic client registration gate (`POST /oauth2/register`).
  *
- * Unauthenticated registration is off unless the operator opts in (see
- * `allowUnauthenticatedClientRegistration` in auth/index.ts). An anonymous
- * Better Auth session is not an authenticated identity either, so it must not
- * be able to register clients in place of a real account. Callers with no
- * session fall through to the OAuth provider, which applies the opt-in.
+ * Registration without a session is always refused
+ * (`allowUnauthenticatedClientRegistration: false` in auth/index.ts). An
+ * anonymous Better Auth session is not an authenticated identity either, so
+ * it must not be able to register clients in place of a real account. Callers
+ * with no session fall through to the OAuth provider, which refuses them.
  */
 export async function handleClientRegistrationGate(
   ctx: { path?: string },
@@ -380,6 +388,64 @@ export async function handleClientRegistrationGate(
   }
 }
 
+/**
+ * Unlinking the last Google or GitHub account of the only administrator would
+ * leave the workspace with no administrator who satisfies the team identity
+ * rule. Refuse it; unlinking is allowed once another eligible administrator
+ * exists, or while the account keeps another Google or GitHub link.
+ */
+export async function handleUnlinkAccountGate(
+  ctx: { path?: string; body?: Record<string, unknown> },
+  resolveSession: SessionResolver = getSessionFromCtx as unknown as SessionResolver
+): Promise<void> {
+  if (ctx.path !== '/unlink-account') return
+  const providerId = ctx.body?.providerId
+  if (providerId !== 'google' && providerId !== 'github') return
+  const accountId = typeof ctx.body?.accountId === 'string' ? ctx.body.accountId : null
+
+  const session = await resolveSession(ctx as never).catch(() => null)
+  const userId = session?.user?.id
+  if (!userId) return
+
+  const {
+    db,
+    principal: principalTable,
+    account: accountTable,
+    eq,
+  } = await import('@/lib/server/db')
+  type UserId = `user_${string}`
+  const principalRow = await db.query.principal.findFirst({
+    where: eq(principalTable.userId, userId as UserId),
+    columns: { id: true, role: true, type: true },
+  })
+  if (!principalRow || principalRow.role !== 'admin' || principalRow.type !== 'user') return
+
+  const links = await db.query.account.findMany({
+    where: eq(accountTable.userId, userId as UserId),
+    columns: { providerId: true, accountId: true },
+  })
+  const keepsTeamLink = links.some(
+    (link) =>
+      (link.providerId === 'google' || link.providerId === 'github') &&
+      !(link.providerId === providerId && (accountId === null || link.accountId === accountId))
+  )
+  if (keepsTeamLink) return
+
+  const { withTeamRoleLock, countEligibleAdmins } =
+    await import('@/lib/server/domains/principals/team-designation')
+  type PrincipalId = `principal_${string}`
+  const others = await withTeamRoleLock((tx) =>
+    countEligibleAdmins(tx, principalRow.id as PrincipalId)
+  )
+  if (others < 1) {
+    throw new APIError('FORBIDDEN', {
+      code: 'last_admin_identity',
+      message:
+        'This Google or GitHub account is what makes you an administrator, and you are the only one. Designate another administrator in Admin > Team before unlinking it.',
+    })
+  }
+}
+
 export const hooksBefore = createAuthMiddleware(async (ctx) => {
   // Disjoint path matchers: grace heal only touches /oauth2/token,
   // sign-in pre-check only touches sign-in/OTP paths, the anonymous gate
@@ -388,6 +454,7 @@ export const hooksBefore = createAuthMiddleware(async (ctx) => {
   await handleRefreshGraceHeal(ctx)
   await handleAnonymousSignInGate(ctx)
   await handleClientRegistrationGate(ctx)
+  await handleUnlinkAccountGate(ctx)
   await handleSignInPreCheck(ctx as Parameters<typeof handleSignInPreCheck>[0])
 })
 
@@ -472,11 +539,23 @@ export async function handleSsoCallbackAfter(
         columns: { id: true },
       })
       if (!existingAdmin) {
-        await tx
-          .update(principalTable)
-          .set({ role: 'admin' })
-          .where(eq(principalTable.userId, userIdTyped))
-        log.info({ user_id: userId }, 'sso bootstrap admin promotion')
+        // Team identity rule: an OIDC sign-in is never a Google or GitHub
+        // identity, so this refuses unless the account also carries one.
+        const { teamRoleGapForUser } =
+          await import('@/lib/server/domains/principals/team-designation')
+        const gap = await teamRoleGapForUser(userIdTyped, tx)
+        if (gap === null) {
+          await tx
+            .update(principalTable)
+            .set({ role: 'admin' })
+            .where(eq(principalTable.userId, userIdTyped))
+          log.info({ user_id: userId }, 'sso bootstrap admin promotion')
+        } else {
+          log.warn(
+            { user_id: userId, gap },
+            'sso bootstrap admin promotion refused: team identity rule'
+          )
+        }
       }
     }
 
@@ -579,7 +658,7 @@ export async function handleAutoProvisionAfter(
 
   const p = await db.query.principal.findFirst({
     where: eq(principalTable.userId, userIdTyped),
-    columns: { role: true },
+    columns: { id: true, role: true },
   })
 
   // Resolve target role: attribute mapping takes precedence over the
@@ -607,10 +686,44 @@ export async function handleAutoProvisionAfter(
 
   if (p?.role === targetRole) return // no-op, save the update
 
-  await db
-    .update(principalTable)
-    .set({ role: targetRole })
-    .where(eq(principalTable.userId, userIdTyped))
+  const designation = await import('@/lib/server/domains/principals/team-designation')
+
+  if (p?.role === 'admin' && p.id) {
+    // Sync mode taking admin away: go through the team-role writer, which
+    // refuses to leave the workspace without an administrator who can act.
+    try {
+      await designation.changeTeamRole({
+        principalId: p.id as `principal_${string}`,
+        newRole: targetRole,
+        requireTeamTarget: false,
+      })
+    } catch (error) {
+      log.warn(
+        { user_id: userId, role: targetRole, err: error },
+        'sso sync demotion refused by the team-role writer'
+      )
+      return
+    }
+  } else {
+    // Team identity rule: a team role needs a verified team-domain address
+    // from a linked Google or GitHub account, which an OIDC callback alone
+    // never is. A demotion to 'user' always proceeds.
+    if (targetRole === 'admin' || targetRole === 'member') {
+      const gap = await designation.teamRoleGapForUser(userIdTyped)
+      if (gap !== null) {
+        log.warn(
+          { user_id: userId, role: targetRole, gap },
+          'sso auto-provision refused: team identity rule'
+        )
+        return
+      }
+    }
+
+    await db
+      .update(principalTable)
+      .set({ role: targetRole })
+      .where(eq(principalTable.userId, userIdTyped))
+  }
 
   if (p?.role && p.role !== targetRole) {
     const { recordAuditEvent } = await import('@/lib/server/audit/log')
@@ -828,6 +941,49 @@ export async function handleCallbackPolicyCleanup(
   if (result.allowed) return
 
   await blockSignIn(result.error ?? 'auth_method_blocked')
+}
+
+/**
+ * Team designation at sign-in (owner decisions 6 and 7, landing-page#2309).
+ *
+ * After a successful Google or GitHub callback, apply the configured
+ * designation to the signed-in account: an address in
+ * VENTURI_TEAM_ADMIN_EMAILS becomes admin, and a pending team invitation for
+ * the address is accepted. Both need the team identity rule to hold, which
+ * applyTeamDesignation checks. Runs after the policy cleanup, so a sign-in the
+ * policy revoked (newSession nulled) is skipped. Best-effort: a failure is
+ * logged and the sign-in proceeds as a contributor; the next authenticated
+ * request retries the admin designation.
+ */
+export async function handleTeamDesignationAfter(ctx: {
+  path?: string
+  params?: Record<string, unknown>
+  body?: Record<string, unknown>
+  context?: {
+    newSession?: {
+      user?: { id?: string; email?: string; emailVerified?: boolean }
+    } | null
+  }
+}): Promise<void> {
+  if (ctx.path !== '/callback/:id' && ctx.path !== '/sign-in/social') return
+  const provider = inferProvider(ctx as Parameters<typeof inferProvider>[0])
+  if (provider !== 'google' && provider !== 'github') return
+  const user = ctx.context?.newSession?.user
+  if (typeof user?.id !== 'string' || user.id.length === 0) return
+
+  try {
+    const { applyTeamDesignation } =
+      await import('@/lib/server/domains/principals/team-designation')
+    await applyTeamDesignation({
+      userId: user.id as `user_${string}`,
+      email: user.email,
+      includeInvitations: true,
+      source: 'sign_in',
+      headers: getRequestHeaders(),
+    })
+  } catch (error) {
+    log.error({ err: error, user_id: user.id }, 'team designation at sign-in failed')
+  }
 }
 
 /**
@@ -1205,6 +1361,9 @@ export const hooksAfter = createAuthMiddleware(async (ctx) => {
     providers,
     registeredOidcIds
   )
+  // Designation (VENTURI_TEAM_ADMIN_EMAILS, pending team invitations) after a
+  // Google or GitHub sign-in the policy above let through.
+  await handleTeamDesignationAfter(ctx as Parameters<typeof handleTeamDesignationAfter>[0])
   // SOC2 trail for user-initiated 2FA lifecycle (`two_factor.enabled`
   // and `two_factor.disabled`). Independent of sign-in success audit;
   // both can fire on the same request only for the verify-totp

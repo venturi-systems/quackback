@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { getWidgetSession } from '@/lib/server/functions/widget-auth'
 import { logger } from '@/lib/server/logger'
+import { widgetDisabledResponse } from '@/lib/server/widget/widget-enabled'
 
 const log = logger.child({ component: 'widget-session' })
 
@@ -8,6 +9,8 @@ export const Route = createFileRoute('/api/widget/session')({
   server: {
     handlers: {
       GET: async () => {
+        const disabled = await widgetDisabledResponse(noStoreHeaders())
+        if (disabled) return disabled
         try {
           // `roll: true` extends an active anonymous session's TTL on this
           // validation hit (the widget calls it once per mount), so a returning

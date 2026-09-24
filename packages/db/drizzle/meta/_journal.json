@@ -827,6 +827,20 @@
       "when": 1782950400000,
       "tag": "0117_identity_provider_jwks_issuer",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1782950460000,
+      "tag": "9001_venturi_two_factor_lockout",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1782950520000,
+      "tag": "9002_venturi_hook_delivery_outcome",
+      "breakpoints": true
     }
   ]
 }

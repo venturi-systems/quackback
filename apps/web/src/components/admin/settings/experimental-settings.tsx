@@ -7,12 +7,17 @@ import { SettingsCard } from '@/components/admin/settings/settings-card'
 import { FEATURE_FLAG_REGISTRY, LAB_SECTIONS, type FeatureFlags } from '@/lib/shared/types'
 import { DEFAULT_FEATURE_FLAGS } from '@/lib/server/domains/settings/settings.types'
 import { updateFeatureFlagsFn } from '@/lib/server/functions/feature-flags'
+import { ManagedSettingNote, useIsManagedSetting } from './managed-setting-note'
+import { VENTURI_DOCS_URL } from '@/lib/shared/venturi-identity'
 
 export function ExperimentalSettings() {
   const { settings } = useRouteContext({ from: '__root__' })
   const flags = (settings?.featureFlags as FeatureFlags | undefined) ?? DEFAULT_FEATURE_FLAGS
   const [localFlags, setLocalFlags] = useState<FeatureFlags>(flags)
   const queryClient = useQueryClient()
+  // Venturi holds the Help Center off by policy (POLICY_MANAGED_SETTINGS
+  // `features.helpCenter`); documentation lives at docs.venturi.systems.
+  const helpCenterManaged = useIsManagedSetting('features.helpCenter')
 
   const mutation = useMutation({
     mutationFn: (update: Partial<FeatureFlags>) => updateFeatureFlagsFn({ data: update }),
@@ -43,23 +48,33 @@ export function ExperimentalSettings() {
           <div className="divide-y divide-border/50">
             {section.flags.map((key) => {
               const meta = FEATURE_FLAG_REGISTRY[key]
+              const managed = key === 'helpCenter' && helpCenterManaged
               return (
-                <div
-                  key={key}
-                  className="flex items-center justify-between py-3 first:pt-0 last:pb-0"
-                >
-                  <div className="space-y-0.5 pr-4">
-                    <Label htmlFor={`flag-${key}`} className="text-sm font-medium cursor-pointer">
-                      {meta.label}
-                    </Label>
-                    <p className="text-xs text-muted-foreground">{meta.description}</p>
+                <div key={key} className="py-3 first:pt-0 last:pb-0 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5 pr-4">
+                      <Label htmlFor={`flag-${key}`} className="text-sm font-medium cursor-pointer">
+                        {meta.label}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">{meta.description}</p>
+                    </div>
+                    <Switch
+                      id={`flag-${key}`}
+                      checked={localFlags[key]}
+                      onCheckedChange={(checked) => handleToggle(key, checked)}
+                      disabled={mutation.isPending || managed}
+                    />
                   </div>
-                  <Switch
-                    id={`flag-${key}`}
-                    checked={localFlags[key]}
-                    onCheckedChange={(checked) => handleToggle(key, checked)}
-                    disabled={mutation.isPending}
-                  />
+                  {managed && (
+                    <ManagedSettingNote
+                      what="The Help Center"
+                      detail={
+                        <>
+                          Documentation lives at <a href={VENTURI_DOCS_URL}>{VENTURI_DOCS_URL}</a>.
+                        </>
+                      }
+                    />
+                  )}
                 </div>
               )
             })}

@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { realEmail } from '@/lib/shared/anonymous-email'
-import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
+import { withApiKeyAuth, assertNoStatusChange } from '@/lib/server/domains/api/auth'
 import {
   successResponse,
   noContentResponse,
@@ -111,6 +111,9 @@ export const Route = createFileRoute('/api/v1/posts/$postId')({
             })
           }
 
+          // Status changes email subscribers: only a signed-in team member
+          // makes one, never an API key.
+          assertNoStatusChange(parsed.data.statusId)
           const statusId = parseOptionalTypeId<StatusId>(
             parsed.data.statusId,
             'status',

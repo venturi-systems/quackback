@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
@@ -13,13 +14,19 @@ export const Route = createFileRoute('/api/v1/webhooks/$webhookId/rotate')({
        */
       POST: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'admin' })
+          const auth = await withApiKeyAuth(request, { role: 'admin' })
 
           const webhookId = parseTypeId<WebhookId>(params.webhookId, 'webhook', 'webhook ID')
 
           const { rotateWebhookSecret } =
             await import('@/lib/server/domains/webhooks/webhook.service')
           const result = await rotateWebhookSecret(webhookId)
+          // Never the secret: the row records that it changed and who did it.
+          await recordApiKeyAuditSafely(
+            auth,
+            { event: 'webhook.secret_rotated', target: { type: 'webhook', id: webhookId } },
+            request.headers
+          )
 
           // Return the new secret (only shown once!)
           return successResponse({

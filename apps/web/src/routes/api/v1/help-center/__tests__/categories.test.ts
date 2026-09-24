@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
 
 // Mocks must be before imports
 vi.mock('@/lib/server/domains/api/auth', () => ({
@@ -44,7 +45,10 @@ import type {
 import { Route } from '../categories/index'
 import { Route as CategoryDetailRoute } from '../categories/$categoryId'
 
-type MockedHandler = (ctx: { request: Request; params?: Record<string, string> }) => Promise<Response>
+type MockedHandler = (ctx: {
+  request: Request
+  params?: Record<string, string>
+}) => Promise<Response>
 type MockedRouteShape = { options: { server: { handlers: Record<string, MockedHandler> } } }
 
 // Access handlers
@@ -75,9 +79,11 @@ const mockAuthContext: ApiAuthContext = {
     expiresAt: null,
     createdAt: new Date('2026-01-01'),
     revokedAt: null,
+    scopes: null,
   },
   principalId: 'principal_1' as PrincipalId,
   role: 'admin',
+  scopes: [...API_KEY_SCOPES],
   importMode: false,
 }
 
@@ -92,9 +98,11 @@ const mockTeamAuthContext: ApiAuthContext = {
     expiresAt: null,
     createdAt: new Date('2026-01-01'),
     revokedAt: null,
+    scopes: null,
   },
   principalId: 'principal_1' as PrincipalId,
   role: 'member',
+  scopes: [...API_KEY_SCOPES],
   importMode: false,
 }
 
@@ -259,9 +267,7 @@ describe('POST /api/v1/help-center/categories', () => {
 
   it('returns 403 when auth fails (non-admin)', async () => {
     vi.mocked(isFeatureEnabled).mockResolvedValue(true)
-    vi.mocked(withApiKeyAuth).mockRejectedValue(
-      new ForbiddenError('FORBIDDEN', 'Admin required')
-    )
+    vi.mocked(withApiKeyAuth).mockRejectedValue(new ForbiddenError('FORBIDDEN', 'Admin required'))
 
     const request = createRequest('POST', 'http://localhost/api/v1/help-center/categories', {
       name: 'Test',
@@ -461,9 +467,7 @@ describe('PATCH /api/v1/help-center/categories/:categoryId', () => {
 
   it('returns 403 when auth fails (non-admin)', async () => {
     vi.mocked(isFeatureEnabled).mockResolvedValue(true)
-    vi.mocked(withApiKeyAuth).mockRejectedValue(
-      new ForbiddenError('FORBIDDEN', 'Admin required')
-    )
+    vi.mocked(withApiKeyAuth).mockRejectedValue(new ForbiddenError('FORBIDDEN', 'Admin required'))
 
     const request = createRequest(
       'PATCH',
@@ -500,9 +504,7 @@ describe('DELETE /api/v1/help-center/categories/:categoryId', () => {
 
   it('returns 403 when auth fails (non-admin)', async () => {
     vi.mocked(isFeatureEnabled).mockResolvedValue(true)
-    vi.mocked(withApiKeyAuth).mockRejectedValue(
-      new ForbiddenError('FORBIDDEN', 'Admin required')
-    )
+    vi.mocked(withApiKeyAuth).mockRejectedValue(new ForbiddenError('FORBIDDEN', 'Admin required'))
 
     const request = createRequest(
       'DELETE',

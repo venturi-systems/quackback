@@ -31,6 +31,8 @@ import {
   findBackfillCursor,
 } from '@/lib/server/domains/chat/chat.query'
 import { normalizePrincipalType } from '@/lib/server/functions/auth-helpers'
+import { resolveSessionRole } from '@/lib/server/domains/principals/session-role'
+import { resolveTeamRole } from '@/lib/server/domains/principals/team-identity'
 import type { Actor } from '@/lib/server/policy/types'
 import { logger } from '@/lib/server/logger'
 
@@ -46,6 +48,9 @@ let openStreams = 0
 
 interface StreamPrincipal {
   principalId: PrincipalId
+  /** The role the principal may exercise now (team identity rule applied),
+   *  never the raw stored role: a stored team role on an identity that fails
+   *  the rule acts as a contributor here as everywhere else. */
   role: string
   type: string
   /** How the principal was authenticated: a minted token (portal access already
@@ -60,8 +65,10 @@ async function resolveStreamPrincipal(request: Request): Promise<StreamPrincipal
   const tokenPrincipalId = verifyStreamToken(url.searchParams.get('token'))
   if (tokenPrincipalId) {
     const row = await db.query.principal.findFirst({ where: eq(principal.id, tokenPrincipalId) })
-    if (row) return { principalId: row.id, role: row.role, type: row.type, via: 'token' }
-    return null
+    if (!row) return null
+    // A token carries no session, so the identity is read from the account.
+    const role = await resolveTeamRole(row)
+    return { principalId: row.id, role, type: row.type, via: 'token' }
   }
 
   const session = await auth.api.getSession({ headers: request.headers })
@@ -70,7 +77,8 @@ async function resolveStreamPrincipal(request: Request): Promise<StreamPrincipal
     where: eq(principal.userId, session.user.id as never),
   })
   if (!row) return null
-  return { principalId: row.id, role: row.role, type: row.type, via: 'session' }
+  const role = await resolveSessionRole(row, session.user, request.headers)
+  return { principalId: row.id, role, type: row.type, via: 'session' }
 }
 
 function sse(event: string, data: unknown, id?: string): string {

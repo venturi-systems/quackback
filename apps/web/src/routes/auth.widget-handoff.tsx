@@ -35,7 +35,7 @@
  *   - identifyVerificationEnabled is also checked by the evaluator: email-capture
  *     widget sessions (HMAC not required) never reach the portal via this path.
  */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, notFound, redirect } from '@tanstack/react-router'
 import { createServerFn, createServerOnlyFn } from '@tanstack/react-start'
 import { getRequestHeaders, setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
@@ -99,8 +99,7 @@ type LoaderData = { status: 'invalid' | 'expired' | 'error' }
 // ---------------------------------------------------------------------------
 
 type HandoffResult =
-  | { kind: 'redirect'; to: string }
-  | { kind: 'error'; status: 'invalid' | 'expired' | 'error' }
+  { kind: 'redirect'; to: string } | { kind: 'error'; status: 'invalid' | 'expired' | 'error' }
 
 /**
  * Verify the OTT against BA, forward Set-Cookie to the browser, insert the
@@ -283,7 +282,12 @@ const consumeWidgetHandoffFn = createServerFn({ method: 'POST' })
 
 export const Route = createFileRoute('/auth/widget-handoff')({
   validateSearch: searchSchema.parse,
-  loader: async ({ location }): Promise<LoaderData> => {
+  loader: async ({ location, context }): Promise<LoaderData> => {
+    // Like every widget route, the handoff does not exist while the widget is
+    // off: no widget session can legitimately be handed to the portal then.
+    if (!context.settings?.publicWidgetConfig?.enabled) {
+      throw notFound()
+    }
     // The search schema is shared between validateSearch and the server fn's
     // validator, so location.search is shape-compatible with the fn's
     // expected input.

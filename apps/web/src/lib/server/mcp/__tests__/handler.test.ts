@@ -24,6 +24,25 @@ vi.mock('@/lib/server/db', () => ({
   eq: vi.fn((_a: unknown, _b: unknown) => 'eq-condition'),
 }))
 
+// Role rules are covered by their own suites (session-role.test.ts,
+// api-key-authority.test.ts). Here the OAuth path applies the human-principal
+// cap only, and an API key keeps its stored role, so this suite stays about
+// the MCP transport, scopes and tools.
+const mockResolveSessionRole = vi.fn(async (record: { role: string; type?: string | null }) =>
+  record.type && record.type !== 'user' ? 'user' : record.role
+)
+vi.mock('@/lib/server/domains/principals/session-role', () => ({
+  resolveSessionRole: (record: { role: string; type?: string | null }) =>
+    mockResolveSessionRole(record),
+}))
+const mockResolveApiKeyRole = vi.fn(async (_key: unknown, role: string | null | undefined) =>
+  role === 'admin' || role === 'member' ? role : 'user'
+)
+vi.mock('@/lib/server/domains/api-keys/api-key-authority', () => ({
+  resolveApiKeyRole: (key: unknown, role: string | null | undefined) =>
+    mockResolveApiKeyRole(key, role),
+}))
+
 // Mock getTypeIdPrefix from @quackback/ids — extract prefix from underscore-separated IDs
 vi.mock('@quackback/ids', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
@@ -312,6 +331,7 @@ const MOCK_API_KEY: ApiKey = {
   lastUsedAt: null,
   expiresAt: null,
   revokedAt: null,
+  scopes: null,
 }
 
 const MOCK_MEMBER_RECORD = {
@@ -396,7 +416,13 @@ async function setupValidOAuth(overrides?: { role?: string; scopes?: string[]; t
     email: 'jane@example.com',
   })
   // resolveOAuthContext re-reads the principal's current role (and type) from DB
-  mockFindFirst.mockResolvedValue({ role, type })
+  mockFindFirst.mockResolvedValue({
+    id: MOCK_MEMBER_ID,
+    role,
+    type,
+    userId: MOCK_USER_ID,
+    user: { id: MOCK_USER_ID, email: 'jane@example.com', emailVerified: true },
+  })
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -903,7 +929,7 @@ describe('MCP HTTP Handler', () => {
         mcpRequest(
           jsonRpcRequest('tools/call', {
             name: 'triage_post',
-            arguments: { postId: 'post_test', statusId: 'status_updated' },
+            arguments: { postId: 'post_test', ownerPrincipalId: 'principal_owner' },
           })
         )
       )
@@ -914,7 +940,81 @@ describe('MCP HTTP Handler', () => {
       }
       const text = JSON.parse(body.result.content[0].text)
       expect(text.id).toBe('post_test')
-      expect(text.statusId).toBe('status_updated')
+    })
+
+    it('never forwards a status change from triage_post, create_post or accept_suggestion', async () => {
+      const { updatePost, createPost } = await import('@/lib/server/domains/posts/post.service')
+      const handleMcpRequest = await initializeSession()
+
+      await handleMcpRequest(
+        mcpRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'triage_post',
+            arguments: { postId: 'post_test', statusId: 'status_updated' },
+          })
+        )
+      )
+      await setupValidAuth()
+      await handleMcpRequest(
+        mcpRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'create_post',
+            arguments: { boardId: 'board_test', title: 'T', statusId: 'status_done' },
+          })
+        )
+      )
+
+      for (const call of vi.mocked(updatePost).mock.calls) {
+        expect(call[1]).not.toHaveProperty('statusId')
+      }
+      for (const call of vi.mocked(createPost).mock.calls) {
+        expect(call[0]).not.toHaveProperty('statusId')
+      }
+    })
+
+    it('does not advertise a status parameter on any post tool', async () => {
+      const handleMcpRequest = await initializeSession()
+      const response = await handleMcpRequest(mcpRequest(jsonRpcRequest('tools/list')))
+      const body = (await response.json()) as {
+        result: { tools: Array<{ name: string; inputSchema: { properties?: object } }> }
+      }
+      for (const name of ['triage_post', 'create_post', 'accept_suggestion']) {
+        const tool = body.result.tools.find((t) => t.name === name)
+        expect(tool, name).toBeDefined()
+        expect(JSON.stringify(tool?.inputSchema)).not.toContain('statusId')
+      }
+    })
+
+    it('limits an API key to its own scopes (read-only key cannot write)', async () => {
+      const { verifyApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      const handleMcpRequest = await initializeSession()
+      vi.mocked(verifyApiKey).mockResolvedValue({ ...MOCK_API_KEY, scopes: ['read:feedback'] })
+
+      const response = await handleMcpRequest(
+        mcpRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'triage_post',
+            arguments: { postId: 'post_test', ownerPrincipalId: 'principal_owner' },
+          })
+        )
+      )
+
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('Insufficient scope')
+    })
+
+    it('gives a read-only API key exactly the read scope', async () => {
+      const { verifyApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      vi.mocked(verifyApiKey).mockResolvedValue({ ...MOCK_API_KEY, scopes: ['read:feedback'] })
+      mockFindFirst.mockResolvedValue(MOCK_MEMBER_RECORD)
+
+      const { resolveAuthContext } = await import('../handler')
+      const auth = await resolveAuthContext(mcpRequest(jsonRpcRequest('initialize')))
+
+      expect((auth as { scopes: string[] }).scopes).toEqual(['read:feedback'])
     })
 
     // ── vote_post tool ──────────────────────────────────────────────────
@@ -1751,7 +1851,7 @@ describe('MCP HTTP Handler', () => {
         oauthRequest(
           jsonRpcRequest('tools/call', {
             name: 'triage_post',
-            arguments: { postId: 'post_test', statusId: 'status_updated' },
+            arguments: { postId: 'post_test', ownerPrincipalId: 'principal_owner' },
           })
         )
       )

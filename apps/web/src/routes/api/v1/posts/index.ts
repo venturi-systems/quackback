@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
-import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
+import { withApiKeyAuth, assertNoStatusChange } from '@/lib/server/domains/api/auth'
 import { InternalError, NotFoundError, ValidationError } from '@/lib/shared/errors'
 import {
   successResponse,
@@ -139,6 +139,9 @@ export const Route = createFileRoute('/api/v1/posts/')({
           }
 
           const boardId = parseTypeId<BoardId>(parsed.data.boardId, 'board', 'board ID')
+          // A new post starts in the board's default status; an API key never
+          // chooses a status (status changes email subscribers).
+          assertNoStatusChange(parsed.data.statusId)
           const statusId = parseOptionalTypeId<StatusId>(
             parsed.data.statusId,
             'status',

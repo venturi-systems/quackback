@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
@@ -60,7 +61,7 @@ export const Route = createFileRoute('/api/v1/statuses/$statusId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const statusId = parseTypeId<StatusId>(params.statusId, 'status', 'status ID')
 
@@ -81,6 +82,16 @@ export const Route = createFileRoute('/api/v1/statuses/$statusId')({
             showOnRoadmap: parsed.data.showOnRoadmap,
             isDefault: parsed.data.isDefault,
           })
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'status.updated',
+              target: { type: 'status', id: status.id },
+              after: status,
+            },
+            request.headers
+          )
 
           return successResponse({
             id: status.id,
@@ -104,13 +115,22 @@ export const Route = createFileRoute('/api/v1/statuses/$statusId')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const statusId = parseTypeId<StatusId>(params.statusId, 'status', 'status ID')
 
           const { deleteStatus } = await import('@/lib/server/domains/statuses/status.service')
 
           await deleteStatus(statusId)
+
+          await recordApiKeyAuditSafely(
+            auth,
+            {
+              event: 'status.deleted',
+              target: { type: 'status', id: statusId },
+            },
+            request.headers
+          )
 
           return noContentResponse()
         } catch (error) {
