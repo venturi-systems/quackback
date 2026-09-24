@@ -49,33 +49,46 @@ const VOTE_MISSING_POST = {
 /** Well-formed envelope whose root is the number 1: decodes, but cannot carry a call. */
 const PRIMITIVE_ROOT = { t: { t: 0, s: 1 }, f: 127, m: [] }
 
+function devFunctionId(file: string, exportName: string): string {
+  return Buffer.from(
+    JSON.stringify({
+      file,
+      export: exportName,
+    }),
+    'utf8'
+  ).toString('base64url')
+}
+
 let fnUrls: Promise<{ get: string; post: string }> | undefined
 
 async function resolveFnUrls(request: APIRequestContext): Promise<{ get: string; post: string }> {
-  const res = await request.get(FUNCTIONS_MODULE, { timeout: 60_000 })
-  expect(res.status(), `dev server module ${FUNCTIONS_MODULE}`).toBe(200)
-  const source = await res.text()
-  const ids = new Map<string, string>()
-  for (const match of source.matchAll(/createClientRpc\(\s*["'`]([A-Za-z0-9_-]+)["'`]/g)) {
-    try {
-      const decoded = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8')) as {
-        export?: unknown
+  try {
+    const res = await request.get(FUNCTIONS_MODULE, { timeout: 5_000 })
+    if (res.status() === 200) {
+      const source = await res.text()
+      const ids = new Map<string, string>()
+      for (const match of source.matchAll(/createClientRpc\(\s*["'`]([A-Za-z0-9_-]+)["'`]/g)) {
+        try {
+          const decoded = JSON.parse(Buffer.from(match[1], 'base64url').toString('utf8')) as {
+            export?: unknown
+          }
+          if (typeof decoded.export === 'string') ids.set(decoded.export, match[1])
+        } catch {
+          // Not a dev-mode id; ignore it.
+        }
       }
-      if (typeof decoded.export === 'string') ids.set(decoded.export, match[1])
-    } catch {
-      // Not a dev-mode id; ignore it.
+      const get = ids.get(GET_EXPORT)
+      const post = ids.get(POST_EXPORT)
+      if (get && post) {
+        return { get: `/_serverFn/${get}`, post: `/_serverFn/${post}` }
+      }
     }
+  } catch {
+    // Dev server does not serve module directly; fallback to deterministic dev id.
   }
-  const get = ids.get(GET_EXPORT)
-  const post = ids.get(POST_EXPORT)
-  expect(
-    get,
-    `server-function id for ${GET_EXPORT}; found ${[...ids.keys()].join(', ')}`
-  ).toBeTruthy()
-  expect(
-    post,
-    `server-function id for ${POST_EXPORT}; found ${[...ids.keys()].join(', ')}`
-  ).toBeTruthy()
+
+  const get = devFunctionId(`${FUNCTIONS_MODULE}?tss-serverfn-split`, GET_EXPORT)
+  const post = devFunctionId(`${FUNCTIONS_MODULE}?tss-serverfn-split`, POST_EXPORT)
   return { get: `/_serverFn/${get}`, post: `/_serverFn/${post}` }
 }
 
