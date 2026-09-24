@@ -100,14 +100,14 @@ jobs:
           restore-keys: ${{ runner.os }}-bun-
       - run: bun install --frozen-lockfile
       - run: bun run lint
-      - name: Typecheck design acceptance and its fixture dependencies
-        run: bunx tsc --noEmit -p apps/web/tsconfig.design-acceptance.json
       - run: bun run --filter @quackback/widget build
       - run: bun run --filter @quackback/widget test
       - run: bun run build
         env:
           SKIP_ENV_VALIDATION: true
       - run: bun run --filter @quackback/web typecheck
+      - name: Typecheck design acceptance and its fixture dependencies
+        run: bunx tsc --noEmit -p apps/web/tsconfig.design-acceptance.json
 
   database_tests:
     name: Database migrations and tests

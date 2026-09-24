@@ -81,7 +81,12 @@ export function validateDesignFixtureEnvironment(
   }
 }
 
-function run(command: string, args: string[], cwd = WEB_ROOT): string {
+function run(
+  command: string,
+  args: string[],
+  cwd = WEB_ROOT,
+  stage = 'service-inspection'
+): string {
   try {
     return execFileSync(command, args, {
       cwd,
@@ -90,9 +95,16 @@ function run(command: string, args: string[], cwd = WEB_ROOT): string {
       timeout: 15_000,
       killSignal: 'SIGKILL',
     })
-  } catch {
-    // Never attach child stderr or environment values to a durable report.
-    throw new Error(FAILURE)
+  } catch (error) {
+    // Fixed stage and allowlisted process metadata only; never child stderr or environment.
+    const failure = error as { code?: unknown; status?: unknown }
+    const code = ['ENOENT', 'EACCES', 'ETIMEDOUT'].includes(String(failure.code))
+      ? String(failure.code)
+      : 'CHILD_FAILED'
+    const status = typeof failure.status === 'number' ? failure.status : 'unknown'
+    // Child errors retain stderr/environment; preserve only the sanitized diagnostic cause.
+    // eslint-disable-next-line preserve-caught-error -- never retain credential-bearing child output
+    throw new Error(`${FAILURE}: ${stage}`, { cause: new Error(`${code}; status=${status}`) })
   }
 }
 
@@ -134,7 +146,19 @@ export function assertDesignFixtureEnvironmentSync(baseURL?: string): void {
   // Helpers, dev server, and migration each load the generated fixture env.
   // Execute only this pure validator through each loader; never import migrate.
   const commands: Array<[string, string[], string]> = [
-    ['dotenv', ['-e', '../../.env', '--', 'bun', GUARD_PATH, '--effective-environment'], WEB_ROOT],
+    [
+      'bun',
+      [
+        resolve(WEB_ROOT, '../../node_modules/dotenv-cli/cli.js'),
+        '-e',
+        '../../.env',
+        '--',
+        'bun',
+        GUARD_PATH,
+        '--effective-environment',
+      ],
+      WEB_ROOT,
+    ],
     ['bun', ['--env-file=../../.env', GUARD_PATH, '--effective-environment'], WEB_ROOT],
     [
       'bun',
@@ -149,8 +173,10 @@ export function assertDesignFixtureEnvironmentSync(baseURL?: string): void {
       resolve(WEB_ROOT, '../../packages/db'),
     ],
   ]
-  for (const [command, args, cwd] of commands) {
-    if (run(command, args, cwd) !== RECEIPT) throw new Error(FAILURE)
+  for (const [index, [command, args, cwd]] of commands.entries()) {
+    const stage = ['helper-environment', 'app-environment', 'migration-environment'][index]
+    if (run(command, args, cwd, stage) !== RECEIPT)
+      throw new Error(`${FAILURE}: ${stage} receipt mismatch`)
   }
 }
 

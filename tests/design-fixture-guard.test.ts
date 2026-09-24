@@ -24,6 +24,23 @@ const fixture = (): NodeJS.ProcessEnv => ({
   VENTURI_TEAM_EMAIL_DOMAINS: 'example.com',
 })
 
+const fixtureServices = () => [
+  {
+    Id: 'a'.repeat(64),
+    State: { Running: true },
+    HostConfig: { NetworkMode: 'job-network' },
+    Mounts: [] as Array<{ Type: string }>,
+    NetworkSettings: { Ports: { '5432/tcp': [{ HostPort: '5432' }] } },
+  },
+  {
+    Id: 'b'.repeat(64),
+    State: { Running: true },
+    HostConfig: { NetworkMode: 'job-network' },
+    Mounts: [] as Array<{ Type: string }>,
+    NetworkSettings: { Ports: { '6379/tcp': [{ HostPort: '6379' }] } },
+  },
+]
+
 describe('design fixture isolation before setup', () => {
   it('accepts only the declared disposable fixture environment', () => {
     expect(() => validateDesignFixtureEnvironment(fixture())).not.toThrow()
@@ -93,22 +110,7 @@ describe('design preflight side-effect boundary', () => {
     (fault) => {
       const original = process.env
       process.env = fixture()
-      const services = [
-        {
-          Id: 'a'.repeat(64),
-          State: { Running: true },
-          HostConfig: { NetworkMode: 'job-network' },
-          Mounts: [] as Array<{ Type: string }>,
-          NetworkSettings: { Ports: { '5432/tcp': [{ HostPort: '5432' }] } },
-        },
-        {
-          Id: 'b'.repeat(64),
-          State: { Running: true },
-          HostConfig: { NetworkMode: 'job-network' },
-          Mounts: [] as Array<{ Type: string }>,
-          NetworkSettings: { Ports: { '6379/tcp': [{ HostPort: '6379' }] } },
-        },
-      ]
+      const services = fixtureServices()
       if (fault === 'shared-bind-mount') services[0].Mounts.push({ Type: 'bind' })
       if (fault === 'host-network') services[0].HostConfig.NetworkMode = 'host'
       if (fault === 'wrong-port')
@@ -120,6 +122,51 @@ describe('design preflight side-effect boundary', () => {
         expect(() => assertDesignFixtureEnvironmentSync()).toThrow()
         expect(execFileSync).toHaveBeenCalledTimes(1)
         expect(vi.mocked(execFileSync).mock.calls[0][0]).toBe('docker')
+      } finally {
+        process.env = original
+      }
+    }
+  )
+})
+
+describe('safe loader failure diagnostics', () => {
+  it.each(['helper-environment', 'app-environment', 'migration-environment'])(
+    'identifies %s without retaining private child output',
+    (stage) => {
+      const original = process.env
+      process.env = fixture()
+      const mock = vi.mocked(execFileSync)
+      const index = ['helper-environment', 'app-environment', 'migration-environment'].indexOf(
+        stage
+      )
+      mock.mockReturnValueOnce(JSON.stringify(fixtureServices()))
+      for (let previous = 0; previous < index; previous += 1) {
+        mock.mockReturnValueOnce('DESIGN_FIXTURE_ENVIRONMENT_OK')
+      }
+      mock.mockImplementationOnce(() => {
+        throw Object.assign(new Error('private-child-payload'), {
+          code: 'ENOENT',
+          status: null,
+          stderr: 'private-child-payload',
+          env: { PRIVATE_TEST_VALUE: 'private-child-payload' },
+        })
+      })
+      try {
+        let captured: unknown
+        try {
+          assertDesignFixtureEnvironmentSync()
+        } catch (error) {
+          captured = error
+        }
+        expect(captured).toBeInstanceOf(Error)
+        const failure = captured as Error
+        expect(failure.message).toContain(stage)
+        expect(failure.cause).toBeInstanceOf(Error)
+        expect((failure.cause as Error).message).toBe('ENOENT; status=unknown')
+        expect((failure.cause as Error).cause).toBeUndefined()
+        expect(JSON.stringify(failure)).not.toContain('private-child-payload')
+        expect(String(failure)).not.toContain('private-child-payload')
+        expect(mock).toHaveBeenCalledTimes(index + 2)
       } finally {
         process.env = original
       }

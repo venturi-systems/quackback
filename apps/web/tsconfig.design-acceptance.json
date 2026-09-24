@@ -11,6 +11,7 @@
     "e2e/utils/design-acceptance.ts",
     "e2e/utils/design-fixture-guard.ts",
     "e2e/utils/rendered-font-evidence.ts",
-    "e2e/utils/browser-zoom-evidence.ts"
+    "e2e/utils/browser-zoom-evidence.ts",
+    "e2e/utils/browser-zoom-actuator.ts"
   ]
 }

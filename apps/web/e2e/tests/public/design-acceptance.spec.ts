@@ -11,12 +11,14 @@ import {
   type TypographyRegion,
 } from '../../utils/design-acceptance'
 import { measureRenderedFonts } from '../../utils/rendered-font-evidence'
+import { withDesignBrowserZoom } from '../../utils/browser-zoom-actuator'
+import { assertActualBrowserZoom } from '../../utils/browser-zoom-evidence'
 
 /**
  * Design acceptance in the existing disposable cloud E2E lane.
- * Uses the existing disposable cloud E2E lane. No additional CI job or browser is provisioned.
+ * Uses the existing disposable cloud E2E lane and its managed Chromium binary; no new CI job.
  * These assertions cover the explicitly declared regions/states, not the entire product.
- * A02 needs separate real browser-zoom evidence; viewport sizing does not certify zoom.
+ * A02 uses a temporary extension-backed browser context and independent CDP zoom evidence.
  * A07 retains touch-targets.spec.ts's five cases; it is not duplicated here.
  */
 assertDesignFixtureEnvironmentSync()
@@ -258,6 +260,151 @@ for (const width of WIDTHS) {
         expect(boxes.detail.right - boxes.detail.left).toBeLessThanOrEqual(72 * boxes.root + 1)
       }
       if (route === 'feed') await recordAuthoredFeedTypography(page, testInfo, `feed-${width}`)
+    })
+  }
+}
+
+async function recordZoomTextSpacing(page: Page, testInfo: TestInfo, state: string) {
+  // Freeze the actual visible headings and paragraphs before applying stress.
+  // Hidden responsive copies are excluded explicitly; disappearing measured copy fails.
+  const inventory = await page
+    .locator('#portal-main h1, #portal-main h2, #portal-main p')
+    .evaluateAll((elements) =>
+      elements
+        .filter(
+          (element) =>
+            element instanceof HTMLElement &&
+            element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+            element.textContent?.trim()
+        )
+        .map((element) => {
+          const parts: string[] = []
+          let current: Element | null = element
+          while (current) {
+            const parent: Element | null = current.parentElement
+            const index = parent ? Array.from(parent.children).indexOf(current) + 1 : 1
+            parts.unshift(`${current.localName}:nth-child(${index})`)
+            current = parent
+          }
+          return {
+            selector: parts.join(' > '),
+            text: element.textContent,
+            paragraph: element.localName === 'p',
+          }
+        })
+    )
+  expect(inventory.length, 'Every zoomed route must expose real readable copy').toBeGreaterThan(0)
+  await stressRenderedText(page, 'spacing')
+  const computed = []
+  for (const item of inventory) {
+    const element = page.locator(item.selector)
+    await expect(element).toBeVisible()
+    expect(await element.textContent()).toBe(item.text)
+    const spacing = await element.evaluate((node) => {
+      const style = getComputedStyle(node)
+      const size = parseFloat(style.fontSize)
+      return {
+        line: parseFloat(style.lineHeight) / size,
+        paragraph: parseFloat(style.marginBlockEnd) / size,
+        letter: parseFloat(style.letterSpacing) / size,
+        word: parseFloat(style.wordSpacing) / size,
+      }
+    })
+    expect(spacing.line).toBeCloseTo(1.5, 2)
+    if (item.paragraph) expect(spacing.paragraph).toBeCloseTo(2, 2)
+    expect(spacing.letter).toBeCloseTo(0.12, 2)
+    expect(spacing.word).toBeCloseTo(0.16, 2)
+    computed.push({ ...item, spacing })
+  }
+  const typography = await measureTypography(
+    page,
+    inventory.map(({ selector }) => ({
+      selector,
+      profile: 'prose' as const,
+      origin: 'user' as const,
+      locale: 'en-US',
+    })),
+    { artifactRevision: SOURCE, state, stress: 'actual browser zoom and text spacing' }
+  )
+  const clipping = typography.findings.flatMap((finding) =>
+    finding.reasons.filter((reason) =>
+      /clipp|mask|truncat|no-rendered-fragment|no-measurable-rendered-text/.test(reason)
+    )
+  )
+  await attach(testInfo, `zoom-text-spacing-${state}`, {
+    computed,
+    typography,
+    clipping,
+    scope:
+      'Visible route headings and paragraphs: effective spacing and clipping. Line-profile and font-identity acceptance remain separately measured.',
+  })
+  expect(typography.coverage.filter((item) => item.status !== 'measured')).toEqual([])
+  expect(clipping).toEqual([])
+}
+
+for (const factor of [2, 4] as const) {
+  for (const route of ROUTES) {
+    test(`A02 ${route} at actual ${factor * 100}% browser zoom preserves reflow and text spacing`, async ({
+      baseURL,
+    }, testInfo) => {
+      test.setTimeout(60_000)
+      await withDesignBrowserZoom(
+        { baseURL, viewport: { width: 1280, height: 1000 }, useAdminState: true },
+        async ({ page, setZoom }) => {
+          await openRoute(page, route, false)
+          const before = await setZoom(factor)
+          const cssWidth = await page.evaluate(() => innerWidth)
+          expect(cssWidth).toBeCloseTo(1280 / factor, 0)
+          const disclosure = page.locator('details.portal-participation-disclosure')
+          if (route === 'feed' && (await disclosure.isVisible())) {
+            await disclosure.locator('summary').click()
+            await expect(disclosure).toHaveAttribute('open', '')
+          }
+          await recordReflow(page, testInfo, `${route}-zoom-${factor}`)
+          await expect(page.locator('#portal-main')).toBeVisible()
+          if (route === 'feed') await expect(page.locator('#feedback-title')).toBeVisible()
+          if (route === 'post') {
+            await expect(page.getByTestId('post-detail')).toBeVisible()
+            await expect(page.locator('[data-testid="post-detail"] h1')).toBeVisible()
+          }
+          if (route === 'roadmap' || route === 'changelog') {
+            const heading = page.locator('#portal-main h1.portal-page-title')
+            await expect(heading).toBeVisible()
+            await expect(heading).toHaveText(route === 'roadmap' ? 'Roadmap' : 'Changelog')
+          }
+          await recordZoomTextSpacing(page, testInfo, `${route}-zoom-${factor}`)
+          await recordReflow(page, testInfo, `${route}-zoom-${factor}-spacing`)
+          const toggle = page.locator('button[aria-controls="portal-mobile-navigation"]')
+          if (factor === 4) {
+            await expect(toggle).toBeVisible()
+            await toggle.click()
+            await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+            await expect(
+              page.getByRole('navigation', { name: 'Mobile portal navigation', exact: true })
+            ).toBeVisible()
+            await recordReflow(page, testInfo, `${route}-zoom-${factor}-menu`)
+            await page.keyboard.press('Escape')
+            await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+            await expect(toggle).toBeFocused()
+          } else {
+            await expect(toggle).toBeHidden()
+            await expect(
+              page.getByRole('navigation', { name: 'Portal navigation', exact: true })
+            ).toBeVisible()
+          }
+          const after = await assertActualBrowserZoom(page, factor)
+          await attach(testInfo, `actual-browser-zoom-${route}-${factor}`, {
+            source: SOURCE,
+            route,
+            factor,
+            before,
+            after,
+            cssWidth,
+            scope:
+              'Actual browser zoom, text spacing, shell reflow and responsive menu on the isolated cloud fixture; no production acceptance.',
+          })
+        }
+      )
     })
   }
 }
