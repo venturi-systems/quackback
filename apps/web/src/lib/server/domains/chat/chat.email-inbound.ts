@@ -87,12 +87,18 @@ export function parseInboundEmail(data: unknown): ParsedInboundEmail {
 /**
  * Naive HTML→text for received emails that carry only an HTML body. Enough to
  * feed extractReplyText — block tags become newlines, entities are unescaped.
+ *
+ * Venturi fork (landing-page#2309): a style or script end tag may carry
+ * whitespace or attributes before its `>` (`</script >`, `</script foo>`), and
+ * HTML still ends the element there. The patterns accept those end tags, so
+ * the element's body is dropped rather than kept as message text (CodeQL
+ * js/bad-tag-filter).
  */
 export function htmlToText(html: string): string {
   return (
     html
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
       .replace(/<[^>]+>/g, ' ')

@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   CHERRY_PICK_LOG_ARGS,
   findLedgerViolations,
+  findMergeIntakeViolations,
+  gitMergeHistory,
   parseCherryPicks,
   parseLedger,
   patchIdOf,
@@ -233,6 +235,59 @@ describe('REQ-21 upstream intake ledger check', () => {
     )
   })
 
+  it('holds a merge intake record to its own rules, not the cherry-pick ones', () => {
+    const merge = entry({ intake: 'merge', patch_id: undefined })
+    // No patch-id and no trailer are needed for a merge commit.
+    expect(findLedgerViolations([merge], [], FULL_HISTORY)).toEqual([])
+
+    const label = `ledger entry 1 (upstream ${UPSTREAM})`
+    expect(findLedgerViolations([entry({ intake: 'merge' })], [], FULL_HISTORY)).toEqual([
+      `${label}: a merge intake records no patch_id`,
+    ])
+    expect(
+      findLedgerViolations(
+        [entry({ intake: 'merge', downstream_commit: undefined, patch_id: undefined })],
+        [],
+        FULL_HISTORY
+      )
+    ).toEqual([`${label}: a merge intake names its merge commit as downstream_commit`])
+    expect(
+      findLedgerViolations(
+        [entry({ neutralized_by: FORK_PARENT })],
+        [{ commit: FORK_PICK, upstream: UPSTREAM }],
+        FULL_HISTORY
+      )
+    ).toEqual([`${label}: neutralized_by belongs only on a merge intake record`])
+    expect(
+      findLedgerViolations(
+        [{ ...merge, review: { decision: 'rejected' }, neutralized_by: '8'.repeat(40) }],
+        [],
+        FULL_HISTORY
+      )
+    ).toEqual([`${label}: neutralized_by ${'8'.repeat(40)} is not in this branch's history`])
+  })
+
+  it('does not let a merge intake record satisfy a cherry-pick', () => {
+    // Even one naming the pick commit: a merge record's patch-id is not checked.
+    const problems = findLedgerViolations(
+      [entry({ intake: 'merge', patch_id: undefined })],
+      [{ commit: FORK_PICK, upstream: UPSTREAM }],
+      FULL_HISTORY
+    )
+    expect(problems).toEqual([
+      `${FORK_PICK} was cherry-picked from upstream ${UPSTREAM}, but no accepted ledger entry for it has downstream_commit ${FORK_PICK}`,
+    ])
+  })
+
+  it('rejects an unknown intake kind and a malformed neutralized_by', () => {
+    expect(() => parseLedger(JSON.stringify({ ...entry(), intake: 'squash' }))).toThrow(
+      'ledger line 1: intake must be "merge" when present'
+    )
+    expect(() => parseLedger(JSON.stringify({ ...entry(), neutralized_by: 'abc' }))).toThrow(
+      'ledger line 1: neutralized_by must be a lowercase 40-character SHA'
+    )
+  })
+
   it('rejects a ledger line without a known review decision', () => {
     const { review: _review, ...unreviewed } = entry()
     expect(() => parseLedger(JSON.stringify(unreviewed))).toThrow(
@@ -277,8 +332,10 @@ describe('REQ-21 committed upstream intake ledger', () => {
         reviewed_by: record.review.by,
         decision: record.review.decision,
         recorded_at: record.recorded_at,
+        intake: record.intake,
         downstream_commit: record.downstream_commit,
         patch_id: record.patch_id,
+        neutralized_by: record.neutralized_by,
         intake_pr: record.intake_pr,
         reason: record.reason,
         notes: record.notes,
@@ -352,6 +409,57 @@ describe('upstream intake record builder', () => {
     )
     expect(() => buildUpstreamIntakeRecord({ ...base, patch_id: PATCH_ID })).toThrow(
       'downstream_commit and patch_id must be recorded together'
+    )
+  })
+
+  it('records a merge intake: the merge commit, no patch-id, and neutralized_by on a rejection', () => {
+    const merge = { ...base, intake: 'merge' as const, downstream_commit: FORK_PICK }
+    const accepted = buildUpstreamIntakeRecord(merge)
+    expect(accepted).toMatchObject({ intake: 'merge', downstream_commit: FORK_PICK })
+    expect(accepted).not.toHaveProperty('patch_id')
+    expect(accepted).not.toHaveProperty('neutralized_by')
+
+    const rejected = buildUpstreamIntakeRecord({
+      ...merge,
+      decision: 'rejected',
+      neutralized_by: FORK_PARENT,
+    })
+    expect(rejected).toMatchObject({
+      neutralized_by: FORK_PARENT,
+      review: { decision: 'rejected' },
+    })
+
+    // A cherry-pick record carries no intake field at all.
+    expect(buildUpstreamIntakeRecord(base)).not.toHaveProperty('intake')
+  })
+
+  it('rejects a merge intake without its merge commit, with a patch-id, or deferred', () => {
+    const merge = { ...base, intake: 'merge' as const, downstream_commit: FORK_PICK }
+    expect(() => buildUpstreamIntakeRecord({ ...merge, downstream_commit: undefined })).toThrow(
+      'a merge intake names its merge commit as downstream_commit'
+    )
+    expect(() => buildUpstreamIntakeRecord({ ...merge, patch_id: PATCH_ID })).toThrow(
+      'a merge intake records no patch_id'
+    )
+    expect(() => buildUpstreamIntakeRecord({ ...merge, decision: 'deferred' })).toThrow(
+      'a merged upstream commit cannot be deferred'
+    )
+    expect(() => buildUpstreamIntakeRecord({ ...merge, decision: 'rejected' })).toThrow(
+      'a rejected merged commit, and only one, records neutralized_by'
+    )
+    expect(() => buildUpstreamIntakeRecord({ ...merge, neutralized_by: FORK_PARENT })).toThrow(
+      'a rejected merged commit, and only one, records neutralized_by'
+    )
+    expect(() =>
+      buildUpstreamIntakeRecord({
+        ...base,
+        downstream_commit: FORK_PICK,
+        patch_id: PATCH_ID,
+        neutralized_by: FORK_PARENT,
+      })
+    ).toThrow('neutralized_by belongs only on a merge intake record')
+    expect(() => buildUpstreamIntakeRecord({ ...merge, neutralized_by: 'abc' })).toThrow(
+      'neutralized_by must be a lowercase 40-character SHA'
     )
   })
 })
@@ -523,7 +631,10 @@ describe('pinned patch-id command', () => {
   })
 
   it('is the command the record builder documents', () => {
-    const builder = readFileSync(join(process.cwd(), 'scripts', 'upstream-intake-ledger.ts'), 'utf8')
+    const builder = readFileSync(
+      join(process.cwd(), 'scripts', 'upstream-intake-ledger.ts'),
+      'utf8'
+    )
     expect(builder).toContain(PATCH_ID_COMMAND)
   })
 })
@@ -605,5 +716,168 @@ describe('cherry-pick log reading', () => {
     const unreadable = (commit: string) =>
       `${commit}: 1 cherry-pick reference(s) in its message are not a trailer line "(cherry picked from commit <sha>)" with a lowercase 7- to 40-character sha`
     expect(readCherryPicks(repo).problems).toEqual([unreadable(capitalized), unreadable(tabbed)])
+  })
+})
+
+describe('merge intake check', () => {
+  // A throwaway repository shaped like the fork:
+  //
+  //   main:     base ── f1 ── mTopic ── mIntake ── n1        (branch main)
+  //                     └ t1 ┘          │                     (fork branch)
+  //   upstream: base ── u1 ── u2 ───────┘   later: main ── mLater (merges u3)
+  //                            └ u3 ──────────────────────────┘
+  //
+  // `base` plays the fork point. mIntake merges upstream u2 into the fork,
+  // n1 undoes u1, and branch `later` merges upstream u3 on top of that.
+  let repo = ''
+  const sha: Record<string, string> = {}
+  const isolated: NodeJS.ProcessEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
+  )
+
+  function run(args: string[]): string {
+    return execFileSync('git', args, { cwd: repo, env: isolated, encoding: 'utf8' }).trim()
+  }
+
+  function commit(name: string): void {
+    writeFileSync(join(repo, `${name}.txt`), `${name}\n`)
+    run(['add', `${name}.txt`])
+    run(['commit', '-q', '-m', name])
+    sha[name] = run(['rev-parse', 'HEAD'])
+  }
+
+  function merge(name: string, other: string): void {
+    run(['merge', '-q', '--no-ff', '--no-edit', '-m', name, other])
+    sha[name] = run(['rev-parse', 'HEAD'])
+  }
+
+  beforeAll(() => {
+    const root = mkdtempSync(join(tmpdir(), 'intake-ledger-merge-'))
+    repo = join(root, 'repo')
+    mkdirSync(repo)
+    const globalConfig = join(root, 'gitconfig')
+    writeFileSync(globalConfig, '')
+    Object.assign(isolated, {
+      GIT_CONFIG_GLOBAL: globalConfig,
+      GIT_CONFIG_NOSYSTEM: '1',
+      XDG_CONFIG_HOME: root,
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@example.com',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@example.com',
+    })
+    run(['-c', 'init.defaultBranch=main', 'init', '-q'])
+    commit('base')
+    run(['checkout', '-q', '-b', 'upstream'])
+    commit('u1')
+    commit('u2')
+    run(['checkout', '-q', 'main'])
+    commit('f1')
+    run(['checkout', '-q', '-b', 'topic'])
+    commit('t1')
+    run(['checkout', '-q', 'main'])
+    merge('mTopic', 'topic')
+    merge('mIntake', 'upstream')
+    commit('n1')
+    run(['checkout', '-q', 'upstream'])
+    commit('u3')
+    run(['checkout', '-q', '-b', 'later', 'main'])
+    merge('mLater', 'upstream')
+    run(['checkout', '-q', 'main'])
+  })
+
+  afterAll(() => {
+    if (repo) rmSync(join(repo, '..'), { recursive: true, force: true })
+  })
+
+  function record(upstream: string, overrides: Partial<LedgerEntry> = {}): LedgerEntry {
+    return {
+      intake: 'merge',
+      upstream_sha: sha[upstream]!,
+      merge_base: sha.base!,
+      downstream_head: sha.mTopic!,
+      downstream_commit: sha.mIntake!,
+      review: { decision: 'accepted' },
+      ...overrides,
+    }
+  }
+
+  const complete = () => [
+    record('u1', { review: { decision: 'rejected' }, neutralized_by: sha.n1 }),
+    record('u2'),
+  ]
+
+  function check(entries: LedgerEntry[], head = 'main'): string[] {
+    return findMergeIntakeViolations(entries, gitMergeHistory(repo, head), sha.base)
+  }
+
+  it('fails when a merge brings upstream history in and no record names it', () => {
+    expect(check([])).toEqual([
+      `merge ${sha.mIntake} brings upstream history into this branch (merge base ${sha.base}), but no merge intake record names it as downstream_commit`,
+    ])
+  })
+
+  it('passes with one record per commit the merge brought in, and ignores fork branch merges', () => {
+    expect(check(complete())).toEqual([])
+  })
+
+  it('fails when a commit the merge brought in has no record', () => {
+    expect(check([record('u2')])).toEqual([
+      `merge ${sha.mIntake} brought in upstream commit ${sha.u1}, which has no merge intake record naming ${sha.mIntake}`,
+    ])
+  })
+
+  it('fails when a record does not hold against the merge it names', () => {
+    const label = (n: number, upstream: string) => `ledger entry ${n} (upstream ${sha[upstream]})`
+    const [u1] = complete()
+    expect(check([u1!, record('u2', { downstream_head: sha.f1 })])).toContain(
+      `${label(2, 'u2')}: downstream_head ${sha.f1} is not a parent of merge ${sha.mIntake}`
+    )
+    expect(check([...complete(), record('base')])).toContain(
+      `${label(3, 'base')}: merge ${sha.mIntake} did not bring in ${sha.base}`
+    )
+    expect(check([u1!, record('u2', { merge_base: sha.f1 })])).toEqual([
+      `${label(2, 'u2')}: merge_base ${sha.f1} is not a merge base of ${sha.mTopic} and ${sha.u2}`,
+    ])
+    expect(check([u1!, record('u2', { downstream_commit: sha.n1 })])).toContain(
+      `${label(2, 'u2')}: downstream_commit ${sha.n1} is not a merge commit`
+    )
+  })
+
+  it('requires an accepted record, or a rejected one undone by a later fork commit', () => {
+    const label = `ledger entry 1 (upstream ${sha.u1})`
+    const u2 = record('u2')
+    expect(check([record('u1', { review: { decision: 'deferred' } }), u2])).toEqual([
+      `${label}: a merged upstream commit cannot be deferred; record it accepted, or rejected with neutralized_by`,
+    ])
+    expect(check([record('u1', { review: { decision: 'rejected' } }), u2])).toEqual([
+      `${label}: a rejected merged commit names the fork commit that undoes it as neutralized_by`,
+    ])
+    expect(check([record('u1', { neutralized_by: sha.n1 }), u2])).toEqual([
+      `${label}: neutralized_by belongs only on a rejected record`,
+    ])
+    for (const early of [sha.f1!, sha.mIntake!]) {
+      const rejected = record('u1', { review: { decision: 'rejected' }, neutralized_by: early })
+      expect(check([rejected, u2])).toEqual([
+        `${label}: neutralized_by ${early} does not come after merge ${sha.mIntake}`,
+      ])
+    }
+  })
+
+  it('finds a later intake on top of a recorded one through the recorded upstream commit', () => {
+    // Without records, the later merge's base (u2) is not yet known upstream,
+    // so only the first intake is reported, through the fork point.
+    expect(check([], 'later')).toEqual([
+      `merge ${sha.mIntake} brings upstream history into this branch (merge base ${sha.base}), but no merge intake record names it as downstream_commit`,
+    ])
+    expect(check(complete(), 'later')).toEqual([
+      `merge ${sha.mLater} brings upstream history into this branch (merge base ${sha.u2}), but no merge intake record names it as downstream_commit`,
+    ])
+    const later = record('u3', {
+      merge_base: sha.u2,
+      downstream_head: sha.n1,
+      downstream_commit: sha.mLater,
+    })
+    expect(check([...complete(), later], 'later')).toEqual([])
   })
 })
