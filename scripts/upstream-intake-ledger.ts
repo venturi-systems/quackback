@@ -8,15 +8,23 @@ const FULL_SHA = /^[0-9a-f]{40}$/
  * - `downstream_head` is the fork commit the pick was applied onto;
  * - `merge_base` is the merge base of `downstream_head` and `upstream_sha`;
  * - `downstream_commit` is the fork commit the pick produced, which must carry
- *   the `(cherry picked from commit <upstream_sha>)` trailer;
+ *   the `(cherry picked from commit <upstream_sha>)` trailer on a line of its
+ *   own;
  * - `patch_id` is that commit's patch-id, computed exactly as
  *   `scripts/check-upstream-intake-ledger.ts` recomputes it (`PATCH_ID_COMMAND`):
- *   `git -c diff.suppressBlankEmpty=false show --no-color --no-ext-diff --no-renames --no-textconv --submodule=short --diff-algorithm=histogram --indent-heuristic --unified=3 --inter-hunk-context=0 --src-prefix=a/ --dst-prefix=b/ --format= <sha> | git patch-id --stable`.
- *   The diff settings git config can change (prefixes, context, blank context
- *   lines, algorithm) are pinned there, because each of them changes the id.
+ *   `env -u GIT_DIFF_OPTS git -c core.quotePath=true -c diff.suppressBlankEmpty=false show --no-color --no-ext-diff --no-relative --no-renames --no-textconv --text --ignore-submodules=none --submodule=short --no-show-signature --diff-algorithm=histogram --indent-heuristic --unified=3 --inter-hunk-context=0 --src-prefix=a/ --dst-prefix=b/ --format= <sha> | git patch-id --stable`.
+ *   Each setting that command pins can change the id. `PATCH_ID_SHOW_ARGS`
+ *   in that script lists exactly which configuration the id is independent of.
  * `downstream_commit` and `patch_id` are recorded together or not at all. A
  * pick is satisfied only by an `accepted` record that names it as
  * `downstream_commit`.
+ *
+ * The ledger is append-only. This script appends each record, and a later
+ * record for the same `upstream_sha` adds to an earlier one; it does not
+ * replace it. The check reads every record: each must hold against history on
+ * its own, and a pick is satisfied when any `accepted` record names it. A later
+ * `rejected` or `deferred` record therefore does not withdraw an earlier
+ * acceptance.
  *
  * `scripts/check-upstream-intake-ledger.ts` enforces the ledger in CI.
  */

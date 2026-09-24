@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
+  CHERRY_PICK_LOG_ARGS,
   findLedgerViolations,
   parseCherryPicks,
   parseLedger,
   patchIdOf,
   PATCH_ID_COMMAND,
+  readCherryPicks,
   type HistoryProbe,
   type LedgerEntry,
 } from '../scripts/check-upstream-intake-ledger'
@@ -50,11 +52,70 @@ describe('REQ-21 upstream intake ledger check', () => {
       `${MERGE_BASE}\x00fix: two picks squashed\n\n(cherry picked from commit ${UPSTREAM})\n(cherry picked from commit ${OTHER_UPSTREAM})\n`,
     ].join('\x1e\n')
 
-    expect(parseCherryPicks(log)).toEqual([
+    expect(parseCherryPicks(log)).toEqual({
+      picks: [
+        { commit: FORK_PICK, upstream: UPSTREAM },
+        { commit: MERGE_BASE, upstream: UPSTREAM },
+        { commit: MERGE_BASE, upstream: OTHER_UPSTREAM },
+      ],
+      problems: [],
+    })
+  })
+
+  it('reads an indented trailer, so an unrecorded indented pick fails the check', () => {
+    const log = [
+      `${FORK_PICK}\x00chore: squashed intake\n\n    (cherry picked from commit ${UPSTREAM})\n`,
+      `${FORK_PARENT}\x00chore: squashed intake\n\n\t(cherry picked from commit ${OTHER_UPSTREAM})\n`,
+    ].join('\x1e\n')
+    const { picks, problems } = parseCherryPicks(log)
+    expect(problems).toEqual([])
+    expect(picks).toEqual([
       { commit: FORK_PICK, upstream: UPSTREAM },
-      { commit: MERGE_BASE, upstream: UPSTREAM },
-      { commit: MERGE_BASE, upstream: OTHER_UPSTREAM },
+      { commit: FORK_PARENT, upstream: OTHER_UPSTREAM },
     ])
+
+    const violations = findLedgerViolations([], picks, FULL_HISTORY)
+    expect(violations).toEqual([
+      `${FORK_PICK} was cherry-picked from upstream ${UPSTREAM}, which has no ledger entry`,
+      `${FORK_PARENT} was cherry-picked from upstream ${OTHER_UPSTREAM}, which has no ledger entry`,
+    ])
+  })
+
+  it('reports a cherry-pick reference that is not a trailer line it can read', () => {
+    const unreadable = (count: number) =>
+      `${FORK_PICK}: ${count} cherry-pick reference(s) in its message are not a trailer line "(cherry picked from commit <sha>)" with a lowercase 7- to 40-character sha`
+    for (const line of [
+      `(cherry picked from commit ${'ABCDEF1234'.repeat(4)})`,
+      `(cherry picked from commit ${UPSTREAM}) and reworded`,
+      `> (cherry picked from commit ${UPSTREAM})`,
+      `- (cherry picked from commit ${UPSTREAM})`,
+      `(cherry picked from commit  ${UPSTREAM})`,
+      '(cherry picked from commit abc12)',
+      `(Cherry picked from commit ${UPSTREAM})`,
+    ]) {
+      const log = `${FORK_PICK}\x00fix: a pick\n\n${line}\n`
+      expect(parseCherryPicks(log), line).toEqual({ picks: [], problems: [unreadable(1)] })
+    }
+
+    // A readable trailer does not hide an unreadable one in the same message.
+    const mixed = `${FORK_PICK}\x00fix: two picks\n\n(cherry picked from commit ${UPSTREAM})\n(cherry picked from commit ${OTHER_UPSTREAM}) and more\n`
+    expect(parseCherryPicks(mixed)).toEqual({
+      picks: [{ commit: FORK_PICK, upstream: UPSTREAM }],
+      problems: [unreadable(1)],
+    })
+  })
+
+  it('does not report the trailer text in prose with a placeholder for the sha', () => {
+    const log = `${FORK_PICK}\x00fix: document the check\n\n- a commit carrying \`(cherry picked from commit X)\` needs an entry\n- written as (cherry picked from commit <sha>)\n`
+    expect(parseCherryPicks(log)).toEqual({ picks: [], problems: [] })
+  })
+
+  it('reports a git log record that does not start with a commit id', () => {
+    const signed = `Good "git" signature for fixture@example.com with ED25519 key SHA256:x\n${FORK_PICK}\x00fix: a pick\n\n(cherry picked from commit ${UPSTREAM})\n`
+    const { picks, problems } = parseCherryPicks(signed)
+    expect(picks).toEqual([])
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('git log printed a record that does not start with a commit id')
   })
 
   it('passes when every pick is recorded and every recorded fork commit is in history', () => {
@@ -143,6 +204,22 @@ describe('REQ-21 upstream intake ledger check', () => {
     }
   })
 
+  it('accepts several records for one upstream commit: a later record adds to an earlier one', () => {
+    const picks = [{ commit: FORK_PICK, upstream: UPSTREAM }]
+    const undecided = { downstream_commit: undefined, patch_id: undefined }
+    const deferred = entry({ ...undecided, review: { decision: 'deferred' } })
+    expect(findLedgerViolations([deferred, entry()], picks, FULL_HISTORY)).toEqual([])
+    const rejected = entry({ ...undecided, review: { decision: 'rejected' } })
+    expect(findLedgerViolations([entry(), rejected], picks, FULL_HISTORY)).toEqual([])
+
+    // Each record still has to hold on its own.
+    const wrongPatchId = entry({ patch_id: '7'.repeat(40) })
+    const problems = findLedgerViolations([entry(), wrongPatchId], picks, FULL_HISTORY)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('ledger entry 2')
+    expect(problems[0]).toContain('does not match')
+  })
+
   it('fails when an entry names a fork commit that carries no trailer for its upstream commit', () => {
     const problems = findLedgerViolations(
       [entry()],
@@ -186,7 +263,7 @@ describe('REQ-21 committed upstream intake ledger', () => {
     expect(parseLedger(readFileSync(ledgerPath, 'utf8'))).toHaveLength(lines.length)
   })
 
-  it('holds only records the builder emits, one per upstream commit', () => {
+  it('holds only records the builder emits, none repeating an earlier decision', () => {
     const records = lines.map((line) => JSON.parse(line))
     for (const record of records) {
       const rebuilt = buildUpstreamIntakeRecord({
@@ -208,8 +285,13 @@ describe('REQ-21 committed upstream intake ledger', () => {
       expect(record.auto_merge).toBe(false)
       expect(record.source_update_mode).toBe('manual-review-only')
     }
-    const upstreams = records.map((record) => record.upstream_sha)
-    expect(new Set(upstreams).size).toBe(upstreams.length)
+    // The builder appends, and a later record for an upstream commit adds to an
+    // earlier one, so only a repeat of the same decision on the same fork
+    // commit is a duplicate.
+    const keys = records.map((record) =>
+      JSON.stringify([record.upstream_sha, record.downstream_commit ?? '', record.review.decision])
+    )
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
 
@@ -274,11 +356,13 @@ describe('upstream intake record builder', () => {
 
 describe('pinned patch-id command', () => {
   // A throwaway repository with one commit whose diff has two nearby hunks and
-  // blank context lines, so each pinned setting changes the unpinned id.
+  // blank context lines in file.txt, a file with a non-ASCII name, and a file
+  // in a subdirectory whose content is latin-1, not UTF-8. Each setting in
+  // `changesTheId` changes the unpinned id of that commit.
   let repo = ''
   let sha = ''
   // No caller git config or GIT_* environment reaches the fixture's own commands.
-  const isolated = Object.fromEntries(
+  const isolated: NodeJS.ProcessEnv = Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
   )
 
@@ -286,14 +370,24 @@ describe('pinned patch-id command', () => {
     return execFileSync('git', args, { cwd: repo, env: isolated, encoding: 'utf8', input })
   }
 
-  function unpinnedPatchId(): string {
-    return run(['patch-id', '--stable'], run(['show', '--format=', sha])).split(' ')[0] ?? ''
+  /** `git show --format= <sha> | git patch-id --stable`, piped as bytes like a shell. */
+  function unpinnedPatchId(options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): string {
+    const cwd = options.cwd ?? repo
+    const env = options.env ?? isolated
+    const diff = execFileSync('git', ['show', '--format=', sha], { cwd, env })
+    const output = execFileSync('git', ['patch-id', '--stable'], {
+      cwd,
+      env,
+      input: diff,
+      encoding: 'utf8',
+    })
+    return output.split(' ')[0] ?? ''
   }
 
   beforeAll(() => {
     const root = mkdtempSync(join(tmpdir(), 'intake-ledger-patch-id-'))
     repo = join(root, 'repo')
-    mkdirSync(repo)
+    mkdirSync(join(repo, 'sub'), { recursive: true })
     const globalConfig = join(root, 'gitconfig')
     writeFileSync(globalConfig, '')
     Object.assign(isolated, {
@@ -309,11 +403,15 @@ describe('pinned patch-id command', () => {
     lines[15] = ''
     run(['-c', 'init.defaultBranch=main', 'init', '-q'])
     writeFileSync(join(repo, 'file.txt'), `${lines.join('\n')}\n`)
-    run(['add', 'file.txt'])
+    writeFileSync(join(repo, 'caf\u00e9.txt'), 'before\n')
+    writeFileSync(join(repo, 'sub', 'latin1.txt'), Buffer.from('caf\xe9\n', 'latin1'))
+    run(['add', '-A'])
     run(['commit', '-q', '-m', 'base'])
     lines[4] = 'line 5 changed'
     lines[13] = 'line 14 changed'
     writeFileSync(join(repo, 'file.txt'), `${lines.join('\n')}\n`)
+    writeFileSync(join(repo, 'caf\u00e9.txt'), 'after\n')
+    writeFileSync(join(repo, 'sub', 'latin1.txt'), Buffer.from('caf\xe9 au lait\n', 'latin1'))
     run(['commit', '-q', '-a', '-m', 'change'])
     sha = run(['rev-parse', 'HEAD']).trim()
   })
@@ -322,7 +420,7 @@ describe('pinned patch-id command', () => {
     if (repo) rmSync(join(repo, '..'), { recursive: true, force: true })
   })
 
-  it('gives the same id under any diff configuration', () => {
+  it('gives the same id under each pinned setting', () => {
     const pinned = patchIdOf(sha, repo)
     const unpinned = unpinnedPatchId()
     expect(pinned).toMatch(/^[0-9a-f]{40}$/)
@@ -334,6 +432,10 @@ describe('pinned patch-id command', () => {
       ['diff.context', '1'],
       ['diff.interHunkContext', '10'],
       ['diff.suppressBlankEmpty', 'true'],
+      // Prints the non-ASCII file name unquoted.
+      ['core.quotePath', 'false'],
+      // Treats every file larger than one byte as binary.
+      ['core.bigFileThreshold', '1'],
     ]
     for (const [key, value] of changesTheId) {
       run(['config', key, value])
@@ -342,6 +444,14 @@ describe('pinned patch-id command', () => {
       run(['config', '--unset', key])
     }
 
+    // An attribute that marks a file binary changes the unpinned id too.
+    const attributes = join(repo, '.git', 'info', 'attributes')
+    mkdirSync(join(repo, '.git', 'info'), { recursive: true })
+    writeFileSync(attributes, 'file.txt -diff\n')
+    expect(unpinnedPatchId(), 'file.txt -diff').not.toBe(unpinned)
+    expect(patchIdOf(sha, repo), 'file.txt -diff').toBe(pinned)
+    rmSync(attributes)
+
     // Settings only newer git reads, or that leave this diff alone; still pinned.
     const alsoPinned: Array<[string, string]> = [
       ['diff.srcPrefix', 'x/'],
@@ -349,6 +459,9 @@ describe('pinned patch-id command', () => {
       ['diff.mnemonicPrefix', 'true'],
       ['diff.algorithm', 'patience'],
       ['diff.indentHeuristic', 'false'],
+      ['diff.relative', 'true'],
+      ['diff.ignoreSubmodules', 'all'],
+      ['log.showSignature', 'true'],
     ]
     for (const [key, value] of alsoPinned) {
       run(['config', key, value])
@@ -357,8 +470,110 @@ describe('pinned patch-id command', () => {
     }
   })
 
+  it('gives the same id from a subdirectory under diff.relative', () => {
+    const pinned = patchIdOf(sha, repo)
+    const subdirectory = join(repo, 'sub')
+    run(['config', 'diff.relative', 'true'])
+    try {
+      // Unpinned, the diff shrinks to sub/ and its paths lose the sub/ prefix.
+      expect(unpinnedPatchId({ cwd: subdirectory })).not.toBe(pinned)
+      expect(patchIdOf(sha, subdirectory)).toBe(pinned)
+    } finally {
+      run(['config', '--unset', 'diff.relative'])
+    }
+  })
+
+  it('ignores GIT_DIFF_OPTS, which overrides --unified', () => {
+    const pinned = patchIdOf(sha, repo)
+    const hostile = { ...isolated, GIT_DIFF_OPTS: '--unified=1' }
+    expect(unpinnedPatchId({ env: hostile })).not.toBe(pinned)
+    const saved = process.env.GIT_DIFF_OPTS
+    process.env.GIT_DIFF_OPTS = '--unified=1'
+    try {
+      expect(patchIdOf(sha, repo)).toBe(pinned)
+    } finally {
+      if (saved === undefined) delete process.env.GIT_DIFF_OPTS
+      else process.env.GIT_DIFF_OPTS = saved
+    }
+  })
+
+  it('hashes the diff as bytes, as the documented pipeline does', () => {
+    // Decoding the diff as UTF-8 replaces the latin-1 byte, which changes the id.
+    const decoded = execFileSync('git', ['show', '--format=', sha], {
+      cwd: repo,
+      env: isolated,
+      encoding: 'utf8',
+    })
+    const fromDecoded = run(['patch-id', '--stable'], decoded).split(' ')[0]
+    expect(fromDecoded).not.toBe(unpinnedPatchId())
+    expect(patchIdOf(sha, repo)).toBe(unpinnedPatchId())
+  })
+
   it('is the command the record builder documents', () => {
     const builder = readFileSync(join(process.cwd(), 'scripts', 'upstream-intake-ledger.ts'), 'utf8')
     expect(builder).toContain(PATCH_ID_COMMAND)
+  })
+})
+
+describe('cherry-pick log reading', () => {
+  // A throwaway repository whose one pick commit is SSH-signed, with
+  // log.showSignature=true and a signer file, so plain `git log` prints a
+  // verification line in front of the commit id.
+  let repo = ''
+  let pick = ''
+  const isolated: NodeJS.ProcessEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))
+  )
+
+  function run(args: string[]): string {
+    return execFileSync('git', args, { cwd: repo, env: isolated, encoding: 'utf8' })
+  }
+
+  beforeAll(() => {
+    const root = mkdtempSync(join(tmpdir(), 'intake-ledger-log-'))
+    repo = join(root, 'repo')
+    mkdirSync(repo)
+    const globalConfig = join(root, 'gitconfig')
+    writeFileSync(globalConfig, '')
+    Object.assign(isolated, {
+      GIT_CONFIG_GLOBAL: globalConfig,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_AUTHOR_NAME: 'Fixture',
+      GIT_AUTHOR_EMAIL: 'fixture@example.com',
+      GIT_COMMITTER_NAME: 'Fixture',
+      GIT_COMMITTER_EMAIL: 'fixture@example.com',
+    })
+    const key = join(root, 'signing-key')
+    execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-C', 'fixture', '-f', key])
+    const signers = join(root, 'allowed-signers')
+    writeFileSync(signers, `fixture@example.com ${readFileSync(`${key}.pub`, 'utf8')}`)
+    run(['-c', 'init.defaultBranch=main', 'init', '-q'])
+    run(['config', 'gpg.format', 'ssh'])
+    run(['config', 'user.signingKey', key])
+    run(['config', 'gpg.ssh.allowedSignersFile', signers])
+    run(['commit', '-q', '--allow-empty', '-m', 'base'])
+    const message = `fix: a pick\n\n(cherry picked from commit ${UPSTREAM})`
+    run(['commit', '-q', '--allow-empty', '-S', '-m', message])
+    pick = run(['rev-parse', 'HEAD']).trim()
+    run(['config', 'log.showSignature', 'true'])
+  })
+
+  afterAll(() => {
+    if (repo) rmSync(join(repo, '..'), { recursive: true, force: true })
+  })
+
+  it('reads a signed pick under log.showSignature=true', () => {
+    // Without --no-show-signature, the verification line precedes the commit
+    // id, and the record is reported rather than read as a pick.
+    const shown = run(CHERRY_PICK_LOG_ARGS.filter((arg) => arg !== '--no-show-signature'))
+    expect(shown).toContain('signature')
+    const unpinned = parseCherryPicks(shown)
+    expect(unpinned.picks).toEqual([])
+    expect(unpinned.problems).toHaveLength(1)
+
+    expect(readCherryPicks(repo)).toEqual({
+      picks: [{ commit: pick, upstream: UPSTREAM }],
+      problems: [],
+    })
   })
 })

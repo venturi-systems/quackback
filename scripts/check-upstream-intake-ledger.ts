@@ -12,7 +12,10 @@
  * - an entry records only one of `downstream_commit` and `patch_id`;
  * - a ledger entry names a fork commit (`downstream_head`, `merge_base`,
  *   `downstream_commit`) that is not in history;
- * - a ledger entry's `patch_id` does not match its `downstream_commit`.
+ * - a ledger entry's `patch_id` does not match its `downstream_commit`;
+ * - a commit message names a commit in a cherry-pick reference that is not a
+ *   trailer line the check can read, or `git log` prints a record that does
+ *   not start with a commit id (see `parseCherryPicks`).
  *
  * The ledger path comes from `.venturi/repository-governance.json`
  * (`authority.upstream.ledger`). Needs full history: CI checks out with
@@ -22,31 +25,65 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 
 const FULL_SHA = /^[0-9a-f]{40}$/
-const TRAILER = /^\(cherry picked from commit ([0-9a-f]{7,40})\)[ \t\r]*$/gm
+const MARKER = '(cherry picked from commit '
+/** A trailer line as `git cherry-pick -x` writes it, optionally indented. */
+const TRAILER = /^[ \t]*\(cherry picked from commit ([0-9a-f]{7,40})\)[ \t\r]*$/gm
+/** The trailer text followed by a hex digit in any case: a reference to a commit. */
+const REFERENCE = /\(cherry picked from commit[ \t]*[0-9a-f]/gi
 const FORK_SHA_FIELDS = ['downstream_head', 'merge_base', 'downstream_commit'] as const
 const DECISIONS = ['accepted', 'rejected', 'deferred'] as const
 
 /**
- * The `git` arguments that print a commit's diff for `git patch-id --stable`.
- * These diff settings can be changed through git config, and each is pinned on
- * the command line so the id does not depend on the caller's config: the
- * prefixes (`diff.noprefix`, `diff.mnemonicPrefix`, `diff.srcPrefix`,
- * `diff.dstPrefix`), the context (`diff.context`, `diff.interHunkContext`),
- * blank context lines (`diff.suppressBlankEmpty`, which has no command-line
- * flag, hence `-c`), the algorithm and its heuristic, renames, external diff
- * and textconv drivers, submodule format and color. The algorithm alone
- * changes the id of f22b51b26 (histogram 0a6cd43f..., myers 5075068b...).
- * `git patch-id --stable` ignores `patchid.verbatim`, so it needs no pin.
+ * Config that `git()` pins with `-c` on every command it runs. Both keys change
+ * `git show` output and have no command-line flag: `core.quotePath=false`
+ * prints a non-ASCII path unquoted in the `diff --git`, `---` and `+++` lines,
+ * and `diff.suppressBlankEmpty=true` drops the space from blank context lines.
+ */
+export const GIT_CONFIG_PINS = ['-c', 'core.quotePath=true', '-c', 'diff.suppressBlankEmpty=false']
+
+/**
+ * The `git show` arguments that print a commit's diff for
+ * `git patch-id --stable`, run with `GIT_CONFIG_PINS` and without the
+ * `GIT_DIFF_OPTS` environment variable (see `PATCH_ID_COMMAND`).
+ *
+ * The id is then independent of the working directory and of these settings,
+ * wherever they are set (system, global, repository or worktree config, `-c`,
+ * or `GIT_CONFIG_PARAMETERS`/`GIT_CONFIG_COUNT`):
+ * - `diff.relative`, which in a subdirectory limits the diff to that
+ *   subdirectory and shortens its paths (`--no-relative`);
+ * - `diff.noprefix`, `diff.mnemonicPrefix`, `diff.srcPrefix` and
+ *   `diff.dstPrefix` (`--src-prefix`, `--dst-prefix`);
+ * - `diff.context` and `diff.interHunkContext` (`--unified`,
+ *   `--inter-hunk-context`);
+ * - `diff.algorithm` and `diff.indentHeuristic` (`--diff-algorithm`,
+ *   `--indent-heuristic`). The algorithm alone changes the id of f22b51b26
+ *   (histogram 0a6cd43f..., myers 5075068b...);
+ * - `diff.renames` (`--no-renames`), `diff.external` (`--no-ext-diff`) and
+ *   `diff.<driver>.textconv` (`--no-textconv`);
+ * - binary detection by `core.bigFileThreshold`, `diff.<driver>.binary` and
+ *   the `diff` and `binary` attributes, including those from
+ *   `core.attributesFile` and `.git/info/attributes` (`--text`);
+ * - `diff.submodule` and `diff.ignoreSubmodules` (`--submodule=short`,
+ *   `--ignore-submodules=none`);
+ * - `color.ui` and `color.diff` (`--no-color`), and `log.showSignature`
+ *   (`--no-show-signature`), whose output comes before the diff;
+ * - `core.quotePath` and `diff.suppressBlankEmpty` (`GIT_CONFIG_PINS`).
+ * `GIT_DIFF_OPTS` overrides `--unified`, so `git()` removes it from the
+ * environment. `git patch-id --stable` ignores `patchid.stable` and
+ * `patchid.verbatim`, and sums per-file hashes, so the file order
+ * (`diff.orderFile`) does not matter. Settings not named here are not pinned.
  */
 export const PATCH_ID_SHOW_ARGS = [
-  '-c',
-  'diff.suppressBlankEmpty=false',
   'show',
   '--no-color',
   '--no-ext-diff',
+  '--no-relative',
   '--no-renames',
   '--no-textconv',
+  '--text',
+  '--ignore-submodules=none',
   '--submodule=short',
+  '--no-show-signature',
   '--diff-algorithm=histogram',
   '--indent-heuristic',
   '--unified=3',
@@ -57,7 +94,23 @@ export const PATCH_ID_SHOW_ARGS = [
 ]
 
 /** The patch-id command as documented for ledger authors. */
-export const PATCH_ID_COMMAND = `git ${PATCH_ID_SHOW_ARGS.join(' ')} <sha> | git patch-id --stable`
+export const PATCH_ID_COMMAND = `env -u GIT_DIFF_OPTS git ${[...GIT_CONFIG_PINS, ...PATCH_ID_SHOW_ARGS].join(' ')} <sha> | git patch-id --stable`
+
+/**
+ * The `git log` arguments that print, as `%H%x00%B%x1e` records, every commit
+ * in `HEAD`'s history whose message contains the trailer text in any case.
+ * `--no-show-signature` keeps `log.showSignature` from printing verification
+ * lines in front of each record.
+ */
+export const CHERRY_PICK_LOG_ARGS = [
+  'log',
+  '--no-show-signature',
+  '--format=%H%x00%B%x1e',
+  '--fixed-strings',
+  '--regexp-ignore-case',
+  `--grep=${MARKER}`,
+  'HEAD',
+]
 
 export interface LedgerEntry {
   upstream_sha: string
@@ -71,6 +124,11 @@ export interface LedgerEntry {
 export interface CherryPick {
   commit: string
   upstream: string
+}
+
+export interface CherryPickLog {
+  picks: CherryPick[]
+  problems: string[]
 }
 
 export interface HistoryProbe {
@@ -117,15 +175,41 @@ export function parseLedger(text: string): LedgerEntry[] {
   return entries
 }
 
-/** Parses `git log --format=%H%x00%B%x1e` output. */
-export function parseCherryPicks(log: string): CherryPick[] {
+/**
+ * Parses `git log` output in the `CHERRY_PICK_LOG_ARGS` format. A trailer is a
+ * line of its own, optionally indented, holding a lowercase 7- to
+ * 40-character id. Every other mention of the trailer text followed by a hex
+ * digit (an uppercase id, text after the closing parenthesis, a quote or list
+ * marker in front, a short id) is reported, because the check cannot tell
+ * which upstream commit it names. A mention followed by a placeholder such as
+ * `X` or `<sha>` is prose and is not reported. A record that does not start
+ * with a full commit id, such as signature output, is reported too.
+ */
+export function parseCherryPicks(log: string): CherryPickLog {
   const picks: CherryPick[] = []
+  const problems: string[] = []
   for (const record of log.split('\x1e')) {
-    const [commit, body = ''] = record.trim().split('\x00')
-    if (!commit) continue
-    for (const match of body.matchAll(TRAILER)) picks.push({ commit, upstream: match[1] })
+    const text = record.trim()
+    if (!text) continue
+    const separator = text.indexOf('\x00')
+    const commit = separator === -1 ? text : text.slice(0, separator)
+    if (!FULL_SHA.test(commit)) {
+      problems.push(
+        `git log printed a record that does not start with a commit id: ${JSON.stringify(text.slice(0, 80))}`
+      )
+      continue
+    }
+    const body = separator === -1 ? '' : text.slice(separator + 1)
+    const trailers = [...body.matchAll(TRAILER)].map((match) => match[1])
+    for (const upstream of trailers) picks.push({ commit, upstream })
+    const unreadable = (body.match(REFERENCE)?.length ?? 0) - trailers.length
+    if (unreadable > 0) {
+      problems.push(
+        `${commit}: ${unreadable} cherry-pick reference(s) in its message are not a trailer line "${MARKER}<sha>)" with a lowercase 7- to 40-character sha`
+      )
+    }
   }
-  return picks
+  return { picks, problems }
 }
 
 export function findLedgerViolations(
@@ -181,19 +265,38 @@ export function findLedgerViolations(
   return problems
 }
 
-function git(args: string[], input?: string, cwd?: string): string {
-  return execFileSync('git', args, {
+/**
+ * Runs git with `GIT_CONFIG_PINS` and without `GIT_DIFF_OPTS`, which would
+ * override `--unified`. Returns the output as bytes.
+ */
+function gitBytes(args: string[], input?: Buffer, cwd?: string): Buffer {
+  const env = { ...process.env }
+  delete env.GIT_DIFF_OPTS
+  return execFileSync('git', [...GIT_CONFIG_PINS, ...args], {
     cwd,
-    encoding: 'utf8',
+    env,
     input,
+    encoding: 'buffer',
     maxBuffer: 256 * 1024 * 1024,
   })
 }
 
+function git(args: string[], input?: Buffer, cwd?: string): string {
+  return gitBytes(args, input, cwd).toString('utf8')
+}
+
 /** The pinned patch-id of `sha` in the repository at `cwd` (default: the working directory). */
 export function patchIdOf(sha: string, cwd?: string): string {
-  const diff = git([...PATCH_ID_SHOW_ARGS, sha], undefined, cwd)
+  // The diff goes to `git patch-id` as bytes, as in the documented pipeline.
+  // Decoding it as UTF-8 first would replace any byte of a file that is not
+  // UTF-8, and so change the id.
+  const diff = gitBytes([...PATCH_ID_SHOW_ARGS, sha], undefined, cwd)
   return git(['patch-id', '--stable'], diff, cwd).split(' ')[0] ?? ''
+}
+
+/** The cherry-pick trailers in `HEAD`'s history at `cwd` (default: the working directory). */
+export function readCherryPicks(cwd?: string): CherryPickLog {
+  return parseCherryPicks(git(CHERRY_PICK_LOG_ARGS, undefined, cwd))
 }
 
 const gitHistory: HistoryProbe = {
@@ -215,16 +318,8 @@ if (import.meta.main) {
     process.exit(1)
   }
   const entries = parseLedger(readFileSync(ledgerPath, 'utf8'))
-  const picks = parseCherryPicks(
-    git([
-      'log',
-      'HEAD',
-      '--format=%H%x00%B%x1e',
-      '--fixed-strings',
-      '--grep=(cherry picked from commit ',
-    ])
-  )
-  const problems = findLedgerViolations(entries, picks, gitHistory)
+  const { picks, problems: logProblems } = readCherryPicks()
+  const problems = [...logProblems, ...findLedgerViolations(entries, picks, gitHistory)]
   if (problems.length > 0) {
     for (const problem of problems) console.error(problem)
     process.exit(1)
