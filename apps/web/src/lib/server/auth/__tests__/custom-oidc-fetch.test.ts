@@ -504,6 +504,44 @@ describe('custom OIDC runtime fetches', () => {
       expect(idTokenClaimProblem(claims({ exp: longExpired }), expected)).toMatch(/expired/)
     })
 
+    // Entra's `common` / `organizations` discovery publishes this template.
+    it("fills an Entra multi-tenant issuer template from the token's tid", () => {
+      const entra = {
+        clientId: 'client-1',
+        issuer: 'https://login.microsoftonline.com/{tenantid}/v2.0',
+      }
+      const tenant = '9188040d-6c67-4c5b-b112-36a304b66dad'
+
+      expect(
+        idTokenClaimProblem(
+          claims({ iss: `https://login.microsoftonline.com/${tenant}/v2.0`, tid: tenant }),
+          entra
+        )
+      ).toBeUndefined()
+      expect(
+        idTokenClaimProblem(
+          claims({ iss: `https://login.microsoftonline.com/${tenant}/v2.0`, tid: 'other-tenant' }),
+          entra
+        )
+      ).toMatch(/iss/)
+      expect(
+        idTokenClaimProblem(
+          claims({ iss: `https://login.microsoftonline.com/${tenant}/v2.0` }),
+          entra
+        )
+      ).toMatch(/iss/)
+    })
+
+    it('accepts both issuer forms Google documents for its ID tokens', () => {
+      const google = { clientId: 'client-1', issuer: 'https://accounts.google.com' }
+
+      expect(
+        idTokenClaimProblem(claims({ iss: 'https://accounts.google.com' }), google)
+      ).toBeUndefined()
+      expect(idTokenClaimProblem(claims({ iss: 'accounts.google.com' }), google)).toBeUndefined()
+      expect(idTokenClaimProblem(claims({ iss: 'accounts.google.com' }), expected)).toMatch(/iss/)
+    })
+
     it('skips the issuer comparison only when no issuer is known', () => {
       expect(
         idTokenClaimProblem(claims({ iss: 'https://anything.example' }), { clientId: 'client-1' })

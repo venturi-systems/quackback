@@ -368,6 +368,28 @@ function isNonEmptyId(id: unknown): id is string | number {
   return id !== undefined && id !== null && id !== ''
 }
 
+/** Google documents both forms as valid `iss` values for its ID tokens. */
+const GOOGLE_ISSUER = 'https://accounts.google.com'
+
+/**
+ * The `iss` values a given ID token may carry for a provider's issuer:
+ * - Microsoft Entra's multi-tenant discovery documents (`common`,
+ *   `organizations`) publish the issuer as a template,
+ *   `https://login.microsoftonline.com/{tenantid}/v2.0`, and each token names
+ *   its tenant in `tid`, so the template is filled in from that claim.
+ * - Google's ID tokens carry `https://accounts.google.com` or the bare
+ *   `accounts.google.com`, and Google says to accept either.
+ * Any other issuer must match exactly.
+ */
+function acceptedIssuers(issuer: string, claims: JWTPayload): string[] {
+  const tenant = claims.tid
+  if (issuer.includes('{tenantid}') && typeof tenant === 'string' && tenant) {
+    return [issuer.replace('{tenantid}', tenant)]
+  }
+  if (issuer === GOOGLE_ISSUER) return [GOOGLE_ISSUER, 'accounts.google.com']
+  return [issuer]
+}
+
 /**
  * Why an ID token's claims must not be trusted, or undefined when they pass.
  *
@@ -382,7 +404,13 @@ export function idTokenClaimProblem(
   claims: JWTPayload,
   expected: { clientId: string; issuer?: string; nowMs?: number }
 ): string | undefined {
-  if (expected.issuer && claims.iss !== expected.issuer) return 'iss does not match the issuer'
+  if (
+    expected.issuer &&
+    (typeof claims.iss !== 'string' ||
+      !acceptedIssuers(expected.issuer, claims).includes(claims.iss))
+  ) {
+    return 'iss does not match the issuer'
+  }
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud]
   if (!audience.includes(expected.clientId)) return 'aud does not contain the client id'
   if (typeof claims.exp !== 'number') return 'exp is missing'
