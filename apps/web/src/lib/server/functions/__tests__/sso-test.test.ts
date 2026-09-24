@@ -46,6 +46,7 @@ const hoisted = vi.hoisted(() => ({
   listIdentityProviders: vi.fn(),
   getIdentityProviderCredentials: vi.fn(),
   safeFetch: vi.fn(),
+  checkUrlSafety: vi.fn(),
 }))
 
 vi.mock('@/lib/server/redis', () => ({
@@ -66,6 +67,7 @@ vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
 
 vi.mock('@/lib/server/content/ssrf-guard', () => ({
   safeFetch: hoisted.safeFetch,
+  checkUrlSafety: hoisted.checkUrlSafety,
 }))
 
 vi.mock('@/lib/server/config', () => ({
@@ -75,6 +77,7 @@ vi.mock('@/lib/server/config', () => ({
 beforeEach(() => {
   vi.clearAllMocks()
   hoisted.requireAuth.mockResolvedValue({ user: { id: 'user_admin' } })
+  hoisted.checkUrlSafety.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
 })
 
 // Load the module ONCE — handler order mirrors the export sequence:
@@ -293,6 +296,101 @@ describe('startSsoTestFn', () => {
     // Session must carry the correct registrationId.
     const [, session] = hoisted.cacheSet.mock.calls[0] as [string, { registrationId: string }]
     expect(session.registrationId).toBe('oidc_abc123')
+  })
+})
+
+// Production sign-in only fetches an https discovery URL and only sends a
+// browser to an https authorization endpoint, a discovered one only on a
+// public address. The test refuses the same before redirecting the admin.
+describe('startSsoTestFn endpoint rules', () => {
+  const discovered = (authorizationEndpoint: string) =>
+    new Response(
+      JSON.stringify({
+        issuer: 'https://idp',
+        authorization_endpoint: authorizationEndpoint,
+        token_endpoint: 'https://idp/token',
+        jwks_uri: 'https://idp/jwks',
+      }),
+      { status: 200 }
+    )
+
+  beforeEach(() => {
+    hoisted.getIdentityProviderCredentials.mockResolvedValue({ clientSecret: 'secret' })
+    hoisted.cacheSet.mockResolvedValue(undefined)
+  })
+
+  it('refuses a plain-http discovery URL without fetching it', async () => {
+    hoisted.listIdentityProviders.mockResolvedValue([
+      { ...ssoProvider, discoveryUrl: 'http://idp/.well-known' },
+    ])
+
+    const result = await startSsoTest({ data: { registrationId: 'sso' } })
+
+    expect(result).toEqual({ error: 'insecure-endpoint' })
+    expect(hoisted.safeFetch).not.toHaveBeenCalled()
+    expect(hoisted.cacheSet).not.toHaveBeenCalled()
+  })
+
+  it('refuses a plain-http discovered authorization endpoint', async () => {
+    hoisted.listIdentityProviders.mockResolvedValue([ssoProvider])
+    hoisted.safeFetch.mockResolvedValue(discovered('http://idp/auth'))
+
+    const result = await startSsoTest({ data: { registrationId: 'sso' } })
+
+    expect(result).toEqual({ error: 'insecure-endpoint' })
+    expect(hoisted.cacheSet).not.toHaveBeenCalled()
+  })
+
+  it('refuses a discovery document with no authorization endpoint', async () => {
+    hoisted.listIdentityProviders.mockResolvedValue([ssoProvider])
+    hoisted.safeFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          issuer: 'https://idp',
+          token_endpoint: 'https://idp/token',
+          jwks_uri: 'https://idp/jwks',
+        }),
+        { status: 200 }
+      )
+    )
+
+    const result = await startSsoTest({ data: { registrationId: 'sso' } })
+
+    expect(result).toEqual({ error: 'insecure-endpoint' })
+    expect(hoisted.cacheSet).not.toHaveBeenCalled()
+  })
+
+  it('refuses a discovered authorization endpoint on a private address', async () => {
+    hoisted.listIdentityProviders.mockResolvedValue([ssoProvider])
+    hoisted.safeFetch.mockResolvedValue(discovered('https://idp/auth'))
+    hoisted.checkUrlSafety.mockResolvedValue({ safe: false, reason: 'ssrf-rejected' })
+
+    const result = await startSsoTest({ data: { registrationId: 'sso' } })
+
+    expect(result).toEqual({ error: 'insecure-endpoint' })
+    expect(hoisted.checkUrlSafety).toHaveBeenCalledWith('https://idp/auth')
+    expect(hoisted.cacheSet).not.toHaveBeenCalled()
+  })
+
+  it('refuses a manual-endpoint provider whose stored authorization URL is plain http', async () => {
+    hoisted.listIdentityProviders.mockResolvedValue([
+      {
+        id: 'idp_manual',
+        registrationId: 'oidc_manual',
+        discoveryUrl: null,
+        authorizationUrl: 'http://idp/auth',
+        tokenUrl: 'https://idp/token',
+        jwksUri: 'https://idp/jwks',
+        issuer: 'https://idp',
+        clientId: 'c',
+        domains: [],
+      },
+    ])
+
+    const result = await startSsoTest({ data: { registrationId: 'oidc_manual' } })
+
+    expect(result).toEqual({ error: 'insecure-endpoint' })
+    expect(hoisted.cacheSet).not.toHaveBeenCalled()
   })
 })
 

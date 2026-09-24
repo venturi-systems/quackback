@@ -14,6 +14,10 @@
  * the request bodies match Better-Auth's own. gitlab.com, used when no issuer
  * is set, is not admin-controlled and is left alone. The authorization URL is
  * a browser redirect and is not fetched server-side.
+ *
+ * The endpoints go through `createOidcEndpointSource`, so they meet the
+ * custom-OIDC https rule: a plain-http issuer fails every pinned fetch closed
+ * instead of sending the client secret or access token in clear.
  */
 
 import type { OAuth2Tokens } from 'better-auth/oauth2'
@@ -70,13 +74,15 @@ export function pinSelfHostedGitlabProvider(providers: unknown): boolean {
   if (!provider || !options || !issuer) return false
 
   const { authorizationEndpoint, tokenEndpoint, userinfoEndpoint } = gitlabEndpoints(issuer)
+  const endpoints = createOidcEndpointSource({
+    authorizationUrl: authorizationEndpoint,
+    tokenUrl: tokenEndpoint,
+    userInfoUrl: userinfoEndpoint,
+  })
   const client = {
     clientId: String(options.clientId ?? ''),
     clientSecret: String(options.clientSecret ?? ''),
-    endpoints: createOidcEndpointSource({
-      authorizationUrl: authorizationEndpoint,
-      tokenUrl: tokenEndpoint,
-    }),
+    endpoints,
   }
   const exchange = createPinnedTokenExchange(client)
   const mapProfileToUser = options.mapProfileToUser
@@ -90,10 +96,17 @@ export function pinSelfHostedGitlabProvider(providers: unknown): boolean {
   provider.refreshAccessToken = createPinnedTokenRefresh(client)
   // Mirrors Better-Auth's GitLab getUserInfo, with the fetch pinned.
   provider.getUserInfo = async (token: OAuth2Tokens) => {
+    // Undefined when the issuer is not https: the access token is never sent
+    // in clear.
+    const userEndpoint = endpoints.peek()?.userinfoEndpoint
+    if (!userEndpoint) {
+      log.warn('self-hosted GitLab issuer is not https; user lookup refused')
+      return null
+    }
     let profile: Record<string, unknown>
     try {
       profile = await fetchPinnedJson(
-        userinfoEndpoint,
+        userEndpoint,
         {
           headers: { authorization: `Bearer ${token.accessToken}` },
           timeoutMs: USERINFO_TIMEOUT_MS,

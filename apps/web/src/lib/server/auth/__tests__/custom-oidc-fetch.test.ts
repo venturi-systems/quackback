@@ -122,7 +122,7 @@ const fetchSpy = vi.spyOn(globalThis, 'fetch')
 beforeEach(() => {
   safeFetchMock.mockReset()
   checkUrlSafetyMock.mockReset()
-  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '203.0.113.10', family: 4 })
+  checkUrlSafetyMock.mockResolvedValue({ safe: true, address: '93.184.216.34', family: 4 })
   clearOidcDiscoveryCache()
   fetchSpy.mockReset()
   fetchSpy.mockImplementation(async () => {
@@ -615,6 +615,80 @@ describe('custom OIDC runtime fetches', () => {
     expect(safeFetchMock.mock.calls.map((c) => c[0])).toEqual([
       'https://manual.example.com/userinfo',
     ])
+  })
+
+  it('holds stored manual endpoints to the https rule discovered endpoints meet', async () => {
+    const httpToken = createOidcEndpointSource({
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'http://manual.example.com/token',
+    })
+    const httpAuthorize = createOidcEndpointSource({
+      authorizationUrl: 'http://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+    })
+    const httpUserinfo = createOidcEndpointSource({
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+      userInfoUrl: 'http://manual.example.com/userinfo',
+    })
+
+    expect(httpToken.peek()).toBeUndefined()
+    await expect(httpToken.resolve()).rejects.toThrow(/no discovery URL or manual endpoints/)
+    expect(httpAuthorize.peek()).toBeUndefined()
+    // A plain-http userinfo URL is dropped; the https endpoints still serve.
+    expect(httpUserinfo.peek()).toEqual({
+      authorizationEndpoint: 'https://manual.example.com/authorize',
+      tokenEndpoint: 'https://manual.example.com/token',
+    })
+    const getUserInfo = createPinnedUserInfo({ clientId: 'client-1', endpoints: httpUserinfo })
+    await expect(
+      getUserInfo({ accessToken: 'access-1', idToken: idToken(claims({ sub: 'user-1' })) })
+    ).resolves.toBeNull()
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  // A discovery document read in clear could name any token endpoint, and the
+  // code and client secret would follow it there.
+  it('never fetches a plain-http discovery URL', async () => {
+    const httpDiscovery = 'http://idp.example.com/.well-known/openid-configuration'
+    const withManual = createOidcEndpointSource({
+      discoveryUrl: httpDiscovery,
+      authorizationUrl: 'https://manual.example.com/authorize',
+      tokenUrl: 'https://manual.example.com/token',
+    })
+
+    await expect(resolveOidcDiscovery(httpDiscovery)).rejects.toThrow(/https/)
+    // As with an unreachable document, the stored https endpoints are the fallback.
+    await expect(withManual.resolve()).resolves.toMatchObject({
+      tokenEndpoint: 'https://manual.example.com/token',
+    })
+    const discoveryOnly = createOidcEndpointSource({ discoveryUrl: httpDiscovery })
+    await expect(discoveryOnly.resolve()).rejects.toThrow(/https/)
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  // `backfill-custom-oidc-provider.ts` copies a legacy credential's endpoint
+  // URLs as they are, without the save-time https schema. A row it wrote must
+  // not become a way to send the code and client secret in clear.
+  it('gives a backfilled provider with a plain-http token URL no endpoints to sign in with', async () => {
+    const { configs, oauthProvider } = await signInStack([
+      provider({
+        registrationId: 'custom-oidc',
+        discoveryUrl: null,
+        authorizationUrl: 'https://legacy.example.com/authorize',
+        tokenUrl: 'http://legacy.example.com/token',
+      }),
+    ])
+
+    expect(configs[0].authorizationUrl).toBeUndefined()
+    expect(configs[0].tokenUrl).toBeUndefined()
+    await expect(oauthProvider('custom-oidc').validateAuthorizationCode(CODE)).rejects.toThrow(
+      /no discovery URL or manual endpoints/
+    )
+    expect(safeFetchMock).not.toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   // Control: proves the global-fetch spy above would catch the leak this fix
