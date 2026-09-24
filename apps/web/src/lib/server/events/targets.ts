@@ -35,6 +35,7 @@ import { stripHtml, truncate } from './hook-utils'
 import { buildHookContext, type HookContext } from './hook-context'
 import type { EventData, EventActor, PostMergedPayload, PostUnmergedPayload } from './types'
 import { getOpenAI } from '@/lib/server/domains/ai/config'
+import { isTeamMember } from '@/lib/shared/roles'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'targets' })
@@ -511,23 +512,35 @@ export async function filterToTeamMembers(subscribers: Subscriber[]): Promise<Su
 }
 
 /**
- * Check if actor is a team member (non-user role).
+ * Whether the actor counts as a team member, for the "team member" label on
+ * comment notifications.
+ *
+ * A person's stored team role counts only while the team identity rule
+ * accepts it (landing-page#2309), as on every other read: a stored admin or
+ * member that the rule rejects commented as a contributor, so the email must
+ * not present it as a team reply. A service principal (an API key or an
+ * integration) keeps its stored role: the REST routes that let it comment
+ * already required a team role it could exercise. A missing principal is not
+ * a team member (the old `role !== 'user'` test read it as one).
+ * Exported for tests.
  */
-async function isActorTeamMember(actor: EventActor): Promise<boolean> {
-  // Service principals: resolve by principalId directly
-  if (actor.principalId) {
-    const record = await db.query.principal.findFirst({
-      where: eq(principal.id, actor.principalId as PrincipalId),
-      columns: { role: true },
-    })
-    return record?.role !== 'user'
-  }
-  if (!actor.userId) return false
-  const record = await db.query.principal.findFirst({
-    where: eq(principal.userId, actor.userId as UserId),
-    columns: { role: true },
-  })
-  return record?.role !== 'user'
+export async function isActorTeamMember(actor: EventActor): Promise<boolean> {
+  const columns = { id: true, role: true, type: true, userId: true } as const
+  const record = actor.principalId
+    ? await db.query.principal.findFirst({
+        where: eq(principal.id, actor.principalId as PrincipalId),
+        columns,
+      })
+    : actor.userId
+      ? await db.query.principal.findFirst({
+          where: eq(principal.userId, actor.userId as UserId),
+          columns,
+        })
+      : undefined
+  if (!record) return false
+  if (record.type === 'service') return isTeamMember(record.role)
+  const { resolveTeamRole } = await import('@/lib/server/domains/principals/team-identity')
+  return isTeamMember(await resolveTeamRole(record))
 }
 
 /**

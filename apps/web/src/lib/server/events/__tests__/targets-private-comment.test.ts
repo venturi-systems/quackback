@@ -21,6 +21,7 @@ vi.mock('@/lib/server/redis', () => ({
 }))
 
 const principalFindMany = vi.fn()
+const principalFindFirst = vi.fn()
 // db.select() chains resolve, in call order, to the queued results.
 let selectResults: unknown[][] = []
 function selectChain(result: unknown[]): Record<string, unknown> {
@@ -37,7 +38,12 @@ function selectChain(result: unknown[]): Record<string, unknown> {
 vi.mock('@/lib/server/db', () => ({
   db: {
     select: () => selectChain(selectResults.shift() ?? []),
-    query: { principal: { findMany: (...a: unknown[]) => principalFindMany(...a) } },
+    query: {
+      principal: {
+        findMany: (...a: unknown[]) => principalFindMany(...a),
+        findFirst: (...a: unknown[]) => principalFindFirst(...a),
+      },
+    },
   },
   integrations: {},
   integrationEventMappings: {},
@@ -78,7 +84,8 @@ vi.mock('@/lib/server/domains/principals/team-identity', () => ({
   resolveTeamRole: (row: { id: string; role: string | null }) => resolveTeamRole(row),
 }))
 
-const { filterToTeamMembers, filterSubscribersByPostAudience } = await import('../targets')
+const { filterToTeamMembers, filterSubscribersByPostAudience, isActorTeamMember } =
+  await import('../targets')
 
 const subscriber = (principalId: string) => ({
   principalId: principalId as PrincipalId,
@@ -166,5 +173,58 @@ describe('filterSubscribersByPostAudience (a post only the team may see yet)', (
     expect(resolveTeamRole).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'principal_bootstrap', role: 'admin', userId: 'user_b' })
     )
+  })
+})
+
+describe('isActorTeamMember (the "team member" label on comment emails)', () => {
+  const person = { type: 'user' as const, principalId: 'principal_x', userId: 'user_x' }
+
+  it('labels a person whose stored team role the rule accepts', async () => {
+    principalFindFirst.mockResolvedValue({
+      id: 'principal_x',
+      role: 'admin',
+      type: 'user',
+      userId: 'user_x',
+    })
+    accepted = new Set(['principal_x'])
+
+    expect(await isActorTeamMember(person)).toBe(true)
+    expect(principalFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ columns: { id: true, role: true, type: true, userId: true } })
+    )
+  })
+
+  it('does not label a stored admin the rule rejects (a password-only bootstrap account)', async () => {
+    principalFindFirst.mockResolvedValue({
+      id: 'principal_x',
+      role: 'admin',
+      type: 'user',
+      userId: 'user_x',
+    })
+
+    expect(await isActorTeamMember(person)).toBe(false)
+    expect(resolveTeamRole).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'principal_x', role: 'admin' })
+    )
+  })
+
+  it("keeps a service principal's stored team role (the REST route required it)", async () => {
+    principalFindFirst.mockResolvedValue({
+      id: 'principal_key',
+      role: 'member',
+      type: 'service',
+      userId: null,
+    })
+
+    expect(
+      await isActorTeamMember({ type: 'service', principalId: 'principal_key', displayName: 'Key' })
+    ).toBe(true)
+    expect(resolveTeamRole).not.toHaveBeenCalled()
+  })
+
+  it('does not label an actor whose principal is missing', async () => {
+    principalFindFirst.mockResolvedValue(undefined)
+
+    expect(await isActorTeamMember(person)).toBe(false)
   })
 })
