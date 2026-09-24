@@ -4,17 +4,20 @@ import { FormattedMessage } from 'react-intl'
 import { z } from 'zod'
 import { RoadmapBoard } from '@/components/public/roadmap-board'
 import { portalQueries } from '@/lib/client/queries/portal'
-import { searchChoice, searchList, searchText } from '@/lib/shared/search-params'
+import { searchChoice, searchId, searchIdList, searchText } from '@/lib/shared/search-params'
 
 // Every field falls back instead of throwing: this page is public, and a
 // hand-written `?board=ideas` used to fail validation and answer 500 with the
-// raw zod issue in the page (DEF-45). See lib/shared/search-params.ts.
+// raw zod issue in the page (DEF-45). The filters hold ids, not slugs, and
+// each column's posts query throws on an id that is not a TypeID, so every id
+// field keeps only well-formed ids of its own entity; `?board=ideas` now opens
+// the unfiltered board. See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  roadmap: searchText(),
+  roadmap: searchId('roadmap'),
   search: searchText(),
-  board: searchList(),
-  tags: searchList(),
-  segments: searchList(),
+  board: searchIdList('board'),
+  tags: searchIdList('tag'),
+  segments: searchIdList('segment'),
   sort: searchChoice(['votes', 'newest', 'oldest']),
 })
 

@@ -11,20 +11,124 @@
  * round-trip check covers the other half: on the server the router redirects
  * to the canonical URL built from the validated values, so that URL must
  * validate to the same values or the redirect would never settle.
+ *
+ * Passing validation is not enough on its own: a value that validates can
+ * still break the query it feeds. Id columns throw on anything that is not a
+ * TypeID, integer columns reject out-of-range and fractional numbers, and an
+ * invalid Date throws when the query serializes it. The later suites check
+ * that such values never come out of validateSearch.
  */
 import { describe, expect, it, vi } from 'vitest'
 import { defaultParseSearch, defaultStringifySearch } from '@tanstack/react-router'
+import { generateId } from '@quackback/ids'
 
+// Route modules are imported for their validateSearch only. Everything they
+// pull in for rendering or data loading is stubbed, so no server function,
+// query client or heavy component is evaluated here.
 vi.mock('@/lib/client/queries/portal', () => ({ portalQueries: {} }))
 vi.mock('@/lib/client/queries/admin', () => ({ adminQueries: {} }))
 vi.mock('@/lib/client/queries/feedback', () => ({ feedbackQueries: {} }))
+vi.mock('@/lib/client/queries/settings', () => ({ settingsQueries: {} }))
 vi.mock('@/lib/client/hooks/use-portal-posts-query', () => ({
   votedPostsKeys: { byWorkspace: () => ['votedPosts'] },
 }))
+vi.mock('@/lib/client/hooks/use-widget-vote', () => ({
+  widgetQueryKeys: {},
+  INITIAL_SESSION_VERSION: 0,
+}))
+vi.mock('@/lib/client/widget-auth', () => ({ getWidgetAuthHeaders: () => ({}) }))
+vi.mock('@/lib/client/config-file', () => ({ boardAccessManagedPath: () => '' }))
+vi.mock('@/lib/server/functions/portal', () => ({ fetchBoardCapabilitiesFn: () => null }))
+vi.mock('@/lib/server/functions/subscriptions', () => ({ processUnsubscribeTokenFn: () => null }))
 vi.mock('@/components/public/roadmap-board', () => ({ RoadmapBoard: () => null }))
 vi.mock('@/components/admin/roadmap-admin', () => ({ RoadmapAdmin: () => null }))
 vi.mock('@/components/admin/roadmap-modal', () => ({ RoadmapModal: () => null }))
 vi.mock('@/components/admin/tab-strip', () => ({ TabStrip: () => null }))
+vi.mock('@/components/admin/users/users-container', () => ({ UsersContainer: () => null }))
+vi.mock('@/components/admin/changelog', () => ({
+  ChangelogList: () => null,
+  ChangelogModal: () => null,
+}))
+vi.mock('@/components/shared/error-page', () => ({ errorMessage: () => '' }))
+vi.mock('@/components/shared/empty-state', () => ({ EmptyState: () => null }))
+vi.mock('@/components/shared/page-header', () => ({ PageHeader: () => null }))
+vi.mock('@/components/ui/back-link', () => ({ BackLink: () => null }))
+vi.mock('@/components/admin/settings/settings-card', () => ({ SettingsCard: () => null }))
+vi.mock('@/components/admin/settings/managed-setting-note', () => ({
+  useIsManagedSetting: () => false,
+}))
+vi.mock('@/components/admin/settings/boards/use-board-selection', () => ({
+  useBoardSelection: () => ({}),
+}))
+vi.mock('@/components/admin/settings/boards/create-board-dialog', () => ({
+  CreateBoardDialog: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-settings-header', () => ({
+  BoardSettingsHeader: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-settings-nav', () => ({
+  BoardSettingsNav: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-general-form', () => ({
+  BoardGeneralForm: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-access-form', () => ({
+  BoardAccessForm: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-moderation-form', () => ({
+  BoardModerationForm: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-import-section', () => ({
+  BoardImportSection: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/board-export-section', () => ({
+  BoardExportSection: () => null,
+}))
+vi.mock('@/components/admin/settings/boards/delete-board-form', () => ({
+  DeleteBoardForm: () => null,
+}))
+vi.mock('@/components/admin/settings/api-keys/api-keys-settings', () => ({
+  ApiKeysSettings: () => null,
+}))
+vi.mock('@/components/admin/settings/api-keys/api-usage-guide', () => ({
+  ApiUsageGuide: () => null,
+}))
+vi.mock('@/components/admin/settings/webhooks/webhooks-settings', () => ({
+  WebhooksSettings: () => null,
+}))
+vi.mock('@/components/admin/settings/webhooks/webhook-verification-guide', () => ({
+  WebhookVerificationGuide: () => null,
+}))
+vi.mock('@/components/admin/settings/mcp/mcp-server-settings', () => ({
+  McpServerSettings: () => null,
+}))
+vi.mock('@/components/admin/settings/mcp/mcp-setup-guide', () => ({
+  McpSetupGuide: () => null,
+}))
+vi.mock('@/components/widget/widget-vote-button', () => ({ WidgetVoteButton: () => null }))
+vi.mock('@/components/widget/widget-shell', () => ({ WidgetShell: () => null }))
+vi.mock('@/components/widget/widget-nav', () => ({
+  resolveInitialTab: () => 'feedback',
+  resolveInitialView: () => 'feedback',
+  supportRootView: () => 'help',
+  homeEnabled: () => false,
+}))
+vi.mock('@/components/widget/widget-home', () => ({ WidgetHome: () => null }))
+vi.mock('@/components/widget/widget-overview', () => ({ WidgetOverview: () => null }))
+vi.mock('@/components/widget/widget-post-detail', () => ({ WidgetPostDetail: () => null }))
+vi.mock('@/components/widget/widget-changelog', () => ({ WidgetChangelog: () => null }))
+vi.mock('@/components/widget/widget-changelog-detail', () => ({
+  WidgetChangelogDetail: () => null,
+}))
+vi.mock('@/components/widget/widget-help', () => ({ WidgetHelp: () => null }))
+vi.mock('@/components/widget/widget-help-category', () => ({ WidgetHelpCategory: () => null }))
+vi.mock('@/components/widget/widget-help-detail', () => ({ WidgetHelpDetail: () => null }))
+vi.mock('@/components/widget/widget-live-chat', () => ({ WidgetLiveChat: () => null }))
+vi.mock('@/components/widget/widget-messages-section', () => ({
+  WidgetMessagesSection: () => null,
+}))
+vi.mock('@/components/widget/widget-auth-provider', () => ({ useWidgetAuth: () => ({}) }))
+vi.mock('@/components/widget/use-chat-presence', () => ({ CHAT_PRESENCE_QUERY_KEY: [] }))
 
 type StandardResult = { value?: Record<string, unknown>; issues?: ReadonlyArray<unknown> }
 type StandardSchema = { '~standard': { validate: (input: unknown) => StandardResult } }
@@ -44,10 +148,39 @@ function validate(route: unknown, query: string): StandardResult {
   return result
 }
 
+/** The validated value of `query`, which must carry no issues. */
+function valueOf(route: unknown, query: string): Record<string, unknown> {
+  const result = validate(route, query)
+  expect(result.issues).toBeUndefined()
+  return result.value ?? {}
+}
+
+/** A query string in the JSON list form the app's own links write. */
+function listQuery(key: string, items: string[]): string {
+  return `?${new URLSearchParams({ [key]: JSON.stringify(items) })}`
+}
+
 const { Route: portalRoadmap } = await import('../_portal/roadmap.index')
 const { Route: portalHome } = await import('../_portal/index')
 const { Route: adminFeedback } = await import('../admin/feedback')
 const { Route: adminRoadmap } = await import('../admin/roadmap')
+const { Route: adminUsers } = await import('../admin/users')
+const { Route: adminChangelog } = await import('../admin/changelog')
+const { Route: adminHelpCenter } = await import('../admin/help-center')
+const { Route: adminBoardSettings } = await import('../admin/settings.boards.index')
+const { Route: adminDevelopers } = await import('../admin/settings.developers')
+const { Route: widget } = await import('../widget/index')
+const { Route: unsubscribe } = await import('../unsubscribe')
+
+const BOARD = generateId('board')
+const OTHER_BOARD = generateId('board')
+const TAG = generateId('tag')
+const SEGMENT = generateId('segment')
+const OTHER_SEGMENT = generateId('segment')
+const ROADMAP = generateId('roadmap')
+const PRINCIPAL = generateId('principal')
+const CATEGORY = generateId('category')
+const CONVERSATION = generateId('conversation')
 
 /** Query strings a person can type, paste or follow from another site. */
 const HOSTILE_QUERIES = [
@@ -68,11 +201,29 @@ const HOSTILE_QUERIES = [
   '?minVotes=abc',
   '?minVotes=0',
   '?minVotes=5',
+  '?minVotes=99999999999',
+  '?minComments=many',
   '?dateFrom=yesterday',
   '?dateFrom=2026-02-31',
+  '?dateTo=2026-13-45&updatedBefore=soon',
   '?responded=maybe',
   '?hasDuplicates=yes&deleted=1',
   '?suggestionSort=x&suggestionStatus=y',
+  '?owner=foo',
+  '?owner=unassigned',
+  '?selected=foo&segments=a,b',
+  '?postCount=gte:abc&voteCount=bogus:5&commentCount=gte:1.5',
+  '?verified=true&includeAnonymous=1&invites=nope',
+  '?category=foo&entry=123&status=archived',
+  '?tab=bogus',
+  '?c=foo',
+  '?c=123',
+  '?token=123',
+  `?board=${BOARD}&tags=${TAG}&segments=${SEGMENT}&roadmap=${ROADMAP}&tagIds=${TAG}`,
+  listQuery('board', [BOARD, 'ideas', TAG]),
+  `?owner=${PRINCIPAL}&selected=${PRINCIPAL}&segments=${SEGMENT},${OTHER_SEGMENT},x`,
+  `?category=${CATEGORY}&c=${CONVERSATION}`,
+  '?postCount=gte:5&dateFrom=2026-01-31&dateTo=2026-09-24T10:00:00.000Z',
 ]
 
 const ROUTES: Array<[string, unknown]> = [
@@ -80,6 +231,13 @@ const ROUTES: Array<[string, unknown]> = [
   ['/_portal/', portalHome],
   ['/admin/feedback', adminFeedback],
   ['/admin/roadmap', adminRoadmap],
+  ['/admin/users', adminUsers],
+  ['/admin/changelog', adminChangelog],
+  ['/admin/help-center', adminHelpCenter],
+  ['/admin/settings/boards/', adminBoardSettings],
+  ['/admin/settings/developers', adminDevelopers],
+  ['/widget/', widget],
+  ['/unsubscribe', unsubscribe],
 ]
 
 describe.each(ROUTES)('%s validateSearch', (_id, route) => {
@@ -97,40 +255,117 @@ describe.each(ROUTES)('%s validateSearch', (_id, route) => {
 })
 
 describe('DEF-45 normalization', () => {
-  it('reads /roadmap?board=<slug> as a one-board filter', () => {
-    expect(validate(portalRoadmap, '?board=feature-requests').value).toMatchObject({
-      board: ['feature-requests'],
-    })
-    expect(validate(adminRoadmap, '?board=feature-requests').value).toMatchObject({
-      board: ['feature-requests'],
-    })
-    expect(validate(adminFeedback, '?board=feature-requests').value).toMatchObject({
-      board: ['feature-requests'],
-    })
+  it('opens /roadmap?board=<slug> unfiltered, because the filter holds board ids', () => {
+    for (const route of [portalRoadmap, adminRoadmap, adminFeedback]) {
+      expect(valueOf(route, '?board=feature-requests').board).toBeUndefined()
+    }
+  })
+
+  it('reads a bare board id as a one-board filter', () => {
+    for (const route of [portalRoadmap, adminRoadmap, adminFeedback]) {
+      expect(valueOf(route, `?board=${BOARD}`)).toMatchObject({ board: [BOARD] })
+    }
   })
 
   it('keeps the list form the app itself writes', () => {
-    const query = `?${new URLSearchParams({ board: JSON.stringify(['a', 'b']) })}`
-    expect(validate(portalRoadmap, query).value).toMatchObject({ board: ['a', 'b'] })
+    expect(valueOf(portalRoadmap, listQuery('board', [BOARD, OTHER_BOARD]))).toMatchObject({
+      board: [BOARD, OTHER_BOARD],
+    })
   })
 
   it('reads a malformed choice as the route default', () => {
-    expect(validate(portalHome, '?sort=bogus').value).toMatchObject({ sort: 'trending' })
-    expect(validate(adminFeedback, '?sort=bogus').value).toMatchObject({ sort: 'newest' })
-    expect(validate(portalRoadmap, '?sort=bogus').value?.sort).toBeUndefined()
+    expect(valueOf(portalHome, '?sort=bogus')).toMatchObject({ sort: 'trending' })
+    expect(valueOf(adminFeedback, '?sort=bogus')).toMatchObject({ sort: 'newest' })
+    expect(valueOf(portalRoadmap, '?sort=bogus').sort).toBeUndefined()
   })
 
   it('reads the portal home status filter from a bare value', () => {
-    expect(validate(portalHome, '?status=open').value).toMatchObject({ status: ['open'] })
+    expect(valueOf(portalHome, '?status=open')).toMatchObject({ status: ['open'] })
   })
 
   it('keeps a numeric search as the text that was typed', () => {
-    expect(validate(portalRoadmap, '?search=123').value).toMatchObject({ search: '123' })
-    expect(validate(portalHome, '?search=123').value).toMatchObject({ search: '123' })
+    expect(valueOf(portalRoadmap, '?search=123')).toMatchObject({ search: '123' })
+    expect(valueOf(portalHome, '?search=123')).toMatchObject({ search: '123' })
   })
 
   it('drops an invalid minimum vote count instead of failing', () => {
-    expect(validate(portalHome, '?minVotes=abc').value?.minVotes).toBeUndefined()
-    expect(validate(portalHome, '?minVotes=5').value).toMatchObject({ minVotes: 5 })
+    expect(valueOf(portalHome, '?minVotes=abc').minVotes).toBeUndefined()
+    expect(valueOf(portalHome, '?minVotes=5')).toMatchObject({ minVotes: 5 })
+  })
+})
+
+describe('ids the database would reject never leave validateSearch', () => {
+  it('keeps only tag ids in the portal home tag filter', () => {
+    expect(valueOf(portalHome, '?tagIds=foo').tagIds).toBeUndefined()
+    expect(valueOf(portalHome, `?tagIds=${TAG}`)).toMatchObject({ tagIds: [TAG] })
+  })
+
+  it('drops malformed and other-entity ids from a list and keeps the rest', () => {
+    for (const route of [portalRoadmap, adminRoadmap, adminFeedback]) {
+      expect(valueOf(route, listQuery('tags', [TAG, 'ux', BOARD]))).toMatchObject({ tags: [TAG] })
+      expect(valueOf(route, listQuery('segments', ['vip', SEGMENT]))).toMatchObject({
+        segments: [SEGMENT],
+      })
+    }
+  })
+
+  it('reads a roadmap param that is not a roadmap id as absent', () => {
+    for (const route of [portalRoadmap, adminRoadmap]) {
+      expect(valueOf(route, '?roadmap=feature').roadmap).toBeUndefined()
+      expect(valueOf(route, `?roadmap=${BOARD}`).roadmap).toBeUndefined()
+      expect(valueOf(route, `?roadmap=${ROADMAP}`)).toMatchObject({ roadmap: ROADMAP })
+    }
+  })
+
+  it('keeps the inbox owner filter to "unassigned" or a principal id', () => {
+    expect(valueOf(adminFeedback, '?owner=unassigned')).toMatchObject({ owner: 'unassigned' })
+    expect(valueOf(adminFeedback, `?owner=${PRINCIPAL}`)).toMatchObject({ owner: PRINCIPAL })
+    expect(valueOf(adminFeedback, '?owner=foo').owner).toBeUndefined()
+    expect(valueOf(adminFeedback, `?owner=${SEGMENT}`).owner).toBeUndefined()
+  })
+
+  it('keeps the users selection and segment filter to their own ids', () => {
+    expect(valueOf(adminUsers, `?selected=${PRINCIPAL}`)).toMatchObject({ selected: PRINCIPAL })
+    expect(valueOf(adminUsers, '?selected=foo').selected).toBeUndefined()
+    expect(valueOf(adminUsers, `?segments=${SEGMENT},vip,${OTHER_SEGMENT}`)).toMatchObject({
+      segments: `${SEGMENT},${OTHER_SEGMENT}`,
+    })
+    expect(valueOf(adminUsers, '?segments=a,b').segments).toBeUndefined()
+  })
+
+  it('keeps the help-center category and the widget conversation to their own ids', () => {
+    expect(valueOf(adminHelpCenter, `?category=${CATEGORY}`)).toMatchObject({
+      category: CATEGORY,
+    })
+    expect(valueOf(adminHelpCenter, '?category=getting-started').category).toBeUndefined()
+    expect(valueOf(widget, `?c=${CONVERSATION}`)).toMatchObject({ c: CONVERSATION })
+    expect(valueOf(widget, '?c=foo').c).toBeUndefined()
+  })
+})
+
+describe('counts and dates the query cannot take read as absent', () => {
+  it('keeps inbox thresholds to whole numbers an integer column can hold', () => {
+    expect(valueOf(adminFeedback, '?minVotes=5')).toMatchObject({ minVotes: '5' })
+    expect(valueOf(adminFeedback, '?minVotes=abc').minVotes).toBeUndefined()
+    expect(valueOf(adminFeedback, '?minVotes=99999999999').minVotes).toBeUndefined()
+    expect(valueOf(adminFeedback, '?minComments=-1').minComments).toBeUndefined()
+    expect(valueOf(portalHome, '?minVotes=99999999999').minVotes).toBeUndefined()
+  })
+
+  it('keeps inbox dates to real ISO dates and timestamps', () => {
+    expect(valueOf(adminFeedback, '?dateFrom=2026-01-31')).toMatchObject({ dateFrom: '2026-01-31' })
+    expect(valueOf(adminFeedback, '?updatedBefore=2026-09-24T10:00:00.000Z')).toMatchObject({
+      updatedBefore: '2026-09-24T10:00:00.000Z',
+    })
+    expect(valueOf(adminFeedback, '?dateFrom=yesterday').dateFrom).toBeUndefined()
+    expect(valueOf(adminFeedback, '?dateTo=2026-13-45').dateTo).toBeUndefined()
+    expect(valueOf(adminUsers, '?dateFrom=soon').dateFrom).toBeUndefined()
+  })
+
+  it('keeps users activity filters to a known operator and a whole number', () => {
+    expect(valueOf(adminUsers, '?postCount=gte:5')).toMatchObject({ postCount: 'gte:5' })
+    for (const bad of ['gte:abc', 'bogus:5', 'gte:1.5', 'gte:-1', 'gte:5:6', 'gte:', 'gte']) {
+      expect(valueOf(adminUsers, `?postCount=${bad}`).postCount).toBeUndefined()
+    }
   })
 })

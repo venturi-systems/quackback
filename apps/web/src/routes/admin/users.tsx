@@ -8,20 +8,47 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/components/shared/error-page'
-import { searchChoice, searchText } from '@/lib/shared/search-params'
+import {
+  isSearchCount,
+  searchChoice,
+  searchDate,
+  searchId,
+  searchIdCsv,
+  searchText,
+  searchWhere,
+} from '@/lib/shared/search-params'
+
+/**
+ * An activity-count filter in its URL form, `op:value` (`gte:5`). The list
+ * query compares the value with a `count(*)::int`, and its server function
+ * accepts only these operators, so anything else would fail the request.
+ */
+function isActivityFilter(value: string): boolean {
+  const [op, count, ...rest] = value.split(':')
+  return (
+    rest.length === 0 &&
+    ['gt', 'gte', 'lt', 'lte', 'eq'].includes(op) &&
+    count !== undefined &&
+    isSearchCount(count)
+  )
+}
 
 // Fields fall back instead of throwing, so a hand-edited filter URL
 // (`?verified=true`, which the router parses as a boolean) opens the list
-// instead of failing with a 500. See lib/shared/search-params.ts.
+// instead of failing with a 500. Values that feed the list query are also held
+// to what it accepts: ids must be TypeIDs of their entity (id columns throw on
+// anything else), dates must be real dates, and activity counts must be
+// `op:value` with a known operator and a whole number.
+// See lib/shared/search-params.ts.
 const searchSchema = z.object({
   search: searchText(),
   verified: searchChoice(['true', 'false']),
-  dateFrom: searchText(),
-  dateTo: searchText(),
+  dateFrom: searchDate(),
+  dateTo: searchDate(),
   emailDomain: searchText(),
-  postCount: searchText(),
-  voteCount: searchText(),
-  commentCount: searchText(),
+  postCount: searchWhere(isActivityFilter),
+  voteCount: searchWhere(isActivityFilter),
+  commentCount: searchWhere(isActivityFilter),
   customAttrs: searchText(),
   includeAnonymous: searchChoice(['true']),
   sort: z
@@ -29,8 +56,8 @@ const searchSchema = z.object({
     .optional()
     .default('newest')
     .catch('newest'),
-  selected: searchText(),
-  segments: searchText(),
+  selected: searchId('principal'),
+  segments: searchIdCsv('segment'),
   // When set, /admin/users renders the Invitations view instead of the
   // signed-up users list. 'pending' is the deep-link target from the
   // Portal settings page; the view itself lets admins flip between

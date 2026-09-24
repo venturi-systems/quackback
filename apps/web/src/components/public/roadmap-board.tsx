@@ -11,6 +11,7 @@ import { usePublicRoadmaps, type RoadmapView } from '@/lib/client/hooks/use-road
 import { useSegments } from '@/lib/client/hooks/use-segments-queries'
 import { usePillsScroll } from '@/lib/client/hooks/use-pills-scroll'
 import { portalQueries } from '@/lib/client/queries/portal'
+import { resolveSelectedRoadmapId } from './resolve-selected-roadmap'
 import { RoadmapColumn } from './roadmap-column'
 import {
   PublicRoadmapFiltersBar,
@@ -50,7 +51,13 @@ export function RoadmapBoard({
   const { data: segments } = useSegments({ enabled: !!isTeamMember })
 
   const availableRoadmaps = initialRoadmaps ?? roadmaps ?? []
-  const effectiveSelectedId = selectedRoadmapId ?? initialSelectedRoadmapId
+  // A roadmap id from the URL that names no roadmap this viewer can see
+  // (deleted, private, mistyped) falls back to the first one instead of
+  // rendering columns whose posts query the server would reject.
+  const effectiveSelectedId = resolveSelectedRoadmapId(
+    selectedRoadmapId ?? initialSelectedRoadmapId,
+    availableRoadmaps
+  )
   const selectedRoadmap = availableRoadmaps.find((r) => r.id === effectiveSelectedId)
   const signInRequiredForRoadmapItems =
     !isAuthenticated && availableRoadmaps.length > 0 && (boards?.length ?? 0) === 0

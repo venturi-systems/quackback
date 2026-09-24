@@ -32,15 +32,17 @@ import { fetchBoardCapabilitiesFn } from '@/lib/server/functions/portal'
 import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
 import { widgetQueryKeys, INITIAL_SESSION_VERSION } from '@/lib/client/hooks/use-widget-vote'
 import { CHAT_PRESENCE_QUERY_KEY } from '@/components/widget/use-chat-presence'
-import { searchText } from '@/lib/shared/search-params'
+import { searchId, searchText } from '@/lib/shared/search-params'
 
 // Fields fall back instead of throwing, so a malformed embed URL opens the
 // widget rather than failing with a 500. See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  board: searchText(),
+  board: searchText(), // board slug, compared as text
   // `?c=<conversationId>` opens the widget straight to live chat — used by the
   // deep link in agent-reply emails. Navigation only; carries no capability.
-  c: searchText(),
+  // Only a conversation TypeID is kept: the chat lookup's id column throws on
+  // anything else.
+  c: searchId('conversation'),
 })
 
 export const Route = createFileRoute('/widget/')({
