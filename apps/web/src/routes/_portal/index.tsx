@@ -11,6 +11,13 @@ import { hasAnyPortalAuthMethod } from '@/components/auth/oauth-buttons'
 import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { votedPostsKeys } from '@/lib/client/hooks/use-portal-posts-query'
+import {
+  MAX_SEARCH_COUNT,
+  searchChoice,
+  searchIdList,
+  searchList,
+  searchText,
+} from '@/lib/shared/search-params'
 
 const FeedbackContainer = lazy(() =>
   import('@/components/public/feedback/feedback-container').then((module) => ({
@@ -18,19 +25,27 @@ const FeedbackContainer = lazy(() =>
   }))
 )
 
+// Every field falls back instead of throwing: this is the public home page, and
+// a malformed filter in a pasted URL (`?status=open`, `?sort=hot`,
+// `?minVotes=many`) used to answer 500 with the raw zod issue in the page.
+// Values that feed the feed query are also held to what the query accepts:
+// tag ids must be tag TypeIDs (the tag column throws on anything else, which
+// failed the SSR loader), and the vote threshold must fit the integer column.
+// See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  board: z.string().optional(),
-  search: z.string().optional(),
-  sort: z.enum(['top', 'new', 'trending']).optional().default('trending'),
-  status: z.array(z.string()).optional(),
-  tagIds: z.array(z.string()).optional(),
-  minVotes: z.coerce.number().int().min(1).optional(),
+  board: searchText(), // board slug, compared as text
+  search: searchText(),
+  sort: z.enum(['top', 'new', 'trending']).optional().default('trending').catch('trending'),
+  status: searchList(), // status slugs, compared as text
+  tagIds: searchIdList('tag'),
+  minVotes: z.coerce.number().int().min(1).max(MAX_SEARCH_COUNT).optional().catch(undefined),
   dateFrom: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .refine((s) => !Number.isNaN(new Date(s).getTime()), 'Invalid calendar date')
-    .optional(),
-  responded: z.enum(['responded', 'unresponded']).optional(),
+    .optional()
+    .catch(undefined),
+  responded: searchChoice(['responded', 'unresponded']),
 })
 
 export const Route = createFileRoute('/_portal/')({

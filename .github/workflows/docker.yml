@@ -36,6 +36,8 @@ jobs:
       source_sha: ${{ steps.source.outputs.source_sha }}
       source_tag: ${{ steps.source.outputs.source_tag }}
       requested_tag: ${{ steps.source.outputs.requested_tag }}
+      image_version: ${{ steps.source.outputs.image_version }}
+      source_created: ${{ steps.source.outputs.source_created }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -97,10 +99,24 @@ jobs:
             test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$source_sha"
           fi
 
+          # The OCI version label: the release version for a release build,
+          # otherwise the immutable sha-<short> tag deployments pin. Never the
+          # moving branch tag. `created` is the commit time, so a rebuild of
+          # the same commit carries the same label.
+          image_version="sha-${source_sha:0:7}"
+          if [ -n "$requested_tag" ]; then
+            image_version="$requested_tag"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            image_version="${GITHUB_REF_NAME#v}"
+          fi
+          source_created="$(git show -s --format=%cI "$source_sha")"
+
           {
             echo "source_sha=$source_sha"
             echo "source_tag=sha-${source_sha:0:7}"
             echo "requested_tag=$requested_tag"
+            echo "image_version=$image_version"
+            echo "source_created=$source_created"
           } >> "$GITHUB_OUTPUT"
 
   # Build each architecture on its OWN native runner — free arm64 hosted
@@ -155,9 +171,14 @@ jobs:
           platforms: ${{ matrix.platform }}
           # Exact commit for the portal footer's AGPL source link: the resolved
           # source commit this leg checked out (the dispatch input for manual
-          # builds), not the workflow run's own commit.
+          # builds), not the workflow run's own commit. The same values become
+          # the image's OCI labels (see the runner stage of the Dockerfile),
+          # which otherwise describe the Bun base image.
           build-args: |
             SOURCE_COMMIT=${{ needs.resolve-source.outputs.source_sha }}
+            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+            IMAGE_VERSION=${{ needs.resolve-source.outputs.image_version }}
+            SOURCE_CREATED=${{ needs.resolve-source.outputs.source_created }}
           # No tags here — the manifest list (and its tags) is assembled in the
           # merge job; each leg pushes an untagged per-arch image by digest.
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -218,6 +239,44 @@ jobs:
             type=raw,value=latest,priority=700,enable=${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=${{ needs.resolve-source.outputs.requested_tag }},priority=900,enable=${{ github.event_name == 'workflow_dispatch' && needs.resolve-source.outputs.requested_tag != '' }}
             type=raw,value=${{ needs.resolve-source.outputs.source_tag }},priority=100
+
+      # Read back what each leg actually pushed before any tag points at it:
+      # the labels must name this repository, this commit and this version,
+      # and none may still describe the Bun base image. Reads the registry
+      # only; nothing is rebuilt.
+      - name: Verify per-arch provenance labels
+        working-directory: /tmp/digests
+        env:
+          EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          EXPECTED_REVISION: ${{ needs.resolve-source.outputs.source_sha }}
+          EXPECTED_VERSION: ${{ needs.resolve-source.outputs.image_version }}
+        run: |
+          set -euo pipefail
+          checked=0
+          for digest in *; do
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid digest artifact: $digest" >&2; exit 1; }
+            # One label set per image config found (a per-arch push may be an
+            # index holding the image plus its attestation); every one must pass.
+            labels="$(docker buildx imagetools inspect "${IMAGE}@sha256:${digest}" --format '{{json .Image}}' \
+              | jq -c '[.. | objects | select(has("config") and (.config | type) == "object") | .config.Labels // {}]')"
+            printf '%s %s\n' "$digest" "$labels"
+            jq -e \
+              --arg source "$EXPECTED_SOURCE" \
+              --arg revision "$EXPECTED_REVISION" \
+              --arg version "$EXPECTED_VERSION" \
+              'length > 0 and all(.[];
+                .["org.opencontainers.image.source"] == $source
+                and .["org.opencontainers.image.url"] == $source
+                and .["org.opencontainers.image.revision"] == $revision
+                and .["org.opencontainers.image.version"] == $version
+                and ([.[] | tostring | select(test("oven-sh|oven/bun"))] | length) == 0)' \
+              <<< "$labels" > /dev/null || {
+              echo "image sha256:${digest} labels do not describe ${EXPECTED_REVISION} (${EXPECTED_VERSION})" >&2
+              exit 1
+            }
+            checked=$((checked + 1))
+          done
+          (( checked > 0 ))
 
       - name: Create manifest list and push
         working-directory: /tmp/digests

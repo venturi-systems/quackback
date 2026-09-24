@@ -4,31 +4,50 @@ import { useQuery } from '@tanstack/react-query'
 import { feedbackQueries } from '@/lib/client/queries/feedback'
 import { TabStrip, type TabStripItem } from '@/components/admin/tab-strip'
 import type { FeatureFlags } from '@/lib/shared/types/settings'
+import {
+  searchChoice,
+  searchCount,
+  searchDate,
+  searchId,
+  searchIdList,
+  searchList,
+  searchText,
+  searchWhere,
+} from '@/lib/shared/search-params'
+import { isValidTypeId } from '@quackback/ids'
 
+// Every field falls back instead of throwing, so a hand-edited or pasted
+// filter URL (`?board=ideas`, `?minVotes=5`) opens the page instead of
+// failing with a 500 (DEF-45). Values that feed the inbox query are also held
+// to what it accepts: ids must be TypeIDs of their entity (id columns throw on
+// anything else), counts must be whole numbers, and dates must be real dates
+// (an invalid Date throws when the query serializes it).
+// See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  board: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-  status: z.array(z.string()).optional(),
-  segments: z.array(z.string()).optional(),
-  owner: z.string().optional(),
-  search: z.string().optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  minVotes: z.string().optional(),
-  minComments: z.string().optional(),
-  responded: z.enum(['all', 'responded', 'unresponded']).optional(),
-  updatedBefore: z.string().optional(),
-  sort: z.enum(['newest', 'oldest', 'votes']).optional().default('newest'),
-  hasDuplicates: z.boolean().optional(),
-  deleted: z.boolean().optional(),
-  post: z.string().optional(),
+  board: searchIdList('board'),
+  tags: searchIdList('tag'),
+  status: searchList(), // status slugs, compared as text
+  segments: searchIdList('segment'),
+  owner: searchWhere((value) => value === 'unassigned' || isValidTypeId(value, 'principal')),
+  search: searchText(),
+  dateFrom: searchDate(),
+  dateTo: searchDate(),
+  minVotes: searchCount(),
+  minComments: searchCount(),
+  responded: searchChoice(['all', 'responded', 'unresponded']),
+  updatedBefore: searchDate(),
+  sort: z.enum(['newest', 'oldest', 'votes']).optional().default('newest').catch('newest'),
+  hasDuplicates: z.boolean().optional().catch(undefined),
+  deleted: z.boolean().optional().catch(undefined),
+  // PostModal validates the post id (TypeID or UUID) before any fetch.
+  post: searchText(),
   // Roadmap-specific
-  roadmap: z.string().optional(),
+  roadmap: searchId('roadmap'),
   // Suggestion filters (for incoming sub-route)
-  source: z.string().optional(),
-  suggestionSort: z.enum(['newest', 'relevance']).optional(),
-  suggestionSearch: z.string().optional(),
-  suggestionStatus: z.enum(['pending', 'dismissed']).optional(),
+  source: searchText(),
+  suggestionSort: searchChoice(['newest', 'relevance']),
+  suggestionSearch: searchText(),
+  suggestionStatus: searchChoice(['pending', 'dismissed']),
 })
 
 export const Route = createFileRoute('/admin/feedback')({

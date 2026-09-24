@@ -158,6 +158,71 @@ describe('root dependency contract', () => {
   })
 })
 
+// HYG-18: the runner stage inherited the Bun base image's OCI labels, so the
+// deployed image claimed to be oven-sh/bun at Bun's revision and version.
+// Assert the shape, never current values: every OCI key the base sets is
+// overridden in the final stage, the build-specific ones come from build
+// args, both image workflows pass those args, and the publish workflow reads
+// the pushed labels back before any tag points at the image.
+describe('image provenance labels', () => {
+  const OCI_KEYS = [
+    'title',
+    'description',
+    'licenses',
+    'url',
+    'source',
+    'revision',
+    'version',
+    'created',
+  ]
+  const BUILD_ARG_LABELS: Array<[string, string]> = [
+    ['url', 'SOURCE_REPOSITORY'],
+    ['source', 'SOURCE_REPOSITORY'],
+    ['revision', 'SOURCE_COMMIT'],
+    ['version', 'IMAGE_VERSION'],
+    ['created', 'SOURCE_CREATED'],
+  ]
+
+  it('overrides every base-image OCI label in the shipped stage', () => {
+    const dockerfile = readFileSync(join(process.cwd(), 'apps', 'web', 'Dockerfile'), 'utf8')
+    const stages = [...dockerfile.matchAll(/^FROM \S+ AS (\S+)$/gm)].map((match) => match[1])
+    expect(stages[stages.length - 1], 'runner must be the final, shipped stage').toBe('runner')
+
+    const runnerStage = dockerfile.split(/^FROM \S+ AS runner$/m)[1] ?? ''
+    for (const key of OCI_KEYS) {
+      expect(runnerStage, `runner stage must set org.opencontainers.image.${key}`).toMatch(
+        new RegExp(`org\\.opencontainers\\.image\\.${key}=`)
+      )
+    }
+    for (const [key, arg] of BUILD_ARG_LABELS) {
+      expect(runnerStage, `runner stage must declare ARG ${arg}`).toMatch(
+        new RegExp(`^ARG ${arg}=`, 'm')
+      )
+      expect(runnerStage, `${key} must come from ${arg}`).toContain(
+        `org.opencontainers.image.${key}="\${${arg}}"`
+      )
+    }
+  })
+
+  it('passes the build values from both image workflows', () => {
+    const publish = readFileSync(join(workflowDir, 'docker.yml'), 'utf8')
+    const exported = readFileSync(join(workflowDir, 'export-amd64-image.yml'), 'utf8')
+    for (const arg of new Set(BUILD_ARG_LABELS.map(([, name]) => name))) {
+      expect(publish, `docker.yml must pass ${arg}`).toMatch(
+        new RegExp(`^\\s+${arg}=\\$\\{\\{ `, 'm')
+      )
+      expect(exported, `export-amd64-image.yml must pass ${arg}`).toContain(
+        `--build-arg "${arg}=`
+      )
+    }
+
+    const verify = publish.indexOf('name: Verify per-arch provenance labels')
+    const tag = publish.indexOf('name: Create manifest list and push')
+    expect(verify, 'docker.yml must read the pushed labels back').toBeGreaterThan(-1)
+    expect(verify, 'labels must be verified before any tag is applied').toBeLessThan(tag)
+  })
+})
+
 const REQUIRED_GOVERNANCE_KEYS = [
   'schema_version',
   'repository',

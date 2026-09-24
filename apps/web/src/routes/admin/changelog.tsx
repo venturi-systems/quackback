@@ -1,11 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { ChangelogList, ChangelogModal } from '@/components/admin/changelog'
+import { searchChoice, searchText } from '@/lib/shared/search-params'
 
+// Fields fall back instead of throwing. See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  status: z.enum(['draft', 'scheduled', 'published']).optional(),
-  entry: z.string().optional(), // Entry ID for modal view
-  search: z.string().optional(),
+  status: searchChoice(['draft', 'scheduled', 'published']),
+  entry: searchText(), // Entry ID for modal view
+  search: searchText(),
 })
 
 export const Route = createFileRoute('/admin/changelog')({

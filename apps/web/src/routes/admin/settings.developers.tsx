@@ -14,9 +14,11 @@ import { McpServerSettings } from '@/components/admin/settings/mcp/mcp-server-se
 import { McpSetupGuide } from '@/components/admin/settings/mcp/mcp-setup-guide'
 import { adminQueries } from '@/lib/client/queries/admin'
 import { settingsQueries } from '@/lib/client/queries/settings'
+import { searchChoice } from '@/lib/shared/search-params'
 
+// An unknown tab reads as the default instead of failing with a 500.
 const searchSchema = z.object({
-  tab: z.enum(['keys', 'webhooks', 'mcp']).optional(),
+  tab: searchChoice(['keys', 'webhooks', 'mcp']),
 })
 
 type ApiTab = 'keys' | 'webhooks' | 'mcp'

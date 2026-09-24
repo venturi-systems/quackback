@@ -1,13 +1,16 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { z } from 'zod'
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/solid'
+import { searchText } from '@/lib/shared/search-params'
 import {
   processUnsubscribeTokenFn,
   type UnsubscribeResult,
 } from '@/lib/server/functions/subscriptions'
 
+// A malformed token reads as missing (the page says so) instead of failing
+// with a 500. See lib/shared/search-params.ts.
 const searchSchema = z.object({
-  token: z.string().optional(),
+  token: searchText(),
 })
 
 export const Route = createFileRoute('/unsubscribe')({
