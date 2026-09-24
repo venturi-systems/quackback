@@ -127,6 +127,11 @@ export function CategoryFormDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    // This dialog also opens from inside the create-article form (its
+    // sidebar's "Create new category" button). React bubbles a portal's events
+    // through the component tree, so without this, creating a category also
+    // submitted the article form around it.
+    e.stopPropagation()
     const trimmedName = name.trim()
     const trimmedDesc = description.trim()
     if (!trimmedName) return

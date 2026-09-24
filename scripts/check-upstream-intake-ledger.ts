@@ -19,7 +19,10 @@
  * - a merge intake is wrong or incomplete (see `findMergeIntakeViolations`):
  *   a merge commit brings upstream history into this branch and no record
  *   names it, an upstream commit that merge brought in has no record, or a
- *   merge record does not hold against the merge it names.
+ *   merge record does not hold against the merge it names;
+ * - a ledger line names no decider (`review.by`), or a provenance amendment
+ *   (`amends_line`) names no earlier line or does not repeat that line's
+ *   identity and decision (see `parseLedger`).
  *
  * A merge intake record (`intake: "merge"`) covers one upstream commit that a
  * merge commit brought in: `downstream_commit` is that merge, `downstream_head`
@@ -43,6 +46,19 @@ const TRAILER = /^[ \t]*\(cherry picked from commit ([0-9a-f]{7,40})\)[ \t\r]*$/
 const REFERENCE = /\(cherry picked from commit[ \t]*[0-9a-f]/gi
 const FORK_SHA_FIELDS = ['downstream_head', 'merge_base', 'downstream_commit'] as const
 const DECISIONS = ['accepted', 'rejected', 'deferred'] as const
+/**
+ * The fields a provenance amendment repeats from the line it amends, so that
+ * it can change who decided or merged a record and never what was decided.
+ */
+export const AMENDMENT_IDENTITY = [
+  'intake',
+  'upstream_sha',
+  'merge_base',
+  'downstream_head',
+  'downstream_commit',
+  'patch_id',
+  'neutralized_by',
+] as const
 
 /**
  * The upstream QuackbackIO/quackback commit this fork branched from: upstream
@@ -145,7 +161,15 @@ export interface LedgerEntry {
   intake?: 'merge'
   /** On a rejected merge intake record: the fork commit that undoes the upstream change. */
   neutralized_by?: string
-  review: { decision: (typeof DECISIONS)[number] }
+  /** On a provenance amendment: the 1-based ledger line it amends. */
+  amends_line?: number
+  review: {
+    decision: (typeof DECISIONS)[number]
+    /** Who made the decision. `parseLedger` requires it on every ledger line. */
+    by?: string
+    /** Who merged the intake pull request, when that is not `by`. */
+    merged_by?: string
+  }
 }
 
 export interface CherryPick {
@@ -163,8 +187,16 @@ export interface HistoryProbe {
   patchId(sha: string): string
 }
 
+/**
+ * Parses the ledger, one JSON record per line; blank lines are skipped. Every
+ * record needs its SHAs, a known `review.decision` and a non-empty
+ * `review.by`. A provenance amendment (`amends_line`) must name an earlier,
+ * non-blank line and repeat that line's `AMENDMENT_IDENTITY` fields and
+ * `review.decision`.
+ */
 export function parseLedger(text: string): LedgerEntry[] {
   const entries: LedgerEntry[] = []
+  const byLine = new Map<number, Record<string, unknown>>()
   text.split('\n').forEach((line, index) => {
     if (!line.trim()) return
     let record: Record<string, unknown> | null
@@ -190,7 +222,8 @@ export function parseLedger(text: string): LedgerEntry[] {
     if (record.intake !== undefined && record.intake !== 'merge') {
       throw new Error(`ledger line ${index + 1}: intake must be "merge" when present`)
     }
-    const review = record.review as { decision?: unknown } | null | undefined
+    const review = record.review as
+      { decision?: unknown; by?: unknown; merged_by?: unknown } | null | undefined
     if (
       typeof review !== 'object' ||
       review === null ||
@@ -200,6 +233,40 @@ export function parseLedger(text: string): LedgerEntry[] {
         `ledger line ${index + 1}: review.decision must be accepted, rejected or deferred`
       )
     }
+    if (typeof review.by !== 'string' || !review.by.trim()) {
+      throw new Error(`ledger line ${index + 1}: review.by must name who made the decision`)
+    }
+    if (
+      review.merged_by !== undefined &&
+      (typeof review.merged_by !== 'string' || !review.merged_by.trim())
+    ) {
+      throw new Error(`ledger line ${index + 1}: review.merged_by must not be empty when present`)
+    }
+    const amends = record.amends_line
+    if (amends !== undefined) {
+      if (typeof amends !== 'number' || !Number.isInteger(amends) || amends < 1 || amends > index) {
+        throw new Error(
+          `ledger line ${index + 1}: amends_line must be the number of an earlier ledger line`
+        )
+      }
+      const amended = byLine.get(amends)
+      if (amended === undefined) {
+        throw new Error(`ledger line ${index + 1}: amends_line ${amends} is a blank line`)
+      }
+      for (const field of AMENDMENT_IDENTITY) {
+        if (record[field] !== amended[field]) {
+          throw new Error(
+            `ledger line ${index + 1}: amends line ${amends} but its ${field} differs from that line's`
+          )
+        }
+      }
+      if (review.decision !== (amended.review as { decision: unknown }).decision) {
+        throw new Error(
+          `ledger line ${index + 1}: amends line ${amends} but its review.decision differs; a decision changes only through an ordinary later record`
+        )
+      }
+    }
+    byLine.set(index + 1, record)
     entries.push(record as unknown as LedgerEntry)
   })
   return entries
@@ -561,7 +628,8 @@ if (import.meta.main) {
   const merges = new Set(
     entries.filter((entry) => entry.intake === 'merge').map((entry) => entry.downstream_commit)
   )
+  const amendments = entries.filter((entry) => entry.amends_line !== undefined).length
   console.log(
-    `${ledgerPath}: ${entries.length} entries, ${picks.length} cherry-picked commits, ${merges.size} merge intake(s).`
+    `${ledgerPath}: ${entries.length} entries, ${picks.length} cherry-picked commits, ${merges.size} merge intake(s), ${amendments} provenance amendment(s).`
   )
 }

@@ -32,7 +32,7 @@ function entry(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
     downstream_head: FORK_PARENT,
     downstream_commit: FORK_PICK,
     patch_id: PATCH_ID,
-    review: { decision: 'accepted' },
+    review: { by: 'reviewer', decision: 'accepted' },
     ...overrides,
   }
 }
@@ -299,6 +299,84 @@ describe('REQ-21 upstream intake ledger check', () => {
     )
   })
 
+  it('rejects a ledger line that names no decider or an empty merger', () => {
+    const { by: _by, ...anonymous } = entry().review
+    expect(() => parseLedger(JSON.stringify(entry({ review: anonymous })))).toThrow(
+      'ledger line 1: review.by must name who made the decision'
+    )
+    expect(() =>
+      parseLedger(JSON.stringify(entry({ review: { by: '  ', decision: 'accepted' } })))
+    ).toThrow('ledger line 1: review.by must name who made the decision')
+    expect(() =>
+      parseLedger(
+        JSON.stringify(entry({ review: { by: 'agent', decision: 'accepted', merged_by: '' } }))
+      )
+    ).toThrow('ledger line 1: review.merged_by must not be empty when present')
+    const split = entry({ review: { by: 'agent', decision: 'accepted', merged_by: 'owner' } })
+    expect(parseLedger(JSON.stringify(split))[0]!.review).toEqual({
+      by: 'agent',
+      decision: 'accepted',
+      merged_by: 'owner',
+    })
+  })
+
+  it('accepts a provenance amendment that repeats the identity and decision of an earlier line', () => {
+    const original = { ...entry(), intake: 'merge', patch_id: undefined, neutralized_by: undefined }
+    const amendment = {
+      ...original,
+      amends_line: 1,
+      review: { by: 'agent lane', decision: 'accepted', merged_by: 'owner' },
+    }
+    const text = [original, amendment].map((record) => JSON.stringify(record)).join('\n')
+    const entries = parseLedger(`${text}\n`)
+    expect(entries).toHaveLength(2)
+    expect(entries[1]!.amends_line).toBe(1)
+    // A blank line keeps its number, so an amendment still names the right line.
+    expect(
+      parseLedger(
+        `\n${JSON.stringify(original)}\n${JSON.stringify({ ...amendment, amends_line: 2 })}`
+      )
+    ).toHaveLength(2)
+  })
+
+  it('rejects a provenance amendment that names no earlier line or changes what was decided', () => {
+    const original = entry()
+    const amend = (overrides: Record<string, unknown>) =>
+      parseLedger(
+        [original, { ...original, amends_line: 1, ...overrides }]
+          .map((record) => JSON.stringify(record))
+          .join('\n')
+      )
+    for (const amends_line of [0, 2, 3, 1.5, '1']) {
+      expect(() => amend({ amends_line })).toThrow(
+        'ledger line 2: amends_line must be the number of an earlier ledger line'
+      )
+    }
+    expect(() => parseLedger(`\n${JSON.stringify({ ...original, amends_line: 1 })}`)).toThrow(
+      'ledger line 2: amends_line 1 is a blank line'
+    )
+    for (const [field, value] of [
+      ['upstream_sha', OTHER_UPSTREAM],
+      ['merge_base', FORK_PARENT],
+      ['downstream_head', MERGE_BASE],
+      ['downstream_commit', FORK_PARENT],
+      ['patch_id', '7'.repeat(40)],
+      ['neutralized_by', FORK_PARENT],
+      ['intake', 'merge'],
+    ] as const) {
+      expect(() => amend({ [field]: value })).toThrow(
+        `ledger line 2: amends line 1 but its ${field} differs from that line's`
+      )
+    }
+    expect(() => amend({ review: { by: 'agent', decision: 'rejected' } })).toThrow(
+      'ledger line 2: amends line 1 but its review.decision differs; a decision changes only through an ordinary later record'
+    )
+    // Only provenance and prose change.
+    expect(
+      amend({ review: { by: 'agent', decision: 'accepted', merged_by: 'owner' }, notes: 'n' })
+    ).toHaveLength(2)
+  })
+
   it('rejects a ledger line that is not JSON or carries a malformed SHA', () => {
     expect(() => parseLedger('{"upstream_sha":')).toThrow('ledger line 1 is not valid JSON')
     const bad = JSON.stringify({ ...entry(), downstream_commit: 'abc' })
@@ -331,6 +409,8 @@ describe('REQ-21 committed upstream intake ledger', () => {
         tests: record.tests,
         reviewed_by: record.review.by,
         decision: record.review.decision,
+        merged_by: record.review.merged_by,
+        amends_line: record.amends_line,
         recorded_at: record.recorded_at,
         intake: record.intake,
         downstream_commit: record.downstream_commit,
@@ -346,11 +426,38 @@ describe('REQ-21 committed upstream intake ledger', () => {
     }
     // The builder appends, and a later record for an upstream commit adds to an
     // earlier one, so only a repeat of the same decision on the same fork
-    // commit is a duplicate.
+    // commit is a duplicate. A provenance amendment repeats its line's
+    // decision on purpose and is keyed by the line it amends, so amending one
+    // line twice is a duplicate too.
     const keys = records.map((record) =>
-      JSON.stringify([record.upstream_sha, record.downstream_commit ?? '', record.review.decision])
+      JSON.stringify([
+        record.upstream_sha,
+        record.downstream_commit ?? '',
+        record.review.decision,
+        record.amends_line ?? 0,
+      ])
     )
     expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('names who decided each record apart from who merged it', () => {
+    // Lines 1 to 37 put the account that merged the intake pull request in
+    // review.by, with no review recorded, although an agent made each
+    // decision. Each such line has a later amendment that names the agent as
+    // the decider and the account as the merger.
+    const mergerAsReviewer =
+      /^\S+ \(merged venturi-systems\/quackback#\d+; no GitHub review recorded\)$/
+    const records = lines.map((line) => JSON.parse(line))
+    const amended = new Set(records.map((record) => record.amends_line).filter(Boolean))
+    records.forEach((record, index) => {
+      if (record.amends_line === undefined && mergerAsReviewer.test(record.review.by)) {
+        expect(amended.has(index + 1), `ledger line ${index + 1}`).toBe(true)
+      }
+      if (record.amends_line !== undefined) {
+        expect(record.review.merged_by, `ledger line ${index + 1}`).toBeTruthy()
+        expect(record.review.by, `ledger line ${index + 1}`).not.toMatch(mergerAsReviewer)
+      }
+    })
   })
 })
 
@@ -386,8 +493,35 @@ describe('upstream intake record builder', () => {
 
   it('omits the optional fields when they are not given', () => {
     const record = buildUpstreamIntakeRecord(base)
-    for (const field of ['downstream_commit', 'patch_id', 'intake_pr', 'reason', 'notes']) {
+    for (const field of [
+      'downstream_commit',
+      'patch_id',
+      'intake_pr',
+      'reason',
+      'notes',
+      'amends_line',
+    ]) {
       expect(record).not.toHaveProperty(field)
+    }
+    expect(record.review).toEqual({ by: 'reviewer', decision: 'accepted' })
+  })
+
+  it('records who merged the intake apart from who decided, and the line an amendment amends', () => {
+    const record = buildUpstreamIntakeRecord({
+      ...base,
+      reviewed_by: 'agent lane',
+      merged_by: 'owner',
+      amends_line: 6,
+    })
+    expect(record.review).toEqual({ by: 'agent lane', decision: 'accepted', merged_by: 'owner' })
+    expect(record.amends_line).toBe(6)
+    expect(() => buildUpstreamIntakeRecord({ ...base, merged_by: ' ' })).toThrow(
+      'merged_by must not be empty when given'
+    )
+    for (const amends_line of [0, -1, 1.5]) {
+      expect(() => buildUpstreamIntakeRecord({ ...base, amends_line })).toThrow(
+        'amends_line must be a positive ledger line number'
+      )
     }
   })
 
