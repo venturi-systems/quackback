@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { MagnifyingGlassIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,7 @@ export function PublicRoadmapToolbar({
   filterButton,
 }: PublicRoadmapToolbarProps): React.ReactElement {
   const intl = useIntl()
+  const searchInputId = useId()
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchValue, setSearchValue] = useState(currentSearch ?? '')
 
@@ -111,23 +112,32 @@ export function PublicRoadmapToolbar({
             </Button>
           </PopoverTrigger>
           <PopoverContent className="max-w-[calc(100vw-2rem)] sm:w-80" align="end">
-            <form onSubmit={handleSearchSubmit} className="flex gap-2">
-              <Input
-                placeholder={intl.formatMessage({
-                  id: 'portal.feedback.toolbar.searchPlaceholder',
-                  defaultMessage: 'Search posts...',
-                })}
-                value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-                className="flex-1"
-                autoFocus
-              />
-              <Button type="submit" size="sm">
+            <form onSubmit={handleSearchSubmit} className="space-y-2">
+              <label htmlFor={searchInputId} className="block text-sm font-medium">
                 <FormattedMessage
-                  id="portal.feedback.toolbar.searchSubmit"
-                  defaultMessage="Search"
+                  id="portal.feedback.toolbar.searchLabel"
+                  defaultMessage="Search posts"
                 />
-              </Button>
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  id={searchInputId}
+                  placeholder={intl.formatMessage({
+                    id: 'portal.feedback.toolbar.searchPlaceholder',
+                    defaultMessage: 'Search posts...',
+                  })}
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  className="flex-1"
+                  autoFocus
+                />
+                <Button type="submit" size="sm">
+                  <FormattedMessage
+                    id="portal.feedback.toolbar.searchSubmit"
+                    defaultMessage="Search"
+                  />
+                </Button>
+              </div>
             </form>
             {currentSearch && (
               <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={handleClearSearch}>

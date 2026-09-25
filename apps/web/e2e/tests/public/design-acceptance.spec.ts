@@ -847,3 +847,42 @@ test('A09 vote-count filter uses actual command-item semantics and survives relo
     writes: 'No post, comment or vote is submitted.',
   })
 })
+
+for (const width of [320, 1440]) {
+  for (const route of ['feed', 'roadmap'] as const) {
+    test(`A10 ${route} search has persistent labels and keyboard recovery at ${width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await openRoute(page, route)
+      const trigger = page.getByRole('button', { name: 'Search', exact: true })
+      await trigger.click()
+      const search = page.getByRole('textbox', { name: 'Search posts', exact: true })
+      await expect(search).toBeFocused()
+      await search.fill('connector')
+      await expect(page.locator('label').filter({ hasText: /^Search posts$/ })).toBeVisible()
+      await recordReflow(page, testInfo, `${route}-search-open-${width}`)
+      await page.keyboard.press('Escape')
+      await expect(search).toBeHidden()
+      await expect(trigger).toBeFocused()
+      await trigger.click()
+      await expect(search).toHaveValue('connector')
+      await search.press('Enter')
+      await expect(page).toHaveURL(/[?&]search=connector(?:&|$)/)
+      await expect(trigger).toBeFocused()
+      await trigger.click()
+      await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+      await expect(page).not.toHaveURL(/[?&]search=/)
+      await expect(trigger).toBeFocused()
+      if (route === 'feed') {
+        const top = page.getByRole('button', { name: 'Top', exact: true })
+        await top.click()
+        await expect(top).toHaveAttribute('aria-pressed', 'true')
+        await expect(page.getByRole('button', { name: 'Trending', exact: true })).toHaveAttribute(
+          'aria-pressed',
+          'false'
+        )
+      }
+    })
+  }
+}

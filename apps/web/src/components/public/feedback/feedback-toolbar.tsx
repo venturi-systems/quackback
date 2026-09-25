@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useIntl, FormattedMessage } from 'react-intl'
 import {
   ArrowTrendingUpIcon,
@@ -52,8 +52,15 @@ export function FeedbackToolbar({
   filterButton,
 }: FeedbackToolbarProps): React.ReactElement {
   const intl = useIntl()
+  const searchInputId = useId()
   const [searchOpen, setSearchOpen] = useState(false)
-  const [searchValue, setSearchValue] = useState(currentSearch || '')
+  const [searchValue, setSearchValue] = useState(currentSearch ?? '')
+
+  // Keep the draft aligned with navigation and external clears without erasing
+  // unsent edits when loading or sort state changes.
+  useEffect(() => {
+    setSearchValue(currentSearch ?? '')
+  }, [currentSearch])
 
   function handleSearchSubmit(e: React.FormEvent): void {
     e.preventDefault()
@@ -78,6 +85,7 @@ export function FeedbackToolbar({
               key={option.value}
               type="button"
               onClick={() => onSortChange(option.value)}
+              aria-pressed={isActive}
               className={cn(
                 'flex min-h-11 items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-full text-sm transition-colors cursor-pointer',
                 isActive
@@ -117,23 +125,32 @@ export function FeedbackToolbar({
             </Button>
           </PopoverTrigger>
           <PopoverContent className="max-w-[calc(100vw-2rem)] sm:w-80" align="end">
-            <form onSubmit={handleSearchSubmit} className="flex gap-2">
-              <Input
-                placeholder={intl.formatMessage({
-                  id: 'portal.feedback.toolbar.searchPlaceholder',
-                  defaultMessage: 'Search posts...',
-                })}
-                value={searchValue}
-                onChange={(e) => setSearchValue(e.target.value)}
-                className="flex-1"
-                autoFocus
-              />
-              <Button type="submit" size="sm">
+            <form onSubmit={handleSearchSubmit} className="space-y-2">
+              <label htmlFor={searchInputId} className="block text-sm font-medium">
                 <FormattedMessage
-                  id="portal.feedback.toolbar.searchSubmit"
-                  defaultMessage="Search"
+                  id="portal.feedback.toolbar.searchLabel"
+                  defaultMessage="Search posts"
                 />
-              </Button>
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  id={searchInputId}
+                  placeholder={intl.formatMessage({
+                    id: 'portal.feedback.toolbar.searchPlaceholder',
+                    defaultMessage: 'Search posts...',
+                  })}
+                  value={searchValue}
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  className="flex-1"
+                  autoFocus
+                />
+                <Button type="submit" size="sm">
+                  <FormattedMessage
+                    id="portal.feedback.toolbar.searchSubmit"
+                    defaultMessage="Search"
+                  />
+                </Button>
+              </div>
             </form>
             {currentSearch && (
               <Button variant="ghost" size="sm" className="mt-2 w-full" onClick={handleClearSearch}>
