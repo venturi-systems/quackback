@@ -19,6 +19,11 @@ import { test, expect, type APIRequestContext } from '@playwright/test'
  *
  * Function ids come from the dev server's own client module: in dev each id
  * is base64url JSON naming the source file and the extracted export.
+ *
+ * POST bodies are sent as raw bytes (a Buffer). Given a string `data` and
+ * `content-type: application/json`, Playwright JSON-encodes any string that
+ * is not valid JSON, so `{not json` would reach the server as the valid JSON
+ * string `"{not json"` and an empty body as `""`.
  */
 const FUNCTIONS_MODULE = '/src/lib/server/functions/public-posts.ts'
 const GET_EXPORT = 'listPublicPostsFn_createServerFn_handler'
@@ -163,7 +168,8 @@ test.describe('Server-function payloads that cannot be decoded (DEF-59)', () => 
       const { post } = await urls(request)
       const res = await request.post(post, {
         headers: { ...RPC_HEADERS, 'content-type': 'application/json' },
-        data: body,
+        // Raw bytes: see the file header.
+        data: Buffer.from(body, 'utf8'),
       })
       await expectBadRequest(res, `POST ${label}`)
     })
@@ -185,7 +191,10 @@ async function expectNotFound(
  * Before this guard an id that names no function threw out of the framework
  * before its `try`, and h3 answered 500 `{"status":500,"unhandled":true,
  * "message":"HTTPError"}` (feedback.venturi.systems, 2026-09-24). So did the
- * bare `/_serverFn/`, even with no RPC headers at all.
+ * bare `/_serverFn/`, even with no RPC headers at all. An id that names an
+ * Object.prototype member, such as `constructor`, also answered 500 there
+ * (2026-09-25T00:06:49Z): the resolver finds the inherited member and throws
+ * `serverFnInfo.importer is not a function`, which is not an unknown-id error.
  */
 test.describe('Server-function ids that name no function (DEF-59)', () => {
   const unknownIds: Array<[string, string]> = [
@@ -217,6 +226,34 @@ test.describe('Server-function ids that name no function (DEF-59)', () => {
     request,
   }) => {
     const res = await request.get('/_serverFn/not-a-real-server-fn', {
+      headers: { 'x-tsr-serverFn': 'true', 'sec-fetch-site': 'cross-site' },
+    })
+    expect(res.status()).toBe(403)
+  })
+
+  // The dev id validator reads `serverFnsById[id]` from a plain object (the
+  // production resolver reads `manifest[id]` the same way), so these ids find
+  // an inherited Object.prototype member instead of reporting an unknown id.
+  // The guard answers them 404 before the framework resolves anything.
+  for (const id of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    test(`GET with the Object.prototype member id ${id} answers 404`, async ({ request }) => {
+      const res = await request.get(`/_serverFn/${id}`, { headers: RPC_HEADERS })
+      await expectNotFound(res, `GET ${id}`)
+    })
+  }
+
+  test('POST with the Object.prototype member id constructor answers 404', async ({ request }) => {
+    const res = await request.post('/_serverFn/constructor', {
+      headers: { ...RPC_HEADERS, 'content-type': 'application/json' },
+      data: JSON.stringify(LIST_ALL),
+    })
+    await expectNotFound(res, 'POST constructor')
+  })
+
+  test('a cross-site request to a prototype-member id is still refused 403 by CSRF first', async ({
+    request,
+  }) => {
+    const res = await request.get('/_serverFn/constructor', {
       headers: { 'x-tsr-serverFn': 'true', 'sec-fetch-site': 'cross-site' },
     })
     expect(res.status()).toBe(403)
