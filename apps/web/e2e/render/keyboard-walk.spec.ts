@@ -107,6 +107,13 @@ interface StopResult {
   visibility: Visibility
   /** Share of the box's area inside the viewport, 0 to 1, two decimals. */
   onScreen: number
+  /**
+   * Present when the element moved on screen, or the page scrolled, between
+   * the walk first reading the stop and measuring it (after the element's
+   * animations settle): dy is the element's move in CSS px, scrollDy the
+   * page's. Evidence for review.
+   */
+  movedAfterFocus?: { dy: number; scrollDy: number }
   order: 'first' | 'in-order' | 'out-of-order'
   rect: { x: number; y: number; width: number; height: number }
 }
@@ -437,6 +444,9 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
     async settleAndStep(direction) {
       const el = deepActive()
       if (!el || el === document.body || el === document.documentElement) return { kind: 'exit' }
+      // Where focus left the element, for telling a stop the browser never
+      // scrolled fully into view from one that moved after it took focus.
+      const atFocus = { top: el.getBoundingClientRect().top, scrollY }
       // Let focus transitions finish before reading the focused style.
       const animations = [el, el.parentElement]
         .filter((e): e is Element => Boolean(e))
@@ -462,6 +472,8 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       visited.push(el)
       const rect = el.getBoundingClientRect()
       const { visibility, onScreen } = visibilityOf(el)
+      const dy = Math.round(rect.top - atFocus.top)
+      const scrollDy = Math.round(scrollY - atFocus.scrollY)
       return {
         kind: 'stop',
         key: keyOf(el),
@@ -474,6 +486,7 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
         target: targetOf(el),
         visibility,
         onScreen,
+        ...(dy || scrollDy ? { movedAfterFocus: { dy, scrollDy } } : {}),
         order,
         rect: {
           x: Math.round(rect.x),
