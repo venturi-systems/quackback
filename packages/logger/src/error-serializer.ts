@@ -13,7 +13,9 @@
  * `serializeError` keeps the standard serializer for every error that has
  * nothing to do with a database. When a failed query is anywhere in reach (the
  * error itself, any depth of its cause chain, an aggregated error, an error in
- * one of its properties), it writes a redacted shape instead:
+ * one of its properties or in a class instance it holds) or its text is (in a
+ * message, a stack, a string property or a string cause), it writes a redacted
+ * shape instead (`failedQueryReach` in ./database-error.ts decides):
  *
  * - a database error becomes `databaseErrorLogFields` (SQLSTATE, class,
  *   parameterized statement, parameter count, Postgres identifiers), a fixed
@@ -21,13 +23,18 @@
  *   cause (a dropped connection, a timeout);
  * - any other error keeps its own message and stack, with the text of every
  *   failed query in reach replaced, and its cause serialized the same way
- *   rather than appended.
+ *   rather than appended; a class instance it holds is written as
+ *   `JSON.stringify` would write it, redacted the same way.
  *
- * `sanitizeLogFields` (pino's `formatters.log`) and `sanitizeLogArguments`
- * (pino's `hooks.logMethod`) route errors logged under other keys, nested in
- * plain objects, passed as the first argument or as a printf argument through
- * the same rules, and cut a failed query's text out of any logged string,
- * including the message pino derives from an error when the call gives none.
+ * `sanitizeLogFields` (pino's `formatters.log` and `formatters.bindings`, and
+ * the logger's child bindings) and `sanitizeLogArguments` (pino's
+ * `hooks.logMethod`) route errors logged under other keys, nested in plain
+ * objects or class instances, bound to a child logger, passed as the first
+ * argument or as a printf argument through the same rules, and cut a failed
+ * query's text out of any logged string, including the message pino derives
+ * from an error when the call gives none. `scrubLogLine` (pino's
+ * `hooks.streamWrite`) is the last layer: it cuts a failed query's text out of
+ * the finished line, whatever wrote it there.
  *
  * A database error's `type` is read from its shape (`databaseErrorKind`), not
  * its class name, because the production server is bundled.
@@ -37,9 +44,9 @@ import {
   FAILED_QUERY_MARKER,
   databaseErrorLogFields,
   errorClassName,
+  failedQueryReach,
   isDatabaseError,
   isPlainObject,
-  reachableErrors,
 } from './database-error'
 
 /** The message a database error is logged with in place of its own. */
@@ -47,6 +54,9 @@ export const DATABASE_ERROR_LOG_MESSAGE = 'database query failed'
 
 /** What replaces a failed query's text in any other logged string. */
 export const WITHHELD_QUERY_TEXT = '[failed query withheld]'
+
+/** What a value that cannot be read or converted is written as. */
+const UNSERIALIZABLE = '[unserializable]'
 
 /** Pino's key for the error of a log call. */
 const ERROR_KEY = 'err'
@@ -68,6 +78,16 @@ const MAX_DEPTH = 32
 
 /** Deepest plain-object nesting of log fields that is inspected. */
 const MAX_SANITIZE_DEPTH = 64
+
+/**
+ * How many values one redacted error may write. A larger graph (an error that
+ * holds a client or a socket) is written up to here, and the rest as
+ * `TRUNCATED`, so the redacted copy is never larger than a readable line.
+ */
+const MAX_REDACTED_VALUES = 10_000
+
+/** What a value past `MAX_REDACTED_VALUES` is written as. */
+const TRUNCATED = '[truncated]'
 
 /** Shorter texts are not replaced, so a short Postgres field cannot garble a stack. */
 const MIN_WITHHELD_LENGTH = 4
@@ -101,7 +121,7 @@ function typeName(error: ErrorLike): string {
 
 /**
  * The texts to withhold for the failed queries among `errors` (which, from
- * `reachableErrors`, already include every cause): each database error's
+ * `failedQueryReach`, already include every cause): each database error's
  * message and the Postgres fields that echo values. Longest first, so a
  * message is replaced before a shorter text inside it. A non-database cause,
  * such as a dropped connection, keeps its message.
@@ -118,33 +138,62 @@ function withheldTexts(errors: Error[]): string[] {
   return [...texts].sort((a, b) => b.length - a.length)
 }
 
-/** `text` with every withheld text replaced, and cut at a failed query's text. */
-function scrubText(text: string, withheld: readonly string[]): string {
+/** `text` with every withheld text replaced. */
+function replaceWithheld(text: string, withheld: readonly string[]): string {
   let out = text
   for (const secret of withheld) {
     if (out.includes(secret)) out = out.split(secret).join(WITHHELD_QUERY_TEXT)
   }
+  return out
+}
+
+/** `text` with every withheld text replaced, and cut at a failed query's text. */
+function scrubText(text: string, withheld: readonly string[]): string {
+  const out = replaceWithheld(text, withheld)
   const at = out.indexOf(FAILED_QUERY_MARKER)
   return at === -1 ? out : out.slice(0, at) + WITHHELD_QUERY_TEXT
 }
 
 /**
- * A stack with every withheld text replaced. A failed query's text that is
- * still there (a message built from one whose error was not kept) is cut up
- * to the stack frames that follow it.
+ * The frames of `stack` when it is provably the error's own: the error's
+ * `message` starts on its first line, and every line after the message is a
+ * stack frame, as V8 and Bun write them. `undefined` when either does not
+ * hold, such as for a stack the app rewrote.
  */
-function scrubStack(stack: string, withheld: readonly string[]): string {
-  let out = stack
-  for (const secret of withheld) {
-    if (out.includes(secret)) out = out.split(secret).join(WITHHELD_QUERY_TEXT)
-  }
+function framesAfterMessage(
+  stack: string,
+  message: string
+): { head: string; frames: string } | undefined {
+  if (message === '') return undefined
+  const start = stack.indexOf(message)
+  if (start === -1 || stack.slice(0, start).includes('\n')) return undefined
+  const end = start + message.length
+  const frames = stack.slice(end)
+  const [first, ...rest] = frames.split('\n')
+  if (first !== '' || !rest.every((line) => FRAME.test(line))) return undefined
+  return { head: stack.slice(0, end), frames }
+}
+
+/**
+ * A stack with every withheld text replaced. A failed query's text that is
+ * still there (a message built from one whose error is out of reach) carries
+ * bound values, which can hold anything, including text shaped like a stack
+ * frame (drizzle-orm joins them with commas: `params: x\n    at y`). So
+ * nothing after that text is kept unless it is provably a frame: when the
+ * stack is the error's own (`framesAfterMessage`), the header is cut at the
+ * failed query's text and the frames after the message are kept. Otherwise
+ * the stack is cut there and nothing after it is kept.
+ */
+function scrubStack(stack: string, message: string, withheld: readonly string[]): string {
+  const out = replaceWithheld(stack, withheld)
   const at = out.indexOf(FAILED_QUERY_MARKER)
   if (at === -1) return out
-  const frames = out
-    .slice(at)
-    .split('\n')
-    .filter((line) => FRAME.test(line))
-  return [out.slice(0, at) + WITHHELD_QUERY_TEXT, ...frames].join('\n')
+  const own = framesAfterMessage(stack, message)
+  if (own) {
+    const frames = replaceWithheld(own.frames, withheld)
+    if (!frames.includes(FAILED_QUERY_MARKER)) return scrubText(own.head, withheld) + frames
+  }
+  return out.slice(0, at) + WITHHELD_QUERY_TEXT
 }
 
 /**
@@ -180,6 +229,8 @@ function databaseErrorStack(
 interface RedactionContext {
   withheld: readonly string[]
   seen: Set<object>
+  /** Values still to be written (`MAX_REDACTED_VALUES`). */
+  budget: number
 }
 
 /**
@@ -221,24 +272,52 @@ function serializeDatabaseError(
 
 /** A value inside a redacted error: strings scrubbed, errors redacted. */
 function redactValue(value: unknown, context: RedactionContext, depth: number): unknown {
+  if (--context.budget < 0) return TRUNCATED
   if (typeof value === 'string') return scrubText(value, context.withheld)
   if (value === null || typeof value !== 'object') return value
   if (isErrorLike(value) && (value instanceof Error || !isPlainObject(value))) {
     return serializeRedacted(value, context, depth)
   }
   if (depth > MAX_DEPTH || context.seen.has(value)) return undefined
-  if (Array.isArray(value)) {
-    context.seen.add(value)
-    return value.map((item) => redactValue(item, context, depth + 1))
-  }
-  if (!isPlainObject(value)) return value
   context.seen.add(value)
+  if (Array.isArray(value)) return value.map((item) => redactValue(item, context, depth + 1))
+  if (!isPlainObject(value)) return redactInstance(value, context, depth)
+  return redactProperties(value, context, depth)
+}
+
+/**
+ * The own enumerable properties of `value`, the ones `JSON.stringify` writes,
+ * redacted, without the properties that hold a query's bound values.
+ */
+function redactProperties(
+  value: object,
+  context: RedactionContext,
+  depth: number
+): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const key of Object.keys(value)) {
     if (BOUND_VALUE_KEYS.has(key)) continue
     out[key] = redactValue(readProperty(value, key), context, depth + 1)
   }
   return out
+}
+
+/**
+ * A class instance inside a redacted value, written as `JSON.stringify` would
+ * write it (its `toJSON` result, else its own enumerable properties), then
+ * redacted. A date, a typed array and a buffer carry no text and are kept.
+ */
+function redactInstance(value: object, context: RedactionContext, depth: number): unknown {
+  try {
+    if (value instanceof Date || ArrayBuffer.isView(value)) return value
+    const toJSON = readProperty(value, 'toJSON')
+    if (typeof toJSON === 'function') {
+      return redactValue(toJSON.call(value), context, depth + 1)
+    }
+    return redactProperties(value, context, depth)
+  } catch {
+    return UNSERIALIZABLE
+  }
 }
 
 /**
@@ -263,7 +342,7 @@ function serializeRedacted(
     message: scrubText(error.message, context.withheld),
   }
   const stack = readProperty(error, 'stack')
-  if (typeof stack === 'string') out.stack = scrubStack(stack, context.withheld)
+  if (typeof stack === 'string') out.stack = scrubStack(stack, error.message, context.withheld)
   const aggregated = readProperty(error, 'errors')
   if (Array.isArray(aggregated)) {
     out.aggregateErrors = aggregated.map((item) => redactValue(item, context, depth + 1))
@@ -282,28 +361,27 @@ function serializeRedacted(
   return out
 }
 
-/** Whether a failed query is in reach of `error`, or its text is in its message. */
-function touchesDatabase(error: ErrorLike, reachable: Error[]): boolean {
-  if (error.message.includes(FAILED_QUERY_MARKER)) return true
-  return reachable.some(
-    (e) =>
-      isDatabaseError(e) ||
-      (typeof e.message === 'string' && e.message.includes(FAILED_QUERY_MARKER))
-  )
-}
-
 /**
- * Pino `err` serializer. Any error with a failed query in reach gets the
- * redacted shape described above; every other error gets pino's standard
- * serializer, unchanged. A value that is not an error is passed through
- * `sanitizeLogValue`.
+ * Pino `err` serializer. Any error with a failed query or its text in reach
+ * (`failedQueryReach`) gets the redacted shape described above; every other
+ * error gets pino's standard serializer, unchanged. A value that is not an
+ * error is passed through `sanitizeLogValue`.
  */
 export function serializeError(value: unknown): unknown {
   if (!isErrorLike(value)) return sanitizeLogValue(value)
-  const reachable = reachableErrors(value)
-  if (!touchesDatabase(value, reachable)) return pino.stdSerializers.err(value as Error)
-  const context: RedactionContext = { withheld: withheldTexts(reachable), seen: new Set() }
-  return serializeRedacted(value, context, 0)
+  const reach = failedQueryReach(value)
+  if (!reach.found) return pino.stdSerializers.err(value as Error)
+  return serializeRedacted(value, redactionContext(reach.errors), 0)
+}
+
+function redactionContext(errors: Error[]): RedactionContext {
+  return { withheld: withheldTexts(errors), seen: new Set(), budget: MAX_REDACTED_VALUES }
+}
+
+/** `errorLogMessage` for an error whose reachable errors are already known. */
+function messageFor(error: ErrorLike, reachable: Error[]): string {
+  if (isDatabaseError(error)) return DATABASE_ERROR_LOG_MESSAGE
+  return scrubText(error.message, withheldTexts(reachable))
 }
 
 /**
@@ -313,8 +391,7 @@ export function serializeError(value: unknown): unknown {
  */
 export function errorLogMessage(error: unknown): string | undefined {
   if (!isErrorLike(error)) return undefined
-  if (isDatabaseError(error)) return DATABASE_ERROR_LOG_MESSAGE
-  return scrubText(error.message, withheldTexts(reachableErrors(error)))
+  return messageFor(error, failedQueryReach(error).errors)
 }
 
 /** Marks a plain object or array whose sanitized copy is still being built. */
@@ -322,10 +399,12 @@ const IN_PROGRESS = Symbol('sanitizing')
 
 /**
  * A logged value made safe: an error anywhere inside plain objects and arrays
- * goes through `serializeError`, and a string that carries a failed query's
- * text is cut there. Returns `value` itself when nothing needed changing, so
- * ordinary log lines are not copied. A plain object or array that contains
- * itself is written as `[Circular]` where it repeats, as pino would.
+ * goes through `serializeError`, a class instance with a failed query or its
+ * text in reach is written redacted (`sanitizeInstance`), and a string that
+ * carries a failed query's text is cut there. Returns `value` itself when
+ * nothing needed changing, so ordinary log lines are not copied. A plain
+ * object or array that contains itself is written as `[Circular]` where it
+ * repeats, as pino would.
  */
 export function sanitizeLogValue(value: unknown): unknown {
   return sanitizeNested(value, 0, undefined)
@@ -346,7 +425,7 @@ function sanitizeNested(
   }
   if (value === null || typeof value !== 'object') return value
   if (value instanceof Error) return serializeError(value)
-  if (!Array.isArray(value) && !isPlainObject(value)) return value
+  if (!Array.isArray(value) && !isPlainObject(value)) return sanitizeInstance(value)
   const memo = memoIn ?? new Map<object, unknown>()
   if (memo.has(value)) {
     const done = memo.get(value)
@@ -383,8 +462,22 @@ function sanitizeNested(
 }
 
 /**
- * Pino `formatters.log`: every field but `err` (which the `err` serializer
- * handles) through `sanitizeLogValue`.
+ * A class instance among the logged values. `JSON.stringify` writes its own
+ * enumerable properties (or its `toJSON` result), so a failed query it holds,
+ * or a string with a failed query's text, would be written as it is. It is
+ * kept as it is unless `failedQueryReach` finds one, and then written as
+ * `redactInstance` writes it (an error-like one as a redacted error).
+ */
+function sanitizeInstance(value: object): unknown {
+  const reach = failedQueryReach(value)
+  if (!reach.found) return value
+  return redactValue(value, redactionContext(reach.errors), 0)
+}
+
+/**
+ * Pino `formatters.log` and `formatters.bindings`, and the logger's child
+ * bindings: every field but `err` (which the `err` serializer handles, in
+ * bindings too) through `sanitizeLogValue`.
  */
 export function sanitizeLogFields(fields: Record<string, unknown>): Record<string, unknown> {
   let copy: Record<string, unknown> | undefined
@@ -415,7 +508,8 @@ function sanitizeMessageArgument(arg: unknown): unknown {
   }
   if (arg === null || typeof arg !== 'object') return arg
   if (isErrorLike(arg) && (arg instanceof Error || !isPlainObject(arg))) {
-    return touchesDatabase(arg, reachableErrors(arg)) ? (errorLogMessage(arg) ?? arg) : arg
+    const reach = failedQueryReach(arg)
+    return reach.found ? messageFor(arg, reach.errors) : arg
   }
   return sanitizeLogValue(arg)
 }
@@ -423,9 +517,10 @@ function sanitizeMessageArgument(arg: unknown): unknown {
 /**
  * Pino `hooks.logMethod` arguments made safe. When a call passes an error (as
  * the first argument, or as `err`) and no message, or `undefined` as the
- * message, pino would log the error's own message, so the call is given
- * `errorLogMessage` instead. A message or format argument that carries a
- * failed query's text is cut there (`sanitizeMessageArgument`).
+ * message (with or without format arguments after it), pino would log the
+ * error's own message, so the call is given `errorLogMessage` instead. A
+ * message or format argument that carries a failed query's text is cut there
+ * (`sanitizeMessageArgument`).
  */
 export function sanitizeLogArguments(args: readonly unknown[]): unknown[] {
   // The first argument is the merging object or error (the serializer and
@@ -435,8 +530,9 @@ export function sanitizeLogArguments(args: readonly unknown[]): unknown[] {
     return typeof arg === 'string' && arg.includes(FAILED_QUERY_MARKER) ? scrubText(arg, []) : arg
   })
   // pino reads the message from the error whenever the call's own message is
-  // `undefined`: absent (`log.error(err)`) or passed as such.
-  if (out.length > 2 || (out.length === 2 && out[1] !== undefined)) return out
+  // `undefined`: absent (`log.error(err)`) or passed as such, whatever follows
+  // it (`log.error(err, undefined, value)` formats to `undefined` too).
+  if (out[1] !== undefined) return out
   const [first] = out
   let error: unknown
   if (first instanceof Error) error = first
@@ -445,11 +541,32 @@ export function sanitizeLogArguments(args: readonly unknown[]): unknown[] {
     if (fields.msg === undefined) error = fields[ERROR_KEY]
   }
   if (error !== undefined && isErrorLike(error)) {
-    const reachable = reachableErrors(error)
-    if (touchesDatabase(error, reachable)) {
-      const message = errorLogMessage(error)
-      if (message !== undefined) out[1] = message
-    }
+    const reach = failedQueryReach(error)
+    if (reach.found) out[1] = messageFor(error, reach.errors)
   }
   return out
+}
+
+/**
+ * Pino `hooks.streamWrite`: the last layer, applied to each finished line.
+ * Whatever the layers above did not reach (a `toJSON` result, a binding a
+ * caller's own bindings formatter made, a VError-style cause function), no
+ * line leaves with a failed query's text in it: every JSON string that holds
+ * one is cut there, as `scrubText` cuts a string. Pino writes every string
+ * with JSON escapes, so the string ends at the next unescaped quote, and the
+ * line stays valid JSON.
+ */
+export function scrubLogLine(line: string): string {
+  let at = line.indexOf(FAILED_QUERY_MARKER)
+  if (at === -1) return line
+  let out = ''
+  let from = 0
+  while (at !== -1) {
+    let end = at + FAILED_QUERY_MARKER.length
+    while (end < line.length && line[end] !== '"') end += line[end] === '\\' ? 2 : 1
+    out += line.slice(from, at) + WITHHELD_QUERY_TEXT
+    from = end
+    at = line.indexOf(FAILED_QUERY_MARKER, end)
+  }
+  return out + line.slice(from)
 }
