@@ -29,7 +29,7 @@ describe.each(toolbars)('$name search', ({ Component, sort }) => {
     fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
     const input = await screen.findByRole('textbox', { name: 'Search' })
     fireEvent.change(input, { target: { value: 'billing' } })
-    expect(screen.getByLabelText('Search')).toBe(input)
+    expect(screen.getByLabelText('Search', { selector: 'input' })).toBe(input)
     expect(screen.getByText('Search', { selector: 'label' })).toBeVisible()
     expect(input).toHaveValue('billing')
   })
