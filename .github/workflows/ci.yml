@@ -21,9 +21,16 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
 
+# Only a first-attempt `synchronize` (a new head) shares the pull request's
+# group and cancels the run it supersedes. Every other event, and every re-run,
+# gets its own run-attempt group. A re-run keeps its original event payload, so
+# `synchronize` alone would let re-running an older run cancel the live
+# required check (RAIL #3877, remediation ledger DEF-04). Its own group also
+# keeps a re-run, reopen or merge-queue event from displacing a PENDING run,
+# which GitHub's one-pending-run-per-group rule would otherwise cancel.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event.action == 'synchronize' && github.run_attempt == '1' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: ${{ github.event.action == 'synchronize' && github.run_attempt == '1' }}
 
 permissions:
   contents: read

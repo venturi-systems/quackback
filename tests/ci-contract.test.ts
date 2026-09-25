@@ -339,7 +339,44 @@ describe('QB-GOV-001 repository governance contract', () => {
     expect(
       contract.schedules.map((schedule: { workflow: string }) => schedule.workflow).sort()
     ).toEqual(scheduledWorkflows)
-    expect(contract.cost.cache_policy).toBe('per-architecture-gha')
+    expect(contract.cost.cache_policy).toBe('per-architecture-registry')
+  })
+
+  // DEF-16: the image build's BuildKit cache lives in the image's own GHCR
+  // package, not the Actions cache (where `type=gha` held 7.74 GB of the
+  // 10 GB allowance). Every build may read it; only a push to main writes it.
+  it('keeps the image layer cache in the registry and writes it only from main', () => {
+    const publish = readFileSync(join(workflowDir, 'docker.yml'), 'utf8')
+    expect(publish).not.toContain('type=gha')
+    expect(publish).toContain(
+      'cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ env.PLATFORM_PAIR }}'
+    )
+    const cacheTo = publish.match(/^\s+cache-to: (.+)$/m)?.[1] ?? ''
+    expect(cacheTo).toMatch(
+      /^\$\{\{ github\.event_name == 'push' && github\.ref == 'refs\/heads\/main' && format\('type=registry,/
+    )
+    expect(cacheTo).toContain('buildcache-{1}')
+    expect(cacheTo).toContain('ignore-error=true')
+    expect(cacheTo).toMatch(/\|\| '' \}\}$/)
+  })
+
+  // REQ-03: a closed pull request's caches are deleted when it closes. The
+  // workflow runs the base branch's definition (pull_request_target), checks
+  // nothing out, and is the only workflow here that holds actions: write.
+  it('evicts a closed pull request\'s caches without checking anything out', () => {
+    const evict = readFileSync(join(workflowDir, 'cache-eviction.yml'), 'utf8')
+    expect(evict).toMatch(/^on:\n {2}pull_request_target:\n {4}types: \[closed\]\n/m)
+    expect(evict).toContain('\npermissions: {}\n')
+    expect(evict).toContain('actions: write')
+    expect(evict).not.toContain('actions/checkout')
+    expect(evict).not.toContain('github.event.pull_request.head')
+    expect(evict).toMatch(/\n {4}timeout-minutes: \d+\n/)
+    expect(evict).toContain('group: cache-eviction-${{ github.event.pull_request.number }}')
+    expect(evict).toContain('cancel-in-progress: false')
+    for (const name of workflowFiles().filter((file) => file !== 'cache-eviction.yml')) {
+      const text = readFileSync(join(workflowDir, name), 'utf8')
+      expect(text, `${name} must not hold actions: write`).not.toContain('actions: write')
+    }
   })
 
   it('pins dormant actions and makes every manual release a dry-run by default', () => {
