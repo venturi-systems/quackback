@@ -27,17 +27,17 @@ describe.each(toolbars)('$name search', ({ Component, sort }) => {
   it('keeps an explicit visible label after typing', async () => {
     render(toolbar())
     fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
-    const input = await screen.findByRole('textbox', { name: 'Search posts' })
+    const input = await screen.findByRole('textbox', { name: 'Search' })
     fireEvent.change(input, { target: { value: 'billing' } })
-    expect(screen.getByLabelText('Search posts')).toBe(input)
-    expect(screen.getByText('Search posts', { selector: 'label' })).toBeVisible()
+    expect(screen.getByLabelText('Search')).toBe(input)
+    expect(screen.getByText('Search', { selector: 'label' })).toBeVisible()
     expect(input).toHaveValue('billing')
   })
 
   it('follows external query changes and clearing', async () => {
     const { rerender } = render(toolbar('alpha'))
     fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
-    const input = await screen.findByRole('textbox', { name: 'Search posts' })
+    const input = await screen.findByRole('textbox', { name: 'Search' })
     expect(input).toHaveValue('alpha')
     rerender(toolbar('beta'))
     expect(input).toHaveValue('beta')
@@ -72,7 +72,7 @@ describe('FeedbackToolbar state', () => {
     expect(screen.getByRole('button', { name: 'Top', pressed: true })).toBeVisible()
 
     fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
-    const input = await screen.findByRole('textbox', { name: 'Search posts' })
+    const input = await screen.findByRole('textbox', { name: 'Search' })
     fireEvent.change(input, { target: { value: 'unsent draft' } })
     rerender(toolbar('top', true))
     expect(input).toHaveValue('unsent draft')

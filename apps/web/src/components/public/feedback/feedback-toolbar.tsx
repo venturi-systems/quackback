@@ -128,8 +128,8 @@ export function FeedbackToolbar({
             <form onSubmit={handleSearchSubmit} className="space-y-2">
               <label htmlFor={searchInputId} className="block text-sm font-medium">
                 <FormattedMessage
-                  id="portal.feedback.toolbar.searchLabel"
-                  defaultMessage="Search posts"
+                  id="portal.feedback.toolbar.search"
+                  defaultMessage="Search"
                 />
               </label>
               <div className="flex gap-2">
