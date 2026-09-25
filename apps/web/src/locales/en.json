@@ -146,6 +146,7 @@
   "portal.feedback.sidebar.boards": "Boards",
   "portal.feedback.sidebar.viewAllPosts": "View all posts",
   "portal.feedback.sidebar.poweredBy": "{brand} feedback",
+  "portal.feedback.sidebar.postCount": "{count, plural, one {# post} other {# posts}}",
   "portal.feedback.similarPosts.heading": "Similar ideas",
   "portal.postDetail.comments": "{count, plural, one {# Comment} other {# Comments}}",
   "portal.postDetail.postActions.ariaLabel": "Post actions",

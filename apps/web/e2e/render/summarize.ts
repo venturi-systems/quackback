@@ -15,6 +15,9 @@
  * NEEDS_REVIEW is not a failure here: it is the suite's own disposition for
  * prose, user-generated text and text-spacing stress, and each one needs an
  * individual reviewed resolution, which the summary lists for that purpose.
+ * Authored-text items print the resolution recorded for them in
+ * review-resolutions.ts, or "none recorded" when their text, route or width
+ * has none, and are listed first so the row limit never hides one.
  *
  * Writes summary.md beside the reports and appends it to $GITHUB_STEP_SUMMARY
  * when that is set. Usage (from apps/web): bun e2e/render/summarize.ts
@@ -31,6 +34,7 @@ import {
   SUITE_DIR,
   walkContextsFor,
 } from './plan'
+import { resolutionFor } from './review-resolutions'
 
 interface CheckerFinding {
   source?: string
@@ -99,11 +103,11 @@ const MAX_ROWS = 80
 
 // A table cell: one line, backslashes escaped before pipes so a value can
 // neither end the cell early nor turn the escape itself into a literal.
-const cell = (value: unknown): string =>
+const cell = (value: unknown, limit = 160): string =>
   String(value ?? '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 160)
+    .slice(0, limit)
     .replace(/\\/g, '\\\\')
     .replace(/\|/g, '\\|')
 
@@ -261,15 +265,34 @@ if (allReviews.length) {
     group.widths.add(`${r.width}${r.stress ? 's' : ''}`)
     groups.set(key, group)
   }
+  // Authored text first: its items are the ones that need a resolution
+  // recorded here; user-generated text keeps its words as written.
+  const ordered = Array.from(groups.values()).sort(
+    (a, b) => Number(a.f.origin === 'user') - Number(b.f.origin === 'user')
+  )
+  const resolutionOf = ({ f, widths }: (typeof ordered)[number]): string => {
+    if (f.origin === 'user') return 'user-generated text: kept as written'
+    const found = Array.from(widths).map((width) => resolutionFor(f.route, f.text ?? '', width))
+    const missing = Array.from(widths).filter((_, index) => !found[index])
+    if (missing.length) return `none recorded (${missing.join(' ')})`
+    const distinct = Array.from(new Set(found.map((entry) => entry?.resolution ?? '')))
+    return distinct.join(' / ')
+  }
+  const unresolved = ordered.filter(
+    (group) => group.f.origin !== 'user' && resolutionOf(group).startsWith('none recorded')
+  )
   out(`#### Review items (${allReviews.length} findings, ${groups.size} distinct elements)`)
   out()
-  out('Widths marked `s` are the text-spacing stress run.')
+  out(
+    `Widths marked \`s\` are the text-spacing stress run. Authored-text items without a recorded resolution (e2e/render/review-resolutions.ts): ${unresolved.length}.`
+  )
   out()
-  out('| Route | Kind | Profile | Origin | Selector | Text | Widths | Review reason |')
-  out('|---|---|---|---|---|---|---|---|')
-  for (const { f, widths } of Array.from(groups.values()).slice(0, MAX_ROWS)) {
+  out('| Route | Kind | Profile | Origin | Selector | Text | Widths | Review reason | Resolution |')
+  out('|---|---|---|---|---|---|---|---|---|')
+  for (const group of ordered.slice(0, MAX_ROWS)) {
+    const { f, widths } = group
     out(
-      `| ${f.route} | ${cell(f.kind ?? 'text')} | ${cell(f.profile)} | ${cell(f.origin)} | \`${cell(f.selector)}\` | ${cell(f.text ?? '')} | ${Array.from(widths).join(' ')} | ${cell((f.reviewReasons ?? [f.reason]).join(' '))} |`
+      `| ${f.route} | ${cell(f.kind ?? 'text')} | ${cell(f.profile)} | ${cell(f.origin)} | \`${cell(f.selector)}\` | ${cell(f.text ?? '')} | ${Array.from(widths).join(' ')} | ${cell((f.reviewReasons ?? [f.reason]).join(' '))} | ${cell(resolutionOf(group), 1200)} |`
     )
   }
   if (groups.size > MAX_ROWS) out(`\n${groups.size - MAX_ROWS} more in the artifact.`)
@@ -311,20 +334,25 @@ out(
 )
 out()
 out(
-  '| Route | Context | Coarse pointer | Stops | Forward end | Reverse end | Partly off screen | Findings |'
+  'Every viewport is walked twice: with motion on (no reduced-motion preference, as most readers browse) and with `prefers-reduced-motion: reduce`.'
 )
-out('|---|---|---|---|---|---|---|---|')
+out()
+out(
+  '| Route | Context | Motion | Coarse pointer | Stops | Forward end | Reverse end | Partly off screen | Findings |'
+)
+out('|---|---|---|---|---|---|---|---|---|')
 const keyboardFindings: string[] = []
 for (const route of ROUTES) {
-  for (const { id: context } of walkContextsFor(route)) {
+  for (const { id: context, motion } of walkContextsFor(route)) {
+    const motionLabel = motion === 'reduce' ? 'reduced' : 'on'
     const result = readJson<KeyboardResult>(path.join(KEYBOARD_DIR, `${route.id}__${context}.json`))
     if (!result) {
       problems.push(`${route.id} at ${context}: no keyboard walk result`)
-      out(`| ${route.id} | ${context} | | | NO RESULT | | | |`)
+      out(`| ${route.id} | ${context} | ${motionLabel} | | | NO RESULT | | | |`)
       continue
     }
     out(
-      `| ${route.id} | ${context} | ${result.pointerCoarse ?? ''} | ${result.forward?.stops.length ?? ''} | ${result.forward?.end ?? ''} | ${result.reverse?.end ?? ''}${reverseDifference(result.reverse)} | ${partlyOffScreen(result.forward)} | ${result.findings.length} |`
+      `| ${route.id} | ${context} | ${motionLabel} | ${result.pointerCoarse ?? ''} | ${result.forward?.stops.length ?? ''} | ${result.forward?.end ?? ''} | ${result.reverse?.end ?? ''}${reverseDifference(result.reverse)} | ${partlyOffScreen(result.forward)} | ${result.findings.length} |`
     )
     if (result.findings.length)
       problems.push(`${route.id} at ${context}: ${result.findings.length} keyboard findings`)

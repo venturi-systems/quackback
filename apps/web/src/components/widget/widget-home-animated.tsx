@@ -26,6 +26,7 @@ import { sendToHost } from '@/lib/client/widget-bridge'
 import type { PostId } from '@quackback/ids'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
 import { ReducedMotionConfig } from '@/components/ui/reduced-motion-config'
+import { useKeepFocusInView } from '@/components/ui/keep-focus-in-view'
 import { useWidgetImageUpload } from '@/lib/client/hooks/use-image-upload'
 import type { JSONContent } from '@tiptap/react'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
@@ -174,7 +175,11 @@ const WidgetPostRow = memo(
 
 // ── Main component ──
 
-/** The widget home, with its animations following the reduced-motion preference. */
+/**
+ * The widget home, with its animations following the reduced-motion
+ * preference. With motion on, its composer panels tween their height;
+ * useKeepFocusInView keeps keyboard focus in view while they do.
+ */
 export function WidgetHomeAnimated(props: WidgetHomeProps) {
   return (
     <ReducedMotionConfig>
@@ -206,6 +211,8 @@ function WidgetHomeForm({
   } = useWidgetAuth()
   const { upload: uploadImage } = useWidgetImageUpload()
   const inputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  useKeepFocusInView(composerRef)
 
   const [title, setTitle] = useState('')
   const [expanded, setExpanded] = useState(false)
@@ -541,6 +548,7 @@ function WidgetHomeForm({
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
         <div className="w-full px-3 pt-2 pb-3">
           <motion.div
+            ref={composerRef}
             className="rounded-lg border border-border bg-card overflow-hidden"
             initial={false}
             animate={{

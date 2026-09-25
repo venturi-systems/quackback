@@ -174,24 +174,52 @@ export const ROUTES: readonly RouteSpec[] = [
   },
 ]
 
-/** One keyboard-walk context: a viewport and the pointer it emulates. */
+/** One keyboard-walk context: a viewport, the pointer it emulates, and a motion setting. */
 export interface WalkContext {
   id: string
+  /** The viewport and pointer alone, shared by both motion settings. */
+  viewport: string
   width: number
   height: number
   hasTouch: boolean
   pointer: 'coarse' | 'fine'
   /** Minimum target edge in CSS px. */
   minTarget: number
+  /**
+   * prefers-reduced-motion as the context emulates it. `no-preference` is how
+   * most readers browse: the composer's panels tween their height while
+   * keyboard focus moves. `reduce` skips those tweens (ReducedMotionConfig)
+   * and the CSS transitions (globals.css).
+   */
+  motion: WalkMotion
 }
+
+export type WalkMotion = 'no-preference' | 'reduce'
+
+/**
+ * Every viewport is walked with motion on and with reduced motion. Walking
+ * only one leaves the other's readers unmeasured: from quackback #172 until
+ * DEF-68, every walk ran with reduced motion, so a keyboard user who keeps
+ * motion on was never walked.
+ */
+export const WALK_MOTIONS: readonly WalkMotion[] = ['no-preference', 'reduce']
+
+/** The id suffix that names a motion setting in test titles and report files. */
+export const MOTION_SUFFIX: Record<WalkMotion, string> = {
+  'no-preference': 'motion',
+  reduce: 'reduced-motion',
+}
+
+/** A viewport and pointer, before the motion setting is chosen. */
+export type WalkViewport = Omit<WalkContext, 'id' | 'motion'>
 
 /** The design system's touch minimum (--ds-component-touch-minimum). */
 const COARSE_MIN_TARGET = 44
 /** WCAG 2.5.8 Target Size (Minimum). */
 const FINE_MIN_TARGET = 24
 
-export const PHONE_COARSE: WalkContext = {
-  id: 'phone-coarse',
+export const PHONE_COARSE: WalkViewport = {
+  viewport: 'phone-coarse',
   width: 390,
   height: 844,
   hasTouch: true,
@@ -199,8 +227,8 @@ export const PHONE_COARSE: WalkContext = {
   minTarget: COARSE_MIN_TARGET,
 }
 
-export const DESKTOP_FINE: WalkContext = {
-  id: 'desktop-fine',
+export const DESKTOP_FINE: WalkViewport = {
+  viewport: 'desktop-fine',
   width: 1440,
   height: 900,
   hasTouch: false,
@@ -215,6 +243,9 @@ export const DESKTOP_FINE: WalkContext = {
  * 1024px, so the phone walk never reaches it, and the desktop walk measures it
  * against the 24px fine-pointer minimum only. #131 gave its links the 44px
  * coarse-pointer minimum; without this walk nothing measures that.
+ *
+ * Each of those viewports is walked in both motion settings (WALK_MOTIONS),
+ * as `<viewport>-motion` and `<viewport>-reduced-motion`.
  */
 export function walkContextsFor(route: Pick<RouteSpec, 'surfaces'>): WalkContext[] {
   const widths = new Set<number>()
@@ -223,15 +254,25 @@ export function walkContextsFor(route: Pick<RouteSpec, 'surfaces'>): WalkContext
   }
   const wider = Array.from(widths)
     .sort((a, b) => a - b)
-    .map((width): WalkContext => ({
-      id: `coarse-${width}`,
-      width,
-      height: 768,
-      hasTouch: true,
-      pointer: 'coarse',
-      minTarget: COARSE_MIN_TARGET,
-    }))
-  return [PHONE_COARSE, ...wider, DESKTOP_FINE]
+    .map(
+      (width): WalkViewport => ({
+        viewport: `coarse-${width}`,
+        width,
+        height: 768,
+        hasTouch: true,
+        pointer: 'coarse',
+        minTarget: COARSE_MIN_TARGET,
+      })
+    )
+  return [PHONE_COARSE, ...wider, DESKTOP_FINE].flatMap((viewport) =>
+    WALK_MOTIONS.map(
+      (motion): WalkContext => ({
+        ...viewport,
+        id: `${viewport.viewport}-${MOTION_SUFFIX[motion]}`,
+        motion,
+      })
+    )
+  )
 }
 
 export function resolveRoutes(postPath: string): RouteSpec[] {

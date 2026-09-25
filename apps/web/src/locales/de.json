@@ -146,6 +146,7 @@
   "portal.feedback.sidebar.boards": "Kategorien",
   "portal.feedback.sidebar.viewAllPosts": "Alle Beiträge anzeigen",
   "portal.feedback.sidebar.poweredBy": "Bereitgestellt von {brand}",
+  "portal.feedback.sidebar.postCount": "{count, plural, one {# Beitrag} other {# Beiträge}}",
   "portal.feedback.similarPosts.heading": "Ähnliche Ideen",
   "portal.postDetail.comments": "{count, plural, one {# Kommentar} other {# Kommentare}}",
   "portal.postDetail.postActions.ariaLabel": "Beitragsaktionen",

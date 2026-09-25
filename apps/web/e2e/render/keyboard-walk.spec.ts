@@ -4,10 +4,11 @@
  * For each route, as its identity, in each of its contexts (plan.ts
  * walkContextsFor: a 390px coarse-pointer phone, a 1440px fine-pointer
  * desktop, and a coarse-pointer walk at the width where a planned surface first
- * renders, such as the post sidebar at 1024px), this presses Tab from the top
- * of the page until focus leaves the document, then Shift+Tab back. Every stop
- * of both walks is recorded, with the elements reached in only one direction,
- * and a route fails when:
+ * renders, such as the post sidebar at 1024px; each of them once with motion
+ * on and once with prefers-reduced-motion: reduce), this presses Tab from the
+ * top of the page until focus leaves the document, then Shift+Tab back. Every
+ * stop of both walks is recorded, with the elements reached in only one
+ * direction, and a route fails when:
  *
  *   - a surface the plan names for it is missing (the lane would otherwise
  *     measure a page that no longer shows what it exists to measure);
@@ -49,6 +50,7 @@ import {
   type SurfaceProbe,
   type WalkContext,
 } from './plan'
+import { resolutionFor } from './review-resolutions'
 
 /** Tab presses per direction before the walk is declared endless. */
 const MAX_STOPS = 400
@@ -686,8 +688,13 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
 /** Capture the exact spacing-stress review cases after the keyboard walk. */
 async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkContext): Promise<void> {
   const feed = route.id === 'admin-feed' || route.id === 'anonymous-feed'
+  // A board button's text includes its screen-reader phrase ("127 posts"), so
+  // the board is matched by the start of its name.
   const targets = feed
-    ? [{ selector: '#portal-main aside nav button', text: /^General Feedback\s*\d*$/ }]
+    ? [
+        { selector: '#portal-main aside nav button', text: /^Feature Requests\s/ },
+        { selector: '#portal-main aside nav button', text: /^General Feedback\s/ },
+      ]
     : route.id === 'admin-post'
       ? [
           {
@@ -707,7 +714,9 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
               },
             ]
           : []
-  if (targets.length === 0 || ctx.id !== (feed ? 'desktop-fine' : 'phone-coarse')) return
+  // Once per route: in the reduced-motion walk of the viewport named here.
+  if (targets.length === 0) return
+  if (ctx.viewport !== (feed ? 'desktop-fine' : 'phone-coarse') || ctx.motion !== 'reduce') return
 
   // Only these previously reported widths are captured. This adds no test,
   // browser context, checker modification or acceptance waiver.
@@ -741,9 +750,25 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
         const style = getComputedStyle(node)
         const box = node.getBoundingClientRect()
         const size = parseFloat(style.fontSize)
+        // The text as the checker reads it: screen-reader-only text excluded.
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+        let checkerText = ''
+        while (walker.nextNode()) {
+          const parent = walker.currentNode.parentElement
+          if (!parent?.closest('.sr-only,.ds-sr-only')) checkerText += walker.currentNode.textContent
+        }
         return {
           text: node.textContent,
+          checkerText: checkerText.replace(/\s+/g, ' ').trim(),
           box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          // The screenshot below is the full page; box is in viewport
+          // coordinates, so pageBox places the region on the screenshot.
+          pageBox: {
+            x: box.x + window.scrollX,
+            y: box.y + window.scrollY,
+            width: box.width,
+            height: box.height,
+          },
           fontFamily: style.fontFamily,
           fontSize: style.fontSize,
           spacing: {
@@ -753,10 +778,18 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
           },
         }
       })
-      regions.push({ selector: target.selector, expectedText: target.text.source, ...measurement })
+      const resolution = resolutionFor(route.id, measurement.checkerText, `${width}s`)
+      regions.push({
+        selector: target.selector,
+        expectedText: target.text.source,
+        ...measurement,
+        disposition: resolution
+          ? `RESOLVED: ${resolution.resolution}`
+          : 'REVIEW_REQUIRED: inspect the region and record its specific resolution in e2e/render/review-resolutions.ts.',
+      })
     }
     const evidence = {
-      schema: 'venturi.portal-spacing-review.v1',
+      schema: 'venturi.portal-spacing-review.v2',
       source: process.env.GITHUB_SHA ?? null,
       route: route.id,
       identity: route.identity,
@@ -766,7 +799,9 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
       textSpacingStress: true,
       capturedAt: new Date().toISOString(),
       regions,
-      disposition: 'REVIEW_REQUIRED: inspect the region and record its specific resolution.',
+      disposition: regions.every((region) => region.disposition.startsWith('RESOLVED'))
+        ? 'RESOLVED: every region has a recorded resolution (regions[].disposition).'
+        : 'REVIEW_REQUIRED: inspect each region without a resolution and record its specific resolution in e2e/render/review-resolutions.ts.',
       pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString(
         'base64'
       ),
@@ -814,7 +849,7 @@ for (const route of ROUTES) {
         hasTouch: ctx.hasTouch,
         storageState,
         locale: 'en-US',
-        reducedMotion: 'reduce',
+        reducedMotion: ctx.motion,
       })
       const findings: Finding[] = []
       const page = await context.newPage()

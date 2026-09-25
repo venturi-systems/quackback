@@ -146,6 +146,7 @@
   "portal.feedback.sidebar.boards": "看板",
   "portal.feedback.sidebar.viewAllPosts": "查看所有貼文",
   "portal.feedback.sidebar.poweredBy": "由 {brand} 提供",
+  "portal.feedback.sidebar.postCount": "{count} 則貼文",
   "portal.feedback.similarPosts.heading": "相似的想法",
   "portal.postDetail.comments": "{count, plural, other {# 則留言}}",
   "portal.postDetail.postActions.ariaLabel": "貼文動作",

@@ -22,6 +22,7 @@ import { useSimilarPosts } from '@/lib/client/hooks/use-similar-posts'
 import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session'
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
 import { ReducedMotionConfig } from '@/components/ui/reduced-motion-config'
+import { useKeepFocusInView } from '@/components/ui/keep-focus-in-view'
 import { cn } from '@/lib/shared/utils'
 import {
   resolveSubmitState,
@@ -61,7 +62,11 @@ export interface FeedbackHeaderProps {
   onPostCreated?: (postId: string, boardSlug: string) => void
 }
 
-/** The composer, with its animations following the reduced-motion preference. */
+/**
+ * The composer, with its animations following the reduced-motion preference.
+ * With motion on, its panels tween their height; useKeepFocusInView keeps
+ * keyboard focus in view while they do.
+ */
 export function FeedbackHeaderAnimated(props: FeedbackHeaderProps) {
   return (
     <ReducedMotionConfig>
@@ -151,6 +156,8 @@ function FeedbackComposer({
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
   const [contentMarkdown, setContentMarkdown] = useState('')
   const titleInputRef = useRef<HTMLInputElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  useKeepFocusInView(composerRef)
 
   // Focus title input when form expands
   useEffect(() => {
@@ -289,6 +296,7 @@ function FeedbackComposer({
 
   return (
     <motion.div
+      ref={composerRef}
       id={COMPOSER_ANCHOR}
       // The title field and the editor are borderless, so the card shows the
       // v6.6 focus ring while either one has keyboard or text focus.
