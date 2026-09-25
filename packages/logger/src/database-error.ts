@@ -120,6 +120,38 @@ function writtenKeys(value: object, errorLike: boolean): string[] {
   return keys
 }
 
+/** How `failedQueryReach` reads one object. */
+interface NodeShape {
+  isArray: boolean
+  isError: boolean
+  errorLike: boolean
+  database: boolean
+  keys: string[]
+}
+
+/**
+ * How `failedQueryReach` reads `value`, or `undefined` when a proxy or other
+ * exotic object throws while it is inspected (such a value cannot be cleared).
+ */
+function nodeShape(value: object): NodeShape | undefined {
+  try {
+    if (Array.isArray(value)) {
+      return { isArray: true, isError: false, errorLike: false, database: false, keys: [] }
+    }
+    const isError = value instanceof Error
+    const errorLike = isError || hasMessage(value)
+    return {
+      isArray: false,
+      isError,
+      errorLike,
+      database: isError && isDatabaseError(value),
+      keys: writtenKeys(value, errorLike),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 /** What `failedQueryReach` found. */
 export interface FailedQueryReach {
   /** Every error reached, each once, `root` first when it is one. */
@@ -164,38 +196,27 @@ export function failedQueryReach(root: unknown): FailedQueryReach {
     }
     seen.add(value)
     if (ArrayBuffer.isView(value)) return
-    let isArray = false
-    let isError = false
-    let errorLike = false
-    let keys: string[] = []
-    try {
-      isArray = Array.isArray(value)
-      if (!isArray) {
-        isError = value instanceof Error
-        errorLike = isError || hasMessage(value)
-        keys = writtenKeys(value, errorLike)
-        if (isError && isDatabaseError(value)) found = true
-      }
-    } catch {
-      // A proxy or exotic object that cannot be inspected cannot be cleared.
+    const shape = nodeShape(value)
+    if (shape === undefined) {
       found = true
       return
     }
-    if (isArray) {
+    if (shape.isArray) {
       for (const item of value as unknown[]) {
         if (budget < 0) return
         visit(item, depth + 1)
       }
       return
     }
-    if (isError) errors.push(value as Error)
-    if (errorLike) {
+    if (shape.isError) errors.push(value as Error)
+    if (shape.database) found = true
+    if (shape.errorLike) {
       visit(readProperty(value, 'message'), depth + 1)
       visit(readProperty(value, 'stack'), depth + 1)
       visit(readProperty(value, 'cause'), depth + 1)
       visit(readProperty(value, 'errors'), depth + 1)
     }
-    for (const key of keys) {
+    for (const key of shape.keys) {
       if (budget < 0) return
       visit(readProperty(value, key), depth + 1)
     }
