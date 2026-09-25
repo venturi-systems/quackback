@@ -5,10 +5,14 @@ import {
   API_KEY_MAX_EXPIRY_DAYS,
   API_KEY_EXPIRY_OPTIONS_DAYS,
   DEFAULT_API_KEY_PRESET,
+  apiKeyExpiresAt,
+  apiKeyRotationBlocker,
   hasApiKeyScope,
   isApiKeyScope,
   parseStoredApiKeyScopes,
 } from '../api-key-scopes'
+
+const DAY_MS = 24 * 60 * 60 * 1000
 
 describe('hasApiKeyScope', () => {
   it('grants a scope the key carries', () => {
@@ -70,5 +74,51 @@ describe('presets', () => {
 
   it('never offers a lifetime beyond the maximum', () => {
     expect(Math.max(...API_KEY_EXPIRY_OPTIONS_DAYS)).toBeLessThanOrEqual(API_KEY_MAX_EXPIRY_DAYS)
+  })
+})
+
+describe('apiKeyExpiresAt (DEF-15: no key lives forever)', () => {
+  const createdAt = new Date('2026-07-01T00:00:00Z')
+
+  it('keeps a stored expiry', () => {
+    const stored = new Date('2026-10-01T00:00:00Z')
+    expect(apiKeyExpiresAt(stored, createdAt)).toEqual(stored)
+  })
+
+  it('expires a key stored without an expiry the maximum lifetime after creation', () => {
+    expect(apiKeyExpiresAt(null, createdAt).getTime()).toBe(
+      createdAt.getTime() + API_KEY_MAX_EXPIRY_DAYS * DAY_MS
+    )
+  })
+
+  it('reads the ISO strings a serialized row carries', () => {
+    const iso = '2026-10-01T00:00:00.000Z' as unknown as Date
+    expect(apiKeyExpiresAt(iso, createdAt).toISOString()).toBe('2026-10-01T00:00:00.000Z')
+  })
+})
+
+describe('apiKeyRotationBlocker', () => {
+  const createdAt = new Date('2026-07-01T00:00:00Z')
+  const now = new Date('2026-09-25T00:00:00Z').getTime()
+
+  it('lets a scoped key that has not expired rotate', () => {
+    const key = { scopes: ['read:feedback'], expiresAt: new Date(now + DAY_MS), createdAt }
+    expect(apiKeyRotationBlocker(key, now)).toBeNull()
+  })
+
+  it('refuses a key created before scopes existed', () => {
+    const key = { scopes: null, expiresAt: new Date(now + DAY_MS), createdAt }
+    expect(apiKeyRotationBlocker(key, now)).toBe('legacy')
+  })
+
+  it('refuses a key stored without an expiry, even with scopes', () => {
+    expect(
+      apiKeyRotationBlocker({ scopes: ['read:feedback'], expiresAt: null, createdAt }, now)
+    ).toBe('legacy')
+  })
+
+  it('refuses an expired key', () => {
+    const key = { scopes: ['read:feedback'], expiresAt: new Date(now - 1), createdAt }
+    expect(apiKeyRotationBlocker(key, now)).toBe('expired')
   })
 })

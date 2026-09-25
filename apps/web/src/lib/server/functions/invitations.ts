@@ -1,8 +1,8 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import { z } from 'zod'
-import type { InviteId, PrincipalId, UserId } from '@quackback/ids'
-import { generateId, isValidTypeId } from '@quackback/ids'
+import type { InviteId, UserId } from '@quackback/ids'
+import { isValidTypeId } from '@quackback/ids'
 import { db, invitation, principal, user, and, eq, or } from '@/lib/server/db'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 import { getSession } from '@/lib/server/auth/session'
@@ -229,40 +229,24 @@ export const acceptInvitationFn = createServerFn({ method: 'POST' })
         )
       }
 
-      const existingPrincipal = await db.query.principal.findFirst({
-        where: eq(principal.userId, userId),
+      // Raise the role (never lower it), or create the principal with it, in
+      // one transaction under the team-role lock. The principal is read there,
+      // so a role another writer set since this request started is the one
+      // compared, and the identity rule above is checked again.
+      const { setUserTeamRole } = await import('@/lib/server/domains/principals/team-designation')
+      const change = await setUserTeamRole({
+        userId,
+        newRole: role,
+        mode: 'raise',
+        create: { displayName: displayName ?? null },
       })
-
-      if (existingPrincipal) {
-        // Raise the role (never lower it) under the team-role lock, so a
-        // concurrent role change cannot interleave with this one.
-        const roleHierarchy = ['user', 'member', 'admin']
-        if (roleHierarchy.indexOf(role) > roleHierarchy.indexOf(existingPrincipal.role)) {
-          const { changeTeamRole } =
-            await import('@/lib/server/domains/principals/team-designation')
-          await changeTeamRole({
-            principalId: existingPrincipal.id as PrincipalId,
-            newRole: role,
-            requireTeamTarget: false,
-          })
-          const { cacheDel, CACHE_KEYS } = await import('@/lib/server/redis')
-          await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(userId))
-        }
-        if (displayName) {
-          await db
-            .update(principal)
-            .set({ displayName })
-            .where(eq(principal.id, existingPrincipal.id as PrincipalId))
-        }
-      } else {
-        // Create new principal record
-        await db.insert(principal).values({
-          id: generateId('principal'),
-          userId,
-          role,
-          displayName,
-          createdAt: new Date(),
-        })
+      if (change) {
+        const { cacheDel, CACHE_KEYS } = await import('@/lib/server/redis')
+        await cacheDel(CACHE_KEYS.PRINCIPAL_BY_USER(userId))
+      }
+      // A principal this call created already carries the display name.
+      if (displayName && change?.previousRole !== null) {
+        await db.update(principal).set({ displayName }).where(eq(principal.userId, userId))
       }
 
       // Update user name if provided

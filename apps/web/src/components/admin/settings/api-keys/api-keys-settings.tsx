@@ -16,7 +16,16 @@ import { ApiKeyRevealDialog } from './api-key-reveal-dialog'
 import { RevokeApiKeyDialog } from './revoke-api-key-dialog'
 import { RotateApiKeyDialog } from './rotate-api-key-dialog'
 import type { ApiKey } from '@/lib/shared/types'
+import { apiKeyExpiresAt } from '@/lib/shared/api-key-scopes'
 import { formatDistanceToNow } from 'date-fns'
+
+/** A key's expiry line. A key stored without one expires a year after creation. */
+function expiryLabel(key: ApiKey): string {
+  const expiresAt = apiKeyExpiresAt(key.expiresAt, key.createdAt)
+  if (expiresAt.getTime() <= Date.now()) return 'Expired'
+  const label = `Expires ${formatDistanceToNow(expiresAt, { addSuffix: true })}`
+  return key.expiresAt ? label : `${label} (created before expiry was required)`
+}
 
 interface ApiKeysSettingsProps {
   apiKeys: ApiKey[]
@@ -120,13 +129,7 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
                       </>
                     )}
                     <span className="hidden sm:inline">·</span>
-                    <span>
-                      {key.expiresAt
-                        ? new Date(key.expiresAt).getTime() <= Date.now()
-                          ? 'Expired'
-                          : `Expires ${formatDistanceToNow(key.expiresAt, { addSuffix: true })}`
-                        : 'Never expires (created before expiry was required)'}
-                    </span>
+                    <span>{expiryLabel(key)}</span>
                   </div>
                   <p className="text-xs text-muted-foreground" data-testid="api-key-scopes">
                     {key.scopes

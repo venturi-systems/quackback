@@ -55,11 +55,14 @@ Developers > MCP must be on. Leave "Portal user MCP access" off.
 - A write tool reached another way answers "Insufficient scope" (required
   scope `write:feedback`) from the portal.
 
-## Rotate or revoke
+## Replace, rotate or revoke
 
-Rotate before the expiry (Developers > API Keys > rotate), paste the new key
-into the Gateway credential field, and confirm one read call. Revoking the key
-in the portal stops the connector at once.
+Rotating (Developers > API Keys > rotate) replaces the secret and keeps the
+key's scopes and expiry date, so it does not extend the key's life. Before the
+key expires, create a replacement with the same preset and a new expiry, paste
+it into the Gateway credential field, confirm one read call, then revoke the
+old key. Rotate when the secret may have leaked; an expired key cannot be
+rotated. Revoking the key in the portal stops the connector at once.
 
 ## Data flow
 

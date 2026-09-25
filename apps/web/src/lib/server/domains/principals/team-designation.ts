@@ -2,22 +2,27 @@
  * Team designation: every write that gives, changes or removes a team role.
  *
  * Three rules hold here, for every writer (Admin > Team, invitations, the
- * VENTURI_TEAM_ADMIN_EMAILS promotion, onboarding and SSO provisioning):
+ * VENTURI_TEAM_ADMIN_EMAILS promotion and SSO auto-provisioning; the onboarding
+ * and first-SSO bootstrap claims check the first rule themselves):
  *
  *  - A promotion to member or admin needs an identity that satisfies the
  *    team identity rule (team-identity.ts). The server refuses anything else.
  *  - A change never leaves the workspace without a human administrator whose
- *    identity satisfies that rule. The check and the write run in one
- *    transaction under one advisory lock, so two concurrent demotions cannot
- *    each see the other as the remaining administrator.
+ *    identity satisfies that rule.
  *  - Nobody changes or removes their own team role.
+ *
+ * Every writer, the bootstrap claims included, reads the principal, checks the
+ * rules and writes in one transaction that holds the team-role advisory lock
+ * (team-role-lock.ts). Two concurrent writers therefore never each see the
+ * other as the remaining administrator, and a role another writer set since a
+ * caller's first read is the one the rules check.
  *
  * Promotion from VENTURI_TEAM_ADMIN_EMAILS happens at a qualifying Google or
  * GitHub sign-in and at the next authenticated request of an existing
  * session. The list only promotes; demotion is always a person's act.
  */
 
-import type { InviteId, PrincipalId, UserId } from '@quackback/ids'
+import { generateId, type InviteId, type PrincipalId, type UserId } from '@quackback/ids'
 import type { Transaction } from '@/lib/server/db'
 import { ForbiddenError, NotFoundError } from '@/lib/shared/errors'
 import { isAdmin, isTeamMember, type Role } from '@/lib/shared/roles'
@@ -33,11 +38,11 @@ import {
   type TeamIdentityGap,
 } from './team-identity'
 import { logger } from '@/lib/server/logger'
+import { acquireTeamRoleLock } from './team-role-lock'
+
+export { TEAM_ROLE_LOCK_KEY } from './team-role-lock'
 
 const log = logger.child({ component: 'team-designation' })
-
-/** Advisory-lock key every team-role writer takes. Stable across pods. */
-export const TEAM_ROLE_LOCK_KEY = 'quackback:team_roles'
 
 const ROLE_RANK: Record<Role, number> = { user: 0, member: 1, admin: 2 }
 
@@ -60,9 +65,9 @@ export function teamIdentityRequiredMessage(gap: TeamIdentityGap): string {
 
 /** Run `fn` in a transaction that holds the team-role advisory lock. */
 export async function withTeamRoleLock<T>(fn: (tx: Transaction) => Promise<T>): Promise<T> {
-  const { db, sql } = await import('@/lib/server/db')
+  const { db } = await import('@/lib/server/db')
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${TEAM_ROLE_LOCK_KEY}))`)
+    await acquireTeamRoleLock(tx)
     return fn(tx)
   })
 }
@@ -136,6 +141,43 @@ export async function countEligibleAdmins(
   ).length
 }
 
+/**
+ * The rules a role change must pass, checked inside the caller's team-role
+ * transaction against the principal as that transaction read it:
+ *
+ * - a promotion (to a higher role) needs a human principal whose identity
+ *   satisfies the team identity rule;
+ * - taking `admin` away from a human principal needs another eligible human
+ *   administrator to remain.
+ *
+ * Throws ForbiddenError `TEAM_IDENTITY_REQUIRED` or `LAST_ADMIN`.
+ */
+async function assertRoleChangeAllowed(
+  tx: Transaction,
+  target: { id: string; type: string; role: string; userId: string | null },
+  newRole: Role
+): Promise<void> {
+  if (rankOf(newRole) > rankOf(target.role)) {
+    if (target.type !== 'user') {
+      throw new ForbiddenError(
+        'TEAM_IDENTITY_REQUIRED',
+        'Only a person can hold a team role. Service and anonymous principals cannot.'
+      )
+    }
+    await assertTeamRoleAssignable(target.userId as UserId | null, tx)
+  }
+
+  if (isAdmin(target.role) && newRole !== 'admin' && target.type === 'user') {
+    const remaining = await countEligibleAdmins(tx, target.id as PrincipalId)
+    if (remaining < 1) {
+      throw new ForbiddenError(
+        'LAST_ADMIN',
+        newRole === 'user' ? 'Cannot remove the last admin' : 'Cannot demote the last admin'
+      )
+    }
+  }
+}
+
 export interface ChangeTeamRoleResult {
   previousRole: string
   newRole: Role
@@ -175,25 +217,7 @@ export async function changeTeamRole(input: {
       throw new NotFoundError('MEMBER_NOT_FOUND', 'Team member not found')
     }
 
-    if (rankOf(input.newRole) > rankOf(target.role)) {
-      if (target.type !== 'user') {
-        throw new ForbiddenError(
-          'TEAM_IDENTITY_REQUIRED',
-          'Only a person can hold a team role. Service and anonymous principals cannot.'
-        )
-      }
-      await assertTeamRoleAssignable(target.userId as UserId | null, tx)
-    }
-
-    if (isAdmin(target.role) && input.newRole !== 'admin' && target.type === 'user') {
-      const remaining = await countEligibleAdmins(tx, target.id as PrincipalId)
-      if (remaining < 1) {
-        throw new ForbiddenError(
-          'LAST_ADMIN',
-          input.newRole === 'user' ? 'Cannot remove the last admin' : 'Cannot demote the last admin'
-        )
-      }
-    }
+    await assertRoleChangeAllowed(tx, target, input.newRole)
 
     const changed = target.role !== input.newRole
     if (changed) {
@@ -208,6 +232,92 @@ export async function changeTeamRole(input: {
       userId: (target.userId as UserId | null) ?? null,
       changed,
     }
+  })
+}
+
+export interface UserRoleChange {
+  /** The role before the change; null when the principal was created. */
+  previousRole: string | null
+  newRole: Role
+  principalId: PrincipalId
+}
+
+/**
+ * When setUserTeamRole changes the role it was given:
+ *
+ * - `raise`: only when the new role ranks above the current one (invitation
+ *   acceptance never lowers a role);
+ * - `from_user`: only a principal whose role is still `user` (SSO
+ *   auto-provisioning without `syncOnEverySignIn`);
+ * - `set`: whatever the current role, a demotion included (SSO
+ *   auto-provisioning with `syncOnEverySignIn`).
+ */
+export type UserRoleWriteMode = 'raise' | 'from_user' | 'set'
+
+/**
+ * Give a user's principal a role, under the team-role lock, for the writers
+ * that address a user rather than a principal: SSO auto-provisioning
+ * (handleAutoProvisionAfter in auth/hooks.ts) and invitation acceptance
+ * (acceptInvitationFn in functions/invitations.ts).
+ *
+ * The principal is read inside the locked transaction, so the role another
+ * writer set after the caller's own first read is the one `mode` and the rules
+ * see. The rules are changeTeamRole's: a promotion needs an identity that
+ * satisfies the team identity rule, and taking `admin` away needs another
+ * eligible administrator.
+ *
+ * A missing principal counts as `user`. It is created with the role: a new
+ * member, or a returning user whose principal "Remove from portal" deleted
+ * (that keeps the auth user). `create` supplies its display name (the auth
+ * user's name otherwise) and, for an SSO sign-in, `lastSsoSignInAt`.
+ *
+ * Returns the change, or null when nothing changed. Throws ForbiddenError
+ * `TEAM_IDENTITY_REQUIRED` or `LAST_ADMIN` when a rule refuses.
+ */
+export async function setUserTeamRole(input: {
+  userId: UserId
+  newRole: Role
+  mode: UserRoleWriteMode
+  create?: { displayName?: string | null; lastSsoSignInAt?: Date | null }
+}): Promise<UserRoleChange | null> {
+  const { principal, user, eq } = await import('@/lib/server/db')
+  return withTeamRoleLock(async (tx) => {
+    const target = await tx.query.principal.findFirst({
+      where: eq(principal.userId, input.userId),
+    })
+    const currentRole = target?.role ?? 'user'
+    if (currentRole === input.newRole) return null
+    if (input.mode === 'from_user' && currentRole !== 'user') return null
+    if (input.mode === 'raise' && rankOf(input.newRole) <= rankOf(currentRole)) return null
+
+    if (target) {
+      await assertRoleChangeAllowed(tx, target, input.newRole)
+      await tx.update(principal).set({ role: input.newRole }).where(eq(principal.id, target.id))
+      return {
+        previousRole: target.role,
+        newRole: input.newRole,
+        principalId: target.id as PrincipalId,
+      }
+    }
+
+    // Reaching here means the new role is a team role: a missing principal
+    // counts as `user`, and `user` to `user` returned above.
+    await assertTeamRoleAssignable(input.userId, tx)
+    const authUser = await tx.query.user.findFirst({
+      where: eq(user.id, input.userId),
+      columns: { name: true, image: true },
+    })
+    const principalId = generateId('principal')
+    await tx.insert(principal).values({
+      id: principalId,
+      userId: input.userId,
+      role: input.newRole,
+      displayName: input.create?.displayName ?? authUser?.name ?? null,
+      avatarUrl: authUser?.image ?? null,
+      lastSsoSignInAt: input.create?.lastSsoSignInAt ?? null,
+      createdAt: new Date(),
+    })
+    return { previousRole: null, newRole: input.newRole, principalId }
   })
 }
 
@@ -247,13 +357,21 @@ export async function applyTeamDesignation(input: {
     input.emailVerified === undefined
       ? undefined
       : { email: input.email, emailVerified: input.emailVerified }
-  const identity = await loadTeamIdentity(input.userId, known)
-  if (!identity || teamIdentityGap(identity) !== null) return null
+  // A first read outside the lock skips the transaction for an identity that
+  // does not qualify (session-role.ts calls this on every request of a
+  // designated address that is not yet admin).
+  const preliminary = await loadTeamIdentity(input.userId, known)
+  if (!preliminary || teamIdentityGap(preliminary) !== null) return null
 
   const email = String(input.email).trim().toLowerCase()
   const { principal, invitation, and, eq, gt, desc } = await import('@/lib/server/db')
 
   const outcome = await withTeamRoleLock(async (tx) => {
+    // The rule is checked again under the lock, like every other rule check,
+    // so an unlink that committed first is what decides.
+    const identity = await loadTeamIdentity(input.userId, known, tx)
+    if (!identity || teamIdentityGap(identity) !== null) return null
+
     const target = await tx.query.principal.findFirst({
       where: eq(principal.userId, input.userId),
     })

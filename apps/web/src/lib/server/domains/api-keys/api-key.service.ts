@@ -11,7 +11,14 @@ import { NotFoundError, ValidationError } from '@/lib/shared/errors'
 import { isAdmin } from '@/lib/shared/roles'
 import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { createServicePrincipal } from '@/lib/server/domains/principals/principal.service'
-import { API_KEY_SCOPES, isApiKeyScope, parseStoredApiKeyScopes } from '@/lib/shared/api-key-scopes'
+import {
+  API_KEY_ROTATION_BLOCKED_MESSAGES,
+  API_KEY_SCOPES,
+  apiKeyExpiresAt,
+  apiKeyRotationBlocker,
+  isApiKeyScope,
+  parseStoredApiKeyScopes,
+} from '@/lib/shared/api-key-scopes'
 import type { ApiKey, ApiKeyId, CreateApiKeyInput, CreateApiKeyResult } from './api-key.types'
 export type { ApiKey, ApiKeyId, CreateApiKeyInput, CreateApiKeyResult }
 
@@ -87,16 +94,19 @@ export async function createApiKey(
   if (input.name.length > 255) {
     throw new ValidationError('VALIDATION_ERROR', 'API key name must be 255 characters or less')
   }
-  let scopesJson: string | null = null
-  if (input.scopes !== undefined) {
-    const scopes = [...new Set(input.scopes)]
-    if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {
-      throw new ValidationError(
-        'VALIDATION_ERROR',
-        `Choose at least one scope from: ${API_KEY_SCOPES.join(', ')}`
-      )
-    }
-    scopesJson = JSON.stringify(scopes)
+  // Every key is scoped and expires (landing-page#2309, DEF-15). No caller may
+  // create a key with full access or without an expiry: that is the shape of a
+  // key made before these were required, which never renews (rotateApiKey).
+  const scopes = [...new Set(Array.isArray(input.scopes) ? input.scopes : [])]
+  if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {
+    throw new ValidationError(
+      'VALIDATION_ERROR',
+      `Choose at least one scope from: ${API_KEY_SCOPES.join(', ')}`
+    )
+  }
+  const scopesJson = JSON.stringify(scopes)
+  if (!(input.expiresAt instanceof Date) || Number.isNaN(input.expiresAt.getTime())) {
+    throw new ValidationError('VALIDATION_ERROR', 'An API key must have an expiry date')
   }
 
   // Generate the key
@@ -127,7 +137,7 @@ export async function createApiKey(
       keyPrefix,
       createdById,
       principalId: servicePrincipal.id,
-      expiresAt: input.expiresAt ?? null,
+      expiresAt: input.expiresAt,
       scopes: scopesJson,
     })
     .returning()
@@ -167,7 +177,9 @@ export async function verifyApiKey(key: string, scope?: string): Promise<ApiKey 
   const hashesMatch = timingSafeEqual(Buffer.from(keyHash, 'hex'), Buffer.from(storedHash, 'hex'))
 
   if (!apiKey || !hashesMatch) return null
-  if (apiKey.expiresAt && apiKey.expiresAt < new Date()) return null
+  // A key stored without an expiry expires API_KEY_MAX_EXPIRY_DAYS after it was
+  // created (apiKeyExpiresAt), so no key works forever.
+  if (apiKeyExpiresAt(apiKey.expiresAt, apiKey.createdAt).getTime() <= Date.now()) return null
 
   if (scope && !hasScope(apiKey.scopes, scope)) return null
 
@@ -198,8 +210,25 @@ function hasScope(scopesRaw: string | null, scope: string): boolean {
  *
  * Uses atomic UPDATE with WHERE clause to prevent race conditions
  * (Neon HTTP-compatible, no interactive transactions)
+ *
+ * Rotation keeps the key's scopes and expiry. It refuses a key created before
+ * scopes and expiry were required, and an expired key
+ * (apiKeyRotationBlocker): rotating either would hand out a new secret for a
+ * key that should be replaced by a scoped, expiring one. Scopes and expiry
+ * never change after creation, so the check needs no lock.
  */
 export async function rotateApiKey(id: ApiKeyId): Promise<CreateApiKeyResult> {
+  const existing = await db.query.apiKeys.findFirst({
+    where: and(eq(apiKeys.id, id), isNull(apiKeys.revokedAt)),
+  })
+  if (!existing) {
+    throw new NotFoundError('API_KEY_NOT_FOUND', 'API key not found or already revoked')
+  }
+  const blocker = apiKeyRotationBlocker(toApiKey(existing))
+  if (blocker) {
+    throw new ValidationError('API_KEY_NOT_ROTATABLE', API_KEY_ROTATION_BLOCKED_MESSAGES[blocker])
+  }
+
   // Generate new key credentials
   const plainTextKey = generateApiKey()
   const keyHash = hashApiKey(plainTextKey)
