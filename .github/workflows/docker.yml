@@ -184,9 +184,9 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           # BuildKit layer cache in this image's own GHCR package, one tag per
           # architecture so the two runners never clobber each other. It used
-          # to be `type=gha`, which kept every blob generation in the Actions
-          # cache: 434 buildkit-blob entries, 7.74 GB of the repository's 10 GB
-          # Actions cache allowance on refs/heads/main alone (2026-09-25), so
+          # to be the GitHub Actions cache backend, which kept every blob
+          # generation there: 434 buildkit-blob entries, 7.74 GB of the 10 GB
+          # Actions cache allowance, on refs/heads/main alone (2026-09-25), so
           # GitHub's LRU eviction kept pushing out CI's warm Bun caches. The
           # registry holds exactly one cache manifest per architecture.
           #
