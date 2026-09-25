@@ -40,6 +40,19 @@ export const E2E_SCRIPT_TIMEOUT_MS = 60_000
 export const E2E_SCRIPT_KILL_SIGNAL = 'SIGKILL' as const
 
 /**
+ * The reason a helper script failed: the spawn error (ETIMEDOUT, an exit
+ * status) AND whatever the script wrote to stderr. Reporting only one of them
+ * hid either the timeout or the step the script had reached (HYG-31,
+ * landing-page#2309).
+ */
+function scriptFailure(error: unknown): string {
+  const err = error as { stderr?: string | Buffer; message: string }
+  const stderr = err.stderr?.toString().trim()
+  // A non-zero exit already carries stderr in the message; a timeout does not.
+  return stderr && !err.message.includes(stderr) ? `${err.message}\n${stderr}` : err.message
+}
+
+/**
  * Get the most recent live magic-link token for an email from the
  * verification table. Used by e2e tests to complete the magic-link
  * sign-in flow without going through real email delivery.
@@ -57,10 +70,7 @@ export function getMagicLinkToken(email: string): string {
 
     return result.trim()
   } catch (error) {
-    const err = error as { stderr?: string; message: string }
-    throw new Error(`Failed to get magic-link token: ${err.stderr || err.message}`, {
-      cause: error,
-    })
+    throw new Error(`Failed to get magic-link token: ${scriptFailure(error)}`, { cause: error })
   }
 }
 
@@ -82,10 +92,7 @@ export function getOtpCode(email: string): string {
 
     return result.trim()
   } catch (error) {
-    const err = error as { stderr?: string; message: string }
-    throw new Error(`Failed to get OTP code: ${err.stderr || err.message}`, {
-      cause: error,
-    })
+    throw new Error(`Failed to get OTP code: ${scriptFailure(error)}`, { cause: error })
   }
 }
 
@@ -109,8 +116,7 @@ export function ensureTestUserHasRole(email: string, role: string = 'admin'): vo
       killSignal: E2E_SCRIPT_KILL_SIGNAL,
     })
   } catch (error) {
-    const err = error as { stderr?: string; message: string }
-    throw new Error(`Failed to ensure user role: ${err.stderr || err.message}`, { cause: error })
+    throw new Error(`Failed to ensure user role: ${scriptFailure(error)}`, { cause: error })
   }
 }
 
@@ -135,8 +141,7 @@ export function getMentionTarget(excludeEmail: string = 'demo@example.com'): {
     })
     return JSON.parse(result.trim()) as { principalId: string; displayName: string }
   } catch (error) {
-    const err = error as { stderr?: string; message: string }
-    throw new Error(`Failed to get mention target: ${err.stderr || err.message}`, { cause: error })
+    throw new Error(`Failed to get mention target: ${scriptFailure(error)}`, { cause: error })
   }
 }
 
@@ -156,8 +161,7 @@ export function getPostWithOwnComment(email: string): { path: string; commentId:
     })
     return JSON.parse(result.trim()) as { path: string; commentId: string }
   } catch (error) {
-    const err = error as { stderr?: string; message: string }
-    throw new Error(`Failed to get post with own comment: ${err.stderr || err.message}`, {
+    throw new Error(`Failed to get post with own comment: ${scriptFailure(error)}`, {
       cause: error,
     })
   }

@@ -4,6 +4,8 @@
  *
  * Usage: bun run db:seed
  */
+// First import: it logs that the process started before the others load.
+import { phase } from './script-phase'
 import { config } from 'dotenv'
 config({ path: '../../.env', quiet: true })
 
@@ -1167,6 +1169,7 @@ async function seed() {
   await client.end()
 }
 
+phase('modules loaded')
 seed().catch(async (error) => {
   console.error('Seed failed:', error)
   await client.end()

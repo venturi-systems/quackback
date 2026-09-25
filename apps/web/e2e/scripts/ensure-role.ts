@@ -8,6 +8,23 @@
  */
 import postgres from 'postgres'
 import { randomUUID } from 'crypto'
+import { writeSync } from 'fs'
+
+/**
+ * HYG-31 (landing-page#2309): this script once ran past its 60 s ceiling in
+ * CI and the caller could report only `spawnSync /bin/sh ETIMEDOUT`. Each step
+ * now writes one line to stderr first, synchronously, so the caller's error
+ * names the last step reached. Milliseconds are since the process started.
+ */
+function phase(label: string): void {
+  try {
+    writeSync(2, `[ensure-role +${Math.round(performance.now())}ms] ${label}\n`)
+  } catch {
+    // stderr is closed: there is nowhere to report progress to.
+  }
+}
+
+phase('modules loaded')
 
 const email = process.argv[2]
 const role = process.argv[3] || 'admin'
@@ -27,6 +44,7 @@ const sql = postgres(connectionString)
 
 async function ensureRole(): Promise<void> {
   // Find the user
+  phase('connecting and reading the user')
   const users = await sql`
     SELECT id, name FROM "user" WHERE email = ${email}
   `
@@ -38,10 +56,12 @@ async function ensureRole(): Promise<void> {
   const userId = users[0].id
 
   // Check if principal record exists
+  phase('reading the principal')
   const principals = await sql`
     SELECT id, role FROM principal WHERE user_id = ${userId}
   `
 
+  phase(`writing role ${role}`)
   if (principals.length === 0) {
     // Create principal record with specified role
     // The database stores TypeIDs as regular UUIDs
@@ -67,6 +87,7 @@ async function ensureRole(): Promise<void> {
   // A linked Google or GitHub account is also required. Test users sign in by
   // magic link, so give a team-role user a verified email and a stand-in GitHub link.
   if (role === 'admin' || role === 'member') {
+    phase('verifying the email and linking a stand-in GitHub account')
     await sql`
       UPDATE "user" SET email_verified = true WHERE id = ${userId}
     `
@@ -91,7 +112,9 @@ async function ensureRole(): Promise<void> {
 
 try {
   await ensureRole()
+  phase('closing the connection')
   await sql.end()
+  phase('done')
   process.exit(0)
 } catch (error) {
   console.error(error instanceof Error ? error.message : 'Unknown error')
