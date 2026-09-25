@@ -303,6 +303,21 @@ describe('handleUnlinkAccountGate', () => {
     expect(hoisted.deleted).toEqual([])
   })
 
+  it('treats an empty accountId as absent, as Better Auth does', async () => {
+    hoisted.principal = { id: 'principal_x', role: 'member', type: 'user' }
+    hoisted.accounts = [
+      { id: 'account_gh1', providerId: 'github', accountId: 'gh_1' },
+      { id: 'account_gh2', providerId: 'github', accountId: 'gh_2' },
+    ]
+    await expect(
+      handleUnlinkAccountGate(
+        { path: '/unlink-account', body: { providerId: 'github', accountId: '' } },
+        signedIn.resolve as never
+      )
+    ).resolves.toEqual({ status: true })
+    expect(hoisted.deleted).toEqual(['account_gh1'])
+  })
+
   it('answers ACCOUNT_NOT_FOUND for a link the account does not have', async () => {
     await expect(
       handleUnlinkAccountGate(unlink('github', 'gh_other'), signedIn.resolve as never)
