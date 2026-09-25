@@ -7,6 +7,8 @@
  * directly, following the established pattern in the auth/settings test files.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { DrizzleQueryError } from 'drizzle-orm'
+import { DATABASE_ERROR_MESSAGE } from '@/lib/server/errors/database-error'
 
 // ---------------------------------------------------------------------------
 // createServerFn stub — captures .handler() callbacks in order
@@ -253,6 +255,26 @@ describe('sendPortalInviteFn — validation (per-email, single)', () => {
     const r = result as { results: Array<{ email: string; ok: boolean; error?: string }> }
     expect(r.results[0]).toMatchObject({ email: 'someone@example.com', ok: false })
     expect(r.results[0].error).toMatch(/pending portal invitation has already been sent/)
+  })
+})
+
+describe('sendPortalInviteFn — database failure (DEF-63)', () => {
+  it('returns a fixed message, never the failed query or its values', async () => {
+    const failed = new DrizzleQueryError(
+      'insert into "invitation" ("email", "token") values ($1, $2)',
+      ['someone@example.com', 'tok_live_SECRET_5150'],
+      new Error('duplicate key value violates unique constraint')
+    )
+    hoisted.mockDbInsert.mockRejectedValueOnce(failed)
+
+    const result = await sendHandler({ data: { emails: ['someone@example.com'] } })
+    const r = result as { results: Array<{ email: string; ok: boolean; error?: string }> }
+    expect(r.results[0]).toMatchObject({
+      email: 'someone@example.com',
+      ok: false,
+      error: DATABASE_ERROR_MESSAGE,
+    })
+    expect(r.results[0].error).not.toContain('tok_live_SECRET_5150')
   })
 })
 

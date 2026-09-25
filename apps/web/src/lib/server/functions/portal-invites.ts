@@ -23,6 +23,7 @@ import { sendPortalInviteEmail } from '@quackback/email'
 import { getSession } from '@/lib/server/auth/session'
 import { safeEmail } from '@/lib/shared/utils/string'
 import { logger } from '@/lib/server/logger'
+import { containsDatabaseError, DATABASE_ERROR_MESSAGE } from '@/lib/server/errors/database-error'
 import { filterId } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'portal-invites' })
@@ -239,7 +240,13 @@ export const sendPortalInviteFn = createServerFn({ method: 'POST' })
         })
         results.push({ email, ok: true, inviteId })
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+        // A failed query's own message is its SQL and every bound value
+        // (DEF-63): neither the log line nor the admin's result may carry it.
+        const errorMsg = containsDatabaseError(err)
+          ? DATABASE_ERROR_MESSAGE
+          : err instanceof Error
+            ? err.message
+            : 'Unknown error'
         log.warn({ email_masked: safeEmail(email), error: errorMsg }, 'bulk send failed')
         results.push({ email, ok: false, error: errorMsg })
       }
