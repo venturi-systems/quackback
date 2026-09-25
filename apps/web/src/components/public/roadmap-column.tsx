@@ -41,10 +41,19 @@ export function RoadmapColumn({
   const posts = flattenRoadmapPostEntries(data)
   const total = data?.pages[0]?.total ?? 0
 
+  // The board has no fixed height, so a page arriving in any column pushes
+  // down the footer below the board: the render check's keyboard walk saw a
+  // focused footer link move from inside a 900px viewport to y = 2,007px
+  // (run 36075134195). Hold loading while focus is after this column's list,
+  // and keep the focused element in place if a page already loading arrives
+  // (WCAG 2.4.11), as the feed does. Keyboard focus passes every card of a
+  // column, right above its sentinel, before it reaches the next column, so
+  // each column still loads while focus is in it.
   const sentinelRef = useInfiniteScroll({
     hasMore: hasNextPage,
     isFetching: isFetchingNextPage,
     onLoadMore: fetchNextPage,
+    holdWhileFocusFollows: true,
   })
 
   return (
