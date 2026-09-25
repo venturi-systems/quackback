@@ -297,19 +297,6 @@ body,
   letter-spacing: -0.01em;
 }
 
-.portal-nav__item {
-  border: 1px solid transparent;
-}
-
-.portal-nav__item--active {
-  border-color: color-mix(in srgb, var(--primary) 24%, transparent);
-  box-shadow: none;
-}
-
-.dark .portal-nav__item--active {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
 .venturi-portal-card {
   background: var(--card);
   border-color: var(--post-card-border);

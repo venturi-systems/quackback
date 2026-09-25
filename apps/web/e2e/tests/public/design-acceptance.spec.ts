@@ -56,6 +56,84 @@ async function recordScreenshot(page: Page, testInfo: TestInfo, state: string) {
   })
 }
 
+async function recordHeaderControls(page: Page, testInfo: TestInfo, route: Route, width: number) {
+  const header = page.locator('header.portal-header')
+  const toggle = header.locator('button[aria-controls="portal-mobile-navigation"]')
+  if (width < 640) await toggle.click()
+  const navigation = page.getByRole('navigation', {
+    name: width < 640 ? 'Mobile portal navigation' : 'Portal navigation',
+    exact: true,
+  })
+  await expect(navigation).toBeVisible()
+  const current = navigation.locator('[aria-current="page"]')
+  await expect(current).toHaveCount(1)
+  await expect(current).toHaveText(
+    route === 'roadmap' ? 'Roadmap' : route === 'changelog' ? 'Changelog' : 'Feedback'
+  )
+  const geometry = await navigation.locator('a').evaluateAll((links) =>
+    links.map((link) => {
+      const style = getComputedStyle(link)
+      const box = link.getBoundingClientRect()
+      const text = Array.from(link.childNodes).find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim()
+      )
+      if (!text) throw new Error('Navigation link must retain its visible label')
+      const range = document.createRange()
+      range.selectNodeContents(text)
+      const label = range.getBoundingClientRect()
+      return {
+        label: text.textContent,
+        current: link.getAttribute('aria-current'),
+        height: box.height,
+        labelCenterOffset: label.y + label.height / 2 - (box.y + box.height / 2),
+        borderWidths: [
+          style.borderTopWidth,
+          style.borderRightWidth,
+          style.borderBottomWidth,
+          style.borderLeftWidth,
+        ],
+        background: style.backgroundColor,
+        shadow: style.boxShadow,
+      }
+    })
+  )
+  for (const link of geometry) {
+    expect(link.height).toBeGreaterThanOrEqual(44)
+    expect(
+      Math.abs(link.labelCenterOffset),
+      `${link.label} must be vertically centered`
+    ).toBeLessThanOrEqual(2)
+    expect(link.borderWidths).toEqual(['0px', '0px', '0px', '0px'])
+    expect(link.shadow).toBe('none')
+    expect(link.background).toBe(
+      link.current === 'page' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0)'
+    )
+  }
+  const admin = header.getByRole('link', { name: 'Admin', exact: true })
+  await expect(admin).toHaveAttribute('href', '/admin')
+  const utility = await admin.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      height: element.getBoundingClientRect().height,
+      borderWidth: style.borderTopWidth,
+      background: style.backgroundColor,
+    }
+  })
+  expect(utility.height).toBeGreaterThanOrEqual(44)
+  expect(utility.borderWidth).toBe('0px')
+  expect(utility.background).toBe('rgba(0, 0, 0, 0)')
+  await attach(testInfo, `header-controls-${route}-${width}`, { source: SOURCE, geometry, utility })
+  await attach(testInfo, `screenshot-header-${route}-${width}`, {
+    schema: 'venturi.portal-render-evidence.v1',
+    source: SOURCE,
+    url: page.url(),
+    viewport: page.viewportSize(),
+    state: `header-${route}-${width}`,
+    pngBase64: (await header.screenshot({ animations: 'disabled' })).toString('base64'),
+  })
+  if (width < 640) await toggle.click()
+}
+
 async function openRoute(page: Page, route: Route, revealParticipation = true) {
   const path =
     route === 'post'
@@ -258,6 +336,7 @@ for (const width of WIDTHS) {
       await recordReflow(page, testInfo, `${route}-${width}`)
       if (width === 320 || width === 1440) {
         await recordScreenshot(page, testInfo, `${route}-${width}`)
+        await recordHeaderControls(page, testInfo, route, width)
       }
 
       if (route === 'post') {
