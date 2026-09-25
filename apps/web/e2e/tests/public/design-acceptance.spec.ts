@@ -106,7 +106,7 @@ async function recordHeaderControls(page: Page, testInfo: TestInfo, route: Route
     expect(link.borderWidths).toEqual(['0px', '0px', '0px', '0px'])
     expect(link.shadow).toBe('none')
     expect(link.background).toBe(
-      link.current === 'page' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(0, 0, 0, 0)'
+      link.current === 'page' ? 'rgba(23, 77, 100, 0.05)' : 'rgba(0, 0, 0, 0)'
     )
   }
   const admin = header.getByRole('link', { name: 'Admin', exact: true })
