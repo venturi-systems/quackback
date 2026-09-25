@@ -202,7 +202,7 @@ export function PortalHeader({
       {navItems.map((item) => {
         const isActive =
           item.to === '/'
-            ? pathname === '/' || /^\/[^/]+\/posts\//.test(pathname)
+            ? pathname === '/' || /^\/b\/[^/]+\/posts\//.test(pathname)
             : item.to === '/hc'
               ? onHelpPages
               : pathname.startsWith(item.to)
@@ -213,11 +213,10 @@ export function PortalHeader({
             to={item.to}
             aria-current={isActive ? 'page' : undefined}
             className={cn(
-              'portal-nav__item px-3 py-2 text-sm font-medium transition-colors [border-radius:calc(var(--radius)*0.8)]',
-              mobile && 'flex min-h-11 items-center',
+              'portal-nav__item inline-flex items-center px-3 py-1.5 text-sm font-medium transition-colors rounded-lg',
               isActive
-                ? 'portal-nav__item--active bg-[var(--nav-active-background)] text-[var(--nav-active-foreground)]'
-                : 'text-[var(--nav-inactive-color)] hover:text-[var(--nav-active-foreground)] hover:bg-[var(--nav-active-background)]/50'
+                ? 'bg-[var(--ds-color-interactive-hover-tint)] text-[var(--nav-active-foreground)]'
+                : 'text-[var(--nav-inactive-color)] hover:text-[var(--nav-active-foreground)] hover:bg-[var(--ds-color-interactive-hover-tint)]'
             )}
           >
             {intl.formatMessage({ id: item.messageId, defaultMessage: item.defaultMessage })}
@@ -303,9 +302,9 @@ export function PortalHeader({
 
       {/* Admin Button (visible for team members) */}
       {canAccessAdmin && (
-        <Button variant="outline" size="sm" asChild className="ms-1 me-2 min-h-11">
+        <Button variant="ghost" size="sm" asChild className="ms-1 me-2 min-h-11">
           <Link to="/admin">
-            <ShieldCheckIcon className="me-2 h-4 w-4" />
+            <ShieldCheckIcon className="h-4 w-4" />
             <FormattedMessage id="portal.header.auth.admin" defaultMessage="Admin" />
           </Link>
         </Button>
