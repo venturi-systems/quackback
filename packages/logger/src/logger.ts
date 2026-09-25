@@ -19,6 +19,7 @@
 import pino from 'pino'
 import { context, trace } from '@opentelemetry/api'
 import { getLogContext } from './context'
+import { sanitizeLogArguments, sanitizeLogFields, serializeError } from './error-serializer'
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent'
 
@@ -64,6 +65,11 @@ const REDACT_PATHS = [
   'request.headers["set-cookie"]',
   'res.headers["set-cookie"]',
   'response.headers["set-cookie"]',
+  // A failed query's bound values (drizzle-orm `params`, postgres.js
+  // `parameters`). The err serializer never writes them (DEF-63); these paths
+  // are the second layer should an error of another shape carry them.
+  'err.params',
+  'err.parameters',
 ]
 
 /**
@@ -118,10 +124,25 @@ export function createLogger(options: CreateLoggerOptions = {}): pino.Logger {
   const pinoOptions: pino.LoggerOptions = {
     level: options.level ?? defaultLevel(),
     base: { service_name: serviceName, ...options.base },
-    // String level (e.g. "info") so Grafana/Loki level detection works.
-    formatters: { level: (label) => ({ level: label }) },
+    formatters: {
+      // String level (e.g. "info") so Grafana/Loki level detection works.
+      level: (label) => ({ level: label }),
+      // Errors under any other key, or nested in plain objects, get the same
+      // serializer as `err`; a failed query's text is cut out of strings.
+      log: sanitizeLogFields,
+    },
     redact: { paths: REDACT_PATHS, remove: true },
-    serializers: { err: pino.stdSerializers.err },
+    // pino's standard serializer, except that a failed query anywhere in reach
+    // is reduced to its statement, SQLSTATE and identifiers (DEF-63).
+    serializers: { err: serializeError },
+    hooks: {
+      // A call that passes an error and no message would log the error's own
+      // message, which for a failed query is the SQL and every bound value.
+      logMethod(args, method) {
+        const write = method as unknown as (...logArgs: unknown[]) => void
+        write.apply(this, sanitizeLogArguments(args))
+      },
+    },
     mixin,
   }
 

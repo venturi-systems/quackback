@@ -24,7 +24,11 @@
  */
 import { createMiddleware } from '@tanstack/react-start'
 import { logger } from '@/lib/server/logger'
-import { databaseErrorLogFields, isDatabaseError } from '@/lib/server/errors/database-error'
+import {
+  DATABASE_ERROR_MESSAGE,
+  databaseErrorLogFields,
+  isDatabaseError,
+} from '@/lib/server/errors/database-error'
 
 const log = logger.child({ component: 'serverfn-database-error' })
 
@@ -32,7 +36,7 @@ const log = logger.child({ component: 'serverfn-database-error' })
 type ErrorLog = { error: (fields: Record<string, unknown>, message: string) => void }
 
 /** What the caller gets instead of a failed query's own message. */
-export const DATABASE_ERROR_MESSAGE = 'The request could not be completed.'
+export { DATABASE_ERROR_MESSAGE }
 
 /**
  * The error a server function's caller should get for `error`: a plain error

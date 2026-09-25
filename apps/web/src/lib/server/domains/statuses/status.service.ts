@@ -18,6 +18,7 @@ import {
   ForbiddenError,
   InternalError,
 } from '@/lib/shared/errors'
+import { containsDatabaseError } from '@/lib/server/errors/database-error'
 import type { Status, CreateStatusInput, UpdateStatusInput } from './status.types'
 import { logger } from '@/lib/server/logger'
 
@@ -323,10 +324,11 @@ export async function listPublicStatuses(): Promise<Status[]> {
     })
   } catch (error) {
     log.error({ err: error }, 'list public statuses failed')
-    throw new InternalError(
-      'DATABASE_ERROR',
-      `Failed to fetch statuses: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      error
-    )
+    // Public server functions return this message to anonymous callers, and a
+    // failed query's own message is its SQL and bound values (DEF-63).
+    const detail = containsDatabaseError(error)
+      ? ''
+      : `: ${error instanceof Error ? error.message : 'Unknown error'}`
+    throw new InternalError('DATABASE_ERROR', `Failed to fetch statuses${detail}`, error)
   }
 }
