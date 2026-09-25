@@ -122,7 +122,7 @@
     "react-dom": "^19.3.0",
     "react-easy-crop": "^6.2.3",
     "react-hook-form": "^7.88.0",
-    "react-intl": "^10.1.26",
+    "react-intl": "^12.1.2",
     "recharts": "3.10.1",
     "slugify": "^1.6.9",
     "sonner": "^2.0.8",
