@@ -361,8 +361,9 @@ describe('handleSsoCallbackAfter — transaction + locking', () => {
         userId: 'user_first',
       })
     )
-    // The bootstrap lock first, then the team-role lock every role write takes
-    // (never the other order, so the two cannot deadlock).
+    // The bootstrap lock first, then the team-role lock every write of a
+    // person's team role takes (never the other order, so the two cannot
+    // deadlock).
     expect(mockExecute).toHaveBeenCalledTimes(2)
     const first = mockExecute.mock.calls[0][0] as { strings: TemplateStringsArray }
     expect(first.strings.raw.join('')).toContain('pg_advisory_xact_lock')

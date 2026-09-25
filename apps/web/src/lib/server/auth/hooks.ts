@@ -423,8 +423,10 @@ const LAST_ADMIN_IDENTITY_MESSAGE =
  * link.
  *
  * The check and the unlink are one transaction under the team-role advisory
- * lock that every role write takes (withTeamRoleLock in team-designation.ts):
- * the caller's role and links are read, the other eligible administrators are
+ * lock (withTeamRoleLock in team-designation.ts), which every write of a
+ * person's team role takes; team-role-lock.ts lists the role writes that go
+ * without it and why none can change who counts as an administrator. The
+ * caller's role and links are read, the other eligible administrators are
  * counted and the account row is deleted before the lock is released. Two
  * administrators who unlink their last links at the same moment, or an unlink
  * racing a demotion, are therefore serialized: whoever takes the lock second
@@ -567,7 +569,8 @@ export const hooksBefore = createAuthMiddleware(async (ctx) => {
  *    admin. Wraps in a transaction with `pg_advisory_xact_lock` so
  *    concurrent first-sign-ins don't race the existing-admin
  *    check; an eligible callback also takes the team-role lock
- *    (team-role-lock.ts) before it reads, like every other role write.
+ *    (team-role-lock.ts) before it reads, like every other write of a
+ *    person's team role.
  *    Recovery-scoped — a healthy workspace post-onboarding
  *    always has an admin so this is a no-op.
  *
@@ -632,9 +635,9 @@ export async function handleSsoCallbackAfter(
     // provisioned API key) doesn't block the first real user from self-
     // promoting.
     if (eligibleForBootstrap) {
-      // Every role write holds the team-role lock (taken after the bootstrap
-      // lock, never before it), so the existing-admin read and the promotion
-      // see what the other team-role writers committed.
+      // Every write of a person's team role holds the team-role lock (taken
+      // after the bootstrap lock, never before it), so the existing-admin read
+      // and the promotion see what the other team-role writers committed.
       await acquireTeamRoleLock(tx)
       const existingAdmin = await tx.query.principal.findFirst({
         where: and(eq(principalTable.role, 'admin'), eq(principalTable.type, 'user')),
