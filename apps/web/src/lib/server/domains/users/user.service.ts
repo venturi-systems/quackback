@@ -477,8 +477,9 @@ export async function listPortalUsers(
  * returning sign-in re-provisions a principal via the SSO hooks or lazily.
  *
  * Only a contributor (role 'user') is ever removed here. The role check and
- * the delete run in one transaction under the team-role advisory lock that
- * every role write takes (withTeamRoleLock in team-designation.ts), so a
+ * the delete run in one transaction under the team-role advisory lock
+ * (withTeamRoleLock in team-designation.ts), which every write of a person's
+ * team role takes (team-role-lock.ts lists the role writes that do not), so a
  * promotion to member or admin cannot land between them: whichever takes the
  * lock second sees what the first one committed (DEF-64). The delete also
  * repeats the role condition, and a delete that removes no row is refused as

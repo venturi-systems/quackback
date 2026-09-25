@@ -61,8 +61,8 @@ function assertHumanSession(session: Session): void {
  * caller is refused, whatever `setup_state` says. The check and the write run
  * in one transaction under the same advisory lock as the SSO bootstrap
  * promotion (auth/hooks.ts), so two first sign-ins cannot both claim admin,
- * and under the team-role lock every role write holds (team-role-lock.ts),
- * taken second.
+ * and under the team-role lock that every write of a person's team role
+ * holds (team-role-lock.ts), taken second.
  */
 async function claimBootstrapAdmin(session: Session): Promise<void> {
   assertHumanSession(session)

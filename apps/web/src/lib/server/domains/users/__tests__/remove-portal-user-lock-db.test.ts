@@ -5,8 +5,9 @@
  * and then delete it by id alone, outside the team-role lock. A promotion that
  * landed between the check and the delete therefore removed a new team member
  * or administrator. removePortalUser now checks and deletes in the one
- * transaction that holds the team-role advisory lock, the lock every role
- * write takes, so it waits for a promotion in flight and sees its result.
+ * transaction that holds the team-role advisory lock, the lock every write of
+ * a person's team role takes, so it waits for a promotion in flight and sees
+ * its result.
  *
  * This suite belongs to the PostgreSQL test gate and drives the real
  * removePortalUser, withTeamRoleLock and changeTeamRole over real connections.

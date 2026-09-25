@@ -7,7 +7,7 @@
  * release it, leaving the delete to Better Auth: two requests queued on the
  * lock each counted the other, and both deletes followed. The gate now reads,
  * counts and deletes in the one transaction that holds the lock, the same
- * lock every role write takes.
+ * lock every write of a person's team role takes.
  *
  * This suite belongs to the PostgreSQL test gate and drives the real gate,
  * the real withTeamRoleLock and countEligibleAdmins, and real concurrent
