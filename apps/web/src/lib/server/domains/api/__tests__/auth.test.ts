@@ -6,7 +6,7 @@ import {
   assertNoStatusChange,
   type AuthLevel,
 } from '../auth'
-import { API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
+import { API_KEY_SCOPES, LEGACY_API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
 import type { ApiKey } from '@/lib/server/domains/api-keys'
 import type { PrincipalId, ApiKeyId } from '@quackback/ids'
 import { UnauthorizedError, ForbiddenError } from '@/lib/shared/errors'
@@ -57,7 +57,9 @@ describe('API Auth', () => {
     lastUsedAt: null,
     expiresAt: null,
     revokedAt: null,
-    scopes: null,
+    legacyBoundedAt: null,
+    // A full-access key; "per-key scopes" below covers a key stored without scopes.
+    scopes: [...API_KEY_SCOPES],
   }
 
   beforeEach(() => {
@@ -300,8 +302,23 @@ describe('API Auth', () => {
       ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
     })
 
-    it('keeps every scope for a legacy key stored without scopes', async () => {
+    it('reads only with a key stored without scopes, never full access (DEF-15)', async () => {
       await keyWith(null)
+      const auth = await withApiKeyAuth(req('GET', '/api/v1/posts'), { role: 'team' })
+      expect(auth.scopes).toEqual([...LEGACY_API_KEY_SCOPES])
+      await expect(
+        withApiKeyAuth(req('GET', '/api/v1/help-center/articles'), { role: 'team' })
+      ).resolves.toBeDefined()
+      await expect(
+        withApiKeyAuth(req('PATCH', '/api/v1/posts/post_1'), { role: 'team' })
+      ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+      await expect(
+        withApiKeyAuth(req('DELETE', '/api/v1/webhooks/w1'), { role: 'admin' })
+      ).rejects.toMatchObject({ code: 'INSUFFICIENT_SCOPE' })
+    })
+
+    it('keeps every scope for a full-access key', async () => {
+      await keyWith([...API_KEY_SCOPES])
       await expect(
         withApiKeyAuth(req('DELETE', '/api/v1/webhooks/w1'), { role: 'admin' })
       ).resolves.toBeDefined()

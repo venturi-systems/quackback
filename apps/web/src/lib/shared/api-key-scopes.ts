@@ -67,16 +67,37 @@ export function isApiKeyScope(value: unknown): value is ApiKeyScope {
 }
 
 /**
+ * What a key stored without any API scope may do: read feedback and help
+ * articles, the "Read only" preset.
+ *
+ * Such a key was created before every key had to be scoped (landing-page#2309,
+ * DEF-15). Migration 9003_venturi_legacy_api_key_bounds.sql stores these scopes
+ * on every such key it finds and records when (`legacy_bounded_at`); this
+ * constant applies the same bound to any key the migration never saw. A
+ * read-only integration keeps working; a key that wrote is replaced by a new
+ * scoped key.
+ */
+export const LEGACY_API_KEY_SCOPES: readonly ApiKeyScope[] = ['read:feedback', 'read:article']
+
+/**
+ * How long a key the migration found without an expiry keeps working: the
+ * default lifetime of a new key, counted from the migration. It is the notice
+ * an administrator has to replace the key (docs/team-designation.md).
+ */
+export const LEGACY_API_KEY_NOTICE_DAYS = 90
+
+/**
  * Parse the stored `api_keys.scopes` JSON.
  *
  * A key created before scopes existed stores NULL (or only internal
- * capability scopes such as `internal:tier-limits`); it keeps full API access,
- * still bounded by its role and its creator's current role. Any stored API
- * scope makes the key scoped to exactly those scopes.
+ * capability scopes such as `internal:tier-limits`): `legacyUnscoped` is true
+ * and it gets LEGACY_API_KEY_SCOPES, never full access. It is still bounded by
+ * its role, its creator's current role and its lifetime (apiKeyExpiresAt).
+ * Any stored API scope makes the key scoped to exactly those scopes.
  */
 export function parseStoredApiKeyScopes(raw: string | null | undefined): {
   scopes: ApiKeyScope[]
-  legacyFullAccess: boolean
+  legacyUnscoped: boolean
 } {
   let parsed: unknown = null
   if (raw) {
@@ -87,12 +108,62 @@ export function parseStoredApiKeyScopes(raw: string | null | undefined): {
     }
   }
   const scopes = Array.isArray(parsed) ? parsed.filter(isApiKeyScope) : []
-  if (scopes.length === 0) return { scopes: [...API_KEY_SCOPES], legacyFullAccess: true }
-  return { scopes: [...new Set(scopes)], legacyFullAccess: false }
+  if (scopes.length === 0) return { scopes: [...LEGACY_API_KEY_SCOPES], legacyUnscoped: true }
+  return { scopes: [...new Set(scopes)], legacyUnscoped: false }
+}
+
+/**
+ * The scopes a key works with: its stored API scopes, or LEGACY_API_KEY_SCOPES
+ * for a key stored without any (`scopes: null` in the ApiKey shape).
+ */
+export function effectiveApiKeyScopes(scopes: readonly ApiKeyScope[] | null): ApiKeyScope[] {
+  return scopes ? [...scopes] : [...LEGACY_API_KEY_SCOPES]
 }
 
 /** Longest lifetime a new key may have. */
 export const API_KEY_MAX_EXPIRY_DAYS = 365
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * When a key stops working. A key stored without an expiry (created before
+ * every key had to expire) expires API_KEY_MAX_EXPIRY_DAYS after it was
+ * created, the longest lifetime a new key may have, so no key lives forever
+ * (landing-page#2309, DEF-15).
+ */
+export function apiKeyExpiresAt(storedExpiresAt: Date | null | undefined, createdAt: Date): Date {
+  // new Date() also accepts the ISO string a serialized row may carry.
+  if (storedExpiresAt) return new Date(storedExpiresAt)
+  return new Date(new Date(createdAt).getTime() + API_KEY_MAX_EXPIRY_DAYS * DAY_MS)
+}
+
+/**
+ * Why a key cannot be rotated, or null when it can. Rotation replaces the
+ * secret and keeps everything else, so it would carry forward a key stored
+ * without scopes or without an expiry, and it cannot bring back an expired
+ * key. Those are replaced instead: create a scoped key that expires, move the
+ * integration to it, revoke the old one. A key the legacy migration bounded
+ * has both stored, so it rotates like any other key, keeping its read-only
+ * scopes and its expiry.
+ *
+ * `scopes` is the key's stored API scopes (null for none), `expiresAt` its
+ * STORED expiry (null for none), as the ApiKey shape reports them.
+ */
+export function apiKeyRotationBlocker(
+  key: { scopes: readonly string[] | null; expiresAt: Date | null; createdAt: Date },
+  now: number = Date.now()
+): 'legacy' | 'expired' | null {
+  if (key.scopes === null || key.expiresAt === null) return 'legacy'
+  if (apiKeyExpiresAt(key.expiresAt, key.createdAt).getTime() <= now) return 'expired'
+  return null
+}
+
+export const API_KEY_ROTATION_BLOCKED_MESSAGES: Record<'legacy' | 'expired', string> = {
+  legacy:
+    'This key was created before every key needed scopes and an expiry, so it cannot be rotated. Create a new key with the scopes it needs, move the integration to it, then revoke this one.',
+  expired:
+    'This key has expired, so it cannot be rotated. Create a new key, move the integration to it, then revoke this one.',
+}
 
 /** Lifetimes offered in the creation dialog. */
 export const API_KEY_EXPIRY_OPTIONS_DAYS = [30, 90, 180, 365] as const

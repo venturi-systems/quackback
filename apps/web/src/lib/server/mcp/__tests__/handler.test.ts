@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { ApiKey } from '@/lib/server/domains/api-keys'
 import type { PrincipalId, ApiKeyId, UserId } from '@quackback/ids'
+import { API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
@@ -331,7 +332,10 @@ const MOCK_API_KEY: ApiKey = {
   lastUsedAt: null,
   expiresAt: null,
   revokedAt: null,
-  scopes: null,
+  legacyBoundedAt: null,
+  // A full-access key (the "Full access" preset). A key stored without scopes
+  // reads only (DEF-15); see "reads only with a key stored without scopes".
+  scopes: [...API_KEY_SCOPES],
 }
 
 const MOCK_MEMBER_RECORD = {
@@ -995,6 +999,40 @@ describe('MCP HTTP Handler', () => {
           jsonRpcRequest('tools/call', {
             name: 'triage_post',
             arguments: { postId: 'post_test', ownerPrincipalId: 'principal_owner' },
+          })
+        )
+      )
+
+      const body = (await response.json()) as {
+        result: { isError: boolean; content: Array<{ text: string }> }
+      }
+      expect(body.result.isError).toBe(true)
+      expect(body.result.content[0].text).toContain('Insufficient scope')
+    })
+
+    it('reads only with a key stored without scopes (DEF-15)', async () => {
+      const { verifyApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      vi.mocked(verifyApiKey).mockResolvedValue({ ...MOCK_API_KEY, scopes: null })
+      mockFindFirst.mockResolvedValue(MOCK_MEMBER_RECORD)
+
+      const { resolveAuthContext } = await import('../handler')
+      const auth = await resolveAuthContext(mcpRequest(jsonRpcRequest('initialize')))
+      const scopes = (auth as { scopes: string[] }).scopes
+
+      expect(scopes).toContain('read:feedback')
+      expect(scopes.every((scope) => scope.startsWith('read:'))).toBe(true)
+    })
+
+    it('refuses a write tool to a key stored without scopes (DEF-15)', async () => {
+      const { verifyApiKey } = await import('@/lib/server/domains/api-keys/api-key.service')
+      const handleMcpRequest = await initializeSession()
+      vi.mocked(verifyApiKey).mockResolvedValue({ ...MOCK_API_KEY, scopes: null })
+
+      const response = await handleMcpRequest(
+        mcpRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'create_changelog',
+            arguments: { title: 'v1', content: 'New stuff' },
           })
         )
       )
@@ -2139,7 +2177,7 @@ describe('MCP HTTP Handler', () => {
       expect(body.result.content[0].text).toContain('team member')
     })
 
-    it('should grant all scopes to API key users', async () => {
+    it('should grant every scope to a full-access API key', async () => {
       await setupValidAuth()
       const handleMcpRequest = await initializeSession()
 
@@ -2156,7 +2194,7 @@ describe('MCP HTTP Handler', () => {
       const body = (await response.json()) as {
         result: { content: Array<{ text: string }> }
       }
-      // Should succeed (not isError) since API keys get all scopes
+      // Should succeed (not isError): a full-access key carries every scope
       expect(JSON.parse(body.result.content[0].text).id).toBe('changelog_new')
     })
 

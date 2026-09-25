@@ -27,7 +27,7 @@ export interface McpAuthContext {
   authMethod: 'oauth' | 'api-key'
   /**
    * Granted scopes. OAuth tokens carry the scopes the user consented to; an
-   * API key carries its own scopes (a legacy key without scopes keeps all).
+   * API key carries its own scopes (a key stored without scopes reads only).
    */
   scopes: McpScope[]
 }

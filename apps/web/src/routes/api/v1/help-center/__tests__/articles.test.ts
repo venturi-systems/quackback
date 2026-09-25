@@ -92,6 +92,7 @@ const mockAuthContext: ApiAuthContext = {
     expiresAt: null,
     createdAt: new Date('2026-01-01'),
     revokedAt: null,
+    legacyBoundedAt: null,
     scopes: null,
   },
   principalId: 'principal_1' as PrincipalId,

@@ -20,7 +20,6 @@
  */
 
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
-import { generateId } from '@quackback/ids'
 import {
   findProviderForDomainEmail,
   isRegisteredOidcProvider,
@@ -43,6 +42,7 @@ import {
   markDeviceSeen,
 } from './signin-device-tracker'
 import { logger } from '@/lib/server/logger'
+import { acquireTeamRoleLock } from '@/lib/server/domains/principals/team-role-lock'
 
 const log = logger.child({ component: 'auth-hooks' })
 
@@ -566,7 +566,9 @@ export const hooksBefore = createAuthMiddleware(async (ctx) => {
  *    first OIDC sign-in into a workspace with no existing admin claims
  *    admin. Wraps in a transaction with `pg_advisory_xact_lock` so
  *    concurrent first-sign-ins don't race the existing-admin
- *    check. Recovery-scoped — a healthy workspace post-onboarding
+ *    check; an eligible callback also takes the team-role lock
+ *    (team-role-lock.ts) before it reads, like every other role write.
+ *    Recovery-scoped — a healthy workspace post-onboarding
  *    always has an admin so this is a no-op.
  *
  * 2. **`lastSsoSignInAt` write.** Read by `setVerifiedDomainEnforcedFn`'s
@@ -630,6 +632,10 @@ export async function handleSsoCallbackAfter(
     // provisioned API key) doesn't block the first real user from self-
     // promoting.
     if (eligibleForBootstrap) {
+      // Every role write holds the team-role lock (taken after the bootstrap
+      // lock, never before it), so the existing-admin read and the promotion
+      // see what the other team-role writers committed.
+      await acquireTeamRoleLock(tx)
       const existingAdmin = await tx.query.principal.findFirst({
         where: and(eq(principalTable.role, 'admin'), eq(principalTable.type, 'user')),
         columns: { id: true },
@@ -719,6 +725,9 @@ export function shouldBootstrapPromote(
  *  - `autoCreateUsers=false` short-circuits — the admin opted out.
  *  - Bootstrap-admin from `handleSsoCallbackAfter` runs first; if
  *    that promoted the user to `admin`, the role-check here skips.
+ *  - The role write is setUserTeamRole (team-designation.ts): it re-reads
+ *    the principal under the team-role lock, so a role another writer set
+ *    since this hook's first read is the one the rules check.
  */
 export async function handleAutoProvisionAfter(
   ctx: {
@@ -752,7 +761,7 @@ export async function handleAutoProvisionAfter(
   if (!provider) return
   if (!provider.autoCreateUsers) return
 
-  const { db, principal: principalTable, user: userTable, eq } = await import('@/lib/server/db')
+  const { db, principal: principalTable, eq } = await import('@/lib/server/db')
   type UserId = `user_${string}`
   const userIdTyped = userId as UserId
 
@@ -784,8 +793,9 @@ export async function handleAutoProvisionAfter(
   // A missing principal is a returning user whose row was soft-removed
   // ("Remove from portal" deletes the principal, not the auth identity, so the
   // user.create hook never re-fires). Treat it as a fresh first sign-in so the
-  // role still applies — otherwise the UPDATE below would touch zero rows and
-  // the lazy getOptionalAuth path would recreate them as a plain 'user'.
+  // role still applies: setUserTeamRole recreates the principal, where an
+  // UPDATE would touch zero rows and leave the lazy getOptionalAuth path to
+  // recreate it as a plain 'user'.
   const currentRole = p?.role ?? 'user'
 
   // Sync mode: re-apply on every sign-in, including for existing
@@ -800,78 +810,44 @@ export async function handleAutoProvisionAfter(
 
   if (currentRole === targetRole) return // no-op, save the write
 
+  // The read above only skips the common no-op cases without a lock. The
+  // write goes through the team-role writer, which reads the principal again
+  // under the team-role lock and applies the same rules as every other role
+  // write: a team role needs the team identity rule (a verified team-domain
+  // address from a linked Google or GitHub account, which an OIDC callback
+  // alone never is), taking admin away needs another eligible administrator,
+  // and without sync mode only a principal still at 'user' changes. A
+  // soft-removed principal is recreated there, never with a team role the
+  // identity cannot hold.
   const designation = await import('@/lib/server/domains/principals/team-designation')
-
-  if (p?.role === 'admin' && p.id) {
-    // Sync mode taking admin away: go through the team-role writer, which
-    // refuses to leave the workspace without an administrator who can act.
-    try {
-      await designation.changeTeamRole({
-        principalId: p.id as `principal_${string}`,
-        newRole: targetRole,
-        requireTeamTarget: false,
-      })
-    } catch (error) {
-      log.warn(
-        { user_id: userId, role: targetRole, err: error },
-        'sso sync demotion refused by the team-role writer'
-      )
-      return
-    }
-  } else {
-    // Team identity rule: a team role needs a verified team-domain address
-    // from a linked Google or GitHub account, which an OIDC callback alone
-    // never is. A demotion to 'user' always proceeds. This also covers a
-    // soft-removed principal recreated below: it is never rebuilt with a team
-    // role the identity cannot hold.
-    if (targetRole === 'admin' || targetRole === 'member') {
-      const gap = await designation.teamRoleGapForUser(userIdTyped)
-      if (gap !== null) {
-        log.warn(
-          { user_id: userId, role: targetRole, gap },
-          'sso auto-provision refused: team identity rule'
-        )
-        return
-      }
-    }
-
-    if (p) {
-      await db
-        .update(principalTable)
-        .set({ role: targetRole })
-        .where(eq(principalTable.userId, userIdTyped))
-    } else {
-      // Recreate the soft-removed principal in-band with the provisioned role.
-      // Display fields come from the auth user so the rebuilt principal matches
-      // what the lazy creation path would have produced.
-      const u = await db.query.user.findFirst({
-        where: eq(userTable.id, userIdTyped),
-        columns: { name: true, image: true },
-      })
-      await db.insert(principalTable).values({
-        id: generateId('principal'),
-        userId: userIdTyped,
-        role: targetRole,
-        displayName: u?.name ?? null,
-        avatarUrl: u?.image ?? null,
-        // This runs in the OIDC callback, so the user is signing in via SSO right
-        // now. Stamp lastSsoSignInAt on the rebuilt row — handleSsoCallbackAfter's
-        // UPDATE ran first and missed it while the principal didn't exist.
-        lastSsoSignInAt: new Date(),
-        createdAt: new Date(),
-      })
-    }
+  let change: Awaited<ReturnType<typeof designation.setUserTeamRole>>
+  try {
+    change = await designation.setUserTeamRole({
+      userId: userIdTyped,
+      newRole: targetRole,
+      mode: syncOnEverySignIn ? 'set' : 'from_user',
+      // A recreated principal is signing in by SSO right now;
+      // handleSsoCallbackAfter's stamp ran first and missed the missing row.
+      create: { lastSsoSignInAt: new Date() },
+    })
+  } catch (error) {
+    log.warn(
+      { user_id: userId, role: targetRole, err: error },
+      'sso auto-provision refused by the team-role writer'
+    )
+    return
   }
+  if (!change) return
 
-  if (p?.role && p.role !== targetRole) {
+  if (change.previousRole && change.previousRole !== change.newRole) {
     const { recordAuditEvent } = await import('@/lib/server/audit/log')
     await recordAuditEvent({
       event: 'user.role.changed',
       outcome: 'success',
       actor: { email: email ?? null }, // SSO callback — no authenticated admin actor
       target: { type: 'user', id: userIdTyped },
-      before: { role: p.role },
-      after: { role: targetRole },
+      before: { role: change.previousRole },
+      after: { role: change.newRole },
       metadata: { source: provider.attributeMapping ? 'attribute_mapping' : 'auto_provision' },
     })
   }

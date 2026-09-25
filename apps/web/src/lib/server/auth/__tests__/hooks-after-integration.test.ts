@@ -58,6 +58,7 @@ const mockGetPublicPortalConfig = vi.fn()
 const mockRecordAuditEvent = vi.fn(async (_spec: unknown) => undefined)
 const mockDeleteSessionCookie = vi.fn((_ctx: unknown) => undefined)
 const mockHasPlatformCredentials = vi.fn(async (_type: string) => true)
+const mockSetUserTeamRole = vi.fn()
 
 vi.mock('@/lib/server/db', () => {
   const tx = {
@@ -124,11 +125,19 @@ vi.mock('@tanstack/react-start/server', () => ({
 }))
 
 // The team identity rule (team-designation.test.ts) is stubbed as satisfied:
-// this suite covers the ordering of the SSO after-hooks, not the rule.
+// this suite covers the ordering of the SSO after-hooks, not the rule. The
+// team-role writer applies the role to the shared state, as the database would,
+// so the policy cleanup's later read sees it.
 vi.mock('@/lib/server/domains/principals/team-designation', () => ({
   teamRoleGapForUser: async () => null,
   changeTeamRole: async () => ({ changed: true }),
   applyTeamDesignation: async () => null,
+  setUserTeamRole: async (input: { newRole: 'admin' | 'member' | 'user' }) => {
+    mockSetUserTeamRole(input)
+    const previousRole = state.role
+    state.role = input.newRole
+    return { previousRole, newRole: input.newRole, principalId: 'principal_new' }
+  },
 }))
 
 vi.mock('@/lib/server/domains/platform-credentials/platform-credential.service', () => ({
@@ -242,7 +251,10 @@ describe('hooksAfter — successful SSO sign-in by brand-new verified-domain use
   it('updates the principal role to "member" (auto-provision wrote)', async () => {
     await hooksAfter(ssoCallbackCtx({ userId: 'user_new', email: 'alice@acme.com', token: 'tok' }))
 
-    expect(mockUpdateSet).toHaveBeenCalledWith({ role: 'member' })
+    expect(mockSetUserTeamRole).toHaveBeenCalledWith(
+      expect.objectContaining({ newRole: 'member', mode: 'from_user' })
+    )
+    expect(state.role).toBe('member')
   })
 
   it('emits an auth.signin.success audit (proves audit ran last and saw a surviving session)', async () => {
@@ -280,7 +292,8 @@ describe('hooksAfter — bootstrap precedes auto-provision', () => {
     // Bootstrap promoted to admin (in the tx).
     expect(mockTxUpdateSet).toHaveBeenCalledWith({ role: 'admin' })
     // Auto-provision did NOT touch the role (admin is not 'user').
-    expect(mockUpdateSet).not.toHaveBeenCalledWith({ role: 'member' })
+    expect(mockSetUserTeamRole).not.toHaveBeenCalled()
+    expect(state.role).toBe('admin')
     // Session survived → cleanup passed.
     expect(mockSessionDelete).not.toHaveBeenCalled()
   })
