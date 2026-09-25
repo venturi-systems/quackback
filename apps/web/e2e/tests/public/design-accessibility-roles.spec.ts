@@ -28,7 +28,7 @@ assertDesignFixtureEnvironmentSync()
 
 const ADMIN_STATE = 'e2e/.auth/admin.json'
 const USER_EMAIL = 'olivia.chen@acme.example'
-const MEMBER_EMAIL = 'noah.brooks@acme.example'
+const MEMBER_EMAIL = 'noah.brooks@example.com'
 const PROBE_TITLE = 'E2E access probe post'
 
 type Actor = 'anonymous' | 'user' | 'member' | 'admin'

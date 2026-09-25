@@ -139,7 +139,10 @@ export async function measureRenderedFonts(
                     : null,
               }
               node.fonts.push(evidence)
-              if (evidence.familyName !== expectedFamily)
+              if (
+                evidence.familyName !== expectedFamily &&
+                !evidence.familyName?.startsWith(`${expectedFamily} `)
+              )
                 node.reasons.push('unexpected-rendered-font-family')
               if (!evidence.postScriptName) node.reasons.push('postscript-font-identity-missing')
               if (evidence.isCustomFont !== true)

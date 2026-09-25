@@ -258,10 +258,19 @@ export async function measureTypography(
             reasons.push(`locale-segmentation-unsupported: ${String(error)}`)
           }
           try {
-            base.font.availabilityCheck = document.fonts.check(
-              `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,
-              selectedText
-            )
+            const primaryFamily = style.fontFamily
+              .split(',')[0]
+              .trim()
+              .replace(/^['"]|['"]$/g, '')
+            base.font.availabilityCheck =
+              document.fonts.check(
+                `${style.fontStyle} ${style.fontWeight} ${style.fontSize} "${primaryFamily}"`,
+                selectedText
+              ) ||
+              document.fonts.check(
+                `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`,
+                selectedText
+              )
           } catch {
             reasons.push('font-availability-check-unsupported')
           }

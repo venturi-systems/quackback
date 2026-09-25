@@ -615,6 +615,10 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      - name: Prune Playwright trace artifacts on success
+        if: success()
+        run: rm -rf apps/web/blob-report apps/web/test-results
+
       - name: Upload the Playwright artifacts
         # Keep inline JSON measurements on successful ratchet runs as well.
         # Reuses this upload and seven-day retention; large traces stay failure-only.
@@ -624,10 +628,10 @@ jobs:
         with:
           name: playwright-shard-${{ matrix.shard }}
           path: |
+            apps/web/blob-report
+            apps/web/test-results
             apps/web/e2e-results.json
             apps/web/e2e-plan.json
-            ${{ failure() && 'apps/web/blob-report' || '' }}
-            ${{ failure() && 'apps/web/test-results' || '' }}
           retention-days: 7
           if-no-files-found: ignore
 
