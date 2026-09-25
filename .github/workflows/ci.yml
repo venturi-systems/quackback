@@ -751,9 +751,11 @@ jobs:
       # even parse the bundle ("Cannot find scope for the label 'a'") that the
       # image's pinned Bun serves in production.
       - name: Build the production image
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
         run: >-
           docker build --file apps/web/Dockerfile
-          --build-arg SOURCE_COMMIT=${{ github.sha }}
+          --build-arg SOURCE_COMMIT="$SOURCE_COMMIT"
           --tag quackback-render:ci .
 
       - run: bun run db:migrate
