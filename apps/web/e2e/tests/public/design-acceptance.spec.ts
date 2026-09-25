@@ -13,6 +13,7 @@ import {
 import { measureRenderedFonts } from '../../utils/rendered-font-evidence'
 import { withDesignBrowserZoom } from '../../utils/browser-zoom-actuator'
 import { assertActualBrowserZoom } from '../../utils/browser-zoom-evidence'
+import { measureFocusIndicator, assertForcedColorsFocus } from '../../utils/forced-colors-focus'
 
 /**
  * Design acceptance in the existing disposable cloud E2E lane.
@@ -782,6 +783,7 @@ test('A06 keyboard focus, forced colors and reduced motion retain the public lig
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(page.locator('html')).toHaveAttribute('data-venturi-web-theme', 'light')
   const toggle = page.locator('button[aria-controls="portal-mobile-navigation"]')
+  const beforeFocus = await measureFocusIndicator(toggle)
   let reachedToggle = false
   for (let index = 0; index < 40; index += 1) {
     await page.keyboard.press('Tab')
@@ -791,23 +793,13 @@ test('A06 keyboard focus, forced colors and reduced motion retain the public lig
     }
   }
   expect(reachedToggle, 'Menu must be reachable through the actual keyboard sequence').toBe(true)
-  const focus = await toggle.evaluate((element) => {
-    const style = getComputedStyle(element)
-    return {
-      focused: element === document.activeElement,
-      focusVisible: element.matches(':focus-visible'),
-      outline: style.outlineStyle,
-      width: style.outlineWidth,
-      color: style.outlineColor,
-      transition: style.transitionDuration,
-      animation: style.animationDuration,
-    }
+  const focus = await measureFocusIndicator(toggle)
+  await attach(testInfo, 'focus-motion-media', { before: beforeFocus, after: focus })
+  assertForcedColorsFocus(beforeFocus, focus)
+  await testInfo.attach('forced-colors-focus-render', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
   })
-  await attach(testInfo, 'focus-motion-media', focus)
-  expect(focus.focusVisible).toBe(true)
-  if (focus.outline !== 'none') {
-    expect(parseFloat(focus.width)).toBeGreaterThan(0)
-  }
   for (const value of [focus.transition, focus.animation]) {
     for (const duration of value.split(',')) {
       const seconds = parseFloat(duration) * (duration.trim().endsWith('ms') ? 0.001 : 1)

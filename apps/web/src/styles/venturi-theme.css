@@ -511,6 +511,12 @@
   :is(button, input, textarea, select, [role='button']) {
     border: 1px solid ButtonText;
   }
+
+  /* Box-shadow rings disappear in forced colors; keep keyboard focus distinct. */
+  [data-slot='button']:focus-visible {
+    outline: 2px solid ButtonText;
+    outline-offset: 2px;
+  }
 }
 
 /* Share-an-idea surface shown instead of the composer (sign-in or restricted). */
