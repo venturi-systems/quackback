@@ -136,7 +136,12 @@ function SupportListPage() {
               >
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-foreground">
+                    {/* A subject or message preview is the conversation's only
+                        label, so it is shown whole and wraps (v6.6). */}
+                    <span
+                      className="min-w-0 break-words text-sm font-medium text-foreground"
+                      data-text-origin={c.subject || c.lastMessagePreview ? 'user' : 'localized'}
+                    >
                       {c.subject ||
                         c.lastMessagePreview ||
                         intl.formatMessage({

@@ -141,7 +141,9 @@ function ArticleDetailPage() {
                   className="mb-5 shrink-0 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground hover:bg-muted"
                 >
                   <ArrowLeft className="h-4 w-4 shrink-0" />
-                  <span className="truncate">All {category.name}</span>
+                  <span className="min-w-0 break-words">
+                    All <span data-text-origin="user">{category.name}</span>
+                  </span>
                 </Link>
                 <h4 className="mb-2 shrink-0 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   In this category

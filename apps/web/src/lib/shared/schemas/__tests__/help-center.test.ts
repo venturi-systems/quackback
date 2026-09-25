@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
+import { generateId } from '@quackback/ids'
 import {
   createCategorySchema,
   updateCategorySchema,
@@ -237,9 +238,13 @@ describe('listArticlesSchema', () => {
 })
 
 describe('articleFeedbackSchema', () => {
+  // The feedback is recorded against the article id column, which takes only
+  // an article TypeID (DEF-45).
+  const articleId = generateId('article')
+
   it('accepts valid feedback', () => {
     const result = articleFeedbackSchema.safeParse({
-      articleId: 'article_1',
+      articleId,
       helpful: true,
     })
     expect(result.success).toBe(true)
@@ -250,14 +255,22 @@ describe('articleFeedbackSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('rejects an articleId that is not an article TypeID', () => {
+    for (const id of ['article_1', generateId('category'), `${articleId}\u0000`]) {
+      expect(articleFeedbackSchema.safeParse({ articleId: id, helpful: true }).success, id).toBe(
+        false
+      )
+    }
+  })
+
   it('rejects missing helpful', () => {
-    const result = articleFeedbackSchema.safeParse({ articleId: 'article_1' })
+    const result = articleFeedbackSchema.safeParse({ articleId })
     expect(result.success).toBe(false)
   })
 
   it('rejects non-boolean helpful', () => {
     const result = articleFeedbackSchema.safeParse({
-      articleId: 'article_1',
+      articleId,
       helpful: 'yes',
     })
     expect(result.success).toBe(false)

@@ -90,7 +90,12 @@ export function SimilarPostsCard({
                         {post.status.name}
                       </span>
                     )}
-                    <p className="text-sm font-semibold text-foreground line-clamp-1">
+                    {/* Another member's title identifies the idea, so it is
+                        shown whole and wraps (v6.6) rather than being clamped. */}
+                    <p
+                      className="text-sm font-semibold text-foreground break-words"
+                      data-text-origin="user"
+                    >
                       {post.title}
                     </p>
                   </div>

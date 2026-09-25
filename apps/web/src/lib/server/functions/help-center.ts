@@ -28,7 +28,7 @@ import {
   restoreArticle,
   recordArticleFeedback,
 } from '@/lib/server/domains/help-center/help-center.service'
-import { filterText } from '@/lib/shared/schemas/list-filters'
+import { filterId, filterText } from '@/lib/shared/schemas/list-filters'
 import {
   listCategoriesSchema,
   getCategorySchema,
@@ -240,7 +240,7 @@ export const listPublicArticlesFn = createServerFn({ method: 'GET' })
   })
 
 export const listPublicArticlesForCategoryFn = createServerFn({ method: 'GET' })
-  .validator(z.object({ categoryId: z.string() }))
+  .validator(z.object({ categoryId: filterId('category') }))
   .handler(async ({ data }) => {
     if (!(await isPublicHelpCenterReadable())) return []
     const articles = await listPublicArticlesForCategory(data.categoryId)

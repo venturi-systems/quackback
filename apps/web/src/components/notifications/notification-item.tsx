@@ -151,14 +151,18 @@ function FullContent({ notification, icon: Icon, iconClass, bgClass, isUnread }:
 
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-4">
-          <div className="space-y-0.5">
+          <div className="min-w-0 space-y-0.5">
             <p
               className={cn('text-sm leading-tight', isUnread ? 'font-medium' : 'text-foreground')}
             >
               {notification.title}
             </p>
+            {/* The full list is where a notification is read; one without a
+                post links nowhere, so its body is shown whole (v6.6). */}
             {notification.body && (
-              <p className="text-xs text-muted-foreground line-clamp-2">{notification.body}</p>
+              <p className="text-xs text-muted-foreground break-words" data-text-origin="user">
+                {notification.body}
+              </p>
             )}
             {notification.post && (
               <p className="text-[11px] text-muted-foreground/60 mt-1">{notification.post.title}</p>

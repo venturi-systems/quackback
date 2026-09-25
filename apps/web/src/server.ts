@@ -4,6 +4,7 @@ import {
   isServerFnRequestWithoutId,
   serverFnNotFound,
 } from '@/lib/server/middleware/serverfn-decode-guard'
+import { protocolRelativePathRedirect } from '@/lib/server/middleware/protocol-relative-redirect'
 
 // Cold-start optimization: eagerly warm DB + Redis connections AND preload
 // the modules that bootstrap.ts dynamically imports on first SSR. The
@@ -30,6 +31,11 @@ logStartupBanner()
 
 export default createServerEntry({
   fetch(request) {
+    // A path that begins with `//` is redirected to the collapsed path, as the
+    // framework would, but with a relative Location: the framework's own 308
+    // names `http://` behind the TLS-terminating proxy.
+    const collapsed = protocolRelativePathRedirect(request)
+    if (collapsed) return collapsed
     // A bare `/_serverFn/` names no server function. TanStack Start throws
     // for it before any request middleware runs, which h3 answers 500; it is
     // a client error, so answer 404 here (DEF-59).

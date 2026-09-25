@@ -52,8 +52,21 @@ export function filterCount(min = 0) {
   return z.number().int().min(min).max(MAX_SEARCH_COUNT)
 }
 
+/** A page size from 1 up to `max` rows. */
+export function filterLimit(max = 100) {
+  return z.number().int().min(1).max(max)
+}
+
+/**
+ * A row offset: a whole number from 0. zod caps an int at the largest safe
+ * integer, which a Postgres `OFFSET` (bigint) takes.
+ */
+export function filterOffset() {
+  return z.number().int().min(0)
+}
+
 /** A page size the list queries serve. */
-const pageLimit = z.number().int().min(1).max(100)
+const pageLimit = filterLimit()
 
 const portalSort = z.enum(['top', 'new', 'trending'])
 const inboxSort = z.enum(['newest', 'oldest', 'votes'])
@@ -111,7 +124,7 @@ export const listPublicPostsSchema = z.object({
 // ============================================
 
 /** The row offset of a roadmap column page. */
-const rowOffset = z.number().int().min(0)
+const rowOffset = filterOffset()
 
 /** The filters the portal and admin roadmap columns share. */
 const roadmapPostFilters = {

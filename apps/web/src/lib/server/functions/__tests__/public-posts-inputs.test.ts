@@ -46,12 +46,16 @@ vi.mock('@quackback/db/client', () => ({
   },
 }))
 import {
+  createPublicPostFn,
   findSimilarPostsFn,
   getPostPermissionsFn,
   getPublicRoadmapPostsFn,
   getRoadmapPostsByStatusFn,
   getVoteSidebarDataFn,
   listPublicPostsFn,
+  toggleVoteFn,
+  userDeletePostFn,
+  userEditPostFn,
 } from '../public-posts'
 
 const NUL = '\u0000'
@@ -97,7 +101,12 @@ describe('public-posts.ts GET inputs (DEF-45)', () => {
       'getRoadmapPostsByStatusFn',
       getRoadmapPostsByStatusFn,
       { statusId: STATUS, page: 2, limit: 10 },
-      [{ statusId: 'in-progress' }, { statusId: `${STATUS}${NUL}` }],
+      [
+        { statusId: 'in-progress' },
+        { statusId: `${STATUS}${NUL}` },
+        { statusId: STATUS, page: 1.5 },
+        { statusId: STATUS, page: 2_147_483_648 },
+      ],
     ],
     [
       'findSimilarPostsFn',
@@ -108,6 +117,58 @@ describe('public-posts.ts GET inputs (DEF-45)', () => {
   ])('%s takes what the app sends and refuses the rest', (_name, fn, ok, refused) => {
     const schema = inputOf(fn)
     expect(schema.safeParse(ok).success).toBe(true)
+    for (const value of refused) {
+      expect(schema.safeParse(value).success, JSON.stringify(value)).toBe(false)
+    }
+  })
+})
+
+describe('public-posts.ts write inputs (DEF-45)', () => {
+  // The vote, edit, delete and create writes are POST server functions a
+  // portal user or the widget can call by hand. Each id goes to a TypeID id
+  // column and each text to a text or jsonb column, so a malformed id or a NUL
+  // is refused before any query runs.
+  const BOARD = generateId('board')
+
+  it.each<[name: string, fn: unknown, accepted: unknown[], refused: unknown[]]>([
+    [
+      'toggleVoteFn',
+      toggleVoteFn,
+      [{ postId: POST }],
+      [{ postId: 'post_e2e_missing' }, { postId: BOARD }, { postId: `${POST}${NUL}` }],
+    ],
+    [
+      'userEditPostFn',
+      userEditPostFn,
+      [{ postId: POST, title: 'Dark mode', content: 'Please add it' }],
+      [
+        { postId: 'post_1', title: 'Dark mode', content: '' },
+        { postId: POST, title: `Dark${NUL}mode`, content: '' },
+        { postId: POST, title: 'Dark mode', content: `Please${NUL}` },
+      ],
+    ],
+    ['userDeletePostFn', userDeletePostFn, [{ postId: POST }], [{ postId: 'post_1' }]],
+    [
+      'createPublicPostFn',
+      createPublicPostFn,
+      [
+        { boardId: BOARD, title: 'Dark mode' },
+        { boardId: BOARD, title: 'Dark mode', content: 'Please', metadata: { plan: 'pro' } },
+      ],
+      [
+        { boardId: 'features', title: 'Dark mode' },
+        { boardId: POST, title: 'Dark mode' },
+        { boardId: BOARD, title: `Dark${NUL}mode` },
+        { boardId: BOARD, title: 'Dark mode', content: NUL },
+        { boardId: BOARD, title: 'Dark mode', metadata: { plan: `pro${NUL}` } },
+        { boardId: BOARD, title: 'Dark mode', metadata: { [`pl${NUL}an`]: 'pro' } },
+      ],
+    ],
+  ])('%s takes what the app sends and refuses the rest', (_name, fn, accepted, refused) => {
+    const schema = inputOf(fn)
+    for (const value of accepted) {
+      expect(schema.safeParse(value).success, JSON.stringify(value)).toBe(true)
+    }
     for (const value of refused) {
       expect(schema.safeParse(value).success, JSON.stringify(value)).toBe(false)
     }

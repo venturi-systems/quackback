@@ -68,7 +68,14 @@ test.describe('auth routes read malformed queries without failing (DEF-55)', () 
   test('a foreign callbackUrl falls back to the portal, never another origin', async ({
     request,
   }) => {
-    for (const callbackUrl of ['//evil.example', 'https://evil.example', '/\t/evil.example']) {
+    for (const callbackUrl of [
+      '//evil.example',
+      'https://evil.example',
+      '/\t/evil.example',
+      // Both resolve to the path //evil.example once dot segments apply.
+      '/.//evil.example',
+      '/admin/..//evil.example',
+    ]) {
       const path = `/auth/login?${new URLSearchParams({ callbackUrl })}`
       const res = await request.get(path)
       await expectNoServerError(res, path)
@@ -110,5 +117,27 @@ test.describe('server-rendered status titles (DEF-44)', () => {
     const res = await request.get('/definitely-not-a-page-e2e')
     expect(res.status()).toBe(404)
     expect(await res.text()).toContain('<title>Page not found · Venturi Feedback</title>')
+  })
+})
+
+// Production answered `GET //evil.example` with
+// `308 location: http://feedback.venturi.systems/evil.example`: the
+// framework's redirect named the scheme the server sees behind the proxy.
+// The server entry now answers with a relative Location (src/server.ts).
+test.describe('paths that begin with //', () => {
+  test('redirect to the collapsed path with a relative Location', async ({
+    request,
+    baseURL,
+  }) => {
+    for (const [path, location] of [
+      ['//evil.example', '/evil.example'],
+      ['//evil.example/x?y=1', '/evil.example/x?y=1'],
+    ]) {
+      // An absolute URL, so the path is not resolved against the base as a
+      // protocol-relative reference to another host.
+      const res = await request.get(`${baseURL}${path}`, { maxRedirects: 0 })
+      expect(res.status(), `${path} status`).toBe(308)
+      expect(res.headers()['location'], `${path} location`).toBe(location)
+    }
   })
 })
