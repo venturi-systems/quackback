@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { keepFocusInView } from '../keep-focus-in-view'
+import { keepFocusInView, revealKeyboardFocus } from '../keep-focus-in-view'
 
 /**
  * Geometry is stubbed: the layout engine is not what these tests measure. The
@@ -145,7 +145,7 @@ describe('keepFocusInView', () => {
     expect(rootScrollBy).not.toHaveBeenCalled()
   })
 
-  it('leaves pointer focus alone', () => {
+  it('leaves focus that is not :focus-visible alone', () => {
     const { place, focus } = page({ keyboard: false })
     focus()
     place(860)
@@ -173,7 +173,7 @@ describe('keepFocusInView', () => {
     panel.scrollBy = panelScrollBy as unknown as typeof panel.scrollBy
     const region = document.createElement('div')
     const control = document.createElement('button')
-    control.matches = ((selector: string) =>
+    control.matches = ((selector: string): boolean =>
       selector === ':focus-visible') as typeof control.matches
     panel.append(region, control)
     document.body.append(panel)
@@ -197,6 +197,41 @@ describe('keepFocusInView', () => {
     stop = null
     place(860)
     resize?.()
+    expect(rootScrollBy).not.toHaveBeenCalled()
+  })
+})
+
+describe('revealKeyboardFocus', () => {
+  it('shows the whole of a field whose caret line alone the browser revealed', () => {
+    const { control, place } = page()
+    // The comment editor at 1024px: 72px tall, 29px of it on screen (768px
+    // viewport in run 36186271140; here the viewport is 844px).
+    place(815, 72)
+    control.focus()
+    expect(revealKeyboardFocus(control)).toBe(true)
+    expect(rootScrollBy).toHaveBeenCalledWith({ top: 43, behavior: 'instant' })
+  })
+
+  it('does nothing when the field is already whole', () => {
+    const { control, place } = page()
+    place(500, 72)
+    control.focus()
+    expect(revealKeyboardFocus(control)).toBe(false)
+    expect(rootScrollBy).not.toHaveBeenCalled()
+  })
+
+  it('leaves focus that is not :focus-visible alone', () => {
+    const { control, place } = page({ keyboard: false })
+    place(815, 72)
+    control.focus()
+    expect(revealKeyboardFocus(control)).toBe(false)
+    expect(rootScrollBy).not.toHaveBeenCalled()
+  })
+
+  it('ignores an element that does not have focus', () => {
+    const { control, place } = page()
+    place(815, 72)
+    expect(revealKeyboardFocus(control)).toBe(false)
     expect(rootScrollBy).not.toHaveBeenCalled()
   })
 })

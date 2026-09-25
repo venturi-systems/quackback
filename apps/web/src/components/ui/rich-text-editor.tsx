@@ -41,6 +41,7 @@ import {
 import { computePosition, flip, shift, offset } from '@floating-ui/dom'
 import DOMPurify from 'dompurify'
 import { cn } from '@/lib/shared/utils'
+import { revealKeyboardFocus } from './keep-focus-in-view'
 import {
   escapeHtmlAttr,
   sanitizeUrl,
@@ -1268,6 +1269,15 @@ function RichTextEditorBase({
     const dialogContent = containerRef.current?.closest<HTMLElement>('[data-slot="dialog-content"]')
     return dialogContent ?? document.body
   }, [])
+  // Tab into the text reveals only its caret line (Chromium scrolls the
+  // selection into view, not the field), which can leave most of the field
+  // and its focus ring below the viewport: show the whole field when it fits.
+  const revealFieldOnKeyboardFocus = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (target instanceof HTMLElement && target.classList.contains('ProseMirror')) {
+      revealKeyboardFocus(target)
+    }
+  }, [])
   const bubbleMenuRef = useCallback((el: HTMLDivElement | null) => {
     if (el) {
       el.style.zIndex = '99'
@@ -1321,6 +1331,7 @@ function RichTextEditorBase({
             className
           )}
           onContextMenu={handleContextMenu}
+          onFocus={revealFieldOnKeyboardFocus}
         >
           {showToolbar && (
             <MenuBar

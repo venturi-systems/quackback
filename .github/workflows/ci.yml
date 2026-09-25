@@ -679,9 +679,11 @@ jobs:
     #
     # MOTION (DEF-68). Every viewport is walked with motion on as well as with
     # reduced motion: 40 keyboard walks instead of 20, on the same runner and
-    # browser. The walk step took 38 s for 20 walks on run 36157989437. The
-    # added walks replace the keyboard walk the feedback release checklist
-    # asked for on the services hub, which may no longer run checks.
+    # browser. The walk step took 38 s for 20 walks on run 36157989437 and
+    # 71 s for 40 on run 36186271140: about 33 s more per run, well under a
+    # runner-minute. The added walks replace the keyboard walk the feedback
+    # release checklist asked for on the services hub, which may no longer
+    # run checks.
     name: Signed-in render check
     needs: [changed_paths]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')

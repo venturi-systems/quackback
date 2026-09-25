@@ -35,7 +35,11 @@ interface Band {
   bottom: number
 }
 
-/** The focused element when focus is keyboard focus; null otherwise. */
+/**
+ * The focused element when it matches :focus-visible; null otherwise. That is
+ * focus from the keyboard, and focus on a text field however it arrived:
+ * browsers match :focus-visible on text fields for a click too.
+ */
 function keyboardFocus(doc: Document): Element | null {
   let active: Element | null = doc.activeElement
   while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
@@ -92,6 +96,34 @@ function isWhole(rect: DOMRect, band: Band): boolean {
 }
 
 /**
+ * Scrolls the band's scroller by the least distance that shows the element
+ * whole, when it is not whole and fits. Returns whether it scrolled.
+ */
+function scrollIntoBand(element: Element, band: Band): boolean {
+  const rect = element.getBoundingClientRect()
+  if (isWhole(rect, band) || rect.height > band.bottom - band.top) return false
+  const delta = rect.bottom > band.bottom ? rect.bottom - band.bottom : rect.top - band.top
+  band.scroller.scrollBy({ top: delta, behavior: 'instant' })
+  return true
+}
+
+/**
+ * Shows a field that has just taken keyboard focus whole, by the least
+ * distance, when it fits. Chromium reveals only the caret of a rich text
+ * field that takes focus from Tab, not the field: at 1024px the comment
+ * editor on a post took focus with 29px of its 72px on screen and its focus
+ * ring below the viewport (render check run 36186271140, both motion
+ * settings). Acts only on :focus-visible focus, which for a text field also
+ * follows a click; then it moves the page only by the part of the field that
+ * was hidden. Returns whether it scrolled.
+ */
+export function revealKeyboardFocus(element: Element): boolean {
+  if (keyboardFocus(element.ownerDocument) !== element) return false
+  const band = bandOf(element)
+  return band ? scrollIntoBand(element, band) : false
+}
+
+/**
  * Watches one region. Returns the function that stops watching it. Exported
  * for tests; components use useKeepFocusInView.
  */
@@ -116,11 +148,7 @@ export function keepFocusInView(region: Element): () => void {
     const focused = keyboardFocus(doc)
     if (focused && focused === tracked && wasWhole) {
       const band = bandOf(focused)
-      const rect = focused.getBoundingClientRect()
-      if (band && !isWhole(rect, band) && rect.height <= band.bottom - band.top) {
-        const delta = rect.bottom > band.bottom ? rect.bottom - band.bottom : rect.top - band.top
-        band.scroller.scrollBy({ top: delta, behavior: 'instant' })
-      }
+      if (band) scrollIntoBand(focused, band)
     }
     measure()
   }
