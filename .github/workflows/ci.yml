@@ -21,15 +21,17 @@ on:
     - cron: '17 5 * * *'
   workflow_dispatch:
 
-# Only a first-attempt `synchronize` (a new head) shares the pull request's
-# group and cancels the run it supersedes. Every other event, and every re-run,
-# gets its own run-attempt group. A re-run keeps its original event payload, so
-# `synchronize` alone would let re-running an older run cancel the live
-# required check (RAIL #3877, remediation ledger DEF-04). Its own group also
-# keeps a re-run, reopen or merge-queue event from displacing a PENDING run,
-# which GitHub's one-pending-run-per-group rule would otherwise cancel.
+# A first-attempt `synchronize` (a new head) cancels the run it supersedes.
+# An `opened` run shares that pull-request group without cancelling, so the
+# first push after opening supersedes it. Every other event (`reopened`,
+# merge queue, push, dispatch) and every re-run gets its own run-attempt
+# group, so it is never cancelled and never displaces a pending run; a
+# close+reopen still starts a fresh run beside a wedged one. A re-run keeps
+# its original `synchronize` payload, so the event alone would let
+# re-running an older run cancel the live required portability-gate (RAIL #3877;
+# remediation ledger DEF-04).
 concurrency:
-  group: ci-${{ github.event.action == 'synchronize' && github.run_attempt == '1' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}-{1}', github.run_id, github.run_attempt) }}
+  group: ci-${{ (github.event.action == 'opened' || github.event.action == 'synchronize') && github.run_attempt == '1' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}-{1}', github.run_id, github.run_attempt) }}
   cancel-in-progress: ${{ github.event.action == 'synchronize' && github.run_attempt == '1' }}
 
 permissions:
