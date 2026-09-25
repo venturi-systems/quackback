@@ -38,9 +38,16 @@ describe('public RoadmapTabs (REQ-07: v6.6 text rules)', () => {
     for (const tab of screen.getAllByRole('tab')) {
       // v6.6 prohibits nowrap as a typography remedy; a long label reflows.
       expect(tab.className).not.toMatch(/\bwhitespace-nowrap\b/)
-      // Tabs keep their size in the scrollable row and never exceed it.
+      // Tabs keep their size in the scrollable row, and a wrapped tab stops
+      // short of the row by both scroll affordances so it can be read whole.
       expect(tab.className).toMatch(/\bshrink-0\b/)
-      expect(tab.className).toMatch(/\bmax-w-full\b/)
+      expect(tab.className).toContain(
+        'max-w-[calc(100%_-_2*max(2.625rem,var(--ds-component-touch-minimum)))]'
+      )
+      // A tall, wrapped tab uses the 24px token radius, not a capsule whose
+      // corners would cut into its first and last lines.
+      expect(tab.className).toContain('rounded-(--ds-primitive-dimension-radius-24)')
+      expect(tab.className).not.toMatch(/\brounded-full\b/)
     }
   })
 

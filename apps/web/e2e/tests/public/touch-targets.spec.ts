@@ -125,6 +125,89 @@ test.describe('Portal coarse-pointer action targets', () => {
     await expectTouchTarget(page.getByRole('button', { name: 'Scroll right', exact: true }))
     await expectNoPageOverflow(page)
   })
+
+  test('a roadmap tab label longer than the row wraps whole inside its tab', async ({ page }) => {
+    await page.goto('/roadmap')
+    await useSmallRoot(page)
+    const tablist = page.getByRole('tablist', { name: 'Roadmaps' })
+    await expect(tablist).toBeVisible()
+    const tab = tablist.getByRole('tab').first()
+    const label = tab.locator('[data-text-origin="user"]')
+    await expect(label).toHaveCount(1)
+
+    // Seeded roadmap names are short. Give the first tab an admin-written name
+    // far wider than the 320px row, in the real row with its real scroll
+    // affordances, so the reflow path itself is rendered.
+    const longName =
+      'Integrations, data connectors and workspace administration planned for the second half of the year'
+    await label.evaluate((element, name) => {
+      element.textContent = name
+    }, longName)
+    await tablist.evaluate((element) => element.dispatchEvent(new Event('scroll')))
+    await expect(tab).toHaveText(longName)
+
+    const geometry = await tab.evaluate((element) => {
+      const text = element.querySelector('[data-text-origin="user"]') as HTMLElement
+      const row = element.closest('[role="tablist"]') as HTMLElement
+      const tabRect = element.getBoundingClientRect()
+      const textRect = text.getBoundingClientRect()
+      const rowRect = row.getBoundingClientRect()
+      const textStyle = getComputedStyle(text)
+      const lineHeight = parseFloat(textStyle.lineHeight)
+      const fontSize = parseFloat(textStyle.fontSize)
+      // Each corner of the label, inset by half-leading to its glyph box, must
+      // lie inside the tab's rounded outline (the radius as painted, clamped to
+      // half the tab's shorter side).
+      const radius = Math.min(
+        parseFloat(getComputedStyle(element).borderTopLeftRadius),
+        tabRect.width / 2,
+        tabRect.height / 2
+      )
+      const inset = (lineHeight - fontSize) / 2
+      const corners = [
+        [textRect.left, textRect.top + inset, tabRect.left + radius, tabRect.top + radius],
+        [textRect.right, textRect.top + inset, tabRect.right - radius, tabRect.top + radius],
+        [textRect.left, textRect.bottom - inset, tabRect.left + radius, tabRect.bottom - radius],
+        [textRect.right, textRect.bottom - inset, tabRect.right - radius, tabRect.bottom - radius],
+      ]
+      const cornersInside = corners.every(([x, y, cx, cy]) => {
+        const outsideX = x < tabRect.left + radius || x > tabRect.right - radius
+        const outsideY = y < tabRect.top + radius || y > tabRect.bottom - radius
+        return !(outsideX && outsideY) || Math.hypot(x - cx, y - cy) <= radius + 0.5
+      })
+      return {
+        tab: { left: tabRect.left, right: tabRect.right },
+        row: { left: rowRect.left, right: rowRect.right },
+        lines: Math.round(textRect.height / lineHeight),
+        unclipped:
+          text.scrollWidth <= text.clientWidth + 1 &&
+          text.scrollHeight <= text.clientHeight + 1 &&
+          textRect.left >= tabRect.left &&
+          textRect.right <= tabRect.right + 0.5,
+        cornersInside,
+      }
+    })
+    // The label wraps instead of staying on one line, and nothing is clipped.
+    expect(geometry.lines).toBeGreaterThan(1)
+    expect(geometry.unclipped).toBe(true)
+    expect(geometry.cornersInside).toBe(true)
+    // The tab stays inside the row.
+    expect(geometry.tab.left).toBeGreaterThanOrEqual(geometry.row.left - 0.5)
+    expect(geometry.tab.right).toBeLessThanOrEqual(geometry.row.right + 0.5)
+    // With the seeded roadmaps the later tabs overflow the row, so the fading
+    // scroll affordance shows; the wrapped tab ends before it, leaving the
+    // whole label readable. A row that fits shows no affordance to avoid.
+    const scrollRight = page.getByRole('button', { name: 'Scroll right', exact: true })
+    if (await tablist.evaluate((element) => element.scrollWidth > element.clientWidth + 1)) {
+      await expectTouchTarget(scrollRight)
+      const arrow = (await scrollRight.boundingBox())!
+      expect(geometry.tab.right).toBeLessThanOrEqual(arrow.x + 0.5)
+    } else {
+      await expect(scrollRight).toHaveCount(0)
+    }
+    await expectTouchTarget(tab)
+    await expectNoPageOverflow(page)
+  })
 })
 
 test.describe('Portal fine-pointer action sizing', () => {
