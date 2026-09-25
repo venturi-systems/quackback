@@ -84,7 +84,7 @@ interface KeyboardResult {
   path: string
   context: { id: string; pointer: string; minTarget: number; width: number }
   pointerCoarse: boolean | null
-  forward: { end: string; stops: unknown[] } | null
+  forward: { end: string; stops: { visibility?: string; onScreen?: number }[] } | null
   reverse: {
     end: string
     stopCount: number
@@ -291,25 +291,40 @@ const reverseDifference = (reverse: KeyboardResult['reverse']): string => {
   return ` (${forwardOnly} forward only, ${reverseOnly} reverse only)`
 }
 
+/**
+ * Forward stops that were partly outside the viewport but at least half on
+ * screen. Less than half is a finding; this much is evidence for review, and
+ * the walk report gives each stop's rect and on-screen share.
+ */
+const partlyOffScreen = (forward: KeyboardResult['forward']): number =>
+  forward?.stops.filter((stop) => stop.visibility === 'clipped' && (stop.onScreen ?? 0) >= 0.5)
+    .length ?? 0
+
 out('### Keyboard walk')
 out()
 out(
   'A note beside the reverse end counts the elements only one of the two walks reached, compared by element rather than by selector. It is evidence for review, not a failure; the walk report names each element.'
 )
 out()
-out('| Route | Context | Coarse pointer | Stops | Forward end | Reverse end | Findings |')
-out('|---|---|---|---|---|---|---|')
+out(
+  'Partly off screen counts the forward stops that ran past the viewport while at least half of the element stayed on screen. Less than half on screen is a finding. The count is evidence for review; the walk report gives each stop its rect and on-screen share.'
+)
+out()
+out(
+  '| Route | Context | Coarse pointer | Stops | Forward end | Reverse end | Partly off screen | Findings |'
+)
+out('|---|---|---|---|---|---|---|---|')
 const keyboardFindings: string[] = []
 for (const route of ROUTES) {
   for (const { id: context } of walkContextsFor(route)) {
     const result = readJson<KeyboardResult>(path.join(KEYBOARD_DIR, `${route.id}__${context}.json`))
     if (!result) {
       problems.push(`${route.id} at ${context}: no keyboard walk result`)
-      out(`| ${route.id} | ${context} | | | NO RESULT | | |`)
+      out(`| ${route.id} | ${context} | | | NO RESULT | | | |`)
       continue
     }
     out(
-      `| ${route.id} | ${context} | ${result.pointerCoarse ?? ''} | ${result.forward?.stops.length ?? ''} | ${result.forward?.end ?? ''} | ${result.reverse?.end ?? ''}${reverseDifference(result.reverse)} | ${result.findings.length} |`
+      `| ${route.id} | ${context} | ${result.pointerCoarse ?? ''} | ${result.forward?.stops.length ?? ''} | ${result.forward?.end ?? ''} | ${result.reverse?.end ?? ''}${reverseDifference(result.reverse)} | ${partlyOffScreen(result.forward)} | ${result.findings.length} |`
     )
     if (result.findings.length)
       problems.push(`${route.id} at ${context}: ${result.findings.length} keyboard findings`)

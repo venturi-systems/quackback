@@ -17,6 +17,12 @@
  *     on the frame that tightly encloses it), is not :focus-visible, has no
  *     box on screen, or is entirely covered by another element (WCAG 2.4.7,
  *     2.4.11);
+ *   - less than half of a stop's box is on screen (the reader cannot tell
+ *     what has focus). Tab scrolls a focused element that fits into full view,
+ *     so one found mostly outside the viewport moved after it took focus, or
+ *     cannot fit on the screen. A stop that is only partly outside is recorded
+ *     (`visibility: 'clipped'`, with its `onScreen` share) and counted in the
+ *     summary for review;
  *   - focus moves backwards in document order, or any element carries a
  *     positive tabindex (WCAG 2.4.3);
  *   - focus cycles inside the page without ever leaving it, or never ends
@@ -57,6 +63,7 @@ type FindingKind =
   | 'pointer-emulation'
   | 'focus-not-visible'
   | 'focus-obscured'
+  | 'focus-clipped'
   | 'focus-order'
   | 'positive-tabindex'
   | 'focus-trap'
@@ -80,6 +87,8 @@ interface TargetResult {
   rule: 'size' | 'hit-area' | 'spacing' | 'inline-exception' | 'user-agent-control' | null
 }
 
+type Visibility = 'visible' | 'no-box' | 'offscreen' | 'covered' | 'clipped'
+
 interface StopResult {
   kind: 'stop'
   /**
@@ -95,7 +104,9 @@ interface StopResult {
   focusVisible: boolean
   indicator: string[]
   target: TargetResult
-  visibility: 'visible' | 'no-box' | 'offscreen' | 'covered'
+  visibility: Visibility
+  /** Share of the box's area inside the viewport, 0 to 1, two decimals. */
+  onScreen: number
   order: 'first' | 'in-order' | 'out-of-order'
   rect: { x: number; y: number; width: number; height: number }
 }
@@ -348,12 +359,24 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
     ok: boolean
     rule: 'size' | 'hit-area' | 'spacing' | 'inline-exception' | 'user-agent-control' | null
   }
-  const visibilityOf = (el: Element): 'visible' | 'no-box' | 'offscreen' | 'covered' => {
+  const visibilityOf = (el: Element): { visibility: Visibility; onScreen: number } => {
     const { rect } = rectOf(el)
-    if (rect.width < 1 || rect.height < 1) return 'no-box'
+    if (rect.width < 1 || rect.height < 1) return { visibility: 'no-box', onScreen: 0 }
     if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) {
-      return 'offscreen'
+      return { visibility: 'offscreen', onScreen: 0 }
     }
+    // Sample the part of the box that is on screen. Fractions of the whole box
+    // miss it when the box runs past the viewport: a 3,110px button left only
+    // two sample points on screen, both under the sticky header (run
+    // 36091574101), and a 4,138px one and a Search button 4px on screen left
+    // none, which read as visible without a single sample (run 36088534312).
+    // Every point below lies inside the viewport, so no stop passes unsampled.
+    const left = Math.max(rect.left, 0)
+    const top = Math.max(rect.top, 0)
+    const right = Math.min(rect.right, innerWidth)
+    const bottom = Math.min(rect.bottom, innerHeight)
+    const onScreen =
+      Math.round((((right - left) * (bottom - top)) / (rect.width * rect.height)) * 100) / 100
     const points = (
       [
         [0.5, 0.5],
@@ -362,11 +385,7 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
         [0.2, 0.8],
         [0.8, 0.8],
       ] as [number, number][]
-    )
-      .map(
-        ([fx, fy]) => [rect.left + rect.width * fx, rect.top + rect.height * fy] as [number, number]
-      )
-      .filter(([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight)
+    ).map(([fx, fy]) => [left + (right - left) * fx, top + (bottom - top) * fy] as [number, number])
     const labels = Array.from((el as HTMLInputElement).labels ?? [])
     const covered = points.filter(([x, y]) => {
       const hit = document.elementFromPoint(x, y)
@@ -374,7 +393,14 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       if (hit === el || el.contains(hit) || hit.contains(el)) return false
       return !labels.some((label) => label === hit || label.contains(hit) || hit.contains(label))
     })
-    return points.length > 0 && covered.length === points.length ? 'covered' : 'visible'
+    if (covered.length === points.length) return { visibility: 'covered', onScreen }
+    // Half a pixel of slack for subpixel layout.
+    const outside =
+      rect.left < -0.5 ||
+      rect.top < -0.5 ||
+      rect.right > innerWidth + 0.5 ||
+      rect.bottom > innerHeight + 0.5
+    return { visibility: outside ? 'clipped' : 'visible', onScreen }
   }
 
   const visited: Element[] = []
@@ -435,6 +461,7 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       }
       visited.push(el)
       const rect = el.getBoundingClientRect()
+      const { visibility, onScreen } = visibilityOf(el)
       return {
         kind: 'stop',
         key: keyOf(el),
@@ -445,7 +472,8 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
         focusVisible: el.matches(':focus-visible'),
         indicator: indicatorOf(el),
         target: targetOf(el),
-        visibility: visibilityOf(el),
+        visibility,
+        onScreen,
         order,
         rect: {
           x: Math.round(rect.x),
@@ -549,6 +577,13 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
           ...at,
           kind: 'focus-obscured',
           detail: 'focused element is entirely covered',
+        })
+      } else if (stop.visibility === 'clipped' && stop.onScreen < 0.5) {
+        const { x, y, width, height } = stop.rect
+        findings.push({
+          ...at,
+          kind: 'focus-clipped',
+          detail: `only ${Math.round(stop.onScreen * 100)}% of the focused element (${width}x${height}px at ${x},${y}) is inside the ${ctx.width}x${ctx.height}px viewport`,
         })
       }
       if (!stop.target.ok) {
