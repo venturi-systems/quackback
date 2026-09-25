@@ -39,6 +39,7 @@ import {
   type AuthContext,
 } from './auth-helpers'
 import { isTeamMember } from '@/lib/shared/roles'
+import { filterId, filterIdList, filterText } from '@/lib/shared/schemas/list-filters'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'chat' })
@@ -50,10 +51,16 @@ const attachmentSchema = z.object({
   size: z.number().int().nonnegative(),
 })
 
+// Ids. Every conversation, message, label, segment, principal, board and post
+// id below goes to a TypeID id column, which throws on anything but a TypeID of
+// its entity, so the validators refuse one before any query runs (DEF-45).
+const conversationIdField = filterId('conversation')
+const messageIdField = filterId('chat_msg')
+
 // Content may be empty only when attachments are present (validated in the
 // service); allow empty here and let the service enforce the real rule.
 const sendMessageSchema = z.object({
-  conversationId: z.string().optional(),
+  conversationId: conversationIdField.optional(),
   content: z.string().max(MAX_CHAT_MESSAGE_LENGTH).default(''),
   // Rich-composer TipTap doc (inline embeds / images). Sanitized server-side;
   // the plain `content` is the doc's text, kept for previews/notifications/search.
@@ -63,11 +70,12 @@ const sendMessageSchema = z.object({
   visitorEmail: z.string().email().max(320).optional(),
 })
 
-const conversationIdSchema = z.object({ conversationId: z.string() })
+const conversationIdSchema = z.object({ conversationId: conversationIdField })
 
 const listMessagesSchema = z.object({
-  conversationId: z.string(),
-  before: z.string().optional(),
+  conversationId: conversationIdField,
+  // The id of the oldest message already shown.
+  before: messageIdField.optional(),
 })
 
 const listConversationsSchema = z.object({
@@ -76,27 +84,28 @@ const listConversationsSchema = z.object({
   // Assignee queue: 'mine' = assigned to the requesting agent, 'unassigned' =
   // no agent yet, 'all'/omitted = no assignee constraint.
   assignee: z.enum(['all', 'mine', 'unassigned']).optional(),
-  search: z.string().max(200).optional(),
+  search: filterText().max(200).optional(),
   // Filter to conversations carrying ANY of these labels.
-  tagIds: z.array(z.string()).optional(),
+  tagIds: filterIdList('chat_tag').optional(),
   // Filter to conversations whose visitor is a member of ANY of these segments.
-  segmentIds: z.array(z.string()).optional(),
+  segmentIds: filterIdList('segment').optional(),
   // 'mentions' = only conversations whose internal notes @-mention the
   // requesting agent (the principal is resolved server-side from auth).
   view: z.enum(['all', 'mentions']).optional(),
-  before: z.string().optional(),
+  // The id of the last conversation on the previous page.
+  before: conversationIdField.optional(),
 })
 
-const messageIdSchema = z.object({ messageId: z.string() })
+const messageIdSchema = z.object({ messageId: messageIdField })
 
 const csatSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   rating: z.number().int().min(1).max(5),
   comment: z.string().max(2000).optional(),
 })
 
 const agentSendSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   content: z.string().max(MAX_CHAT_MESSAGE_LENGTH).default(''),
   // Rich-composer TipTap doc (inline embeds / images). Sanitized server-side;
   // the plain `content` is the doc's text, kept for previews/notifications/search.
@@ -105,12 +114,12 @@ const agentSendSchema = z.object({
 })
 
 const startConversationSchema = z.object({
-  targetPrincipalId: z.string(),
+  targetPrincipalId: filterId('principal'),
   content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
 })
 
 const agentNoteSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
   // TipTap doc from the note editor (carries @-mention nodes). Validated +
   // mention-extracted server-side; omitted for a plain-text note.
@@ -120,30 +129,30 @@ const agentNoteSchema = z.object({
 })
 
 const setStatusSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   status: z.enum(CONVERSATION_STATUSES),
 })
 
 const endConversationSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   reason: z.enum(CONVERSATION_END_REASONS),
   note: z.string().max(2000).optional(),
 })
 
 const assignSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   /** null/omitted = unassign; 'me' = the current agent; otherwise a team
    *  member's principal id (validated server-side). */
-  assignTo: z.union([z.string(), z.null()]).optional(),
+  assignTo: z.union([z.literal('me'), filterId('principal'), z.null()]).optional(),
 })
 
 const setPrioritySchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   priority: z.enum(['none', 'low', 'medium', 'high', 'urgent']),
 })
 
 const messageReactionSchema = z.object({
-  messageId: z.string(),
+  messageId: messageIdField,
   // Server-side allowlist: reactions are restricted to the curated set so a
   // direct API call can't store arbitrary unicode.
   emoji: z
@@ -152,13 +161,13 @@ const messageReactionSchema = z.object({
 })
 
 const messageFlagSchema = z.object({
-  messageId: z.string(),
+  messageId: messageIdField,
   flagged: z.boolean(),
 })
 
 const markUnreadFromMessageSchema = z.object({
-  conversationId: z.string(),
-  messageId: z.string(),
+  conversationId: conversationIdField,
+  messageId: messageIdField,
 })
 
 async function assertConversationsEnabled(): Promise<void> {
@@ -268,7 +277,7 @@ export const getChatPresenceFn = createServerFn({ method: 'GET' }).handler(
 //  - omitted        → the visitor's active/most-recent thread (default)
 //  - a conversation → that thread, if the caller owns it (else greeting state)
 //  - null           → "new": config + greeting with no thread
-const myChatSchema = z.object({ conversationId: z.string().nullish() }).optional()
+const myChatSchema = z.object({ conversationId: conversationIdField.nullish() }).optional()
 
 /** The current visitor's active conversation + first page of messages. */
 export const getMyChatFn = createServerFn({ method: 'GET' })
@@ -609,9 +618,10 @@ export const listConversationsFn = createServerFn({ method: 'GET' })
   })
 
 const userConversationsSchema = z.object({
-  principalId: z.string(),
+  principalId: filterId('principal'),
   status: z.enum(CONVERSATION_STATUSES).optional(),
-  before: z.string().optional(),
+  // The id of the last conversation on the previous page.
+  before: conversationIdField.optional(),
 })
 
 /** A single visitor's chat history (status-filterable, paginated) — admin user profile. */
@@ -754,11 +764,11 @@ export const addChatNoteFn = createServerFn({ method: 'POST' })
   })
 
 const convertSchema = z.object({
-  conversationId: z.string(),
-  boardId: z.string(),
+  conversationId: conversationIdField,
+  boardId: filterId('board'),
   title: z.string().max(200).optional(),
   content: z.string().max(10000).optional(),
-  asUpvoteOfPostId: z.string().optional(),
+  asUpvoteOfPostId: filterId('post').optional(),
   sourceMessageContent: z.string().max(10000).optional(),
 })
 
@@ -792,7 +802,7 @@ export const createPostFromConversationFn = createServerFn({ method: 'POST' })
 // be ignored server-side rather than rejected, so capturing an email can never
 // block the track action it rides alongside.
 const captureContactEmailSchema = z.object({
-  conversationId: z.string(),
+  conversationId: conversationIdField,
   email: z.string().max(320),
 })
 
@@ -816,8 +826,8 @@ export const captureVisitorContactEmailFn = createServerFn({ method: 'POST' })
   })
 
 const sharePostSchema = z.object({
-  conversationId: z.string(),
-  postId: z.string(),
+  conversationId: conversationIdField,
+  postId: filterId('post'),
 })
 
 /** Agent action: embed an existing feedback post into the conversation (visitor can upvote it). */
@@ -1004,7 +1014,7 @@ export const getLinkedPostsForConversationFn = createServerFn({ method: 'GET' })
   })
 
 export const getLinkedConversationsForPostFn = createServerFn({ method: 'GET' })
-  .validator(z.object({ postId: z.string() }))
+  .validator(z.object({ postId: filterId('post') }))
   .handler(async ({ data }) => {
     try {
       await requireAuth({ roles: ['admin', 'member'] })

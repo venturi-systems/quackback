@@ -9,6 +9,7 @@ import { db, eq, and, principal, user } from '@/lib/server/db'
 import type { PrincipalId, UserId } from '@quackback/ids'
 import { generateId } from '@quackback/ids'
 import { ForbiddenError, NotFoundError } from '@/lib/shared/errors'
+import { isUniqueViolation } from '@/lib/server/errors/database-error'
 import {
   isTeamDomainEmail,
   TEAM_IDENTITY_LOCKED_MESSAGE,
@@ -178,7 +179,7 @@ export async function identifyPortalUser(
       created = true
     } catch (err) {
       // Handle concurrent insert race condition (unique constraint on email)
-      if ((err as { code?: string }).code === '23505') {
+      if (isUniqueViolation(err)) {
         userRecord = (await db.query.user.findFirst({
           where: eq(user.email, normalizedEmail),
           columns: USER_COLUMNS,

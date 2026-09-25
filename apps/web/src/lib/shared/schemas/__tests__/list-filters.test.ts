@@ -9,6 +9,8 @@ import {
   filterDate,
   filterDay,
   filterId,
+  filterLimit,
+  filterOffset,
   filterText,
   inboxPostListSchema,
   listInboxPostsSchema,
@@ -113,6 +115,25 @@ describe('filter fields refuse what the query cannot take', () => {
       expect(accepts(filterCount(), value), String(value)).toBe(false)
     }
     expect(accepts(filterCount(1), 0)).toBe(false)
+  })
+
+  it('keeps only whole page sizes from 1 up to the cap', () => {
+    expect(accepts(filterLimit(), 1)).toBe(true)
+    expect(accepts(filterLimit(), 100)).toBe(true)
+    expect(accepts(filterLimit(50), 50)).toBe(true)
+    for (const value of [0, -1, 1.5, 101, Number.NaN, Infinity, '20']) {
+      expect(accepts(filterLimit(), value), String(value)).toBe(false)
+    }
+    expect(accepts(filterLimit(50), 51)).toBe(false)
+  })
+
+  it('keeps only whole row offsets from 0 that OFFSET can take', () => {
+    for (const value of [0, 40, Number.MAX_SAFE_INTEGER]) {
+      expect(accepts(filterOffset(), value), String(value)).toBe(true)
+    }
+    for (const value of [-1, 1.5, 1e300, Number.NaN, Infinity, '0']) {
+      expect(accepts(filterOffset(), value), String(value)).toBe(false)
+    }
   })
 })
 
