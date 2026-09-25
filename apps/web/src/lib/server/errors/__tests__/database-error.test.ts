@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { DrizzleQueryError } from 'drizzle-orm'
 import { ConflictError, InternalError, ValidationError } from '@/lib/shared/errors'
-import { isDatabaseError, isUniqueViolation, postgresErrorCode } from '../database-error'
+import {
+  databaseErrorLogFields,
+  isDatabaseError,
+  isUniqueViolation,
+  postgresErrorCode,
+} from '../database-error'
 
 // drizzle-orm 0.45 wraps every failed query in a DrizzleQueryError whose
 // `cause` is the Postgres error. These helpers read the SQLSTATE through that
@@ -89,5 +94,57 @@ describe('isDatabaseError', () => {
     expect(isDatabaseError({ query: 'select 1', params: [] })).toBe(false)
     expect(isDatabaseError('Failed query: select 1')).toBe(false)
     expect(isDatabaseError(null)).toBe(false)
+  })
+})
+
+describe('databaseErrorLogFields (DEF-63)', () => {
+  // A failed query whose bound value, Postgres message and detail all carry
+  // user data, as they do in production (an email address, a pasted token).
+  function leakyFailedQuery() {
+    const message = 'invalid input syntax for type uuid: "tok_live_SECRET"'
+    const cause = Object.assign(new Error(message), {
+      code: '23505',
+      severity: 'ERROR',
+      routine: '_bt_check_unique',
+      table_name: 'users',
+      constraint_name: 'users_email_key',
+      detail: 'Key (email)=(ann@acme.example) already exists.',
+    })
+    return new DrizzleQueryError(
+      'insert into "users" ("email", "token") values ($1, $2)',
+      ['ann@acme.example', 'tok_live_SECRET'],
+      cause
+    )
+  }
+
+  it('keeps the statement, codes and identifiers', () => {
+    expect(databaseErrorLogFields(leakyFailedQuery())).toEqual({
+      pg_code: '23505',
+      error_name: 'DrizzleQueryError',
+      statement: 'insert into "users" ("email", "token") values ($1, $2)',
+      param_count: 2,
+      severity: 'ERROR',
+      routine: '_bt_check_unique',
+      table: 'users',
+      constraint: 'users_email_key',
+    })
+  })
+
+  it('never returns a parameter value, the message or the Postgres detail', () => {
+    const logged = JSON.stringify(databaseErrorLogFields(leakyFailedQuery()))
+    const secrets = ['ann@acme.example', 'tok_live_SECRET', 'already exists', 'Failed query']
+    for (const secret of secrets) {
+      expect(logged).not.toContain(secret)
+    }
+  })
+
+  it('reads a bare Postgres error and ignores non-errors', () => {
+    expect(databaseErrorLogFields(postgresError('22P02', 'bad input "x"'))).toEqual({
+      pg_code: '22P02',
+      error_name: 'Error',
+      severity: 'ERROR',
+      routine: '_bt_check_unique',
+    })
+    expect(databaseErrorLogFields(undefined)).toEqual({})
   })
 })
