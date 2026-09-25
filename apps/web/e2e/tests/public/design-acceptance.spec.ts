@@ -855,7 +855,7 @@ for (const width of [320, 1440]) {
     }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })
       await openRoute(page, route)
-      const trigger = page.getByRole('button', { name: 'Search', exact: true })
+      const trigger = page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })
       await trigger.click()
       const search = page.getByRole('textbox', { name: 'Search', exact: true })
       await expect(search).toBeFocused()
@@ -886,3 +886,31 @@ for (const width of [320, 1440]) {
     })
   }
 }
+
+test('A11 empty search recovery preserves the selected board and sort', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await openRoute(page, 'feed')
+  await page.locator('#portal-main aside nav button').nth(1).click()
+  await expect(page).toHaveURL(/[?&]board=/)
+  const board = new URL(page.url()).searchParams.get('board')
+  expect(board).toBeTruthy()
+  const query = new URLSearchParams({
+    board: board!,
+    sort: 'top',
+    search: 'zz-no-matching-feedback-a11',
+    minVotes: '999999',
+  })
+  await page.goto(`/?${query}`)
+  const status = page.locator('#portal-main [role="status"]')
+  await expect(status).toHaveText('0 posts shown')
+  await expect(page.getByText('Search: zz-no-matching-feedback-a11', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBeNull()
+  const restored = new URL(page.url()).searchParams
+  expect(restored.get('minVotes')).toBeNull()
+  expect(restored.get('board')).toBe(board)
+  expect(restored.get('sort')).toBe('top')
+  await expect(status).toHaveText(/\d+ posts? shown/)
+  await expect(page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Clear all', exact: true })).toBeHidden()
+})

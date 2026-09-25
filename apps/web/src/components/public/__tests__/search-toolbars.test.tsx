@@ -6,27 +6,36 @@ import { FeedbackToolbar } from '../feedback/feedback-toolbar'
 import { PublicRoadmapToolbar } from '../public-roadmap-toolbar'
 
 const toolbars = [
-  { name: 'feedback', Component: FeedbackToolbar, sort: 'trending' as const },
-  { name: 'roadmap', Component: PublicRoadmapToolbar, sort: 'votes' as const },
+  { name: 'feedback' },
+  { name: 'roadmap' },
 ]
 
-describe.each(toolbars)('$name search', ({ Component, sort }) => {
+describe.each(toolbars)('$name search', ({ name }) => {
   function toolbar(currentSearch?: string) {
     return (
       <IntlProvider locale="en" defaultLocale="en">
-        <Component
-          currentSort={sort as never}
-          onSortChange={vi.fn()}
-          currentSearch={currentSearch}
-          onSearchChange={vi.fn()}
-        />
+        {name === 'feedback' ? (
+          <FeedbackToolbar
+            currentSort="trending"
+            onSortChange={vi.fn()}
+            currentSearch={currentSearch}
+            onSearchChange={vi.fn()}
+          />
+        ) : (
+          <PublicRoadmapToolbar
+            currentSort="votes"
+            onSortChange={vi.fn()}
+            currentSearch={currentSearch}
+            onSearchChange={vi.fn()}
+          />
+        )}
       </IntlProvider>
     )
   }
 
   it('keeps an explicit visible label after typing', async () => {
     render(toolbar())
-    fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     const input = await screen.findByRole('textbox', { name: 'Search' })
     fireEvent.change(input, { target: { value: 'billing' } })
     expect(screen.getByLabelText('Search', { selector: 'input' })).toBe(input)
@@ -36,7 +45,7 @@ describe.each(toolbars)('$name search', ({ Component, sort }) => {
 
   it('follows external query changes and clearing', async () => {
     const { rerender } = render(toolbar('alpha'))
-    fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     const input = await screen.findByRole('textbox', { name: 'Search' })
     expect(input).toHaveValue('alpha')
     rerender(toolbar('beta'))
@@ -71,7 +80,7 @@ describe('FeedbackToolbar state', () => {
     expect(screen.getAllByRole('button', { pressed: true })).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Top', pressed: true })).toBeVisible()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Search', exact: true }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     const input = await screen.findByRole('textbox', { name: 'Search' })
     fireEvent.change(input, { target: { value: 'unsent draft' } })
     rerender(toolbar('top', true))

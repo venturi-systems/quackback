@@ -12,6 +12,8 @@ interface PublicRoadmapToolbarProps {
   currentSort: RoadmapSort
   onSortChange: (sort: RoadmapSort) => void
   currentSearch?: string
+  /** Stable focus destination after clearing the applied query and facets. */
+  searchTriggerRef?: React.Ref<HTMLButtonElement>
   onSearchChange: (search: string | undefined) => void
   /** Optional slot rendered after the search button on the right (typically the Filter button). */
   filterButton?: React.ReactNode
@@ -21,6 +23,7 @@ export function PublicRoadmapToolbar({
   currentSort,
   onSortChange,
   currentSearch,
+  searchTriggerRef,
   onSearchChange,
   filterButton,
 }: PublicRoadmapToolbarProps): React.ReactElement {
@@ -97,6 +100,7 @@ export function PublicRoadmapToolbar({
                 no accessible name on mobile -- the icon is aria-hidden. The
                 aria-label keeps it named at every width. */}
             <Button
+              ref={searchTriggerRef}
               variant="outline"
               size="sm"
               className="gap-1.5"

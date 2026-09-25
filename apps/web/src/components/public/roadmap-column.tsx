@@ -31,15 +31,45 @@ export function RoadmapColumn({
   signInRequiredForItems,
 }: RoadmapColumnProps) {
   const intl = useIntl()
-  const { data, isFetchingNextPage, hasNextPage, fetchNextPage, isLoading, isError, refetch } =
-    usePublicRoadmapPosts({
-      roadmapId,
-      statusId,
-      filters,
-    })
+  const {
+    data,
+    isFetching,
+    isFetchingNextPage,
+    isPlaceholderData,
+    hasNextPage,
+    fetchNextPage,
+    isLoading,
+    isPending,
+    isError,
+    refetch,
+  } = usePublicRoadmapPosts({
+    roadmapId,
+    statusId,
+    filters,
+  })
 
   const posts = flattenRoadmapPostEntries(data)
-  const total = data?.pages[0]?.total ?? 0
+  const total = data?.pages[0]?.total
+  const resultsPending = isPending || isLoading || isFetching || isPlaceholderData
+  const hasAppliedFilters = Boolean(
+    filters?.search || filters?.board?.length || filters?.tags?.length || filters?.segmentIds?.length
+  )
+  const signInMessage = intl.formatMessage({
+    id: 'portal.roadmap.column.empty.signInRequired',
+    defaultMessage: 'Sign in to view roadmap items.',
+  })
+  const resultStatus = isError
+    ? ''
+    : resultsPending
+      ? intl.formatMessage({
+          id: 'portal.postDetail.deleteDialog.loading',
+          defaultMessage: 'Loading...',
+        })
+      : signInRequiredForItems && total === 0
+        ? signInMessage
+        : total !== undefined
+          ? intl.formatNumber(total)
+          : ''
 
   const sentinelRef = useInfiniteScroll({
     hasMore: hasNextPage,
@@ -61,23 +91,42 @@ export function RoadmapColumn({
           </div>
           {/* When items are hidden behind sign-in the true count is unknown to
               this visitor — a "0" badge would misread as an empty column. */}
-          {!isLoading && !isError && !(signInRequiredForItems && total === 0) && (
-            <Badge variant="secondary" className="text-xs">
-              {total}
-            </Badge>
-          )}
+          <div role="status" aria-atomic="true" data-testid="roadmap-result-status">
+            <span className="sr-only">
+              {resultStatus && (
+                <>
+                  {title}
+                  {': '}
+                  {resultStatus}
+                </>
+              )}
+            </span>
+            {!resultsPending &&
+              !isError &&
+              total !== undefined &&
+              !(signInRequiredForItems && total === 0) && (
+                <Badge variant="secondary" className="text-xs" aria-hidden="true">
+                  {intl.formatNumber(total)}
+                </Badge>
+              )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="flex-1 min-h-0 p-0">
         <ScrollArea className="h-full px-6 pb-6">
           {isError ? (
             <div role="alert" className="py-6">
-              <p className="mb-3 text-sm text-muted-foreground">These items could not be loaded.</p>
+              <p className="mb-3 text-sm text-muted-foreground">
+                {intl.formatMessage({
+                  id: 'portal.roadmap.column.loadFailed',
+                  defaultMessage: 'These items could not be loaded.',
+                })}
+              </p>
               <Button type="button" variant="outline" onClick={() => void refetch()}>
-                Try again
+                {intl.formatMessage({ id: 'portal.auth.tryAgain', defaultMessage: 'Try again' })}
               </Button>
             </div>
-          ) : isLoading ? (
+          ) : isLoading || (resultsPending && posts.length === 0) ? (
             <div className="h-full flex items-center justify-center py-8 animate-in fade-in duration-200">
               <ArrowPathIcon className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
@@ -85,14 +134,16 @@ export function RoadmapColumn({
             <div className="h-full flex items-center justify-center py-8 animate-in fade-in duration-200">
               <p className="text-sm text-muted-foreground">
                 {signInRequiredForItems
-                  ? intl.formatMessage({
-                      id: 'portal.roadmap.column.empty.signInRequired',
-                      defaultMessage: 'Sign in to view roadmap items.',
-                    })
-                  : intl.formatMessage({
-                      id: 'portal.roadmap.column.empty',
-                      defaultMessage: 'No items yet',
-                    })}
+                  ? signInMessage
+                  : hasAppliedFilters
+                    ? intl.formatMessage({
+                        id: 'portal.feedback.list.noPostsFiltered',
+                        defaultMessage: 'No posts match your filters.',
+                      })
+                    : intl.formatMessage({
+                        id: 'portal.roadmap.column.empty',
+                        defaultMessage: 'No items yet',
+                      })}
               </p>
             </div>
           ) : (

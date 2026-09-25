@@ -20,6 +20,7 @@ interface FeedbackToolbarProps {
   isLoading?: boolean
   /** Optional slot rendered after the search button on the right (typically the Filter button). */
   filterButton?: React.ReactNode
+  searchTriggerRef?: React.Ref<HTMLButtonElement>
 }
 
 const SORT_OPTIONS = [
@@ -50,6 +51,7 @@ export function FeedbackToolbar({
   onSearchChange,
   isLoading = false,
   filterButton,
+  searchTriggerRef,
 }: FeedbackToolbarProps): React.ReactElement {
   const intl = useIntl()
   const searchInputId = useId()
@@ -110,6 +112,7 @@ export function FeedbackToolbar({
             {/* The label is display:none below sm; aria-label keeps the control
                 named at every width (same as the roadmap toolbar). */}
             <Button
+              ref={searchTriggerRef}
               variant="outline"
               size="sm"
               className="gap-1.5"
