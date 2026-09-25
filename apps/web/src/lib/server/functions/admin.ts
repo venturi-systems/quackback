@@ -58,7 +58,12 @@ import {
   removeInviteMagicLinkToken,
 } from './invitation-magic-link'
 import { logger } from '@/lib/server/logger'
-import { inboxPostListSchema, listPortalUsersSchema } from '@/lib/shared/schemas/list-filters'
+import {
+  filterCount,
+  filterText,
+  inboxPostListSchema,
+  listPortalUsersSchema,
+} from '@/lib/shared/schemas/list-filters'
 
 /**
  * Server functions for admin data fetching.
@@ -197,9 +202,12 @@ export const fetchTeamMembers = createServerFn({ method: 'GET' }).handler(async 
   }
 })
 
+// The search text goes to an ILIKE pattern, which Postgres cannot take with a
+// NUL, and LIMIT takes only a whole number. searchMembers caps the limit at 50
+// (DEF-45).
 const searchMembersSchema = z.object({
-  search: z.string().optional(),
-  limit: z.number().optional(),
+  search: filterText().optional(),
+  limit: filterCount(1).optional(),
 })
 
 export const searchMembersFn = createServerFn({ method: 'GET' })
@@ -1237,7 +1245,8 @@ const assignUsersSchema = z.object({
  */
 const fetchSegmentAttributeValuesSchema = z.object({
   attribute: z.enum(['country', 'locale', 'name', 'email', 'signup_source']),
-  query: z.string().max(200).default(''),
+  // Matched in SQL, which cannot take a NUL (DEF-45).
+  query: filterText().max(200).default(''),
   limit: z.number().int().min(1).max(50).default(20),
 })
 

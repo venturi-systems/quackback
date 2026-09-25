@@ -2,10 +2,12 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import { z } from 'zod'
 import type { InviteId, UserId } from '@quackback/ids'
+import { isValidTypeId } from '@quackback/ids'
 import { db, invitation, principal, user, and, eq, or } from '@/lib/server/db'
 import { getPublicUrlOrNull } from '@/lib/server/storage/s3'
 import { getSession } from '@/lib/server/auth/session'
 import { logger } from '@/lib/server/logger'
+import { filterId } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'invitations' })
 
@@ -17,7 +19,7 @@ const log = logger.child({ component: 'invitations' })
  * accessible to newly authenticated users who may not yet have a member record.
  */
 export const getInvitationDetailsFn = createServerFn({ method: 'GET' })
-  .validator((invitationId: string) => invitationId)
+  .validator(z.string())
   .handler(async ({ data: invitationId }) => {
     log.debug({ invitation_id: invitationId }, 'get invitation details: entry')
 
@@ -29,11 +31,16 @@ export const getInvitationDetailsFn = createServerFn({ method: 'GET' })
 
     log.debug({ user_id: session.user.id }, 'get invitation details: session resolved')
 
+    // The id comes from the invitation link. The invitation id column takes
+    // only an invite TypeID, so any other value is an invitation that cannot
+    // exist: answer it as not found, without a query (DEF-45).
     const [inv, settings, authConfig] = await Promise.all([
-      db.query.invitation.findFirst({
-        where: and(eq(invitation.id, invitationId as InviteId), eq(invitation.kind, 'team')),
-        with: { inviter: true },
-      }),
+      isValidTypeId(invitationId, 'invite')
+        ? db.query.invitation.findFirst({
+            where: and(eq(invitation.id, invitationId as InviteId), eq(invitation.kind, 'team')),
+            with: { inviter: true },
+          })
+        : undefined,
       db.query.settings.findFirst(),
       import('@/lib/server/domains/settings/settings.service').then((m) => m.getPublicAuthConfig()),
     ])
@@ -106,7 +113,8 @@ export const getInvitationDetailsFn = createServerFn({ method: 'GET' })
   })
 
 const acceptInvitationSchema = z.object({
-  invitationId: z.string(),
+  // Only an invite TypeID can name an invitation (DEF-45).
+  invitationId: filterId('invite'),
   name: z.string().min(2).optional(),
 })
 
@@ -303,19 +311,24 @@ export const setPasswordFn = createServerFn({ method: 'POST' })
  * Public - no authentication required.
  */
 export const getInviteBrandingFn = createServerFn({ method: 'GET' })
-  .validator((invitationId: string) => invitationId)
+  .validator(z.string())
   .handler(async ({ data: invitationId }) => {
+    // A value that is not an invite TypeID names no invitation, so the page
+    // gets the workspace branding without an inviter and no query runs
+    // (DEF-45).
     const [settings, inv] = await Promise.all([
       db.query.settings.findFirst(),
-      db.query.invitation
-        .findFirst({
-          where: and(
-            eq(invitation.id, invitationId as InviteId),
-            or(eq(invitation.kind, 'team'), eq(invitation.kind, 'portal'))
-          ),
-          with: { inviter: true },
-        })
-        .catch(() => null),
+      isValidTypeId(invitationId, 'invite')
+        ? db.query.invitation
+            .findFirst({
+              where: and(
+                eq(invitation.id, invitationId as InviteId),
+                or(eq(invitation.kind, 'team'), eq(invitation.kind, 'portal'))
+              ),
+              with: { inviter: true },
+            })
+            .catch(() => null)
+        : null,
     ])
 
     return {

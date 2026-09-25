@@ -14,7 +14,12 @@ import {
   type UserId,
 } from '@quackback/ids'
 import { tiptapContentSchema } from '@/lib/shared/schemas/posts'
-import { filterId, filterText, listPublicPostsSchema } from '@/lib/shared/schemas/list-filters'
+import {
+  filterCount,
+  filterId,
+  filterText,
+  listPublicPostsSchema,
+} from '@/lib/shared/schemas/list-filters'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import {
@@ -52,36 +57,38 @@ const log = logger.child({ component: 'public-posts' })
 // tiptapContentSchema imported from shared schemas
 
 // listPublicPostsSchema lives in lib/shared/schemas/list-filters.ts, which
-// holds each filter to what the list query accepts. The other GET inputs here
-// (post permissions, roadmap columns, vote sidebar, similar posts) use its
-// field helpers for the same reason: an id must be a TypeID of its entity and
-// text must hold no NUL, or the query fails instead of the validator (DEF-45).
+// holds each filter to what the list query accepts. The other inputs here
+// (post permissions, roadmap columns, vote sidebar, similar posts, and the
+// vote, edit, delete and create writes) use its field helpers for the same
+// reason: an id must be a TypeID of its entity and text must hold no NUL, or
+// the query fails instead of the validator (DEF-45).
 
 const getPostPermissionsSchema = z.object({
   postId: filterId('post'),
 })
 
 const userEditPostSchema = z.object({
-  postId: z.string(),
-  title: z.string().min(1, 'Title is required').max(200),
-  content: z.string().max(10000),
+  postId: filterId('post'),
+  title: filterText().min(1, 'Title is required').max(200),
+  content: filterText().max(10000),
   contentJson: tiptapContentSchema.optional(),
 })
 
 const userDeletePostSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const toggleVoteSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const createPublicPostSchema = z.object({
-  boardId: z.string(),
-  title: z.string().min(1, 'Title is required').max(200),
-  content: z.string().max(10000).optional().default(''),
+  boardId: filterId('board'),
+  title: filterText().min(1, 'Title is required').max(200),
+  content: filterText().max(10000).optional().default(''),
   contentJson: tiptapContentSchema.optional(),
-  metadata: z.record(z.string(), z.string()).optional(),
+  // Stored as jsonb, which cannot hold a NUL in a key or a value.
+  metadata: z.record(filterText(), filterText()).optional(),
 })
 
 const getPublicRoadmapPostsSchema = z.object({
@@ -93,7 +100,7 @@ const getPublicRoadmapPostsSchema = z.object({
 
 const getRoadmapPostsByStatusSchema = z.object({
   statusId: filterId('status'),
-  page: z.number().int().min(1).optional().default(1),
+  page: filterCount(1).optional().default(1),
   limit: z.number().int().min(1).max(100).optional().default(10),
 })
 
