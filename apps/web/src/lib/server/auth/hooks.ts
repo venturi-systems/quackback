@@ -361,7 +361,9 @@ export async function handleAnonymousSignInGate(ctx: { path?: string }): Promise
   }
 }
 
-type SessionResolver = (ctx: never) => Promise<{ user?: { id?: string } } | null>
+type SessionResolver = (
+  ctx: never
+) => Promise<{ user?: { id?: string }; session?: { createdAt?: Date | string | number } } | null>
 
 /**
  * OAuth dynamic client registration gate (`POST /oauth2/register`).
@@ -405,73 +407,148 @@ export async function handleClientRegistrationGate(
   }
 }
 
+/** Better Auth's default `session.freshAge` in seconds, for a context that carries none. */
+const DEFAULT_SESSION_FRESH_AGE_SECONDS = 60 * 60 * 24
+
+/** Refusal for the unlink that would leave no administrator who can act. */
+const LAST_ADMIN_IDENTITY_MESSAGE =
+  'This Google or GitHub account is what makes you an administrator, and you are the only one. Designate another administrator in Admin > Team before unlinking it.'
+
 /**
- * Unlinking the last Google or GitHub account of the only administrator would
- * leave the workspace with no administrator who satisfies the team identity
- * rule. Refuse it; unlinking is allowed once another eligible administrator
- * exists, or while the account keeps another Google or GitHub link.
+ * Unlinking a Google or GitHub account can take away the identity that lets an
+ * administrator act (team-identity.ts). Unlinking the last one of the only
+ * such administrator would leave the workspace with nobody who can sign in and
+ * administer it, so it is refused; it is allowed once another eligible
+ * administrator exists, or while the account keeps another Google or GitHub
+ * link.
+ *
+ * The check and the unlink are one transaction under the team-role advisory
+ * lock that every role write takes (withTeamRoleLock in team-designation.ts):
+ * the caller's role and links are read, the other eligible administrators are
+ * counted and the account row is deleted before the lock is released. Two
+ * administrators who unlink their last links at the same moment, or an unlink
+ * racing a demotion, are therefore serialized: whoever takes the lock second
+ * counts the state the first one committed. Counting under the lock and
+ * leaving the delete to Better Auth after the lock was released let both
+ * unlinks pass (DEF-62).
+ *
+ * So this hook performs every Google or GitHub unlink itself and returns
+ * Better Auth's response body, which ends the request. It keeps the checks of
+ * Better Auth's own /unlink-account endpoint, in its order and with its error
+ * codes: a signed-in, fresh session, never the account's last linked account,
+ * and the named account must exist. Any other provider, and a body Better
+ * Auth's schema rejects, returns undefined and is left to Better Auth.
  */
 export async function handleUnlinkAccountGate(
-  ctx: { path?: string; body?: Record<string, unknown> },
+  ctx: {
+    path?: string
+    body?: Record<string, unknown>
+    context?: {
+      sessionConfig?: { freshAge?: number }
+      options?: { account?: { accountLinking?: { allowUnlinkingAll?: boolean } } }
+    }
+  },
   resolveSession: SessionResolver = getSessionFromCtx as unknown as SessionResolver
-): Promise<void> {
+): Promise<{ status: true } | undefined> {
   if (ctx.path !== '/unlink-account') return
   const providerId = ctx.body?.providerId
   if (providerId !== 'google' && providerId !== 'github') return
-  const accountId = typeof ctx.body?.accountId === 'string' ? ctx.body.accountId : null
+  const requestedAccountId = ctx.body?.accountId
+  if (requestedAccountId !== undefined && typeof requestedAccountId !== 'string') return
+  const accountId = requestedAccountId ?? null
 
-  const session = await resolveSession(ctx as never).catch(() => null)
+  // Better Auth's freshSessionMiddleware, which runs after this hook: no
+  // session is refused here, so no Google or GitHub unlink ever reaches Better
+  // Auth's own delete, which runs outside the lock.
+  const session = await resolveSession(ctx as never)
   const userId = session?.user?.id
-  if (!userId) return
+  if (!userId || !session?.session) {
+    throw new APIError('UNAUTHORIZED', { code: 'UNAUTHORIZED', message: 'Unauthorized' })
+  }
+  const freshAge = ctx.context?.sessionConfig?.freshAge ?? DEFAULT_SESSION_FRESH_AGE_SECONDS
+  if (freshAge !== 0) {
+    const created = session.session.createdAt
+    const createdAt =
+      created instanceof Date ? created.getTime() : new Date(created ?? Number.NaN).getTime()
+    // A missing or unreadable creation time counts as not fresh.
+    if (!(Date.now() - createdAt < freshAge * 1000)) {
+      throw new APIError('FORBIDDEN', {
+        code: 'SESSION_NOT_FRESH',
+        message: 'Session is not fresh',
+      })
+    }
+  }
+  const allowUnlinkingAll =
+    ctx.context?.options?.account?.accountLinking?.allowUnlinkingAll === true
 
-  const {
-    db,
-    principal: principalTable,
-    account: accountTable,
-    eq,
-  } = await import('@/lib/server/db')
-  type UserId = `user_${string}`
-  const principalRow = await db.query.principal.findFirst({
-    where: eq(principalTable.userId, userId as UserId),
-    columns: { id: true, role: true, type: true },
-  })
-  if (!principalRow || principalRow.role !== 'admin' || principalRow.type !== 'user') return
-
-  const links = await db.query.account.findMany({
-    where: eq(accountTable.userId, userId as UserId),
-    columns: { providerId: true, accountId: true },
-  })
-  const keepsTeamLink = links.some(
-    (link) =>
-      (link.providerId === 'google' || link.providerId === 'github') &&
-      !(link.providerId === providerId && (accountId === null || link.accountId === accountId))
-  )
-  if (keepsTeamLink) return
-
+  const { principal: principalTable, account: accountTable, eq } = await import('@/lib/server/db')
   const { withTeamRoleLock, countEligibleAdmins } =
     await import('@/lib/server/domains/principals/team-designation')
+  const { TEAM_IDENTITY_PROVIDER_IDS } =
+    await import('@/lib/server/domains/principals/team-identity')
+  const teamProviders: readonly string[] = TEAM_IDENTITY_PROVIDER_IDS
+  type UserId = `user_${string}`
   type PrincipalId = `principal_${string}`
-  const others = await withTeamRoleLock((tx) =>
-    countEligibleAdmins(tx, principalRow.id as PrincipalId)
-  )
-  if (others < 1) {
-    throw new APIError('FORBIDDEN', {
-      code: 'last_admin_identity',
-      message:
-        'This Google or GitHub account is what makes you an administrator, and you are the only one. Designate another administrator in Admin > Team before unlinking it.',
+
+  await withTeamRoleLock(async (tx) => {
+    const links = await tx.query.account.findMany({
+      where: eq(accountTable.userId, userId as UserId),
+      columns: { id: true, providerId: true, accountId: true },
     })
-  }
+    if (links.length === 1 && !allowUnlinkingAll) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'FAILED_TO_UNLINK_LAST_ACCOUNT',
+        message: "You can't unlink your last account",
+      })
+    }
+    const target = links.find((link) =>
+      accountId !== null
+        ? link.accountId === accountId && link.providerId === providerId
+        : link.providerId === providerId
+    )
+    if (!target) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'ACCOUNT_NOT_FOUND',
+        message: 'Account not found',
+      })
+    }
+
+    const principalRow = await tx.query.principal.findFirst({
+      where: eq(principalTable.userId, userId as UserId),
+      columns: { id: true, role: true, type: true },
+    })
+    const keepsTeamLink = links.some(
+      (link) => link.id !== target.id && teamProviders.includes(link.providerId)
+    )
+    if (principalRow?.role === 'admin' && principalRow.type === 'user' && !keepsTeamLink) {
+      const others = await countEligibleAdmins(tx, principalRow.id as PrincipalId)
+      if (others < 1) {
+        throw new APIError('FORBIDDEN', {
+          code: 'last_admin_identity',
+          message: LAST_ADMIN_IDENTITY_MESSAGE,
+        })
+      }
+    }
+
+    await tx.delete(accountTable).where(eq(accountTable.id, target.id))
+  })
+  return { status: true }
 }
 
 export const hooksBefore = createAuthMiddleware(async (ctx) => {
   // Disjoint path matchers: grace heal only touches /oauth2/token,
   // sign-in pre-check only touches sign-in/OTP paths, the anonymous gate
-  // only /sign-in/anonymous and the registration gate only /oauth2/register.
-  // Order is irrelevant.
+  // only /sign-in/anonymous, the registration gate only /oauth2/register and
+  // the unlink gate only /unlink-account. Order is irrelevant.
   await handleRefreshGraceHeal(ctx)
   await handleAnonymousSignInGate(ctx)
   await handleClientRegistrationGate(ctx)
-  await handleUnlinkAccountGate(ctx)
+  // A Google or GitHub unlink is performed by the gate itself, under the
+  // team-role lock; its response body ends the request here.
+  const unlinked = await handleUnlinkAccountGate(
+    ctx as Parameters<typeof handleUnlinkAccountGate>[0]
+  )
+  if (unlinked) return ctx.json(unlinked)
   await handleSignInPreCheck(ctx as Parameters<typeof handleSignInPreCheck>[0])
 })
 
