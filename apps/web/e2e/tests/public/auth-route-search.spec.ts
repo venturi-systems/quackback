@@ -68,7 +68,14 @@ test.describe('auth routes read malformed queries without failing (DEF-55)', () 
   test('a foreign callbackUrl falls back to the portal, never another origin', async ({
     request,
   }) => {
-    for (const callbackUrl of ['//evil.example', 'https://evil.example', '/\t/evil.example']) {
+    for (const callbackUrl of [
+      '//evil.example',
+      'https://evil.example',
+      '/\t/evil.example',
+      // Both resolve to the path //evil.example once dot segments apply.
+      '/.//evil.example',
+      '/admin/..//evil.example',
+    ]) {
       const path = `/auth/login?${new URLSearchParams({ callbackUrl })}`
       const res = await request.get(path)
       await expectNoServerError(res, path)

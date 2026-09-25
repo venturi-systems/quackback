@@ -88,6 +88,23 @@ describe('isSafeCallbackUrl', () => {
     expect(isSafeCallbackUrl('/admin/settings?tab=sign-in#oidc')).toBe(true)
     expect(isSafeCallbackUrl('/admin/feedback?board=%5B%22ideas%22%5D')).toBe(true)
   })
+
+  // Each of these resolves to the path `//evil.example` once the URL parser
+  // applies its dot segments, so it is refused like `//evil.example` itself.
+  it.each([
+    '/.//evil.example',
+    '/admin/..//evil.example',
+    '/admin/%2e%2e//evil.example',
+    '/admin/%2E%2E//evil.example',
+    '/././/evil.example/admin',
+  ])('rejects %j, whose resolved path is protocol-relative', (url) => {
+    expect(isSafeCallbackUrl(url)).toBe(false)
+  })
+
+  it('still accepts dot segments that stay on an ordinary path', () => {
+    expect(isSafeCallbackUrl('/admin/./settings')).toBe(true)
+    expect(isSafeCallbackUrl('/admin/../b/ideas')).toBe(true)
+  })
 })
 
 describe('isTeamCallback', () => {
@@ -114,6 +131,18 @@ describe('isTeamCallback', () => {
     expect(isTeamCallback('/?next=/admin')).toBe(false)
     expect(isTeamCallback('/administrator?x=/admin')).toBe(false)
   })
+  it('reads the path the browser resolves, after dot segments', () => {
+    expect(isTeamCallback('/admin/./settings')).toBe(true)
+    expect(isTeamCallback('/b/../admin/feedback')).toBe(true)
+    expect(isTeamCallback('/admin/../b/ideas')).toBe(false)
+    expect(isTeamCallback('/admin/%2e%2e/b/ideas')).toBe(false)
+    expect(isTeamCallback('/admin/..//evil.example')).toBe(false)
+  })
+  it('is false for a value that is not a same-origin relative path', () => {
+    expect(isTeamCallback('admin')).toBe(false)
+    expect(isTeamCallback('//evil.example/admin')).toBe(false)
+    expect(isTeamCallback('https://evil.example/admin')).toBe(false)
+  })
 })
 
 // DEF-48: a signed-out visitor on /admin/settings was sent to sign in with
@@ -139,6 +168,10 @@ describe('teamSigninCallback', () => {
     '/\\evil.example',
     '/\t/evil.example',
     '/admin\u0000',
+    '/.//evil.example',
+    '/admin/..//evil.example',
+    '/admin/%2e%2e//evil.example',
+    '/admin/../b/ideas',
     'javascript:alert(1)',
     '/b/ideas',
     '/',
