@@ -1,0 +1,113 @@
+name: cache-eviction
+
+# Delete a closed pull request's GitHub Actions caches (refs/pull/<N>/merge and
+# refs/pull/<N>/head), plus caches left on finished merge-queue refs whose
+# branch no longer exists. GitHub evicts caches only by age and by pressure,
+# never because the ref that produced them is gone, so dead pull-request caches
+# otherwise sit in the 10 GB allowance until LRU pushes main's warm caches out
+# (remediation ledger REQ-03; 1.63 GB on 11 closed pull-request refs here on
+# 2026-09-25).
+#
+# This is a port of the organization's cache-eviction composite action
+# (venturi-systems/.github, .github/actions/cache-eviction). quackback is the
+# organization's only public repository, and a public repository cannot use an
+# action that lives in a private one, so the same fail-closed logic runs here
+# inline:
+#   - a merge-queue branch counts as gone only on HTTP 404 and as live only on
+#     HTTP 200; any other probe status aborts the run BEFORE anything is deleted;
+#   - a DELETE answering 404 means another run removed the cache first and is
+#     counted as already gone, not as deleted;
+#   - any other DELETE failure fails the job after the remaining deletions.
+#
+# pull_request_target runs the default branch's copy of this file, so a pull
+# request cannot edit the job that holds actions: write. The job checks nothing
+# out and reads no pull-request content except the pull request number.
+# It runs on a GitHub-hosted runner because a public repository cannot use the
+# organization's self-hosted runner groups (.venturi/repository-governance.json
+# runners.classes).
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions: {}
+
+concurrency:
+  group: cache-eviction-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  evict:
+    name: Delete the closed pull request's caches
+    if: github.repository == 'venturi-systems/quackback'
+    runs-on: ubuntu-latest
+    # Measured runs of the organization action take seconds; ten minutes only
+    # bounds a hung API call.
+    timeout-minutes: 10
+    permissions:
+      # List and delete caches.
+      actions: write
+      # Probe whether a merge-queue branch still exists before deleting its caches.
+      contents: read
+    steps:
+      - name: Delete the closed pull request's caches and finished merge-queue caches
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = Number(process.env.PR_NUMBER);
+            if (!Number.isInteger(pr) || pr <= 0) {
+              throw new Error(`invalid pull request number: ${process.env.PR_NUMBER}`);
+            }
+            const QUEUE = 'refs/heads/gh-readonly-queue/';
+            const listCaches = (ref) =>
+              github.paginate(github.rest.actions.getActionsCacheList, {
+                owner, repo, per_page: 100, ...(ref ? { ref } : {}),
+              });
+
+            // Collect everything first, so a failed probe aborts before any deletion.
+            const doomed = new Map();
+            for (const ref of [`refs/pull/${pr}/merge`, `refs/pull/${pr}/head`]) {
+              for (const cache of await listCaches(ref)) doomed.set(cache.id, cache);
+            }
+            const gone = new Map();
+            for (const cache of await listCaches()) {
+              if (!(cache.ref || '').startsWith(QUEUE)) continue;
+              const branch = cache.ref.slice('refs/heads/'.length);
+              if (!gone.has(branch)) {
+                let status;
+                try {
+                  status = (await github.rest.repos.getBranch({ owner, repo, branch })).status;
+                } catch (error) {
+                  status = error.status;
+                }
+                if (status === 200) gone.set(branch, false);
+                else if (status === 404) gone.set(branch, true);
+                else throw new Error(`branch probe for ${branch} returned HTTP ${status}; refusing to treat it as gone`);
+              }
+              if (gone.get(branch)) doomed.set(cache.id, cache);
+            }
+
+            let deleted = 0;
+            let freed = 0;
+            let alreadyGone = 0;
+            let failed = 0;
+            for (const cache of doomed.values()) {
+              try {
+                await github.rest.actions.deleteActionsCacheById({ owner, repo, cache_id: cache.id });
+                deleted += 1;
+                freed += cache.size_in_bytes || 0;
+              } catch (error) {
+                if (error.status === 404) {
+                  alreadyGone += 1;
+                  continue;
+                }
+                failed += 1;
+                core.warning(`deleting cache ${cache.id} (${cache.key}) failed: HTTP ${error.status}`);
+              }
+            }
+            const summary = `deleted ${deleted} cache(s), ${(freed / 1e9).toFixed(2)} GB freed, ${alreadyGone} already gone, ${failed} failed`;
+            core.info(summary);
+            await core.summary.addRaw(`cache-eviction (pull request #${pr}): ${summary}\n`).write();
+            if (failed) core.setFailed(`${failed} cache deletion(s) failed`);

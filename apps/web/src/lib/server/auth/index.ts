@@ -21,6 +21,7 @@ import { config } from '@/lib/server/config'
 import { logger } from '@/lib/server/logger'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import { linkingTrustedProviderIds } from './linking-trust'
+import { betterAuthLoggerOptions } from './better-auth-logger'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 
 const log = logger.child({ component: 'auth-config' })
@@ -213,6 +214,11 @@ async function createAuth() {
     },
     // Use SECRET_KEY for auth signing (Better Auth defaults to BETTER_AUTH_SECRET)
     secret: config.secretKey,
+
+    // Better Auth's own log calls go through the app logger, never the console:
+    // its routes log raw failed queries, whose message carries every bound
+    // value (DEF-66; see better-auth-logger.ts).
+    logger: betterAuthLoggerOptions(logger.child({ component: 'better-auth' })),
 
     // Disable the JWT plugin's /token endpoint — conflicts with OAuth's /oauth2/token
     // Does NOT affect magicLink or session management
