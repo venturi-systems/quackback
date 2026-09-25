@@ -22,6 +22,12 @@
  *
  * We assert these by exercising `hooksAfter` end-to-end against a fully
  * mocked dependency graph and checking the side-effect tape.
+ *
+ * Named `-composition`, not `-integration`: the root vitest config excludes
+ * every `*-integration.test.ts` file (suites that need live services), and
+ * this suite runs on mocks only. Under its upstream name,
+ * `hooks-after-integration.test.ts`, no test run ever collected it
+ * (landing-page#2309).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { makeAuthConfig, makeTenant, makeVerifiedDomain } from './_helpers'
@@ -193,6 +199,16 @@ vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
 const mockGetRegisteredOidcProviderIds = vi.fn(async () => new Set(['sso']))
 vi.mock('@/lib/server/auth/registered-providers', () => ({
   getRegisteredOidcProviderIds: () => mockGetRegisteredOidcProviderIds(),
+}))
+
+// The new-device notice (last in the chain) keeps its fingerprints in Redis,
+// which the unit-test job does not run. A known device keeps this suite off
+// the network and on its subject, the order of the hooks.
+vi.mock('@/lib/server/auth/signin-device-tracker', () => ({
+  computeDeviceFingerprint: () => 'fingerprint',
+  isDeviceUnseen: async () => false,
+  markDeviceSeen: async () => undefined,
+  forgetDevice: async () => undefined,
 }))
 
 const { hooksAfter } = (await import('../hooks')) as unknown as {
