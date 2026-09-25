@@ -455,7 +455,9 @@ export async function handleUnlinkAccountGate(
   if (providerId !== 'google' && providerId !== 'github') return
   const requestedAccountId = ctx.body?.accountId
   if (requestedAccountId !== undefined && typeof requestedAccountId !== 'string') return
-  const accountId = requestedAccountId ?? null
+  // Better Auth tests `accountId` for truthiness, so an empty string names no
+  // account and the first link of the provider is unlinked. Match it.
+  const accountId = requestedAccountId || null
 
   // Better Auth's freshSessionMiddleware, which runs after this hook: no
   // session is refused here, so no Google or GitHub unlink ever reaches Better

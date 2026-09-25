@@ -5,6 +5,7 @@
 import { db } from '@/lib/server/db'
 import { cacheDel, CACHE_KEYS } from '@/lib/server/redis'
 import { NotFoundError, InternalError, ValidationError } from '@/lib/shared/errors'
+import { containsDatabaseError } from '@/lib/server/errors/database-error'
 import { sanitizeTiptapContent } from '@/lib/server/sanitize-tiptap'
 import { logger } from '@/lib/server/logger'
 import {
@@ -143,6 +144,12 @@ export async function requireSettings(): Promise<SettingsRecord> {
 /** @internal */
 export function wrapDbError(operation: string, error: unknown): never {
   if (error instanceof NotFoundError || error instanceof ValidationError) throw error
+  // This message can reach a server function's caller and the log. A failed
+  // query's own message is its SQL and every bound value (DEF-63), so it is
+  // never copied in; the error stays attached as the cause.
+  if (containsDatabaseError(error)) {
+    throw new InternalError('DATABASE_ERROR', `Failed to ${operation}`, error)
+  }
   const message = error instanceof Error ? error.message : 'Unknown error'
   throw new InternalError('DATABASE_ERROR', `Failed to ${operation}: ${message}`, error)
 }
