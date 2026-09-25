@@ -91,7 +91,14 @@ export function RoadmapColumn({
           </div>
           {/* When items are hidden behind sign-in the true count is unknown to
               this visitor — a "0" badge would misread as an empty column. */}
-          <div role="status" aria-atomic="true" data-testid="roadmap-result-status">
+          {/* Anchor the absolute sr-only text inside this scrollable column.
+              An outer containing block lets offscreen column text extend the page. */}
+          <div
+            className="relative"
+            role="status"
+            aria-atomic="true"
+            data-testid="roadmap-result-status"
+          >
             <span className="sr-only">
               {resultStatus && (
                 <>

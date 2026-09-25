@@ -46,8 +46,16 @@ for (const width of [320, 1440]) {
     await expect(reset).toHaveCount(1)
     await expect(reset).toBeVisible()
     await testInfo.attach('roadmap-filtered-empty', {
-      body: await page.screenshot({ fullPage: true }),
-      contentType: 'image/png',
+      body: Buffer.from(JSON.stringify({
+        schema: 'venturi.portal-render-evidence.v1',
+        source: process.env.GITHUB_SHA,
+        url: page.url(),
+        viewport: page.viewportSize(),
+        state: 'roadmap-filtered-empty',
+        capturedAt: new Date().toISOString(),
+        pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString('base64'),
+      })),
+      contentType: 'application/json',
     })
 
     await reset.click()
