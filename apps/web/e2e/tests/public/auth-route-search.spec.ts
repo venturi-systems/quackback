@@ -112,3 +112,25 @@ test.describe('server-rendered status titles (DEF-44)', () => {
     expect(await res.text()).toContain('<title>Page not found · Venturi Feedback</title>')
   })
 })
+
+// Production answered `GET //evil.example` with
+// `308 location: http://feedback.venturi.systems/evil.example`: the
+// framework's redirect named the scheme the server sees behind the proxy.
+// The server entry now answers with a relative Location (src/server.ts).
+test.describe('paths that begin with //', () => {
+  test('redirect to the collapsed path with a relative Location', async ({
+    request,
+    baseURL,
+  }) => {
+    for (const [path, location] of [
+      ['//evil.example', '/evil.example'],
+      ['//evil.example/x?y=1', '/evil.example/x?y=1'],
+    ]) {
+      // An absolute URL, so the path is not resolved against the base as a
+      // protocol-relative reference to another host.
+      const res = await request.get(`${baseURL}${path}`, { maxRedirects: 0 })
+      expect(res.status(), `${path} status`).toBe(308)
+      expect(res.headers()['location'], `${path} location`).toBe(location)
+    }
+  })
+})
