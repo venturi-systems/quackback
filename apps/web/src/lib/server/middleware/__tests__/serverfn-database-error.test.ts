@@ -65,6 +65,35 @@ describe('withDatabaseErrorRedaction', () => {
     ).rejects.toBe(notFound)
   })
 
+  it('logs only the redacted shape of a failed query, never its parameters (DEF-63)', async () => {
+    const calls: Array<[Record<string, unknown>, string]> = []
+    const errorLog = {
+      error: (fields: Record<string, unknown>, message: string) => calls.push([fields, message]),
+    }
+    await expect(
+      withDatabaseErrorRedaction(async () => {
+        throw failedQuery()
+      }, errorLog)
+    ).rejects.toThrow(new Error(DATABASE_ERROR_MESSAGE))
+    expect(calls).toHaveLength(1)
+    expect(calls[0][0]).toMatchObject({ pg_code: '22P02', statement: SQL, param_count: 1 })
+    const logged = JSON.stringify(calls)
+    expect(logged).not.toContain('user_secret_param')
+    expect(logged).not.toContain('invalid input syntax')
+  })
+
+  it('logs nothing for an app error', async () => {
+    const calls: unknown[] = []
+    const errorLog = { error: (...args: unknown[]) => calls.push(args) }
+    const notFound = new NotFoundError('POST_NOT_FOUND', 'Post not found')
+    await expect(
+      withDatabaseErrorRedaction(async () => {
+        throw notFound
+      }, errorLog)
+    ).rejects.toBe(notFound)
+    expect(calls).toHaveLength(0)
+  })
+
   it('throws the fixed message for a failed query', async () => {
     await expect(
       withDatabaseErrorRedaction(async () => {
