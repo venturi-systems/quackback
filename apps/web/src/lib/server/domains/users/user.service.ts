@@ -475,23 +475,34 @@ export async function listPortalUsers(
  * "account created" dates). The FK is `principal.userId -> user` with
  * onDelete cascade, so deleting the principal does NOT remove the user; a
  * returning sign-in re-provisions a principal via the SSO hooks or lazily.
+ *
+ * Only a contributor (role 'user') is ever removed here. The role check and
+ * the delete run in one transaction under the team-role advisory lock that
+ * every role write takes (withTeamRoleLock in team-designation.ts), so a
+ * promotion to member or admin cannot land between them: whichever takes the
+ * lock second sees what the first one committed (DEF-64). The delete also
+ * repeats the role condition, and a delete that removes no row is refused as
+ * not found, so a role written by any path outside the lock still cannot turn
+ * this into the removal of a team member or administrator.
  */
 export async function removePortalUser(principalId: PrincipalId): Promise<void> {
+  const notFound = () =>
+    new NotFoundError('MEMBER_NOT_FOUND', `Portal user with principal ID ${principalId} not found`)
   try {
-    // Verify principal exists and has role='user'
-    const existingPrincipal = await db.query.principal.findFirst({
-      where: and(eq(principal.id, principalId), eq(principal.role, 'user')),
+    const { withTeamRoleLock } = await import('@/lib/server/domains/principals/team-designation')
+    await withTeamRoleLock(async (tx) => {
+      const existingPrincipal = await tx.query.principal.findFirst({
+        where: and(eq(principal.id, principalId), eq(principal.role, 'user')),
+        columns: { id: true },
+      })
+      if (!existingPrincipal) throw notFound()
+
+      const removed = await tx
+        .delete(principal)
+        .where(and(eq(principal.id, principalId), eq(principal.role, 'user')))
+        .returning({ id: principal.id })
+      if (removed.length === 0) throw notFound()
     })
-
-    if (!existingPrincipal) {
-      throw new NotFoundError(
-        'MEMBER_NOT_FOUND',
-        `Portal user with principal ID ${principalId} not found`
-      )
-    }
-
-    // Delete principal record (user record will be deleted via CASCADE since user is org-scoped)
-    await db.delete(principal).where(eq(principal.id, principalId))
   } catch (error) {
     if (error instanceof NotFoundError) throw error
     log.error({ err: error }, 'failed to remove portal user')
