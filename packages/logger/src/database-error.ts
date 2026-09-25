@@ -29,8 +29,15 @@ const SQLSTATE = /^[0-9A-Z]{5}$/
 /** How far down a `cause` chain to look. Real chains are one or two deep. */
 const MAX_CAUSE_DEPTH = 8
 
-/** How deep `containsDatabaseError` follows causes, errors and properties. */
+/** How deep `failedQueryReach` follows causes, errors and properties. */
 const MAX_GRAPH_DEPTH = 32
+
+/**
+ * How many values `failedQueryReach` inspects. A graph larger than this is
+ * not walked to the end and is taken to hold a failed query, so a log line is
+ * never cheaper to make than it is safe.
+ */
+const MAX_GRAPH_VALUES = 10_000
 
 /** How every drizzle-orm failed-query message starts. */
 export const FAILED_QUERY_MARKER = 'Failed query: '
@@ -95,48 +102,142 @@ function readProperty(value: object, key: string): unknown {
   }
 }
 
-/**
- * Every error reachable from `root`, each once: `root` itself, `cause` chains
- * (enumerable or not), an AggregateError's `errors`, and errors held in
- * enumerable properties, plain objects and arrays, at most
- * `MAX_GRAPH_DEPTH` levels deep. Class instances other than errors are not
- * entered.
- */
-export function reachableErrors(root: unknown): Error[] {
-  const found: Error[] = []
-  const seen = new Set<object>()
-  const visit = (value: unknown, depth: number): void => {
-    if (depth > MAX_GRAPH_DEPTH || value === null || typeof value !== 'object') return
-    if (seen.has(value)) return
-    seen.add(value)
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, depth + 1)
-      return
-    }
-    const isError = value instanceof Error
-    if (!isError && !isPlainObject(value)) return
-    if (isError) {
-      found.push(value)
-      visit(readProperty(value, 'cause'), depth + 1)
-      visit(readProperty(value, 'errors'), depth + 1)
-    }
-    for (const key of Object.keys(value)) visit(readProperty(value, key), depth + 1)
-  }
-  visit(root, 0)
-  return found
+/** Whether `value` has a string `message`, the test pino uses for an error. */
+function hasMessage(value: object): boolean {
+  return typeof readProperty(value, 'message') === 'string'
 }
 
 /**
- * Whether `error`, or anything reachable from it (see `reachableErrors`), is
- * a failed database query, or carries one's message in its own (an app error
- * built as `Failed to ...: ${error.message}`).
+ * The property names a log line can write for `value`. An error is written by
+ * pino's serializer (or ./error-serializer.ts), which reads its enumerable
+ * properties, own and inherited; anything else is written by `JSON.stringify`,
+ * which reads its own enumerable properties only.
+ */
+function writtenKeys(value: object, errorLike: boolean): string[] {
+  if (!errorLike) return Object.keys(value)
+  const keys: string[] = []
+  for (const key in value) keys.push(key)
+  return keys
+}
+
+/** How `failedQueryReach` reads one object. */
+interface NodeShape {
+  isArray: boolean
+  isError: boolean
+  errorLike: boolean
+  database: boolean
+  keys: string[]
+}
+
+/**
+ * How `failedQueryReach` reads `value`, or `undefined` when a proxy or other
+ * exotic object throws while it is inspected (such a value cannot be cleared).
+ */
+function nodeShape(value: object): NodeShape | undefined {
+  try {
+    if (Array.isArray(value)) {
+      return { isArray: true, isError: false, errorLike: false, database: false, keys: [] }
+    }
+    const isError = value instanceof Error
+    const errorLike = isError || hasMessage(value)
+    return {
+      isArray: false,
+      isError,
+      errorLike,
+      database: isError && isDatabaseError(value),
+      keys: writtenKeys(value, errorLike),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** What `failedQueryReach` found. */
+export interface FailedQueryReach {
+  /** Every error reached, each once, `root` first when it is one. */
+  errors: Error[]
+  /**
+   * Whether a failed query may be in reach: a database error, any string
+   * that carries a failed query's text (a message, a stack, a property, a
+   * string `cause`), or a graph too deep, too large or too exotic to walk to
+   * the end.
+   */
+  found: boolean
+}
+
+/**
+ * Walk everything a log line could write from `root`, each value once:
+ * `message`, `stack`, `cause` (enumerable or not) and `errors` of anything
+ * with a string `message`, and the properties of errors, plain objects,
+ * arrays and class instances alike (a class instance is written by
+ * `JSON.stringify` as its own enumerable properties, so a failed query it
+ * holds would be written too). Typed arrays and buffers hold only numbers and
+ * are not entered. The walk stops `MAX_GRAPH_DEPTH` levels deep and after
+ * `MAX_GRAPH_VALUES` values, and either stop counts as finding a failed query.
+ */
+export function failedQueryReach(root: unknown): FailedQueryReach {
+  const errors: Error[] = []
+  const seen = new Set<object>()
+  let found = false
+  let budget = MAX_GRAPH_VALUES
+  const visit = (value: unknown, depth: number): void => {
+    if (--budget < 0) {
+      found = true
+      return
+    }
+    if (typeof value === 'string') {
+      if (value.includes(FAILED_QUERY_MARKER)) found = true
+      return
+    }
+    if (value === null || typeof value !== 'object' || seen.has(value)) return
+    if (depth > MAX_GRAPH_DEPTH) {
+      found = true
+      return
+    }
+    seen.add(value)
+    if (ArrayBuffer.isView(value)) return
+    const shape = nodeShape(value)
+    if (shape === undefined) {
+      found = true
+      return
+    }
+    if (shape.isArray) {
+      for (const item of value as unknown[]) {
+        if (budget < 0) return
+        visit(item, depth + 1)
+      }
+      return
+    }
+    if (shape.isError) errors.push(value as Error)
+    if (shape.database) found = true
+    if (shape.errorLike) {
+      visit(readProperty(value, 'message'), depth + 1)
+      visit(readProperty(value, 'stack'), depth + 1)
+      visit(readProperty(value, 'cause'), depth + 1)
+      visit(readProperty(value, 'errors'), depth + 1)
+    }
+    for (const key of shape.keys) {
+      if (budget < 0) return
+      visit(readProperty(value, key), depth + 1)
+    }
+  }
+  visit(root, 0)
+  return { errors, found }
+}
+
+/** Every error reachable from `root`, each once (see `failedQueryReach`). */
+export function reachableErrors(root: unknown): Error[] {
+  return failedQueryReach(root).errors
+}
+
+/**
+ * Whether `error`, or anything reachable from it (see `failedQueryReach`),
+ * is a failed database query or carries one's text: an app error built as
+ * `Failed to ...: ${error.message}`, or a property or string `cause` that
+ * holds such a message. A graph too deep or too large to walk counts as one.
  */
 export function containsDatabaseError(error: unknown): boolean {
-  return reachableErrors(error).some(
-    (e) =>
-      isDatabaseError(e) ||
-      (typeof e.message === 'string' && e.message.includes(FAILED_QUERY_MARKER))
-  )
+  return failedQueryReach(error).found
 }
 
 /**

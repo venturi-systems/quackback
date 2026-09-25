@@ -427,3 +427,200 @@ describe('errors unrelated to a database keep the standard shape', () => {
     expect(sink.last().err.params).toBeUndefined()
   })
 })
+
+/**
+ * The four residuals an independent verifier found on main f96d1b992 (DEF-63,
+ * venturi-systems/landing-page#2309). Each case failed on that code.
+ */
+describe('an undefined message followed by format arguments (DEF-63 residual 1)', () => {
+  it('logs a fixed message whatever follows the undefined message', () => {
+    // pino formats an undefined message to undefined even when format
+    // arguments follow it, then falls back to the error's own message.
+    const message: string | undefined = undefined
+    const sink = capture()
+    sink.log.error(failedQuery(), message, 'post_1')
+    sink.log.error({ err: failedQuery() }, message, 'post_1', 2)
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    expect(sink.lines.map((l) => JSON.parse(l).msg)).toEqual([
+      DATABASE_ERROR_LOG_MESSAGE,
+      DATABASE_ERROR_LOG_MESSAGE,
+    ])
+  })
+})
+
+describe('bindings (DEF-63 residual 2)', () => {
+  it('serializes an error bound to a child logger under any key', () => {
+    const sink = capture()
+    sink.log.child({ error: failedQuery() }).info('bound')
+    sink.log.child({ component: 'admin' }).child({ reason: failedQuery() }).info('bound')
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    const [first, second] = sink.lines.map((l) => JSON.parse(l))
+    expect(first.error).toMatchObject({
+      type: 'DrizzleQueryError',
+      pg_code: '22P02',
+      statement: STATEMENT,
+    })
+    expect(second).toMatchObject({ component: 'admin', reason: { pg_code: '22P02' } })
+  })
+
+  it("cuts a failed query's text out of a bound string, and out of setBindings", () => {
+    const sink = capture()
+    sink.log.child({ detail: failedQuery().message }).info('bound')
+    const child = sink.log.child({ component: 'admin' })
+    child.setBindings({ cause: failedQuery() })
+    child.info('bound')
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    const [first, second] = sink.lines.map((l) => JSON.parse(l))
+    expect(first.detail).toBe(WITHHELD_QUERY_TEXT)
+    expect(second).toMatchObject({ component: 'admin', cause: { pg_code: '22P02' } })
+  })
+
+  it("serializes an error in the logger's own base bindings", () => {
+    const lines: string[] = []
+    const log = createLogger({
+      level: 'trace',
+      base: { boot_error: failedQuery() },
+      destination: { write: (s: string) => lines.push(s) },
+    })
+    log.info('started')
+
+    expectNoSecrets(lines[0])
+    expect(JSON.parse(lines[0]).boot_error).toMatchObject({ pg_code: '22P02' })
+  })
+})
+
+describe("a failed query's text that no database error carries (DEF-63 residual 3)", () => {
+  /** A class instance, which `JSON.stringify` writes as its own properties. */
+  class QueryContext {
+    constructor(
+      public readonly sql: string,
+      public readonly source?: Error
+    ) {}
+  }
+
+  it('withholds it in a string property and a string cause of an ordinary error', () => {
+    const withProperty = Object.assign(new Error('lookup failed'), {
+      detail: failedQuery().message,
+    })
+    const withCause = new Error('lookup failed')
+    ;(withCause as { cause?: unknown }).cause = failedQuery().message
+    const sink = capture()
+    sink.log.error({ err: withProperty }, 'failed')
+    sink.log.error({ err: withCause }, 'failed')
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    const [first, second] = sink.lines.map((l) => JSON.parse(l).err)
+    expect(first).toMatchObject({ message: 'lookup failed', detail: WITHHELD_QUERY_TEXT })
+    expect(second).toMatchObject({ message: 'lookup failed', cause: WITHHELD_QUERY_TEXT })
+  })
+
+  it('withholds it in an error-like plain object', () => {
+    const error = Object.assign(new Error('lookup failed'), {
+      inner: { message: failedQuery().message, code: 'E_LOOKUP' },
+    })
+    const sink = capture()
+    sink.log.error({ err: error }, 'failed')
+
+    expectNoSecrets(sink.lines[0])
+    expect(sink.last().err.inner).toEqual({ message: WITHHELD_QUERY_TEXT, code: 'E_LOOKUP' })
+  })
+
+  it('withholds it, and a failed query, in a class instance an error holds', () => {
+    const withText = Object.assign(new Error('lookup failed'), {
+      context: new QueryContext(failedQuery().message),
+    })
+    const withQuery = Object.assign(new Error('lookup failed'), {
+      context: new QueryContext('select 1', failedQuery()),
+    })
+    const sink = capture()
+    sink.log.error({ err: withText }, 'failed')
+    sink.log.error({ err: withQuery }, 'failed')
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    const [first, second] = sink.lines.map((l) => JSON.parse(l).err)
+    expect(first.context).toEqual({ sql: WITHHELD_QUERY_TEXT })
+    expect(second.context).toMatchObject({ sql: 'select 1', source: { pg_code: '22P02' } })
+  })
+
+  it('withholds a failed query in a class instance logged as a field or a format argument', () => {
+    const sink = capture()
+    sink.log.warn({ context: new QueryContext('select 1', failedQuery()) }, 'failed')
+    sink.log.warn('failed: %o', new QueryContext(failedQuery().message))
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    const [first, second] = sink.lines.map((l) => JSON.parse(l))
+    expect(first.context).toMatchObject({ sql: 'select 1', source: { pg_code: '22P02' } })
+    expect(second.msg).toBe(`failed: {"sql":"${WITHHELD_QUERY_TEXT}"}`)
+  })
+
+  it('keeps an ordinary class instance as JSON.stringify writes it', () => {
+    const sink = capture()
+    const at = new Date('2026-09-25T00:00:00.000Z')
+    sink.log.info({ context: new QueryContext('select 1'), at }, 'ok')
+
+    expect(sink.last()).toMatchObject({
+      context: { sql: 'select 1' },
+      at: '2026-09-25T00:00:00.000Z',
+    })
+  })
+
+  it('cuts it out of the finished line when a toJSON result carries it (the last layer)', () => {
+    class Snapshot {
+      toJSON() {
+        return { sql: failedQuery().message, rows: 0 }
+      }
+    }
+    const sink = capture()
+    sink.log.info({ snapshot: new Snapshot() }, 'state')
+
+    expectNoSecrets(sink.lines[0])
+    expect(sink.last().snapshot).toEqual({ sql: WITHHELD_QUERY_TEXT, rows: 0 })
+  })
+})
+
+describe('stacks that carry a failed query (DEF-63 residual 4)', () => {
+  // drizzle-orm joins bound values with commas, so a bound value can hold
+  // text shaped like a stack frame.
+  const FRAME_SHAPED_VALUE = `x\n    at leak (file:///${SECRET_PARAM}.js:1:1)`
+
+  function frameShapedQuery(): DrizzleQueryError {
+    return new DrizzleQueryError(STATEMENT, [FRAME_SHAPED_VALUE], postgresError())
+  }
+
+  it("keeps only the error's own frames after a failed query no database error carries", () => {
+    // The app built its message from the failed query's and dropped the error.
+    const error = new AppError(`Failed to list posts: ${frameShapedQuery().message}`)
+    const sink = capture()
+    sink.log.error({ err: error }, 'list failed')
+
+    expectNoSecrets(sink.lines[0])
+    const lines = (sink.last().err.stack as string).split('\n')
+    expect(lines[0]).toBe(`AppError: Failed to list posts: ${WITHHELD_QUERY_TEXT}`)
+    expect(lines.length).toBeGreaterThan(1)
+    for (const line of lines.slice(1)) expect(line).toMatch(/^\s+at\s/)
+  })
+
+  it('keeps nothing after a failed query in a stack the error does not own', () => {
+    const error = new AppError('lookup failed')
+    error.stack = [
+      'AppError: lookup failed (retried)',
+      '    at first (file:///app.js:1:1)',
+      frameShapedQuery().message,
+      '    at second (file:///app.js:2:2)',
+    ].join('\n')
+    const sink = capture()
+    sink.log.error({ err: error }, 'lookup failed')
+
+    expectNoSecrets(sink.lines[0])
+    expect(sink.last().err.stack).toBe(
+      [
+        'AppError: lookup failed (retried)',
+        '    at first (file:///app.js:1:1)',
+        WITHHELD_QUERY_TEXT,
+      ].join('\n')
+    )
+  })
+})
