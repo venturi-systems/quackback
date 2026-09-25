@@ -141,7 +141,7 @@ describe('databaseErrorLogFields (DEF-63)', () => {
   it('reads a bare Postgres error and ignores non-errors', () => {
     expect(databaseErrorLogFields(postgresError('22P02', 'bad input "x"'))).toEqual({
       pg_code: '22P02',
-      error_name: 'Error',
+      error_name: 'PostgresError',
       severity: 'ERROR',
       routine: '_bt_check_unique',
     })

@@ -34,7 +34,7 @@
  * restrict reference is left for a later run; the batch carries on.
  */
 import type { SQL } from 'drizzle-orm'
-import { db, eq, sql, principal, session, user } from '@/lib/server/db'
+import { db, eq, sql, session, user } from '@/lib/server/db'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'anon-sweep' })
