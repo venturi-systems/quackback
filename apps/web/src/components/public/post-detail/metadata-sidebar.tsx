@@ -532,7 +532,11 @@ export function MetadataSidebar({
                       )}
                     >
                       <FolderIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      <span className="truncate flex-1">{b.name}</span>
+                      {/* Board names are written by admins: a long name wraps in
+                          the picker (v6.6 menus) rather than ending in an ellipsis. */}
+                      <span className="min-w-0 flex-1 break-words" data-text-origin="user">
+                        {b.name}
+                      </span>
                       {b.id === board.id && (
                         <CheckIcon className="h-3.5 w-3.5 text-primary shrink-0" />
                       )}
@@ -676,20 +680,24 @@ export function MetadataSidebar({
                     onClick={() => handleRemoveFromRoadmap(roadmap.id as RoadmapId)}
                     disabled={isPending}
                     className={cn(
-                      'group inline-flex items-center gap-1 ps-1.5 pe-1 py-0.5',
-                      'rounded-md text-[11px] font-medium',
+                      'group inline-flex max-w-full items-center gap-1 ps-1.5 pe-1 py-0.5',
+                      'rounded-md text-[11px] font-medium text-start',
                       'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',
                       'hover:bg-blue-500/15 hover:border-blue-500/30',
                       'transition-all duration-150',
                       'disabled:opacity-50 disabled:cursor-not-allowed'
                     )}
                   >
-                    <MapIcon className="h-3 w-3 opacity-70" />
-                    <span className="truncate max-w-[100px]">{roadmap.name}</span>
+                    <MapIcon className="h-3 w-3 shrink-0 opacity-70" />
+                    {/* The roadmap name is the chip's only distinction, so it is
+                        shown whole: a long name wraps inside the chip (v6.6). */}
+                    <span className="min-w-0 break-words" data-text-origin="user">
+                      {roadmap.name}
+                    </span>
                     {isPending ? (
-                      <ArrowPathIcon className="h-2.5 w-2.5 animate-spin" />
+                      <ArrowPathIcon className="h-2.5 w-2.5 shrink-0 animate-spin" />
                     ) : (
-                      <XMarkIcon className="h-2.5 w-2.5 opacity-50 group-hover:opacity-100 transition-opacity" />
+                      <XMarkIcon className="h-2.5 w-2.5 shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" />
                     )}
                   </button>
                 )
@@ -734,10 +742,12 @@ export function MetadataSidebar({
                               'disabled:opacity-50'
                             )}
                           >
-                            <MapIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="truncate">{roadmap.name}</span>
+                            <MapIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 break-words" data-text-origin="user">
+                              {roadmap.name}
+                            </span>
                             {isPending && (
-                              <ArrowPathIcon className="h-3 w-3 animate-spin ms-auto" />
+                              <ArrowPathIcon className="h-3 w-3 shrink-0 animate-spin ms-auto" />
                             )}
                           </button>
                         )
