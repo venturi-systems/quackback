@@ -59,7 +59,12 @@ jobs:
       - name: Check fork portability contract
         run: |
           set -euo pipefail
-          test "$(node -p "require('./package.json').packageManager")" = "bun@1.3.7"
+          # setup-bun installs this version on every runner. Bun 1.3.7 can hang
+          # at startup with no output (oven-sh/bun#26810, fixed in 1.3.9). It
+          # hung 11 CI setup steps between 2026-08-27 and 2026-09-25, and 3 of
+          # 6000 starts in a probe where 1.3.9, 1.3.14 and 1.4.2 hung 0 of 6000
+          # each (HYG-31). 1.4.2 is also the production image's Bun.
+          test "$(node -p "require('./package.json').packageManager")" = "bun@1.4.2"
           test -f apps/web/Dockerfile
           test -f docker-compose.yml
           test -f .env.example

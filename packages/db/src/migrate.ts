@@ -1,3 +1,5 @@
+// First import: it logs that the process started before the others load.
+import { phase } from './script-phase'
 import { config } from 'dotenv'
 config({ path: '../../.env', quiet: true })
 
@@ -10,6 +12,8 @@ import { postStatuses, DEFAULT_STATUSES } from './schema/statuses'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+phase('modules loaded')
 
 async function runMigrations() {
   const connectionString = process.env.DATABASE_URL
@@ -31,7 +35,9 @@ async function runMigrations() {
 
   try {
     // Ensure pgvector extension is available before running migrations
+    phase('connecting and creating the vector extension')
     await sql`CREATE EXTENSION IF NOT EXISTS vector`
+    phase('applying migrations')
     await migrate(db, { migrationsFolder })
     console.log('✅ Migrations completed successfully!')
 
@@ -40,6 +46,7 @@ async function runMigrations() {
     // create posts, and without it the very first post submission throws
     // "Default 'open' status not found." Idempotent — re-running on a
     // pod with statuses already configured is a no-op.
+    phase('checking the default post statuses')
     const existing = await db.select({ id: postStatuses.id }).from(postStatuses).limit(1)
     if (existing.length === 0) {
       await db.insert(postStatuses).values(DEFAULT_STATUSES)
@@ -49,8 +56,10 @@ async function runMigrations() {
     console.error('❌ Migration failed:', error)
     process.exit(1)
   } finally {
+    phase('closing the connection')
     await sql.end()
   }
+  phase('done')
 }
 
 runMigrations()
