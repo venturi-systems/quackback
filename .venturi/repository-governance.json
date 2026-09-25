@@ -45,7 +45,8 @@
     "write_identities": [
       "github-token:ghcr-publisher",
       "github-oidc:npm-trusted-publisher",
-      "github-token:release-asset-uploader"
+      "github-token:release-asset-uploader",
+      "github-token:actions-cache-eviction"
     ],
     "aws_oidc_roles": []
   },
@@ -92,6 +93,6 @@
     "cache_limit_gb": null,
     "budget_increase_allowed": false,
     "circuit_breaker": "workflow timeouts, concurrency cancellation, a changed-path filter on the end-to-end lane, and exactly one nightly schedule",
-    "cache_policy": "per-architecture-gha"
+    "cache_policy": "per-architecture-registry"
   }
 }
