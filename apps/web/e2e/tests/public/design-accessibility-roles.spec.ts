@@ -211,17 +211,32 @@ test.describe('Design acceptance: actual fixture roles and material states', () 
     const failFixtureReads = async (route: Route) => {
       const request = route.request()
       const url = new URL(request.url())
-      const search = decodeURIComponent(url.search)
-      const postData = request.postData() ?? ''
-      const isTargetRead =
+      let isTargetRead = false
+      if (
         url.origin === fixtureOrigin &&
         ['fetch', 'xhr'].includes(request.resourceType()) &&
-        url.pathname.includes('/_serverFn/') &&
-        (search.includes('boardSlug') ||
-          search.includes('sort') ||
-          search.includes('sort=') ||
-          postData.includes('boardSlug') ||
-          postData.includes('sort'))
+        url.pathname.includes('/_serverFn/')
+      ) {
+        const fnId = url.pathname.replace('/_serverFn/', '')
+        try {
+          const decoded = Buffer.from(fnId, 'base64url').toString('utf8')
+          if (decoded.includes('listPublicPostsFn') || decoded.includes('public-posts')) {
+            isTargetRead = true
+          }
+        } catch {
+          // not base64url encoded
+        }
+        if (!isTargetRead) {
+          const search = decodeURIComponent(url.search)
+          const postData = request.postData() ?? ''
+          if (
+            (search.includes('cursor') && search.includes('limit')) ||
+            (postData.includes('cursor') && postData.includes('limit'))
+          ) {
+            isTargetRead = true
+          }
+        }
+      }
       if (isTargetRead) {
         failedReads += 1
         await route.abort('failed')
