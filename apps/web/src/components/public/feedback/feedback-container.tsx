@@ -72,6 +72,7 @@ export function FeedbackContainer({
   welcomeCard,
 }: FeedbackContainerProps): React.ReactElement {
   const intl = useIntl()
+  const searchTriggerRef = useRef<HTMLButtonElement>(null)
   const router = useRouter()
   const { session } = useRouteContext({ from: '__root__' })
   const { filters, setFilters, clearFilters, activeFilterCount } = usePublicFilters()
@@ -144,6 +145,8 @@ export function FeedbackContainer({
     data: postsData,
     isFetching,
     isFetchingNextPage,
+    isPlaceholderData,
+    isPending,
     isError,
     refetch,
     hasNextPage,
@@ -163,6 +166,7 @@ export function FeedbackContainer({
   const posts = flattenPublicPosts(postsData)
   // Show subtle loading indicator when fetching new filter results (not for pagination)
   const isLoading = isFetching && !isFetchingNextPage
+  const resultsPending = isPending || isLoading || isPlaceholderData
 
   // Update list key only when loading completes to trigger animations
   // This ensures we animate the new data, not stale data during loading
@@ -245,6 +249,7 @@ export function FeedbackContainer({
           />
 
           <FeedbackToolbar
+            searchTriggerRef={searchTriggerRef}
             currentSort={activeSort}
             onSortChange={handleSortChange}
             currentSearch={activeSearch}
@@ -265,17 +270,70 @@ export function FeedbackContainer({
               filters={filters}
               setFilters={setFilters}
               clearFilters={clearFilters}
+              showClearAll={false}
               statuses={statuses}
               tags={tags}
               boards={boards}
             />
           </div>
 
-          <div className="mt-5" aria-busy={isLoading}>
+          <div className="mt-3 text-sm text-muted-foreground">
+            <p role="status" aria-live="polite" aria-atomic="true">
+              {resultsPending
+                ? intl.formatMessage({
+                    id: 'portal.feedback.list.updating',
+                    defaultMessage: 'Updating feedback…',
+                  })
+                : !isError && postsData
+                  ? intl.formatMessage(
+                      {
+                        id: 'portal.feedback.list.shown',
+                        defaultMessage: '{count, plural, one {# post shown} other {# posts shown}}',
+                      },
+                      { count: posts.length }
+                    )
+                  : null}
+            </p>
+            {activeSearch && (
+              <p className="mt-1 [overflow-wrap:anywhere]">
+                {intl.formatMessage({ id: 'portal.feedback.toolbar.search', defaultMessage: 'Search' })}
+                {': '}
+                <bdi data-text-origin="user">{activeSearch}</bdi>
+              </p>
+            )}
+            {(activeSearch || activeFilterCount > 0) && (
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2"
+                onClick={() => {
+                  searchTriggerRef.current?.focus()
+                  setFilters({
+                    search: undefined,
+                    status: undefined,
+                    tagIds: undefined,
+                    minVotes: undefined,
+                    dateFrom: undefined,
+                    responded: undefined,
+                  })
+                }}
+              >
+                {intl.formatMessage({
+                  id: 'portal.feedback.filter.clearAll',
+                  defaultMessage: 'Clear all',
+                })}
+              </Button>
+            )}
+          </div>
+
+          <div className="mt-5" aria-busy={resultsPending}>
             {isError && (
               <div role="alert" className="mb-4 rounded-lg border border-input p-4">
                 <p className="mb-3">
-                  Feedback could not be refreshed. Your filters are still selected.
+                  {intl.formatMessage({
+                    id: 'portal.feedback.list.refreshFailed',
+                    defaultMessage: 'Feedback could not be refreshed. Your filters are still selected.',
+                  })}
                 </p>
                 <Button
                   type="button"
@@ -283,22 +341,24 @@ export function FeedbackContainer({
                   onClick={() => void refetch()}
                   disabled={isFetching}
                 >
-                  Try again
+                  {intl.formatMessage({ id: 'portal.auth.tryAgain', defaultMessage: 'Try again' })}
                 </Button>
               </div>
             )}
-            {posts.length === 0 && !isLoading && !isError ? (
-              <p className="text-muted-foreground text-center py-8">
-                {activeSearch || activeFilterCount > 0
-                  ? intl.formatMessage({
-                      id: 'portal.feedback.list.noPostsFiltered',
-                      defaultMessage: 'No posts match your filters.',
-                    })
-                  : intl.formatMessage({
-                      id: 'portal.feedback.list.noPostsYet',
-                      defaultMessage: 'No posts yet.',
-                    })}
-              </p>
+            {posts.length === 0 && !resultsPending && !isError && postsData ? (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">
+                  {activeSearch || activeFilterCount > 0
+                    ? intl.formatMessage({
+                        id: 'portal.feedback.list.noPostsFiltered',
+                        defaultMessage: 'No posts match your filters.',
+                      })
+                    : intl.formatMessage({
+                        id: 'portal.feedback.list.noPostsYet',
+                        defaultMessage: 'No posts yet.',
+                      })}
+                </p>
+              </div>
             ) : (
               <>
                 <div

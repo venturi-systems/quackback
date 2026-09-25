@@ -30,7 +30,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { KEYBOARD_DIR, ROUTES, readPlan, type RouteSpec, type SurfaceProbe } from './plan'
+import { KEYBOARD_DIR, OUT_DIR, ROUTES, readPlan, type RouteSpec, type SurfaceProbe } from './plan'
 
 interface WalkContext {
   id: 'phone-coarse' | 'desktop-fine'
@@ -572,6 +572,99 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
   return findings
 }
 
+/** Capture the exact spacing-stress review cases after the keyboard walk. */
+async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkContext): Promise<void> {
+  const feed = route.id === 'admin-feed' || route.id === 'anonymous-feed'
+  const targets = feed
+    ? [{ selector: '#portal-main aside nav button', text: /^General Feedback\s*\d*$/ }]
+    : route.id === 'admin-post'
+      ? [
+          {
+            // The status selector belongs to the top-level composer; replies share the form test id.
+            selector: 'form[data-testid="comment-form"]:has([id^="comment-status-label-"]) button',
+            text: /^Internal note \(team only\)$/,
+          },
+        ]
+      : route.id === 'admin-settings-statuses'
+        ? [{ selector: 'p', text: /^Toggle statuses to show on your roadmap$/ }]
+        : route.id === 'member-admin-only-notice'
+          ? [
+              { selector: '#admin-only-notice-title', text: /^Administrators only$/ },
+              {
+                selector: '[data-testid="admin-only-notice"] p',
+                text: /^Only administrators can change workspace settings such as members, sign-in, portal access, branding, boards and integrations\.$/,
+              },
+            ]
+          : []
+  if (targets.length === 0 || ctx.id !== (feed ? 'desktop-fine' : 'phone-coarse')) return
+
+  // Only these previously reported widths are captured. This adds no test,
+  // browser context, checker modification or acceptance waiver.
+  const widths = feed ? [1024, 1440, 1920, 2560] : [320]
+  const directory = path.join(OUT_DIR, 'review')
+  fs.mkdirSync(directory, { recursive: true })
+  await page.addStyleTag({
+    content: `
+      * { line-height: 1.5 !important; letter-spacing: 0.12em !important; word-spacing: 0.16em !important; }
+      p { margin-bottom: 2em !important; }
+    `,
+  })
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: ctx.height })
+    await page.evaluate(async () => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      window.scrollTo(0, 0)
+      await document.fonts.ready
+    })
+    for (const target of targets) {
+      const element = page.locator(target.selector).filter({ hasText: target.text })
+      await expect(element).toHaveCount(1)
+      await element.scrollIntoViewIfNeeded()
+    }
+    const regions = []
+    for (const target of targets) {
+      const element = page.locator(target.selector).filter({ hasText: target.text })
+      await expect(element).toHaveCount(1)
+      await expect(element).toBeVisible()
+      const measurement = await element.evaluate((node) => {
+        const style = getComputedStyle(node)
+        const box = node.getBoundingClientRect()
+        const size = parseFloat(style.fontSize)
+        return {
+          text: node.textContent,
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          spacing: {
+            line: parseFloat(style.lineHeight) / size,
+            letter: parseFloat(style.letterSpacing) / size,
+            word: parseFloat(style.wordSpacing) / size,
+          },
+        }
+      })
+      regions.push({ selector: target.selector, expectedText: target.text.source, ...measurement })
+    }
+    const evidence = {
+      schema: 'venturi.portal-spacing-review.v1',
+      source: process.env.GITHUB_SHA ?? null,
+      route: route.id,
+      identity: route.identity,
+      url: page.url(),
+      viewport: page.viewportSize(),
+      locale: 'en-US',
+      textSpacingStress: true,
+      capturedAt: new Date().toISOString(),
+      regions,
+      disposition: 'REVIEW_REQUIRED: inspect the region and record its specific resolution.',
+      pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString('base64'),
+    }
+    fs.writeFileSync(
+      path.join(directory, `${route.id}__${width}__spacing.json`),
+      `${JSON.stringify(evidence, null, 2)}\n`
+    )
+  }
+}
+
 test.describe.configure({ mode: 'parallel' })
 
 for (const route of ROUTES) {
@@ -659,8 +752,9 @@ for (const route of ROUTES) {
         findings.push(...stopFindings(forward, ctx))
         reverse = await walk(page, 'reverse')
         findings.push(...stopFindings(reverse, ctx))
-        for (const message of pageErrors) findings.push({ kind: 'page-error', detail: message })
+        await captureSpacingReview(page, planned, ctx)
       } finally {
+        for (const message of pageErrors) findings.push({ kind: 'page-error', detail: message })
         const result = {
           route: planned.id,
           identity: planned.identity,

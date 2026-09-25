@@ -42,6 +42,8 @@ interface PublicRoadmapFiltersBarProps {
   filters: RoadmapFilters
   onFiltersChange: (updates: Partial<RoadmapFilters>) => void
   onClearAll: () => void
+  /** A parent result summary can provide the one shared reset action. */
+  showClearAll?: boolean
   boards: FilterBarBoard[]
   tags: Tag[]
   segments?: SegmentListItem[]
@@ -54,6 +56,7 @@ export function PublicRoadmapFiltersBar({
   filters,
   onFiltersChange,
   onClearAll,
+  showClearAll = true,
   boards,
   tags,
   segments,
@@ -90,7 +93,7 @@ export function PublicRoadmapFiltersBar({
         onToggleSegment={onToggleSegment}
       />
 
-      {activeChips.length >= 2 && (
+      {showClearAll && activeChips.length >= 2 && (
         <button
           type="button"
           onClick={onClearAll}

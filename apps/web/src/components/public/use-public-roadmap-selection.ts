@@ -6,12 +6,14 @@ export function usePublicRoadmapSelection(): {
   setSelectedRoadmap: (roadmapId: string | null) => void
 } {
   const navigate = useNavigate()
-  const { roadmap } = Route.useSearch()
+  const search = Route.useSearch()
+  const { roadmap } = search
 
   function setSelectedRoadmap(roadmapId: string | null): void {
     void navigate({
       to: '/roadmap',
-      search: { roadmap: roadmapId ?? undefined },
+      // Choosing the view changes its scope, not the user's search or sort.
+      search: { ...search, roadmap: roadmapId ?? undefined },
       replace: true,
     })
   }

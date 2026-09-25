@@ -60,6 +60,7 @@ interface PublicFiltersBarProps {
   filters: PublicFeedbackFilters
   setFilters: (updates: Partial<PublicFeedbackFilters>) => void
   clearFilters: () => void
+  showClearAll?: boolean
   statuses: PostStatusEntity[]
   tags: Tag[]
   boards: FilterBarBoard[]
@@ -69,6 +70,7 @@ export function PublicFiltersBar({
   filters,
   setFilters,
   clearFilters,
+  showClearAll = true,
   statuses,
   tags,
   boards,
@@ -101,7 +103,7 @@ export function PublicFiltersBar({
         variant="pill"
       />
 
-      {activeChips.length >= 2 && (
+      {showClearAll && activeChips.length >= 2 && (
         <button
           type="button"
           onClick={clearFilters}

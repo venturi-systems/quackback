@@ -138,10 +138,14 @@ describe('databaseErrorLogFields (DEF-63)', () => {
     }
   })
 
-  it('reads a bare Postgres error and ignores non-errors', () => {
-    expect(databaseErrorLogFields(postgresError('22P02', 'bad input "x"'))).toEqual({
+  it('classifies a bare Postgres error by shape and ignores non-errors', () => {
+    const error = postgresError('22P02', 'bad input "x"')
+    // DEF-63 uses the driver's shape, not a constructor name that a bundler
+    // can rename. This native Error still represents a Postgres driver error.
+    expect(error.name).toBe('Error')
+    expect(databaseErrorLogFields(error)).toEqual({
       pg_code: '22P02',
-      error_name: 'Error',
+      error_name: 'PostgresError',
       severity: 'ERROR',
       routine: '_bt_check_unique',
     })
