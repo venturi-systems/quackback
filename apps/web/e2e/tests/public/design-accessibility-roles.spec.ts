@@ -210,10 +210,19 @@ test.describe('Design acceptance: actual fixture roles and material states', () 
     let failedReads = 0
     const failFixtureReads = async (route: Route) => {
       const request = route.request()
-      if (
-        new URL(request.url()).origin === fixtureOrigin &&
-        ['fetch', 'xhr'].includes(request.resourceType())
-      ) {
+      const url = new URL(request.url())
+      const search = decodeURIComponent(url.search)
+      const postData = request.postData() ?? ''
+      const isTargetRead =
+        url.origin === fixtureOrigin &&
+        ['fetch', 'xhr'].includes(request.resourceType()) &&
+        url.pathname.includes('/_serverFn/') &&
+        (search.includes('boardSlug') ||
+          search.includes('sort') ||
+          search.includes('sort=') ||
+          postData.includes('boardSlug') ||
+          postData.includes('sort'))
+      if (isTargetRead) {
         failedReads += 1
         await route.abort('failed')
       } else {
