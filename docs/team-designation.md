@@ -71,6 +71,15 @@ and its creator's current role, so a key made by an account that no longer
 qualifies loses its team authority. No API key and no MCP client can change a
 post's status.
 
+Every API key is scoped and expires (`lib/shared/api-key-scopes.ts`,
+`domains/api-keys/api-key.service.ts`). A key created before that can lack
+both. Without scopes it keeps full scope, bounded by its role and its
+creator's role; without a stored expiry it stops working 365 days after it was
+created, the longest lifetime a new key may have. Such a key cannot be
+rotated, because rotation keeps a key's scopes and expiry and would only renew
+its secret; neither can an expired key. Replace either with a new scoped key
+(cutover step 4).
+
 ## Designation sources
 
 - **`VENTURI_TEAM_ADMIN_EMAILS`** (comma-separated). A listed address becomes
@@ -83,8 +92,13 @@ post's status.
   first Google or GitHub sign-in with that address. The server refuses an
   invitation or a promotion for any other address.
 
-Every role write runs in one transaction under one advisory lock
-(`team-designation.ts`):
+Every write that gives or takes away a team role reads the principal, checks
+the rules and writes in one transaction that holds the team-role advisory lock
+(`team-role-lock.ts`): Admin > Team, invitations, the
+`VENTURI_TEAM_ADMIN_EMAILS` promotion and SSO auto-provisioning
+(`team-designation.ts`), and the onboarding and first-SSO bootstrap claims,
+which take their own bootstrap lock first. So a role another writer set a
+moment earlier is the one the rules check:
 
 - a promotion needs a qualifying identity;
 - taking `admin` away needs another administrator who satisfies the rule, so
@@ -146,7 +160,29 @@ the fork-side steps are:
 3. **Demote the bootstrap account** (runbook step 10): in Admin > Team, the
    owner removes the bootstrap account's team role. The server allows it
    because another qualifying administrator exists.
-4. **Break-glass** stays the feedback operations repository's SSM path. If
+4. **Replace keys made before scopes and expiry** (read-only SQL, then Admin >
+   Settings > Developers > API Keys, after step 2). List the active keys that
+   carry no API scope or no stored expiry:
+
+   ```sql
+   SELECT id, name, key_prefix, created_at, last_used_at, expires_at, scopes
+   FROM api_keys
+   WHERE revoked_at IS NULL
+     AND (expires_at IS NULL
+          OR scopes IS NULL
+          OR NOT (scopes LIKE ANY (ARRAY['%"read:feedback"%', '%"write:feedback"%',
+            '%"write:changelog"%', '%"read:article"%', '%"write:article"%',
+            '%"read:chat"%', '%"write:chat"%', '%"admin:workspace"%'])));
+   ```
+
+   A row without an API scope keeps full scope, a row without a stored expiry
+   works until 365 days after `created_at`, and none of them can be rotated.
+   For each one still in use, the designated administrator creates a scoped
+   key with an expiry, moves the integration to it, and revokes the old key.
+   Revoke a key nobody uses at once. The list is empty when the cutover is
+   done.
+
+5. **Break-glass** stays the feedback operations repository's SSM path. If
    step 2 cannot pass (for example the provider reports the address as
    unverified), no one can administer through the app until it does; nothing
    in the app can create an administrator any other way.

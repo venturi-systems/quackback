@@ -9,6 +9,9 @@
  *  - VENTURI_TEAM_ADMIN_EMAILS only promotes, and only a qualifying identity;
  *    a pending team invitation applies at the invitee's Google or GitHub
  *    sign-in.
+ *  - setUserTeamRole (SSO auto-provisioning, invitation acceptance) reads the
+ *    principal under the lock, so a role another writer set after the
+ *    caller's own read is the one its mode and the rules check.
  *
  * The tables are an in-memory store driven through the same drizzle operator
  * shapes the code uses, so the real queries and transaction run against it.
@@ -28,6 +31,9 @@ const store = vi.hoisted(() => ({
   account: [] as Array<Record<string, unknown>>,
   invitation: [] as Array<Record<string, unknown>>,
   locks: [] as string[],
+  // Run once when the next lock is taken: a writer that commits between the
+  // caller's first read and its locked transaction.
+  lockHooks: [] as Array<() => void>,
   audits: [] as Array<Record<string, unknown>>,
   cacheDeletes: [] as string[],
   revoked: [] as string[][],
@@ -87,7 +93,13 @@ const db = {
   },
   execute: async (q: { values?: unknown[] }) => {
     store.locks.push(String(q.values?.[0]))
+    for (const hook of store.lockHooks.splice(0)) hook()
   },
+  insert: (t: Record<string, string>) => ({
+    values: async (v: Row) => {
+      rows(String(t.id).split('.')[0]).push({ ...v })
+    },
+  }),
   update: (t: Record<string, string>) => ({
     set: (v: Row) => ({
       where: async (cond: Cond) => {
@@ -136,8 +148,13 @@ vi.mock('@/lib/server/logger', () => ({
   logger: { child: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }) },
 }))
 
-const { changeTeamRole, applyTeamDesignation, countEligibleAdmins, TEAM_ROLE_LOCK_KEY } =
-  await import('../team-designation')
+const {
+  changeTeamRole,
+  applyTeamDesignation,
+  countEligibleAdmins,
+  setUserTeamRole,
+  TEAM_ROLE_LOCK_KEY,
+} = await import('../team-designation')
 
 /** Seed a person. `qualifies` = verified team address with a GitHub link. */
 function person(
@@ -457,6 +474,24 @@ describe('applyTeamDesignation (VENTURI_TEAM_ADMIN_EMAILS and invitations)', () 
     expect(store.invitation[0].status).toBe('pending')
   })
 
+  it('checks the identity again under the lock', async () => {
+    // The owner qualifies at the first read, then an unlink commits before
+    // the designation takes the lock: the locked read is what decides.
+    person('owner', 'user')
+    store.lockHooks.push(() => {
+      store.account.length = 0
+    })
+    expect(
+      await applyTeamDesignation({
+        userId: 'user_owner' as never,
+        email: 'owner@venturi.systems',
+        includeInvitations: false,
+        source: 'session',
+      })
+    ).toBeNull()
+    expect(roleOf('owner')).toBe('user')
+  })
+
   it('skips an anonymous principal even at a designated address', async () => {
     person('owner', 'user', { type: 'anonymous' })
     expect(
@@ -468,5 +503,137 @@ describe('applyTeamDesignation (VENTURI_TEAM_ADMIN_EMAILS and invitations)', () 
       })
     ).toBeNull()
     expect(roleOf('owner')).toBe('user')
+  })
+})
+
+describe('setUserTeamRole (SSO auto-provisioning and invitation acceptance)', () => {
+  const U = (key: string) => `user_${key}` as never
+
+  it('promotes a qualifying contributor under the team-role lock', async () => {
+    person('owner', 'admin')
+    person('ops', 'user')
+    const change = await setUserTeamRole({ userId: U('ops'), newRole: 'member', mode: 'from_user' })
+    expect(change).toMatchObject({ previousRole: 'user', newRole: 'member' })
+    expect(roleOf('ops')).toBe('member')
+    expect(store.locks).toEqual([TEAM_ROLE_LOCK_KEY])
+  })
+
+  it('refuses a team role to an identity that fails the rule', async () => {
+    person('owner', 'admin')
+    person('ops', 'user', { providers: ['sso'] })
+    await expect(
+      setUserTeamRole({ userId: U('ops'), newRole: 'admin', mode: 'from_user' })
+    ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_REQUIRED' })
+    expect(roleOf('ops')).toBe('user')
+  })
+
+  it('leaves a principal another writer promoted after the caller read it (from_user)', async () => {
+    // The SSO hook read 'user' outside the lock; a designation made the
+    // account admin before this transaction took the lock.
+    person('owner', 'admin')
+    person('ops', 'user')
+    store.lockHooks.push(() => {
+      store.principal.find((p) => p.id === 'principal_ops')!.role = 'admin'
+    })
+    expect(
+      await setUserTeamRole({ userId: U('ops'), newRole: 'member', mode: 'from_user' })
+    ).toBeNull()
+    expect(roleOf('ops')).toBe('admin')
+  })
+
+  it('checks the last-admin rule against the role another writer set (set mode)', async () => {
+    // Sync mode demotes. The hook read 'user'; by the time the lock is held
+    // the account is the only eligible administrator, so the demotion is refused.
+    person('bootstrap', 'admin', { qualifies: false })
+    person('ops', 'user')
+    store.lockHooks.push(() => {
+      store.principal.find((p) => p.id === 'principal_ops')!.role = 'admin'
+    })
+    await expect(
+      setUserTeamRole({ userId: U('ops'), newRole: 'member', mode: 'set' })
+    ).rejects.toMatchObject({ code: 'LAST_ADMIN' })
+    expect(roleOf('ops')).toBe('admin')
+  })
+
+  it('demotes an administrator in set mode while another eligible one remains', async () => {
+    person('owner', 'admin')
+    person('ops', 'admin')
+    const change = await setUserTeamRole({ userId: U('ops'), newRole: 'user', mode: 'set' })
+    expect(change).toMatchObject({ previousRole: 'admin', newRole: 'user' })
+    expect(roleOf('ops')).toBe('user')
+  })
+
+  it('never lowers a role in raise mode', async () => {
+    person('owner', 'admin')
+    person('ops', 'admin')
+    expect(await setUserTeamRole({ userId: U('ops'), newRole: 'member', mode: 'raise' })).toBeNull()
+    expect(roleOf('ops')).toBe('admin')
+  })
+
+  it('raises a member to admin in raise mode', async () => {
+    person('owner', 'admin')
+    person('ops', 'member')
+    const change = await setUserTeamRole({ userId: U('ops'), newRole: 'admin', mode: 'raise' })
+    expect(change).toMatchObject({ previousRole: 'member', newRole: 'admin' })
+  })
+
+  it('creates a missing principal with the role, under the lock', async () => {
+    // "Remove from portal" deleted the principal and kept the auth user.
+    person('owner', 'admin')
+    store.user.push({
+      id: 'user_ops',
+      email: 'ops@venturi.systems',
+      emailVerified: true,
+      name: 'Ops',
+      image: 'https://example.test/ops.png',
+    })
+    store.account.push({ userId: 'user_ops', providerId: 'github' })
+    const signedInAt = new Date('2026-09-25T00:00:00Z')
+    const change = await setUserTeamRole({
+      userId: U('ops'),
+      newRole: 'member',
+      mode: 'from_user',
+      create: { lastSsoSignInAt: signedInAt },
+    })
+    expect(change).toMatchObject({ previousRole: null, newRole: 'member' })
+    expect(store.principal.find((p) => p.userId === 'user_ops')).toMatchObject({
+      role: 'member',
+      displayName: 'Ops',
+      avatarUrl: 'https://example.test/ops.png',
+      lastSsoSignInAt: signedInAt,
+    })
+    expect(store.locks).toEqual([TEAM_ROLE_LOCK_KEY])
+  })
+
+  it('uses the given display name for a created principal', async () => {
+    person('owner', 'admin')
+    store.user.push({ id: 'user_ops', email: 'ops@venturi.systems', emailVerified: true })
+    store.account.push({ userId: 'user_ops', providerId: 'google' })
+    await setUserTeamRole({
+      userId: U('ops'),
+      newRole: 'admin',
+      mode: 'raise',
+      create: { displayName: 'Operations' },
+    })
+    expect(store.principal.find((p) => p.userId === 'user_ops')).toMatchObject({
+      role: 'admin',
+      displayName: 'Operations',
+    })
+  })
+
+  it('never creates a principal with a team role its identity cannot hold', async () => {
+    person('owner', 'admin')
+    store.user.push({ id: 'user_ops', email: 'ops@acme.example', emailVerified: true })
+    store.account.push({ userId: 'user_ops', providerId: 'github' })
+    await expect(
+      setUserTeamRole({ userId: U('ops'), newRole: 'member', mode: 'from_user' })
+    ).rejects.toMatchObject({ code: 'TEAM_IDENTITY_REQUIRED' })
+    expect(store.principal.find((p) => p.userId === 'user_ops')).toBeUndefined()
+  })
+
+  it('creates nothing for a missing principal whose target is user', async () => {
+    store.user.push({ id: 'user_ops', email: 'ops@venturi.systems', emailVerified: true })
+    expect(await setUserTeamRole({ userId: U('ops'), newRole: 'user', mode: 'set' })).toBeNull()
+    expect(store.principal).toEqual([])
   })
 })
