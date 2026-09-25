@@ -195,7 +195,7 @@ async function raceBehindTheLock(
     await released
   })
 
-  let pending: Array<Promise<Outcome>> = []
+  let pending!: Array<Promise<Outcome>>
   try {
     await held
     pending = attempts.map(({ who, run }) =>
