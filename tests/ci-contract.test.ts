@@ -267,9 +267,7 @@ describe('image provenance labels', () => {
       expect(publish, `docker.yml must pass ${arg}`).toMatch(
         new RegExp(`^\\s+${arg}=\\$\\{\\{ `, 'm')
       )
-      expect(exported, `export-amd64-image.yml must pass ${arg}`).toContain(
-        `--build-arg "${arg}=`
-      )
+      expect(exported, `export-amd64-image.yml must pass ${arg}`).toContain(`--build-arg "${arg}=`)
     }
 
     const verify = publish.indexOf('name: Verify per-arch provenance labels')
@@ -490,7 +488,7 @@ describe('QB-CI-003 database setup steps fail fast', () => {
   // sets up the database container carries its own, much smaller cap.
   it.each([
     ['database_tests', ['bun run db:migrate', 'bun run db:indexes']],
-    ['e2e_tests', ['bun run db:migrate', 'bun run db:seed']],
+    ['e2e_tests', ['bun run db:migrate', 'bun run --cwd packages/db db:seed']],
   ] as const)('%s caps each database setup step on its own', (name, commands) => {
     const text = job(name)
     const jobCap = Number(text.match(/\n {4}timeout-minutes: (\d+)\n/)?.[1])

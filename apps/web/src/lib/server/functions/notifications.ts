@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
 import type { NotificationId } from '@quackback/ids'
 import { requireAuth, policyActorFromAuth } from './auth-helpers'
+import { filterId, filterLimit, filterOffset } from '@/lib/shared/schemas/list-filters'
 import {
   getNotificationsForMember,
   getUnreadCount,
@@ -21,14 +22,17 @@ const log = logger.child({ component: 'notifications' })
 // Schemas
 // ============================================
 
+// LIMIT and OFFSET take only whole numbers, and the notification id column
+// throws on anything but a TypeID, so the validator refuses a fractional or
+// out-of-range page and a malformed id before any query runs (DEF-45).
 const getNotificationsSchema = z.object({
-  limit: z.number().min(1).max(100).optional().default(20),
-  offset: z.number().min(0).optional().default(0),
+  limit: filterLimit().optional().default(20),
+  offset: filterOffset().optional().default(0),
   unreadOnly: z.boolean().optional().default(false),
 })
 
 const notificationIdSchema = z.object({
-  notificationId: z.string(),
+  notificationId: filterId('notification'),
 })
 
 // ============================================

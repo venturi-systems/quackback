@@ -36,6 +36,23 @@ const OPTIONAL_SHAS: readonly string[] = ['downstream_commit', 'patch_id', 'neut
  * `rejected` or `deferred` record therefore does not withdraw an earlier
  * acceptance.
  *
+ * Provenance: `review.by` names who made the decision, and
+ * `review.merged_by`, when given, names who merged the intake pull request.
+ * They are different people when an agent prepared the intake and a person
+ * merged it without a recorded review; `review.by` then names the agent and
+ * says that no human review was recorded.
+ *
+ * A provenance amendment (`amends_line`) corrects who decided or merged an
+ * earlier record without editing that line. It names the earlier record's
+ * 1-based line number and repeats that record's identity (`intake`,
+ * `upstream_sha`, `merge_base`, `downstream_head`, `downstream_commit`,
+ * `patch_id`, `neutralized_by`, `intake_pr` and `review.decision`), which the
+ * check compares; it cannot change a decision or the intake pull request. A
+ * decision changes only through an ordinary later record. An amendment names
+ * an ordinary record, never another amendment, and a record takes at most one
+ * amendment, so the check refuses a second amendment of a line however it is
+ * addressed.
+ *
  * `scripts/check-upstream-intake-ledger.ts` enforces the ledger in CI.
  */
 export interface UpstreamIntakeInput {
@@ -46,8 +63,13 @@ export interface UpstreamIntakeInput {
   downstream_head: string
   downstream_patches: string[]
   tests: string[]
+  /** Who made the decision: a person, or the agent that prepared the intake. */
   reviewed_by: string
   decision: 'accepted' | 'rejected' | 'deferred'
+  /** Who merged the intake pull request, when that is not `reviewed_by`. */
+  merged_by?: string
+  /** On a provenance amendment: the 1-based ledger line it amends. */
+  amends_line?: number
   recorded_at?: string
   downstream_commit?: string
   patch_id?: string
@@ -98,6 +120,13 @@ export function buildUpstreamIntakeRecord(input: UpstreamIntakeInput) {
   }
   if (input.tests.length === 0) throw new Error('at least one test result is required')
   if (!input.reviewed_by.trim()) throw new Error('reviewed_by is required')
+  if (input.merged_by !== undefined && !input.merged_by.trim()) {
+    throw new Error('merged_by must not be empty when given')
+  }
+  const amends = input.amends_line
+  if (amends !== undefined && !(Number.isInteger(amends) && amends > 0)) {
+    throw new Error('amends_line must be a positive ledger line number')
+  }
   const pr = input.intake_pr
   if (pr !== undefined && !(Number.isInteger(pr) && pr > 0)) {
     throw new Error('intake_pr must be a positive pull request number')
@@ -114,9 +143,14 @@ export function buildUpstreamIntakeRecord(input: UpstreamIntakeInput) {
     ...(input.downstream_commit !== undefined && { downstream_commit: input.downstream_commit }),
     ...(input.patch_id !== undefined && { patch_id: input.patch_id }),
     ...(input.neutralized_by !== undefined && { neutralized_by: input.neutralized_by }),
+    ...(input.amends_line !== undefined && { amends_line: input.amends_line }),
     downstream_patches: input.downstream_patches,
     tests: input.tests,
-    review: { by: input.reviewed_by, decision: input.decision },
+    review: {
+      by: input.reviewed_by,
+      decision: input.decision,
+      ...(input.merged_by !== undefined && { merged_by: input.merged_by }),
+    },
     ...(input.intake_pr !== undefined && { intake_pr: input.intake_pr }),
     ...(input.reason !== undefined && { reason: input.reason }),
     ...(input.notes !== undefined && { notes: input.notes }),
@@ -146,6 +180,7 @@ if (import.meta.main) {
     throw new Error('--decision must be accepted, rejected, or deferred')
   }
   const intakePr = optional('--intake-pr')
+  const amendsLine = optional('--amends-line')
   const intake = optional('--intake')
   if (intake !== undefined && intake !== 'merge') throw new Error("--intake must be 'merge'")
   const record = buildUpstreamIntakeRecord({
@@ -157,6 +192,8 @@ if (import.meta.main) {
     tests: values('--test'),
     reviewed_by: value('--reviewed-by'),
     decision,
+    merged_by: optional('--merged-by'),
+    amends_line: amendsLine === undefined ? undefined : Number(amendsLine),
     downstream_commit: optional('--downstream-commit'),
     patch_id: optional('--patch-id'),
     neutralized_by: optional('--neutralized-by'),

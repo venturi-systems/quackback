@@ -26,6 +26,7 @@ import {
 } from '@/lib/server/db'
 import { listSuggestions } from '@/lib/server/domains/feedback/suggestion.query'
 import { logger } from '@/lib/server/logger'
+import { filterCount, filterId, filterIdList, filterLimit } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'feedback' })
 
@@ -33,15 +34,18 @@ const log = logger.child({ component: 'feedback' })
 // Schemas
 // ============================================
 
+// The board and source ids go to TypeID id columns, and the query reads
+// `offset + limit + 1` rows, so both counts must be whole numbers in range. The
+// validator refuses anything else before any query runs (DEF-45).
 const listSuggestionsSchema = z.object({
   status: z.enum(['pending', 'accepted', 'dismissed', 'expired']).optional().default('pending'),
   suggestionType: z.enum(['create_post', 'vote_on_post', 'duplicate_post']).optional(),
-  boardId: z.string().optional(),
-  sourceIds: z.array(z.string()).optional(),
+  boardId: filterId('board').optional(),
+  sourceIds: filterIdList('feedback_source').optional(),
   sourceTypes: z.array(z.string()).optional(),
   sort: z.enum(['newest', 'relevance']).optional().default('newest'),
-  limit: z.number().optional().default(20),
-  offset: z.number().optional().default(0),
+  limit: filterLimit().optional().default(20),
+  offset: filterCount().optional().default(0),
 })
 
 const acceptSuggestionSchema = z.object({

@@ -14,13 +14,20 @@
  * JSON parsing is the runtime's own. `fromJSON` is reduced to its envelope
  * check (seroval 1.6.4 rejects any value that is not a `{ t, f, m }`
  * envelope with "Seroval Error (step: 3)") plus the node types the fixtures
- * use. The end-to-end spec e2e/tests/public/serverfn-malformed-payload.spec.ts
- * runs the same cases against the real framework.
+ * use. The stand-in echoes only an `Error`'s message; every value these
+ * fixtures throw is an `Error`, and echoing any other thrown value verbatim
+ * is what CodeQL's js/stack-trace-exposure query reports.
+ *
+ * The end-to-end spec e2e/tests/public/serverfn-malformed-payload.spec.ts
+ * sends the same payloads, byte for byte, to the real framework on the dev
+ * server. The one case it does not send is the GET payload over 1,000,000
+ * characters.
  */
 import { describe, it, expect } from 'vitest'
 import {
   UNKNOWN_SERVER_FN_MESSAGES,
   guardServerFnDecode,
+  isPrototypeMemberServerFnId,
   isServerFnRequestWithoutId,
   isUndecodedServerFnFailure,
   isUnknownServerFnError,
@@ -74,7 +81,7 @@ function fromJSON(value: unknown): unknown {
 }
 
 function frameworkErrorResponse(error: unknown): Response {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = error instanceof Error ? error.message : 'Non-Error value thrown'
   return new Response(
     JSON.stringify({ t: 25, i: 0, s: { message: { t: 1, s: message } }, c: '$TSR/Error' }),
     { status: 500, headers: { 'Content-Type': 'application/json', 'x-tss-serialized': 'true' } }
@@ -121,7 +128,9 @@ function frameworkTerminal(request: Request, opts: TerminalOptions = {}) {
       try {
         res = { result: await (opts.handler ?? (() => ({ ok: true })))(payload) }
       } catch (error) {
-        res = { error: error instanceof Error ? { message: error.message } : error }
+        res = {
+          error: { message: error instanceof Error ? error.message : 'Non-Error value thrown' },
+        }
       }
       if (opts.failSerialization) {
         throw new Error('Server function serialization exceeded its pending output limit')
@@ -421,6 +430,120 @@ describe('guardServerFnDecode: an id that names no function answers 404', () => 
         },
       })
     ).rejects.toBe(error)
+  })
+})
+
+describe('guardServerFnDecode: an id that names an Object.prototype member answers 404', () => {
+  // The production resolver's `manifest[id]` and the dev validator's
+  // `serverFnsById[id]` read plain objects, so these ids find an inherited
+  // member and the framework answers 500 (see the guard's file header).
+  const prototypeIds = [
+    'constructor',
+    '__proto__',
+    'toString',
+    'hasOwnProperty',
+    'valueOf',
+    'isPrototypeOf',
+    '__defineGetter__',
+  ]
+
+  it.each(prototypeIds.map((id) => [id]))(
+    '/_serverFn/%s answers 404 without reaching the framework',
+    async (id) => {
+      let nextCalled = false
+      const result = await guardServerFnDecode({
+        request: new Request(`http://acme.localhost:3000/_serverFn/${id}`, {
+          headers: { 'x-tsr-serverFn': 'true' },
+        }),
+        handlerType: 'serverFn',
+        next: async () => {
+          nextCalled = true
+          throw new TypeError('serverFnInfo.importer is not a function')
+        },
+      })
+      expect(nextCalled).toBe(false)
+      expect(result).toBeInstanceOf(Response)
+      const response = result as Response
+      expect(response.status).toBe(404)
+      expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+      expect(response.headers.get('cache-control')).toBe('no-store')
+      expect(await response.text()).toBe('Not Found')
+    }
+  )
+
+  it('a POST to a prototype-member id answers 404 too', async () => {
+    let nextCalled = false
+    const result = await guardServerFnDecode({
+      request: new Request('http://acme.localhost:3000/_serverFn/constructor', {
+        method: 'POST',
+        headers: { 'x-tsr-serverFn': 'true', 'Content-Type': 'application/json' },
+        body: JSON.stringify(VALID_ENVELOPE),
+      }),
+      handlerType: 'serverFn',
+      next: async () => {
+        nextCalled = true
+        return { response: serialized({ result: 'unreachable' }) }
+      },
+    })
+    expect(nextCalled).toBe(false)
+    expect((result as Response).status).toBe(404)
+  })
+
+  it("uses the framework's pathname when it is given", async () => {
+    let nextCalled = false
+    const result = await guardServerFnDecode({
+      request: new Request('http://acme.localhost:3000/_serverFn/raw-id'),
+      pathname: '/_serverFn/constructor',
+      handlerType: 'serverFn',
+      next: async () => {
+        nextCalled = true
+        return { response: serialized({ result: 'unreachable' }) }
+      },
+    })
+    expect(nextCalled).toBe(false)
+    expect((result as Response).status).toBe(404)
+  })
+
+  const lookalikes = ['Constructor', 'constructorX', 'x__proto__', 'tostring', '0123abcd']
+  it.each(lookalikes.map((id) => [id]))(
+    'an id that only looks similar (%s) still reaches the framework',
+    async (id) => {
+      const original = serialized({ result: 'ok' })
+      const result = await guardServerFnDecode({
+        request: new Request(`http://acme.localhost:3000/_serverFn/${id}`),
+        handlerType: 'serverFn',
+        next: async () => ({ response: original }),
+      })
+      expect((result as { response: Response }).response).toBe(original)
+    }
+  )
+
+  it('router requests are not inspected, even on a prototype-member path', async () => {
+    const original = new Response('page', { status: 200 })
+    const result = await guardServerFnDecode({
+      request: new Request('http://acme.localhost:3000/_serverFn/constructor'),
+      handlerType: 'router',
+      next: async () => ({ response: original }),
+    })
+    expect((result as { response: Response }).response).toBe(original)
+  })
+})
+
+describe('isPrototypeMemberServerFnId', () => {
+  const table: Array<[string | undefined, boolean]> = [
+    ['constructor', true],
+    ['__proto__', true],
+    ['toString', true],
+    ['hasOwnProperty', true],
+    ['propertyIsEnumerable', true],
+    ['__lookupSetter__', true],
+    ['0123abcd', false],
+    ['Constructor', false],
+    ['', false],
+    [undefined, false],
+  ]
+  it.each(table)('%o -> %s', (id, expected) => {
+    expect(isPrototypeMemberServerFnId(id)).toBe(expected)
   })
 })
 

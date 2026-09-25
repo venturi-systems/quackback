@@ -164,7 +164,7 @@ function CategoryIndexPage() {
                 className="mb-4 shrink-0 inline-flex w-full items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0" />
-                <span className="min-w-0 truncate">All categories</span>
+                <span className="min-w-0 break-words">All categories</span>
               </Link>
               <p className="mb-1.5 shrink-0 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
                 Browse
@@ -190,7 +190,12 @@ function CategoryIndexPage() {
                             icon={cat.icon}
                             className="h-3.5 w-3.5 shrink-0 opacity-50"
                           />
-                          <span className="min-w-0 truncate">{cat.name}</span>
+                          {/* Category names are written by admins; a long name
+                              wraps in the navigation (v6.6) instead of ending in
+                              an ellipsis. */}
+                          <span className="min-w-0 break-words" data-text-origin="user">
+                            {cat.name}
+                          </span>
                         </Link>
                         {isActive && subcategories.length > 0 && (
                           <ul className="mt-px ml-4 w-full space-y-px pr-1">
@@ -201,7 +206,12 @@ function CategoryIndexPage() {
                                   className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs leading-snug text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                                 >
                                   <ChevronRightIcon className="h-3 w-3 shrink-0 opacity-40" />
-                                  <span className="min-w-0 flex-1 truncate">{sub.name}</span>
+                                  <span
+                                    className="min-w-0 flex-1 break-words"
+                                    data-text-origin="user"
+                                  >
+                                    {sub.name}
+                                  </span>
                                   {sub.articles.length > 0 && (
                                     <span className="shrink-0 tabular-nums text-muted-foreground/40">
                                       {sub.articles.length}

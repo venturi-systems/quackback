@@ -49,6 +49,21 @@
  * error and reports "Invalid server function ID", so that case answers 404
  * on the dev server.
  *
+ * Ids that name an `Object.prototype` member (`constructor`, `__proto__`,
+ * `toString`, `hasOwnProperty` and the rest). The production resolver looks
+ * the id up in a plain object literal (`manifest[id]`), so such an id finds
+ * the inherited member instead of nothing, and the resolver then throws
+ * `serverFnInfo.importer is not a function`, which the exact-text match above
+ * rightly does not recognise; production answered 500 for these ids on
+ * 2026-09-25. The dev id validator reads a plain object the same way
+ * (`serverFnsById[id]`) and lets the id through to a base64url JSON decode
+ * that throws, which by the source ends in the same 500. No real id can be
+ * such a name: production ids are sha256 hex digests and dev ids are
+ * base64url JSON (they start with `eyJ`). So the guard answers these ids 404
+ * before the framework resolves anything, with a structural check that
+ * matches no error text. It runs after CSRF, so a cross-site request is still
+ * refused 403 first.
+ *
  * A request for the bare `/_serverFn/` names no id at all. The framework
  * throws for it before any request middleware runs, so the server entry
  * (src/server.ts) answers it with `isServerFnRequestWithoutId` and
@@ -71,7 +86,12 @@ export const SERVER_FN_BASE = '/_serverFn/'
  * when that id names no function the client may call
  * (@tanstack/start-plugin-core 1.171.46):
  *   - production build, the id is not in the manifest;
- *   - production build, the function exists but is not client-callable;
+ *   - production build with a separate server-function provider environment
+ *     (an RSC build, `includeClientReferencedCheck`), the function exists but
+ *     is not client-callable. This fork's build has no such environment
+ *     (react-start without `rsc`, so the SSR environment is the provider), so
+ *     its resolver never throws this one; it stays listed in case the fork
+ *     ever enables RSC;
  *   - dev server, the `validate-server-fn-id` virtual module rejects the id.
  */
 export const UNKNOWN_SERVER_FN_MESSAGES = [
@@ -100,6 +120,16 @@ export function isUnknownServerFnError(error: unknown, serverFnId: string | unde
   const message = (error as { message?: unknown } | null | undefined)?.message
   if (typeof message !== 'string') return false
   return UNKNOWN_SERVER_FN_MESSAGES.some((prefix) => message === prefix + serverFnId)
+}
+
+/**
+ * True when `serverFnId` names a member of `Object.prototype`, such as
+ * `constructor` or `__proto__`. The framework's resolver would find that
+ * inherited member in its plain-object manifest and fail with a 500 instead
+ * of reporting an unknown id (see the file header).
+ */
+export function isPrototypeMemberServerFnId(serverFnId: string | undefined): boolean {
+  return !!serverFnId && serverFnId in Object.prototype
 }
 
 /**
@@ -179,7 +209,8 @@ interface NextResult {
 
 /**
  * Core of the request middleware, decoupled from the framework so it can be
- * unit tested. Returns the framework's result unchanged unless the call
+ * unit tested. Returns the framework's result unchanged unless the id names
+ * an `Object.prototype` member (404 without calling `next`) or the call
  * failed before its function started. `pathname` is the framework's own
  * (normalized) request path; it defaults to the request URL's path.
  */
@@ -196,19 +227,18 @@ export async function guardServerFnDecode<T extends NextResult>({
 }): Promise<T | Response> {
   if (handlerType !== 'serverFn') return next()
 
+  const serverFnId = serverFnIdFromPathname(pathname ?? new URL(request.url).pathname)
+  // Answered before the framework runs: its resolver would find the
+  // inherited member and fail with a 500 (see the file header).
+  if (isPrototypeMemberServerFnId(serverFnId)) return serverFnNotFound()
+
   const probe: DispatchProbe = { dispatched: false }
   inFlight.set(request, probe)
   let result: T
   try {
     result = await next()
   } catch (error) {
-    if (
-      !probe.dispatched &&
-      isUnknownServerFnError(
-        error,
-        serverFnIdFromPathname(pathname ?? new URL(request.url).pathname)
-      )
-    ) {
+    if (!probe.dispatched && isUnknownServerFnError(error, serverFnId)) {
       return serverFnNotFound()
     }
     throw error
@@ -227,8 +257,9 @@ export async function guardServerFnDecode<T extends NextResult>({
 
 /**
  * Global request middleware: answers 400 for a server-function request whose
- * payload could not be decoded, and 404 for one whose id names no function.
- * Register it after CSRF, so a cross-site request is still refused 403 first.
+ * payload could not be decoded, and 404 for one whose id names no function
+ * (including an id that names an `Object.prototype` member). Register it
+ * after CSRF, so a cross-site request is still refused 403 first.
  */
 export const serverFnDecodeGuardMiddleware = createMiddleware().server(
   ({ request, pathname, handlerType, next }) =>

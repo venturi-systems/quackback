@@ -6,6 +6,7 @@
 
 import { z } from 'zod'
 import { tiptapContentSchema } from './posts'
+import { filterId, filterText } from './list-filters'
 
 // ============================================================================
 // Category Schemas
@@ -87,10 +88,14 @@ export const listArticlesSchema = z.object({
   sort: z.enum(['newest', 'oldest']).optional(),
 })
 
+// The public Help Center inputs below are reachable without signing in, so
+// each takes only what its query accepts (DEF-45): the category and article id
+// columns throw on anything but a TypeID, and Postgres rejects a NUL in the
+// search text or a slug. The cursor is the id of the last article on the page.
 export const listPublicArticlesSchema = z.object({
-  categoryId: z.string().optional(),
-  search: z.string().optional(),
-  cursor: z.string().optional(),
+  categoryId: filterId('category').optional(),
+  search: filterText().optional(),
+  cursor: filterId('article').optional(),
   limit: z.number().int().positive().max(100).optional(),
 })
 
@@ -99,16 +104,16 @@ export const publishArticleSchema = z.object({
 })
 
 export const articleFeedbackSchema = z.object({
-  articleId: z.string().min(1),
+  articleId: filterId('article'),
   helpful: z.boolean(),
 })
 
 export const getCategoryBySlugSchema = z.object({
-  slug: z.string().min(1),
+  slug: filterText().min(1),
 })
 
 export const getArticleBySlugSchema = z.object({
-  slug: z.string().min(1),
+  slug: filterText().min(1),
 })
 
 export const unpublishArticleSchema = z.object({

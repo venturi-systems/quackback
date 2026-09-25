@@ -8,9 +8,12 @@ import { test, expect } from '@playwright/test'
  * Prerequisites:
  *   - The `helpCenter` feature flag must be enabled for the acme workspace.
  *
- * The suite enables the flag before each suite via `enableHelpCenter`. Tests that
- * can't run without the flag return early rather than failing, so the suite stays
- * green on fresh seeds where the flag is off by default.
+ * The suite enables the flag before each suite via `enableHelpCenter`, so the
+ * admin Help Center is always reachable. A test never returns early when an
+ * element it needs is missing: that would pass having asserted nothing. It
+ * waits for the element and fails when it never appears, and a case that
+ * genuinely depends on seed data it cannot create calls `test.skip` with the
+ * reason, so the report shows it as skipped rather than passed.
  */
 
 // ---------------------------------------------------------------------------
@@ -69,7 +72,7 @@ async function selectOrCreateCategory(
   page: import('@playwright/test').Page
 ): Promise<void> {
   const trigger = container.locator('[role="combobox"]').first()
-  if ((await trigger.count()) === 0) return
+  await expect(trigger).toBeVisible({ timeout: 10000 })
   await trigger.click()
   const listbox = page.getByRole('listbox')
   await expect(listbox).toBeAttached()
@@ -93,18 +96,23 @@ async function selectOrCreateCategory(
 
 /**
  * Create a fresh article via the dialog and navigate to the editor page.
- * Returns the editor URL, or null if the creation flow was unavailable.
+ * Returns the editor URL.
+ *
+ * It used to return null when the New button was not there at the instant it
+ * was counted, and every editor test then returned early and passed having
+ * asserted nothing. It now waits for the button, so a missing creation flow
+ * fails the test that needs it.
  */
 async function createAndOpenArticle(
   page: import('@playwright/test').Page,
   title = `Editor Test Article ${Date.now()}`
-): Promise<string | null> {
+): Promise<string> {
   await enableHelpCenter(page)
   await page.goto('/admin/help-center')
   await page.waitForLoadState('networkidle')
 
   const newButton = page.getByRole('button', { name: /^New$/i })
-  if ((await newButton.count()) === 0) return null
+  await expect(newButton).toBeVisible({ timeout: 10000 })
   await newButton.click()
 
   await page.getByRole('menuitem', { name: 'New article' }).click()
@@ -279,8 +287,7 @@ test.describe('Help Center article creation', () => {
 
 test.describe('Help Center article editor', () => {
   test('editor shows title input, description input, and content area', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     await expect(page.getByPlaceholder('Untitled')).toBeVisible({ timeout: 10000 })
     await expect(page.getByPlaceholder('Page description (optional)')).toBeVisible()
@@ -288,8 +295,7 @@ test.describe('Help Center article editor', () => {
   })
 
   test('editor has category select, Publish button and Save changes button', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     const categorySelect = page.locator('button[role="combobox"]')
     await expect(categorySelect.first()).toBeVisible({ timeout: 10000 })
@@ -303,8 +309,7 @@ test.describe('Help Center article editor', () => {
   })
 
   test('can edit the article title and save', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     const titleInput = page.getByPlaceholder('Untitled')
     await expect(titleInput).toBeVisible({ timeout: 10000 })
@@ -322,8 +327,7 @@ test.describe('Help Center article editor', () => {
   })
 
   test('can edit article description', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     const descInput = page.getByPlaceholder('Page description (optional)')
     await expect(descInput).toBeVisible({ timeout: 10000 })
@@ -335,11 +339,10 @@ test.describe('Help Center article editor', () => {
   })
 
   test('can publish an article and see "View article" link', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     const publishButton = page.getByRole('button', { name: /^publish$/i })
-    if ((await publishButton.count()) === 0) return
+    await expect(publishButton).toBeVisible({ timeout: 10000 })
 
     await publishButton.click()
 
@@ -347,11 +350,10 @@ test.describe('Help Center article editor', () => {
   })
 
   test('can unpublish a published article via ellipsis menu', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     const publishButton = page.getByRole('button', { name: /^publish$/i })
-    if ((await publishButton.count()) === 0) return
+    await expect(publishButton).toBeVisible({ timeout: 10000 })
 
     await publishButton.click()
     await expect(page.getByRole('link', { name: /view article/i })).toBeVisible({ timeout: 10000 })
@@ -366,8 +368,7 @@ test.describe('Help Center article editor', () => {
   })
 
   test('back button navigates to help center list', async ({ page }) => {
-    const url = await createAndOpenArticle(page)
-    if (!url) return
+    await createAndOpenArticle(page)
 
     const breadcrumbLink = page.getByRole('link', { name: 'Help Center' }).first()
     await expect(breadcrumbLink).toBeVisible({ timeout: 10000 })
@@ -395,26 +396,25 @@ test.describe('Help Center article author', () => {
     await page.waitForLoadState('networkidle')
 
     const articleCards = page.locator('h3')
-    if ((await articleCards.count()) === 0) return
+    test.skip((await articleCards.count()) === 0, 'no help-center articles in the list')
 
     await expect(articleCards.first()).toBeVisible()
   })
 
   test('article editor remains stable after setting author via API', async ({ page, request }) => {
     const url = await createAndOpenArticle(page)
-    if (!url) return
 
-    const urlMatch = url.match(/\/articles\/([^/?#]+)/)
-    if (!urlMatch) return
-    const articleId = urlMatch[1]
+    const articleId = url.match(/\/articles\/([^/?#]+)/)?.[1]
+    expect(articleId, `article id in ${url}`).toBeTruthy()
 
     const patchResponse = await request.patch(`/api/v1/help-center/articles/${articleId}`, {
       data: { authorId: 'self' },
       headers: { 'Content-Type': 'application/json' },
     })
 
-    // If authorId: "self" is unsupported, skip — don't fail hard.
-    if (!patchResponse.ok()) return
+    // If authorId: "self" is unsupported, skip loudly rather than pass having
+    // asserted nothing; the integration suite covers the API itself.
+    test.skip(!patchResponse.ok(), `PATCH authorId=self answered ${patchResponse.status()}`)
 
     await page.reload()
     await page.waitForLoadState('networkidle')
@@ -471,8 +471,7 @@ test.describe('Help Center article filtering', () => {
 
 test.describe('Help Center article editor toolbar', () => {
   test('bubble menu appears when text is selected', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Toolbar Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Toolbar Test ${Date.now()}`)
 
     const editor = page.locator('.ProseMirror[contenteditable="true"]')
     await expect(editor).toBeVisible({ timeout: 10000 })
@@ -484,17 +483,15 @@ test.describe('Help Center article editor toolbar', () => {
     // Select all text in the editor (Ctrl+A scoped to editor)
     await editor.press('Control+a')
 
-    // Bubble menu should appear (it activates on text selection)
-    // The bubble menu may contain Bold, Italic, Link buttons
-    const bubbleMenu = page.locator('[class*="bubble-menu"], [data-tippy-root], .tippy-box')
-    if ((await bubbleMenu.count()) > 0) {
-      await expect(bubbleMenu.first()).toBeVisible({ timeout: 3000 })
-    }
+    // The bubble menu appears on a text selection. The article editor is
+    // borderless, so it has no fixed toolbar, and this Bold button exists
+    // only in the bubble menu (rich-text-editor.tsx BubbleMenuContent). The
+    // old tippy/class locator matched nothing, so the case passed untested.
+    await expect(page.getByRole('button', { name: 'Bold (Cmd+B)' })).toBeVisible({ timeout: 5000 })
   })
 
   test('bold shortcut (Ctrl+B) toggles bold in editor', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Bold Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Bold Test ${Date.now()}`)
 
     const editor = page.locator('.ProseMirror[contenteditable="true"]')
     await expect(editor).toBeVisible({ timeout: 10000 })
@@ -510,8 +507,7 @@ test.describe('Help Center article editor toolbar', () => {
   })
 
   test('italic shortcut (Ctrl+I) toggles italic in editor', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Italic Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Italic Test ${Date.now()}`)
 
     const editor = page.locator('.ProseMirror[contenteditable="true"]')
     await expect(editor).toBeVisible({ timeout: 10000 })
@@ -526,8 +522,7 @@ test.describe('Help Center article editor toolbar', () => {
   })
 
   test('slash command menu opens when "/" is typed at start of line', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Slash Menu Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Slash Menu Test ${Date.now()}`)
 
     const editor = page.locator('.ProseMirror[contenteditable="true"]')
     await expect(editor).toBeVisible({ timeout: 10000 })
@@ -538,19 +533,11 @@ test.describe('Help Center article editor toolbar', () => {
     await editor.press('Enter')
     await editor.type('/')
 
-    // Slash command menu should appear
-    // It's typically rendered in a floating popover/tooltip
-    const slashMenu = page
-      .locator('[class*="slash"], [data-slash-menu]')
-      .or(page.locator('.tippy-box'))
-      .or(page.locator('[role="listbox"]'))
-    const menuVisible = (await slashMenu.count()) > 0
-
-    if (menuVisible) {
-      await expect(slashMenu.first()).toBeVisible({ timeout: 3000 })
-      await page.keyboard.press('Escape') // dismiss
-    }
-    // If not visible, the test passes non-destructively — menu may require different trigger
+    // The slash menu lists its block types as buttons (SlashMenuList), and
+    // the article editor enables headings. The old locators matched nothing
+    // and the case passed without checking the menu at all.
+    await expect(page.getByRole('button', { name: /Heading 1/ })).toBeVisible({ timeout: 5000 })
+    await page.keyboard.press('Escape') // dismiss
   })
 })
 
@@ -560,8 +547,7 @@ test.describe('Help Center article editor toolbar', () => {
 
 test.describe('Help Center article SEO description', () => {
   test('description field value is persisted after save and page reload', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `SEO Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `SEO Test ${Date.now()}`)
 
     const descInput = page.getByPlaceholder('Page description (optional)')
     await expect(descInput).toBeVisible({ timeout: 10000 })
@@ -589,8 +575,7 @@ test.describe('Help Center article SEO description', () => {
   })
 
   test('description field is trimmed on save (leading/trailing whitespace)', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Trim Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Trim Test ${Date.now()}`)
 
     const descInput = page.getByPlaceholder('Page description (optional)')
     await expect(descInput).toBeVisible({ timeout: 10000 })
@@ -624,7 +609,7 @@ test.describe('Help Center article list filtering - status', () => {
     page,
   }) => {
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    await expect(addFilterButton).toBeVisible({ timeout: 10000 })
 
     await addFilterButton.click()
 
@@ -638,7 +623,7 @@ test.describe('Help Center article list filtering - status', () => {
 
   test('can apply Draft status filter', async ({ page }) => {
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    await expect(addFilterButton).toBeVisible({ timeout: 10000 })
 
     await addFilterButton.click()
     await page
@@ -662,7 +647,7 @@ test.describe('Help Center article list filtering - status', () => {
 
   test('can apply Published status filter', async ({ page }) => {
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    await expect(addFilterButton).toBeVisible({ timeout: 10000 })
 
     await addFilterButton.click()
     await page
@@ -682,7 +667,7 @@ test.describe('Help Center article list filtering - status', () => {
   test('status filter chip can be removed', async ({ page }) => {
     // Apply a Draft filter
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    await expect(addFilterButton).toBeVisible({ timeout: 10000 })
 
     await addFilterButton.click()
     await page
@@ -692,23 +677,15 @@ test.describe('Help Center article list filtering - status', () => {
     await page.getByRole('button', { name: 'Draft' }).click()
     await page.waitForLoadState('networkidle')
 
-    // Remove the filter by clicking the × on the chip
-    // FilterChip renders a remove button (usually contains an × or X icon)
-    const statusChip = page.locator('button').filter({ hasText: /status/i })
-    if ((await statusChip.count()) === 0) return
+    // FilterChip names its remove button `Remove ${label} ${value} filter`.
+    // The old locator guessed at "a button after one that mentions status"
+    // and returned early, passing, whenever the guess found nothing.
+    const removeButton = page.getByRole('button', { name: 'Remove Status Draft filter' })
+    await expect(removeButton).toBeVisible({ timeout: 5000 })
+    await removeButton.click()
+    await page.waitForLoadState('networkidle')
 
-    // Look for a sibling remove button by finding a button close to the chip
-    const removeButton = statusChip
-      .locator('xpath=following-sibling::button[1]')
-      .or(page.locator('button[aria-label*="remove"]').first())
-
-    if ((await removeButton.count()) > 0) {
-      await removeButton.first().click()
-      await page.waitForLoadState('networkidle')
-    } else {
-      // If no dedicated remove button, just verify the filter chip is present
-      await expect(statusChip.first()).toBeVisible()
-    }
+    await expect(removeButton).toHaveCount(0, { timeout: 5000 })
   })
 
   test('searching in the admin list shows matching articles', async ({ page }) => {
@@ -724,7 +701,7 @@ test.describe('Help Center article list filtering - status', () => {
       .locator('[data-search-input]')
       .or(page.getByPlaceholder(/search all articles/i))
       .or(page.getByPlaceholder(/search/i))
-    if ((await searchInput.count()) === 0) return
+    await expect(searchInput.first()).toBeVisible({ timeout: 10000 })
 
     await searchInput.first().fill(uniqueTitle)
     await page.waitForTimeout(500) // debounce
@@ -741,7 +718,7 @@ test.describe('Help Center article list filtering - status', () => {
       .locator('[data-search-input]')
       .or(page.getByPlaceholder(/search all articles/i))
       .or(page.getByPlaceholder(/search/i))
-    if ((await searchInput.count()) === 0) return
+    await expect(searchInput.first()).toBeVisible({ timeout: 10000 })
 
     await searchInput.first().fill('xyznonexistentarticlexyz98765')
     await page.waitForTimeout(500)
@@ -761,12 +738,11 @@ test.describe('Help Center article list filtering - status', () => {
 
 test.describe('Help Center article preview link', () => {
   test('"View article" link uses the correct /hc/articles/{cat}/{slug} path', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Preview Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Preview Test ${Date.now()}`)
 
     // The article must be published to show the "View article" link
     const publishButton = page.getByRole('button', { name: /^publish$/i })
-    if ((await publishButton.count()) === 0) return
+    await expect(publishButton).toBeVisible({ timeout: 10000 })
     await publishButton.click()
 
     // Wait for "View article" link to appear
@@ -779,11 +755,10 @@ test.describe('Help Center article preview link', () => {
   })
 
   test('"View article" link opens in a new tab (target=_blank)', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `NewTab Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `NewTab Test ${Date.now()}`)
 
     const publishButton = page.getByRole('button', { name: /^publish$/i })
-    if ((await publishButton.count()) === 0) return
+    await expect(publishButton).toBeVisible({ timeout: 10000 })
     await publishButton.click()
 
     const viewLink = page.locator('a').filter({ hasText: /view article/i })
@@ -794,8 +769,7 @@ test.describe('Help Center article preview link', () => {
   })
 
   test('"View article" link is not shown for draft articles', async ({ page }) => {
-    const url = await createAndOpenArticle(page, `Draft Link Test ${Date.now()}`)
-    if (!url) return
+    await createAndOpenArticle(page, `Draft Link Test ${Date.now()}`)
 
     // Article is in draft state after creation — "View article" should not be present
     const viewLink = page.locator('a').filter({ hasText: /view article/i })

@@ -12,8 +12,10 @@ import { createDb, type Database } from '../client'
  * already at its final shape. The test copies those tables into a scratch
  * schema (`LIKE ... INCLUDING ALL`: columns, defaults, constraints, indexes),
  * puts that schema first on the search path so the migrations' unqualified
- * table names resolve to the copies, seeds rows the backfills would touch,
- * runs the ten migrations again, and compares every column, default and row.
+ * table names resolve to the copies, seeds every copied table with rows in the
+ * shape the first run left them, runs the ten migrations again, and compares
+ * every column, default and row. `LIKE` copies no foreign keys, so the seeded
+ * rows need no parent rows.
  *
  * Everything runs in one transaction that is rolled back. The real tables are
  * only read (`LIKE` takes ACCESS SHARE), so other suites using the same
@@ -121,6 +123,69 @@ describe.skipIf(!dbAvailable)('fork and upstream v0.13.2 migrations run again', 
             (gen_random_uuid(), 'oidc_reapply', 'Reapply', 'cid', true, true,
              'member', ${JSON.stringify(mapping)}::jsonb, false)
         `)
+
+        // Rows the other migrations meet on a re-run, each in the shape the
+        // first run left it:
+        // - 0121 and 0122: a board, a category and an article whose empty
+        //   slugs were already healed to `<kind>-<id>`, next to ordinary ones;
+        // - 0123: a webhook already subscribed to conversation.csat_comment_added
+        //   (a re-run must not append it again) and one it never touches;
+        // - 0124 and 0125: a conversation 0124 already renamed to messenger and
+        //   an email one;
+        // - 9001 and 9002: a locked-out 2FA row and an in-flight hook delivery,
+        //   whose values a re-run must not reset to the column defaults.
+        const healedBoard = '00000000-0000-4000-8000-000000000121'
+        const healedCategory = '00000000-0000-4000-8000-000000001221'
+        const healedArticle = '00000000-0000-4000-8000-000000001222'
+        await tx.execute(sql`
+          INSERT INTO "boards" (id, slug, name)
+          VALUES
+            (${healedBoard}::uuid, ${`board-${healedBoard}`}, 'Renamed to an emoji'),
+            (gen_random_uuid(), 'features', 'Features')
+        `)
+        await tx.execute(sql`
+          INSERT INTO "kb_categories" (id, slug, name)
+          VALUES
+            (${healedCategory}::uuid, ${`category-${healedCategory}`}, 'Renamed to an emoji'),
+            (gen_random_uuid(), 'getting-started', 'Getting started')
+        `)
+        await tx.execute(sql`
+          INSERT INTO "kb_articles" (id, category_id, slug, title, content, principal_id)
+          VALUES
+            (${healedArticle}::uuid, ${healedCategory}::uuid, ${`article-${healedArticle}`},
+             'Titled with an emoji', 'c', gen_random_uuid()),
+            (gen_random_uuid(), ${healedCategory}::uuid, 'install', 'Install', 'c', gen_random_uuid())
+        `)
+        await tx.execute(sql`
+          INSERT INTO "webhooks" (id, created_by_id, url, secret, events)
+          VALUES
+            (gen_random_uuid(), gen_random_uuid(), 'https://hooks.example/csat', 's',
+             ARRAY['conversation.csat_submitted', 'conversation.csat_comment_added']::text[]),
+            (gen_random_uuid(), gen_random_uuid(), 'https://hooks.example/posts', 's',
+             ARRAY['post.created']::text[])
+        `)
+        await tx.execute(sql`
+          INSERT INTO "conversations" (id, visitor_principal_id, channel)
+          VALUES
+            (gen_random_uuid(), gen_random_uuid(), 'messenger'),
+            (gen_random_uuid(), gen_random_uuid(), 'email')
+        `)
+        await tx.execute(sql`
+          INSERT INTO "two_factor"
+            (id, user_id, secret, backup_codes, failed_verification_count, locked_until)
+          VALUES
+            (gen_random_uuid(), gen_random_uuid(), 's', 'b', 3, now() + interval '15 minutes')
+        `)
+        await tx.execute(sql`
+          INSERT INTO "hook_deliveries" (job_id, hook_type, outcome)
+          VALUES ('reapply-job-1', 'webhook', 'processing')
+        `)
+        for (const table of TABLES) {
+          const counted = await tx.execute<{ n: number }>(
+            sql.raw(`SELECT count(*)::int AS n FROM "${SCHEMA}"."${table}"`)
+          )
+          expect((counted as unknown as { n: number }[])[0]!.n, table).toBeGreaterThan(0)
+        }
 
         const before = await snapshot(tx)
         for (const tag of TAGS) {
