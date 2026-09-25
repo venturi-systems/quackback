@@ -223,18 +223,29 @@ function NotificationRow({ notification, onMarkAsRead, style }: NotificationRowP
         >
           {notification.title}
         </p>
+        {/* This page is where a notification is read in full; one without a
+            post links nowhere, so the body is shown whole (v6.6) rather than
+            clamped to two lines. */}
         {notification.body && (
-          <p className="text-sm text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+          <p
+            className="text-sm text-muted-foreground mt-1 break-words leading-relaxed"
+            data-text-origin="user"
+          >
             {notification.body}
           </p>
         )}
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex items-baseline gap-2 mt-2">
           {notification.post && (
             <>
-              <span className="text-xs text-muted-foreground/70 truncate max-w-[200px]">
+              {/* The post title is the only pointer to the post, so it is shown
+                  whole and wraps (v6.6) instead of ending in an ellipsis. */}
+              <span
+                className="min-w-0 break-words text-xs text-muted-foreground/70"
+                data-text-origin="user"
+              >
                 {notification.post.title}
               </span>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="shrink-0 text-muted-foreground/40">·</span>
             </>
           )}
           <time
