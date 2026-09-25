@@ -71,8 +71,9 @@ export function isApiKeyScope(value: unknown): value is ApiKeyScope {
  *
  * A key created before scopes existed stores NULL (or only internal
  * capability scopes such as `internal:tier-limits`); it keeps full API access,
- * still bounded by its role and its creator's current role. Any stored API
- * scope makes the key scoped to exactly those scopes.
+ * still bounded by its role, its creator's current role and its lifetime
+ * (apiKeyExpiresAt). Any stored API scope makes the key scoped to exactly
+ * those scopes.
  */
 export function parseStoredApiKeyScopes(raw: string | null | undefined): {
   scopes: ApiKeyScope[]
@@ -93,6 +94,46 @@ export function parseStoredApiKeyScopes(raw: string | null | undefined): {
 
 /** Longest lifetime a new key may have. */
 export const API_KEY_MAX_EXPIRY_DAYS = 365
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * When a key stops working. A key stored without an expiry (created before
+ * every key had to expire) expires API_KEY_MAX_EXPIRY_DAYS after it was
+ * created, the longest lifetime a new key may have, so no key lives forever
+ * (landing-page#2309, DEF-15).
+ */
+export function apiKeyExpiresAt(storedExpiresAt: Date | null | undefined, createdAt: Date): Date {
+  // new Date() also accepts the ISO string a serialized row may carry.
+  if (storedExpiresAt) return new Date(storedExpiresAt)
+  return new Date(new Date(createdAt).getTime() + API_KEY_MAX_EXPIRY_DAYS * DAY_MS)
+}
+
+/**
+ * Why a key cannot be rotated, or null when it can. Rotation replaces the
+ * secret and keeps everything else, so it would carry forward a key made
+ * before scopes and expiry were required (full access, no stored expiry), and
+ * it cannot bring back an expired key. Those are replaced instead: create a
+ * scoped key that expires, move the integration to it, revoke the old one.
+ *
+ * `scopes` is the key's API scopes (null for full access), `expiresAt` its
+ * STORED expiry (null for none), as the ApiKey shape reports them.
+ */
+export function apiKeyRotationBlocker(
+  key: { scopes: readonly string[] | null; expiresAt: Date | null; createdAt: Date },
+  now: number = Date.now()
+): 'legacy' | 'expired' | null {
+  if (key.scopes === null || key.expiresAt === null) return 'legacy'
+  if (apiKeyExpiresAt(key.expiresAt, key.createdAt).getTime() <= now) return 'expired'
+  return null
+}
+
+export const API_KEY_ROTATION_BLOCKED_MESSAGES: Record<'legacy' | 'expired', string> = {
+  legacy:
+    'This key was created before every key needed scopes and an expiry, so it cannot be rotated. Create a new key with the scopes it needs, move the integration to it, then revoke this one.',
+  expired:
+    'This key has expired, so it cannot be rotated. Create a new key, move the integration to it, then revoke this one.',
+}
 
 /** Lifetimes offered in the creation dialog. */
 export const API_KEY_EXPIRY_OPTIONS_DAYS = [30, 90, 180, 365] as const

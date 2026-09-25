@@ -10,6 +10,11 @@ export interface ApiKey {
   createdById: PrincipalId | null
   principalId: PrincipalId
   lastUsedAt: Date | null
+  /**
+   * The stored expiry. Null for a key created before every key had to expire:
+   * that key stops working API_KEY_MAX_EXPIRY_DAYS after `createdAt`
+   * (apiKeyExpiresAt in lib/shared/api-key-scopes.ts).
+   */
   expiresAt: Date | null
   createdAt: Date
   revokedAt: Date | null
@@ -23,9 +28,10 @@ export interface ApiKey {
 
 export interface CreateApiKeyInput {
   name: string
-  expiresAt?: Date | null
-  /** API scopes for the key. Omitted only by internal callers. */
-  scopes?: ApiKeyScope[]
+  /** Every key expires (landing-page#2309, DEF-15). */
+  expiresAt: Date
+  /** API scopes for the key: at least one. Every key is scoped. */
+  scopes: ApiKeyScope[]
 }
 
 export interface CreateApiKeyResult {
