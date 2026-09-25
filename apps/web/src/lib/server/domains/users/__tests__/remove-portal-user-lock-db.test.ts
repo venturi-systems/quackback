@@ -14,7 +14,7 @@
  * order it names. The fixtures live in a throwaway schema, dropped after.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { generateId } from '@quackback/ids'
+import { generateId, toUuid } from '@quackback/ids'
 import { eq } from 'drizzle-orm'
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
@@ -183,9 +183,10 @@ async function behindTheLock(
   const holder = admin.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(hashtext(${TEAM_ROLE_LOCK_KEY}))`
     if (promoteWhileHolding) {
+      // Raw SQL bypasses the TypeID column mapping: the stored id is the UUID.
       await tx`
         UPDATE ${tx(SCHEMA)}.principal SET role = 'admin'
-        WHERE id = ${promoteWhileHolding.principalId}
+        WHERE id = ${toUuid(promoteWhileHolding.principalId)}
       `
     }
     holding()
