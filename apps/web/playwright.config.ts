@@ -1,4 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
+import { assertDesignFixtureEnvironmentSync } from './e2e/utils/design-fixture-guard'
+
+// Guard CI before webServer and setup fixtures are instantiated.
+if (process.env.CI) assertDesignFixtureEnvironmentSync()
 
 /**
  * Playwright configuration for Quackback E2E tests

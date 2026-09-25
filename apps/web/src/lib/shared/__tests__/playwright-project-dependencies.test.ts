@@ -1,7 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+// These tests inspect project declarations, not an executing E2E fixture.
+// Mock only this import boundary; the real Playwright config retains its guard.
+const { fixtureGuard } = vi.hoisted(() => ({ fixtureGuard: vi.fn() }))
+vi.mock('../../../../e2e/utils/design-fixture-guard', () => ({
+  assertDesignFixtureEnvironmentSync: fixtureGuard,
+}))
 
 /**
  * The e2e lane is sharded (`--shard=N/4` in ci.yml) and each shard is its own
@@ -42,6 +49,10 @@ const INFRASTRUCTURE_PROJECTS = new Set(['setup', 'cleanup'])
 async function loadProjects(): Promise<PlaywrightProject[]> {
   const configPath = join(WEB_ROOT, 'playwright.config.ts')
   const mod = await import(/* @vite-ignore */ configPath)
+  expect(
+    fixtureGuard,
+    'Configuration inspection must exercise the mocked CI fixture guard'
+  ).toHaveBeenCalledTimes(1)
   const projects = (mod.default as { projects?: PlaywrightProject[] }).projects
   return projects ?? []
 }
@@ -68,6 +79,16 @@ function matches(testMatch: RegExp | string | undefined, file: string): boolean 
 }
 
 describe('playwright project dependencies', () => {
+  beforeEach(() => {
+    vi.stubEnv('CI', 'true')
+    vi.resetModules()
+    fixtureGuard.mockClear()
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('declares setup as a dependency of every spec-running project', async () => {
     const projects = await loadProjects()
     const specRunning = projects.filter((p) => p.name && !INFRASTRUCTURE_PROJECTS.has(p.name))

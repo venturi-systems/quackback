@@ -120,6 +120,7 @@
 .portal-participation dt {
   margin-bottom: 0.35rem;
   font-weight: 500;
+  text-wrap: balance;
 }
 
 /* Two-line statements in equal-width columns: balance keeps the second line
