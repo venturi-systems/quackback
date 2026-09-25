@@ -1,10 +1,13 @@
 /**
  * Keyboard walk over every route in the render plan.
  *
- * For each route, as its identity, in two contexts (a 390px coarse-pointer
- * phone and a 1440px fine-pointer desktop), this presses Tab from the top of
- * the page until focus leaves the document, then Shift+Tab back. Every stop is
- * recorded, and a route fails when:
+ * For each route, as its identity, in each of its contexts (plan.ts
+ * walkContextsFor: a 390px coarse-pointer phone, a 1440px fine-pointer
+ * desktop, and a coarse-pointer walk at the width where a planned surface first
+ * renders, such as the post sidebar at 1024px), this presses Tab from the top
+ * of the page until focus leaves the document, then Shift+Tab back. Every stop
+ * of both walks is recorded, with the elements reached in only one direction,
+ * and a route fails when:
  *
  *   - a surface the plan names for it is missing (the lane would otherwise
  *     measure a page that no longer shows what it exists to measure);
@@ -30,22 +33,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { KEYBOARD_DIR, ROUTES, readPlan, type RouteSpec, type SurfaceProbe } from './plan'
-
-interface WalkContext {
-  id: 'phone-coarse' | 'desktop-fine'
-  width: number
-  height: number
-  hasTouch: boolean
-  pointer: 'coarse' | 'fine'
-  /** Minimum target edge in CSS px. */
-  minTarget: number
-}
-
-const CONTEXTS: WalkContext[] = [
-  { id: 'phone-coarse', width: 390, height: 844, hasTouch: true, pointer: 'coarse', minTarget: 44 },
-  { id: 'desktop-fine', width: 1440, height: 900, hasTouch: false, pointer: 'fine', minTarget: 24 },
-]
+import {
+  KEYBOARD_DIR,
+  ROUTES,
+  readPlan,
+  walkContextsFor,
+  type RouteSpec,
+  type SurfaceProbe,
+  type WalkContext,
+} from './plan'
 
 /** Tab presses per direction before the walk is declared endless. */
 const MAX_STOPS = 400
@@ -86,6 +82,12 @@ interface TargetResult {
 
 interface StopResult {
   kind: 'stop'
+  /**
+   * The element's identity within this page: the same element carries the
+   * same key in the forward and the reverse walk, even when a node inserted
+   * elsewhere (a portal, a loaded page) changes its structural selector.
+   */
+  key: number
   selector: string
   tag: string
   role: string | null
@@ -376,6 +378,18 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
   }
 
   const visited: Element[] = []
+  // Element identity for comparing the two walks. It lives as long as the
+  // page, so reset() between the walks keeps it.
+  const keys = new WeakMap<Element, number>()
+  let nextKey = 0
+  const keyOf = (el: Element): number => {
+    let key = keys.get(el)
+    if (key === undefined) {
+      key = nextKey++
+      keys.set(el, key)
+    }
+    return key
+  }
   const initial = deepActive()
   const api: WalkerApi = {
     reset() {
@@ -423,6 +437,7 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       const rect = el.getBoundingClientRect()
       return {
         kind: 'stop',
+        key: keyOf(el),
         selector: locator(el),
         tag: el.localName,
         role: el.getAttribute('role'),
@@ -574,8 +589,28 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
 
 test.describe.configure({ mode: 'parallel' })
 
+/**
+ * How the Shift+Tab walk compares with the Tab walk, by element identity
+ * rather than by selector. The two can differ for a sound reason: a list that
+ * loads another page while the walk passes it has more stops on the way back.
+ * The comparison is evidence for review, not a finding: an element reached in
+ * only one direction is named here so a reviewer can tell which case it is.
+ */
+function compareWalks(forward: WalkResult, reverse: WalkResult) {
+  const back = [...reverse.stops].reverse()
+  const forwardKeys = new Set(forward.stops.map((s) => s.key))
+  const reverseKeys = new Set(back.map((s) => s.key))
+  const brief = (s: StopResult) => ({ selector: s.selector, name: s.name })
+  return {
+    matchesForward:
+      back.length === forward.stops.length && back.every((s, i) => s.key === forward.stops[i].key),
+    forwardOnly: forward.stops.filter((s) => !reverseKeys.has(s.key)).map(brief),
+    reverseOnly: back.filter((s) => !forwardKeys.has(s.key)).map(brief),
+  }
+}
+
 for (const route of ROUTES) {
-  for (const ctx of CONTEXTS) {
+  for (const ctx of walkContextsFor(route)) {
     test(`${route.id} at ${ctx.id}`, async ({ browser }) => {
       test.setTimeout(240_000)
       const plan = readPlan()
@@ -680,12 +715,10 @@ for (const route of ROUTES) {
             end: reverse.end,
             detail: reverse.detail ?? null,
             stopCount: reverse.stops.length,
-            matchesForward:
-              forward !== null &&
-              reverse.stops
-                .map((s) => s.selector)
-                .reverse()
-                .join('\n') === forward.stops.map((s) => s.selector).join('\n'),
+            ...(forward
+              ? compareWalks(forward, reverse)
+              : { matchesForward: false, forwardOnly: [], reverseOnly: [] }),
+            stops: reverse.stops,
           },
           findings,
         }

@@ -7,6 +7,9 @@
  *   - a checker report is FAIL: an applicable authored headline or short-copy
  *     failure, or an infrastructure failure (fonts, page errors, overflow,
  *     document wider than the viewport, no measurable text);
+ *   - a checker run ended on another path than the planned one: a redirect,
+ *     such as to sign-in when a session was not honoured, would otherwise
+ *     measure the wrong page and pass;
  *   - a planned keyboard walk has no result, or its result has a finding.
  *
  * NEEDS_REVIEW is not a failure here: it is the suite's own disposition for
@@ -19,7 +22,15 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { CHECKER_DIR, KEYBOARD_DIR, OUT_DIR, PLAN_PATH, ROUTES, SUITE_DIR } from './plan'
+import {
+  CHECKER_DIR,
+  KEYBOARD_DIR,
+  OUT_DIR,
+  PLAN_PATH,
+  ROUTES,
+  SUITE_DIR,
+  walkContextsFor,
+} from './plan'
 
 interface CheckerFinding {
   source?: string
@@ -74,11 +85,16 @@ interface KeyboardResult {
   context: { id: string; pointer: string; minTarget: number; width: number }
   pointerCoarse: boolean | null
   forward: { end: string; stops: unknown[] } | null
-  reverse: { end: string; stopCount: number; matchesForward: boolean } | null
+  reverse: {
+    end: string
+    stopCount: number
+    matchesForward: boolean
+    forwardOnly?: unknown[]
+    reverseOnly?: unknown[]
+  } | null
   findings: { kind: string; selector?: string; name?: string; detail: string; direction?: string }[]
 }
 
-const KEYBOARD_CONTEXTS = ['phone-coarse', 'desktop-fine']
 const MAX_ROWS = 80
 
 // A table cell: one line, backslashes escaped before pipes so a value can
@@ -100,6 +116,15 @@ const readJson = <T>(file: string): T | null => {
 }
 
 const sha256 = (file: string) => createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+
+/** The path of a URL or of a path with a query; null when it cannot be parsed. */
+const pathOf = (value: string): string | null => {
+  try {
+    return new URL(value, 'http://render.invalid').pathname
+  } catch {
+    return null
+  }
+}
 
 const lines: string[] = []
 const problems: string[] = []
@@ -188,6 +213,14 @@ for (const route of plan?.routes ?? []) {
     }
     if (run.errors.length) reasons.push(`errors: ${run.errors.slice(0, 3).join('; ')}`)
     if (run.documentWidth > run.width) reasons.push(`document ${run.documentWidth}px wide`)
+    const renderedPath = pathOf(run.finalURL)
+    if (renderedPath !== pathOf(route.path)) {
+      const detail = `rendered ${renderedPath ?? run.finalURL}, planned ${pathOf(route.path)}`
+      reasons.push(detail)
+      problems.push(
+        `${route.id} at ${run.width}px${run.textSpacingStress ? ' with text spacing' : ''}: ${detail}`
+      )
+    }
     if (reasons.length) {
       infra.push(
         `| ${route.id} | ${run.width} | ${run.textSpacingStress ? 'yes' : 'no'} | ${cell(reasons.join(' / '))} |`
@@ -244,13 +277,31 @@ if (allReviews.length) {
 }
 
 // ---- Keyboard ---------------------------------------------------------------
+/**
+ * How the Shift+Tab walk differs from the Tab walk, by element identity: the
+ * elements reached only going forward and only coming back. Evidence for
+ * review, not a failure (a list that loads while the walk passes it adds
+ * stops on the way back); the walk's own report names each element.
+ */
+const reverseDifference = (reverse: KeyboardResult['reverse']): string => {
+  if (!reverse || reverse.matchesForward) return ''
+  const forwardOnly = reverse.forwardOnly?.length ?? 0
+  const reverseOnly = reverse.reverseOnly?.length ?? 0
+  if (!forwardOnly && !reverseOnly) return ' (same elements, other order)'
+  return ` (${forwardOnly} forward only, ${reverseOnly} reverse only)`
+}
+
 out('### Keyboard walk')
+out()
+out(
+  'A note beside the reverse end counts the elements only one of the two walks reached, compared by element rather than by selector. It is evidence for review, not a failure; the walk report names each element.'
+)
 out()
 out('| Route | Context | Coarse pointer | Stops | Forward end | Reverse end | Findings |')
 out('|---|---|---|---|---|---|---|')
 const keyboardFindings: string[] = []
 for (const route of ROUTES) {
-  for (const context of KEYBOARD_CONTEXTS) {
+  for (const { id: context } of walkContextsFor(route)) {
     const result = readJson<KeyboardResult>(path.join(KEYBOARD_DIR, `${route.id}__${context}.json`))
     if (!result) {
       problems.push(`${route.id} at ${context}: no keyboard walk result`)
@@ -258,7 +309,7 @@ for (const route of ROUTES) {
       continue
     }
     out(
-      `| ${route.id} | ${context} | ${result.pointerCoarse ?? ''} | ${result.forward?.stops.length ?? ''} | ${result.forward?.end ?? ''} | ${result.reverse?.end ?? ''}${result.reverse && !result.reverse.matchesForward ? ' (differs)' : ''} | ${result.findings.length} |`
+      `| ${route.id} | ${context} | ${result.pointerCoarse ?? ''} | ${result.forward?.stops.length ?? ''} | ${result.forward?.end ?? ''} | ${result.reverse?.end ?? ''}${reverseDifference(result.reverse)} | ${result.findings.length} |`
     )
     if (result.findings.length)
       problems.push(`${route.id} at ${context}: ${result.findings.length} keyboard findings`)
