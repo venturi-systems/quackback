@@ -90,6 +90,15 @@ interface TargetResult {
 
 type Visibility = 'visible' | 'no-box' | 'offscreen' | 'covered' | 'clipped'
 
+interface Occluder {
+  selector: string
+  slot: string | null
+  state: string | null
+  opacity: string
+  animation: string
+  rect: { x: number; y: number; width: number; height: number }
+}
+
 interface StopResult {
   kind: 'stop'
   /**
@@ -106,6 +115,8 @@ interface StopResult {
   indicator: string[]
   target: TargetResult
   visibility: Visibility
+  occluders?: Occluder[]
+  screenshot?: string
   /** Share of the box's area inside the viewport, 0 to 1, two decimals. */
   onScreen: number
   /**
@@ -367,7 +378,9 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
     ok: boolean
     rule: 'size' | 'hit-area' | 'spacing' | 'inline-exception' | 'user-agent-control' | null
   }
-  const visibilityOf = (el: Element): { visibility: Visibility; onScreen: number } => {
+  const visibilityOf = (
+    el: Element
+  ): { visibility: Visibility; onScreen: number; occluders?: Occluder[] } => {
     const { rect } = rectOf(el)
     if (rect.width < 1 || rect.height < 1) return { visibility: 'no-box', onScreen: 0 }
     if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) {
@@ -395,13 +408,32 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       ] as [number, number][]
     ).map(([fx, fy]) => [left + (right - left) * fx, top + (bottom - top) * fy] as [number, number])
     const labels = Array.from((el as HTMLInputElement).labels ?? [])
+    const occludingElements = new Set<Element>()
     const covered = points.filter(([x, y]) => {
       const hit = document.elementFromPoint(x, y)
       if (!hit) return false
       if (hit === el || el.contains(hit) || hit.contains(el)) return false
-      return !labels.some((label) => label === hit || label.contains(hit) || hit.contains(label))
+      if (labels.some((label) => label === hit || label.contains(hit) || hit.contains(label))) {
+        return false
+      }
+      occludingElements.add(hit)
+      return true
     })
-    if (covered.length === points.length) return { visibility: 'covered', onScreen }
+    if (covered.length === points.length) {
+      const occluders = Array.from(occludingElements, (hit) => {
+        const rect = hit.getBoundingClientRect()
+        const style = getComputedStyle(hit)
+        return {
+          selector: locator(hit),
+          slot: hit.getAttribute('data-slot'),
+          state: hit.getAttribute('data-state'),
+          opacity: style.opacity,
+          animation: style.animationName,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        }
+      })
+      return { visibility: 'covered', onScreen, occluders }
+    }
     // Half a pixel of slack for subpixel layout.
     const outside =
       rect.left < -0.5 ||
@@ -472,7 +504,7 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       }
       visited.push(el)
       const rect = el.getBoundingClientRect()
-      const { visibility, onScreen } = visibilityOf(el)
+      const { visibility, onScreen, occluders } = visibilityOf(el)
       const dy = Math.round(rect.top - atFocus.top)
       const scrollDy = Math.round(scrollY - atFocus.scrollY)
       return {
@@ -487,6 +519,7 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
         target: targetOf(el),
         visibility,
         onScreen,
+        ...(occluders ? { occluders } : {}),
         ...(dy || scrollDy ? { movedAfterFocus: { dy, scrollDy } } : {}),
         order,
         rect: {
@@ -501,10 +534,15 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
   window.__renderWalk = api
 }
 
-async function walk(page: Page, direction: 'forward' | 'reverse'): Promise<WalkResult> {
+async function walk(
+  page: Page,
+  direction: 'forward' | 'reverse',
+  evidenceName: string
+): Promise<WalkResult> {
   await page.evaluate(() => window.__renderWalk!.reset())
   const stops: StopResult[] = []
   let iframePresses = 0
+  let capturedFailure = false
   for (let press = 0; press < MAX_STOPS + MAX_IFRAME_PRESSES; press++) {
     await page.keyboard.press(direction === 'forward' ? 'Tab' : 'Shift+Tab')
     const step = await page.evaluate((dir) => window.__renderWalk!.settleAndStep(dir), direction)
@@ -536,6 +574,16 @@ async function walk(page: Page, direction: 'forward' | 'reverse'): Promise<WalkR
         stops,
       }
     }
+    if (
+      !capturedFailure &&
+      (step.visibility === 'covered' || (step.visibility === 'clipped' && step.onScreen < 0.5))
+    ) {
+      fs.mkdirSync(KEYBOARD_DIR, { recursive: true })
+      const filename = `${evidenceName}__${direction}__first-visibility-failure.png`
+      await page.screenshot({ path: path.join(KEYBOARD_DIR, filename) })
+      step.screenshot = filename
+      capturedFailure = true
+    }
     stops.push(step)
     if (stops.length >= MAX_STOPS) break
   }
@@ -565,48 +613,47 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
       selector: stop.selector,
       name: stop.name,
     }
-    if (result.direction === 'forward') {
-      if (!stop.focusVisible) {
-        findings.push({
-          ...at,
-          kind: 'focus-not-visible',
-          detail: 'keyboard focus does not match :focus-visible',
-        })
-      } else if (stop.indicator.length === 0) {
-        findings.push({
-          ...at,
-          kind: 'focus-not-visible',
-          detail:
-            'no outline, shadow, colour or surface change on the element, its frame or beside it',
-        })
-      }
-      if (stop.visibility === 'no-box' || stop.visibility === 'offscreen') {
-        findings.push({
-          ...at,
-          kind: 'focus-not-visible',
-          detail: `focused element is ${stop.visibility}`,
-        })
-      } else if (stop.visibility === 'covered') {
-        findings.push({
-          ...at,
-          kind: 'focus-obscured',
-          detail: 'focused element is entirely covered',
-        })
-      } else if (stop.visibility === 'clipped' && stop.onScreen < 0.5) {
-        const { x, y, width, height } = stop.rect
-        findings.push({
-          ...at,
-          kind: 'focus-clipped',
-          detail: `only ${Math.round(stop.onScreen * 100)}% of the focused element (${width}x${height}px at ${x},${y}) is inside the ${ctx.width}x${ctx.height}px viewport`,
-        })
-      }
-      if (!stop.target.ok) {
-        findings.push({
-          ...at,
-          kind: 'target-size',
-          detail: `${stop.target.width}x${stop.target.height}px is below the ${ctx.minTarget}px ${ctx.pointer}-pointer minimum`,
-        })
-      }
+    // Visibility and target requirements apply to Tab and Shift+Tab alike.
+    if (!stop.focusVisible) {
+      findings.push({
+        ...at,
+        kind: 'focus-not-visible',
+        detail: 'keyboard focus does not match :focus-visible',
+      })
+    } else if (stop.indicator.length === 0) {
+      findings.push({
+        ...at,
+        kind: 'focus-not-visible',
+        detail:
+          'no outline, shadow, colour or surface change on the element, its frame or beside it',
+      })
+    }
+    if (stop.visibility === 'no-box' || stop.visibility === 'offscreen') {
+      findings.push({
+        ...at,
+        kind: 'focus-not-visible',
+        detail: `focused element is ${stop.visibility}`,
+      })
+    } else if (stop.visibility === 'covered') {
+      findings.push({
+        ...at,
+        kind: 'focus-obscured',
+        detail: 'focused element is entirely covered',
+      })
+    } else if (stop.visibility === 'clipped' && stop.onScreen < 0.5) {
+      const { x, y, width, height } = stop.rect
+      findings.push({
+        ...at,
+        kind: 'focus-clipped',
+        detail: `only ${Math.round(stop.onScreen * 100)}% of the focused element (${width}x${height}px at ${x},${y}) is inside the ${ctx.width}x${ctx.height}px viewport`,
+      })
+    }
+    if (!stop.target.ok) {
+      findings.push({
+        ...at,
+        kind: 'target-size',
+        detail: `${stop.target.width}x${stop.target.height}px is below the ${ctx.minTarget}px ${ctx.pointer}-pointer minimum`,
+      })
     }
     if (stop.order === 'out-of-order') {
       findings.push({
@@ -720,7 +767,9 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
       capturedAt: new Date().toISOString(),
       regions,
       disposition: 'REVIEW_REQUIRED: inspect the region and record its specific resolution.',
-      pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString('base64'),
+      pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString(
+        'base64'
+      ),
     }
     fs.writeFileSync(
       path.join(directory, `${route.id}__${width}__spacing.json`),
@@ -832,9 +881,9 @@ for (const route of ROUTES) {
           })
         }
 
-        forward = await walk(page, 'forward')
+        forward = await walk(page, 'forward', `${planned.id}__${ctx.id}`)
         findings.push(...stopFindings(forward, ctx))
-        reverse = await walk(page, 'reverse')
+        reverse = await walk(page, 'reverse', `${planned.id}__${ctx.id}`)
         findings.push(...stopFindings(reverse, ctx))
         await captureSpacingReview(page, planned, ctx)
       } finally {
