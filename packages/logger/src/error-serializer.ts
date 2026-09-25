@@ -25,14 +25,18 @@
  *
  * `sanitizeLogFields` (pino's `formatters.log`) and `sanitizeLogArguments`
  * (pino's `hooks.logMethod`) route errors logged under other keys, nested in
- * plain objects, or passed as the first argument through the same rules, and
- * cut a failed query's text out of any logged string, including the message
- * pino derives from an error when the call gives none.
+ * plain objects, passed as the first argument or as a printf argument through
+ * the same rules, and cut a failed query's text out of any logged string,
+ * including the message pino derives from an error when the call gives none.
+ *
+ * A database error's `type` is read from its shape (`databaseErrorKind`), not
+ * its class name, because the production server is bundled.
  */
 import pino from 'pino'
 import {
   FAILED_QUERY_MARKER,
   databaseErrorLogFields,
+  errorClassName,
   isDatabaseError,
   isPlainObject,
   reachableErrors,
@@ -198,7 +202,8 @@ function serializeDatabaseError(
   context: RedactionContext,
   depth: number
 ): Record<string, unknown> {
-  const type = typeName(error)
+  // Read from the error's shape, not its class name, which a bundler may rename.
+  const type = errorClassName(error)
   const out: Record<string, unknown> = {
     type,
     message: DATABASE_ERROR_LOG_MESSAGE,
@@ -322,10 +327,19 @@ const IN_PROGRESS = Symbol('sanitizing')
  * ordinary log lines are not copied. A plain object or array that contains
  * itself is written as `[Circular]` where it repeats, as pino would.
  */
-export function sanitizeLogValue(
+export function sanitizeLogValue(value: unknown): unknown {
+  return sanitizeNested(value, 0, undefined)
+}
+
+/**
+ * `sanitizeLogValue` with its recursion state. The memo is created only when
+ * a plain object or array is walked, so the strings and numbers that make up
+ * most log fields cost no allocation.
+ */
+function sanitizeNested(
   value: unknown,
-  depth = 0,
-  memo: Map<object, unknown> = new Map()
+  depth: number,
+  memoIn: Map<object, unknown> | undefined
 ): unknown {
   if (typeof value === 'string') {
     return value.includes(FAILED_QUERY_MARKER) ? scrubText(value, []) : value
@@ -333,6 +347,7 @@ export function sanitizeLogValue(
   if (value === null || typeof value !== 'object') return value
   if (value instanceof Error) return serializeError(value)
   if (!Array.isArray(value) && !isPlainObject(value)) return value
+  const memo = memoIn ?? new Map<object, unknown>()
   if (memo.has(value)) {
     const done = memo.get(value)
     return done === IN_PROGRESS ? '[Circular]' : done
@@ -344,7 +359,7 @@ export function sanitizeLogValue(
     let copy: unknown[] | undefined
     for (let index = 0; index < value.length; index++) {
       const item: unknown = value[index]
-      const clean = sanitizeLogValue(item, depth + 1, memo)
+      const clean = sanitizeNested(item, depth + 1, memo)
       if (clean !== item) {
         copy ??= value.slice()
         copy[index] = clean
@@ -355,7 +370,7 @@ export function sanitizeLogValue(
     let copy: Record<string, unknown> | undefined
     for (const key of Object.keys(value)) {
       const item = readProperty(value, key)
-      const clean = sanitizeLogValue(item, depth + 1, memo)
+      const clean = sanitizeNested(item, depth + 1, memo)
       if (clean !== item) {
         copy ??= { ...value }
         copy[key] = clean
@@ -386,29 +401,54 @@ export function sanitizeLogFields(fields: Record<string, unknown>): Record<strin
 }
 
 /**
+ * A message or printf argument (anything after the first argument) made safe.
+ * Pino formats these with quick-format-unescaped, which writes `%s` with
+ * `String()` and `%o`, `%O` and `%j` with `JSON.stringify`, so neither goes
+ * through the `err` serializer: an error with a failed query in reach becomes
+ * `errorLogMessage`, and a plain object or array goes through
+ * `sanitizeLogValue`. Any other error is left as it is, so `%s` still prints
+ * its message.
+ */
+function sanitizeMessageArgument(arg: unknown): unknown {
+  if (typeof arg === 'string') {
+    return arg.includes(FAILED_QUERY_MARKER) ? scrubText(arg, []) : arg
+  }
+  if (arg === null || typeof arg !== 'object') return arg
+  if (isErrorLike(arg) && (arg instanceof Error || !isPlainObject(arg))) {
+    return touchesDatabase(arg, reachableErrors(arg)) ? (errorLogMessage(arg) ?? arg) : arg
+  }
+  return sanitizeLogValue(arg)
+}
+
+/**
  * Pino `hooks.logMethod` arguments made safe. When a call passes an error (as
- * the first argument, or as `err`) and no message, pino would log the error's
- * own message, so the call is given `errorLogMessage` instead. A message or
- * format argument that carries a failed query's text is cut there.
+ * the first argument, or as `err`) and no message, or `undefined` as the
+ * message, pino would log the error's own message, so the call is given
+ * `errorLogMessage` instead. A message or format argument that carries a
+ * failed query's text is cut there (`sanitizeMessageArgument`).
  */
 export function sanitizeLogArguments(args: readonly unknown[]): unknown[] {
-  const out = args.map((arg) =>
-    typeof arg === 'string' && arg.includes(FAILED_QUERY_MARKER) ? scrubText(arg, []) : arg
-  )
-  if (out.length === 1) {
-    const [first] = out
-    let error: unknown
-    if (first instanceof Error) error = first
-    else if (first !== null && typeof first === 'object') {
-      const fields = first as Record<string, unknown>
-      if (fields.msg === undefined) error = fields[ERROR_KEY]
-    }
-    if (error !== undefined && isErrorLike(error)) {
-      const reachable = reachableErrors(error)
-      if (touchesDatabase(error, reachable)) {
-        const message = errorLogMessage(error)
-        if (message !== undefined) out.push(message)
-      }
+  // The first argument is the merging object or error (the serializer and
+  // `formatters.log` handle those) or the message string.
+  const out = args.map((arg, index) => {
+    if (index > 0) return sanitizeMessageArgument(arg)
+    return typeof arg === 'string' && arg.includes(FAILED_QUERY_MARKER) ? scrubText(arg, []) : arg
+  })
+  // pino reads the message from the error whenever the call's own message is
+  // `undefined`: absent (`log.error(err)`) or passed as such.
+  if (out.length > 2 || (out.length === 2 && out[1] !== undefined)) return out
+  const [first] = out
+  let error: unknown
+  if (first instanceof Error) error = first
+  else if (first !== null && typeof first === 'object') {
+    const fields = first as Record<string, unknown>
+    if (fields.msg === undefined) error = fields[ERROR_KEY]
+  }
+  if (error !== undefined && isErrorLike(error)) {
+    const reachable = reachableErrors(error)
+    if (touchesDatabase(error, reachable)) {
+      const message = errorLogMessage(error)
+      if (message !== undefined) out[1] = message
     }
   }
   return out

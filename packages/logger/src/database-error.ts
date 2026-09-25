@@ -156,11 +156,30 @@ const SAFE_POSTGRES_FIELDS = [
 ] as const
 
 /**
- * The name of an error's class for a log line. drizzle-orm 0.45 never sets
- * `name` on DrizzleQueryError, so this falls back to the class name; a bundler
- * that renames classes only changes this label.
+ * Which kind of failed query `error` is, read from its shape: drizzle-orm's
+ * `DrizzleQueryError` or a postgres.js `PostgresError`. `undefined` for any
+ * other error. The production server is bundled, and a bundler may rename a
+ * class, so a label read from `constructor.name` or from postgres.js's
+ * `this.name = this.constructor.name` could name a class that does not exist.
+ */
+export function databaseErrorKind(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined
+  const e = error as Error & { query?: unknown; params?: unknown }
+  if (typeof e.query === 'string' && Array.isArray(e.params)) return 'DrizzleQueryError'
+  if (typeof e.message === 'string' && e.message.startsWith(FAILED_QUERY_MARKER)) {
+    return 'DrizzleQueryError'
+  }
+  return isDatabaseError(error) ? 'PostgresError' : undefined
+}
+
+/**
+ * The name of an error's class for a log line: the shape-read kind for a
+ * failed query (`databaseErrorKind`), else `name`, else the class name
+ * (drizzle-orm 0.45 never sets `name` on DrizzleQueryError).
  */
 export function errorClassName(error: Error): string {
+  const kind = databaseErrorKind(error)
+  if (kind) return kind
   return error.name !== 'Error' ? error.name : error.constructor?.name || error.name
 }
 

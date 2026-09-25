@@ -258,6 +258,77 @@ describe('messages pino derives from an error (DEF-63)', () => {
     expectNoSecrets(sink.lines[0])
     expect(sink.last().msg).toBe(`lookup failed: ${WITHHELD_QUERY_TEXT}`)
   })
+
+  it('logs a fixed message when the message passed is undefined', () => {
+    // pino falls back to the error's own message for an undefined message,
+    // not only for an absent one.
+    const message: string | undefined = undefined
+    const sink = capture()
+    sink.log.error({ err: failedQuery() }, message)
+    sink.log.error(failedQuery(), message)
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    expect(sink.lines.map((l) => JSON.parse(l).msg)).toEqual([
+      DATABASE_ERROR_LOG_MESSAGE,
+      DATABASE_ERROR_LOG_MESSAGE,
+    ])
+  })
+
+  it('withholds failed queries passed as printf arguments', () => {
+    // quick-format-unescaped writes %s with String() and %j / %o with
+    // JSON.stringify, neither of which reaches the err serializer.
+    const sink = capture()
+    sink.log.error('lookup failed: %s', failedQuery())
+    sink.log.error('lookup failed: %j', failedQuery())
+    sink.log.error({ post_id: 'post_1' }, 'lookup failed: %o', { reason: failedQuery() })
+    sink.log.error('lookup failed: %s', new AppError('Search is unavailable', failedQuery()))
+
+    for (const line of sink.lines) expectNoSecrets(line)
+    const messages = sink.lines.map((l) => JSON.parse(l).msg as string)
+    expect(messages[0]).toBe(`lookup failed: ${DATABASE_ERROR_LOG_MESSAGE}`)
+    expect(messages[1]).toBe(`lookup failed: '${DATABASE_ERROR_LOG_MESSAGE}'`)
+    expect(messages[2]).toContain('"pg_code":"22P02"')
+    expect(messages[3]).toBe('lookup failed: Search is unavailable')
+  })
+
+  it('leaves printf arguments unrelated to a database as they were', () => {
+    const sink = capture()
+    sink.log.error('lookup failed: %s (%d tries)', new Error('boom'), 3)
+
+    expect(sink.last().msg).toBe('lookup failed: Error: boom (3 tries)')
+  })
+})
+
+describe('labels a bundler cannot change (DEF-63)', () => {
+  // The production server is bundled, and a bundler may rename a class. These
+  // subclasses stand in for the renamed classes: same shapes, other names.
+  class RenamedQueryError extends DrizzleQueryError {}
+  class RenamedPostgresError extends PostgresError {}
+
+  it('names a failed query by its shape, not its class name', () => {
+    const pg = new RenamedPostgresError({
+      message: PG_MESSAGE,
+      severity: 'ERROR',
+      code: '22P02',
+      detail: PG_DETAIL,
+    })
+    const db = new RenamedQueryError(STATEMENT, [SEARCH_TEXT, SECRET_EMAIL], pg)
+    const sink = capture()
+    sink.log.error({ err: db, pg }, 'failed')
+
+    expectNoSecrets(sink.lines[0])
+    const rec = sink.last()
+    expect(pg.name).toBe('RenamedPostgresError')
+    expect(rec.err).toMatchObject({ type: 'DrizzleQueryError', error_name: 'DrizzleQueryError' })
+    expect(rec.err.stack.startsWith(`DrizzleQueryError: ${DATABASE_ERROR_LOG_MESSAGE}\n`)).toBe(
+      true
+    )
+    expect(rec.pg).toMatchObject({
+      type: 'PostgresError',
+      error_name: 'PostgresError',
+      pg_code: '22P02',
+    })
+  })
 })
 
 describe('errors under other keys (DEF-63)', () => {
