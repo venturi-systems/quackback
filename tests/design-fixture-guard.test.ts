@@ -21,7 +21,7 @@ const fixture = (): NodeJS.ProcessEnv => ({
   TRUSTED_ORIGINS: 'http://acme.localhost:3000',
   SECRET_KEY: 'test-secret-for-ci-only-must-be-at-least-32-characters',
   BETTER_AUTH_SECRET: 'test-secret-for-ci-only-must-be-at-least-32-characters',
-  VENTURI_TEAM_EMAIL_DOMAINS: 'example.com',
+  VENTURI_TEAM_EMAIL_DOMAINS: 'example.com,acme.example',
 })
 
 const fixtureServices = () => [
@@ -65,7 +65,6 @@ describe('design fixture isolation before setup', () => {
     ['TRUSTED_ORIGINS', 'http://acme.localhost:3000,https://feedback.venturi.systems'],
     ['SECRET_KEY', 'unexpected-value'],
     ['BETTER_AUTH_SECRET', 'unexpected-value'],
-    ['VENTURI_TEAM_EMAIL_DOMAINS', 'acme.example'],
     ['HTTP_PROXY', 'http://proxy.example'],
     ['AWS_ACCESS_KEY_ID', 'unexpected-value'],
     ['RESEND_API_KEY', 'unexpected-value'],
@@ -93,6 +92,30 @@ describe('design fixture isolation before setup', () => {
 })
 
 describe('design preflight side-effect boundary', () => {
+  it.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['legacy-only', 'example.com'],
+    ['design-only', 'acme.example'],
+    ['additional', 'example.com,acme.example,other.example'],
+    ['subdomain', 'example.com,sub.acme.example'],
+    ['look-alike', 'example.com,acme.example.attacker.example'],
+  ] as const)('rejects %s team domains before launching any subprocess', (_case, domains) => {
+    const original = process.env
+    const env = fixture()
+    if (domains === undefined) delete env.VENTURI_TEAM_EMAIL_DOMAINS
+    else env.VENTURI_TEAM_EMAIL_DOMAINS = domains
+    process.env = env
+    try {
+      expect(() => assertDesignFixtureEnvironmentSync()).toThrow(
+        'Design acceptance requires the isolated GitHub CI fixture'
+      )
+      expect(execFileSync).not.toHaveBeenCalled()
+    } finally {
+      process.env = original
+    }
+  })
+
   it('rejects missing CI context before launching a subprocess', () => {
     const saved = process.env.CI
     process.env.CI = ''
