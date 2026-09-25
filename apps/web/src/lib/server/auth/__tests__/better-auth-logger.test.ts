@@ -110,7 +110,10 @@ describe('Better Auth log calls (DEF-66)', () => {
     const sink = capture()
     const { logger, spies } = await authLogger(sink)
 
-    logger.error(failedQuery())
+    // Better Auth types the message as a string, but its compiled route
+    // passes the error itself (`ctx.context.logger.error(e)`), so this call
+    // reproduces that at runtime.
+    logger.error(failedQuery() as unknown as string)
 
     expect(sink.lines).toHaveLength(1)
     for (const secret of SECRETS) expect(sink.lines[0]).not.toContain(secret)
