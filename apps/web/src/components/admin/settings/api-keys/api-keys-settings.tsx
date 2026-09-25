@@ -165,7 +165,7 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
                     ) : (
                       <>
                         <span className="hidden sm:inline">·</span>
-                        <span className="text-amber-600 dark:text-amber-400">Never used</span>
+                        <span className="text-amber-700 dark:text-amber-400">Never used</span>
                       </>
                     )}
                     <span className="hidden sm:inline">·</span>
@@ -174,9 +174,10 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
                   <p className="text-xs text-muted-foreground" data-testid="api-key-scopes">
                     {scopesLabel(key)}
                   </p>
+                  {/* amber-700 reads 4.8:1 on the card; amber-600 read 3.0:1 (v6.6: 4.5:1). */}
                   {key.legacyBoundedAt && (
                     <p
-                      className="text-xs text-amber-600 dark:text-amber-400"
+                      className="text-xs text-amber-700 dark:text-amber-400"
                       data-testid="api-key-legacy-bound"
                     >
                       {legacyBoundLabel(key.legacyBoundedAt)}
