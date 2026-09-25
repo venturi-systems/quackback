@@ -578,7 +578,13 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
   const targets = feed
     ? [{ selector: '#portal-main aside nav button', text: /^General Feedback\s*\d*$/ }]
     : route.id === 'admin-post'
-      ? [{ selector: '[data-testid="comment-form"] button', text: /^Internal note \(team only\)$/ }]
+      ? [
+          {
+            // The status selector belongs to the top-level composer; replies share the form test id.
+            selector: 'form[data-testid="comment-form"]:has([id^="comment-status-label-"]) button',
+            text: /^Internal note \(team only\)$/,
+          },
+        ]
       : route.id === 'admin-settings-statuses'
         ? [{ selector: 'p', text: /^Toggle statuses to show on your roadmap$/ }]
         : route.id === 'member-admin-only-notice'
