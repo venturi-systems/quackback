@@ -90,12 +90,12 @@ database migration runs
 
 The code applies the same bounds to any key the migration never saw: a key
 stored without an API scope reads only, never full access, and one stored
-without an expiry stops working 365 days after it was created. Neither is
-still bounded only by its role and its creator's role. A key stored without
-scopes or without an expiry cannot be rotated, because rotation keeps a key's
-scopes and expiry and would only renew its secret; neither can an expired key.
-A bounded key has both, so it rotates, keeping its read-only scopes and its
-expiry. Replace any of them with a new scoped key (cutover step 4).
+without an expiry stops working 365 days after it was created. Before this
+rule, such a key was bounded only by its role and its creator's role. A key
+stored without scopes or without an expiry cannot be rotated, because rotation
+keeps a key's scopes and expiry and would only renew its secret; neither can
+an expired key. A bounded key has both, so it rotates, keeping its read-only
+scopes and its expiry. Replace any of them with a new scoped key (cutover step 4).
 
 ## Designation sources
 

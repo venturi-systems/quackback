@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 type Row = Record<string, unknown>
 
 const hoisted = vi.hoisted(() => ({
-  principal: undefined as undefined | { id: string; role: string; type: string },
+  principal: undefined as undefined | { id: string; userId: string; role: string; type: string },
   user: undefined as
     undefined | { email: string; emailVerified: boolean; name: string; image: string | null },
   providerIds: [] as string[],
@@ -133,7 +133,10 @@ async function signIn(email: string, providerDomain: string) {
 
 beforeEach(() => {
   delete process.env.VENTURI_TEAM_EMAIL_DOMAINS // the default team domain, venturi.systems
-  hoisted.principal = { id: 'principal_abc', role: 'user', type: 'user' }
+  // A stored principal always carries its userId: the team-role writer checks
+  // the identity rule for that user, so a fixture without one would be refused
+  // by the missing identity rather than by the rule under test.
+  hoisted.principal = { id: 'principal_abc', userId: 'user_abc', role: 'user', type: 'user' }
   hoisted.user = undefined
   hoisted.providerIds = []
   hoisted.idToken = null

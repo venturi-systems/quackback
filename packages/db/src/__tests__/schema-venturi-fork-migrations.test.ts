@@ -97,8 +97,13 @@ describe('fork migration journal', () => {
     }
   })
 
-  it('dates every journal entry after the one before it', () => {
-    for (let i = 1; i < journal.entries.length; i++) {
+  it('dates every journal entry from 0117 on after the one before it', () => {
+    // Drizzle applies a migration only when its `when` is later than the newest
+    // applied one. Upstream's own 0051/0052 pair is out of order, long before
+    // any fork migration; from 0117 on the order is the fork's to keep.
+    const from = journal.entries.findIndex((e) => e.tag.startsWith('0117_'))
+    expect(from).toBeGreaterThan(0)
+    for (let i = from + 1; i < journal.entries.length; i++) {
       expect(journal.entries[i]!.when, journal.entries[i]!.tag).toBeGreaterThan(
         journal.entries[i - 1]!.when
       )
