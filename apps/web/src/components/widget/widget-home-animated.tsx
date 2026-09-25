@@ -25,6 +25,7 @@ import { useWidgetAuth } from './widget-auth-provider'
 import { sendToHost } from '@/lib/client/widget-bridge'
 import type { PostId } from '@quackback/ids'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { ReducedMotionConfig } from '@/components/ui/reduced-motion-config'
 import { useWidgetImageUpload } from '@/lib/client/hooks/use-image-upload'
 import type { JSONContent } from '@tiptap/react'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
@@ -173,7 +174,16 @@ const WidgetPostRow = memo(
 
 // ── Main component ──
 
-export function WidgetHomeAnimated({
+/** The widget home, with its animations following the reduced-motion preference. */
+export function WidgetHomeAnimated(props: WidgetHomeProps) {
+  return (
+    <ReducedMotionConfig>
+      <WidgetHomeForm {...props} />
+    </ReducedMotionConfig>
+  )
+}
+
+function WidgetHomeForm({
   initialPosts,
   initialHasMore = false,
   statuses,

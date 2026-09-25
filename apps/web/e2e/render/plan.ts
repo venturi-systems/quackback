@@ -174,6 +174,66 @@ export const ROUTES: readonly RouteSpec[] = [
   },
 ]
 
+/** One keyboard-walk context: a viewport and the pointer it emulates. */
+export interface WalkContext {
+  id: string
+  width: number
+  height: number
+  hasTouch: boolean
+  pointer: 'coarse' | 'fine'
+  /** Minimum target edge in CSS px. */
+  minTarget: number
+}
+
+/** The design system's touch minimum (--ds-component-touch-minimum). */
+const COARSE_MIN_TARGET = 44
+/** WCAG 2.5.8 Target Size (Minimum). */
+const FINE_MIN_TARGET = 24
+
+export const PHONE_COARSE: WalkContext = {
+  id: 'phone-coarse',
+  width: 390,
+  height: 844,
+  hasTouch: true,
+  pointer: 'coarse',
+  minTarget: COARSE_MIN_TARGET,
+}
+
+export const DESKTOP_FINE: WalkContext = {
+  id: 'desktop-fine',
+  width: 1440,
+  height: 900,
+  hasTouch: false,
+  pointer: 'fine',
+  minTarget: FINE_MIN_TARGET,
+}
+
+/**
+ * The contexts each route is walked in: the phone and the desktop, plus one
+ * coarse-pointer walk at each width where a planned surface first renders
+ * when that width is wider than the phone. The post sidebar exists only from
+ * 1024px, so the phone walk never reaches it, and the desktop walk measures it
+ * against the 24px fine-pointer minimum only. #131 gave its links the 44px
+ * coarse-pointer minimum; without this walk nothing measures that.
+ */
+export function walkContextsFor(route: Pick<RouteSpec, 'surfaces'>): WalkContext[] {
+  const widths = new Set<number>()
+  for (const surface of route.surfaces) {
+    if (surface.minWidth && surface.minWidth > PHONE_COARSE.width) widths.add(surface.minWidth)
+  }
+  const wider = Array.from(widths)
+    .sort((a, b) => a - b)
+    .map((width): WalkContext => ({
+      id: `coarse-${width}`,
+      width,
+      height: 768,
+      hasTouch: true,
+      pointer: 'coarse',
+      minTarget: COARSE_MIN_TARGET,
+    }))
+  return [PHONE_COARSE, ...wider, DESKTOP_FINE]
+}
+
 export function resolveRoutes(postPath: string): RouteSpec[] {
   return ROUTES.map((route) => ({
     ...route,

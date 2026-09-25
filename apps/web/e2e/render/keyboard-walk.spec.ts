@@ -1,10 +1,13 @@
 /**
  * Keyboard walk over every route in the render plan.
  *
- * For each route, as its identity, in two contexts (a 390px coarse-pointer
- * phone and a 1440px fine-pointer desktop), this presses Tab from the top of
- * the page until focus leaves the document, then Shift+Tab back. Every stop is
- * recorded, and a route fails when:
+ * For each route, as its identity, in each of its contexts (plan.ts
+ * walkContextsFor: a 390px coarse-pointer phone, a 1440px fine-pointer
+ * desktop, and a coarse-pointer walk at the width where a planned surface first
+ * renders, such as the post sidebar at 1024px), this presses Tab from the top
+ * of the page until focus leaves the document, then Shift+Tab back. Every stop
+ * of both walks is recorded, with the elements reached in only one direction,
+ * and a route fails when:
  *
  *   - a surface the plan names for it is missing (the lane would otherwise
  *     measure a page that no longer shows what it exists to measure);
@@ -14,6 +17,12 @@
  *     on the frame that tightly encloses it), is not :focus-visible, has no
  *     box on screen, or is entirely covered by another element (WCAG 2.4.7,
  *     2.4.11);
+ *   - less than half of a stop's box is on screen (the reader cannot tell
+ *     what has focus). Tab scrolls a focused element that fits into full view,
+ *     so one found mostly outside the viewport moved after it took focus, or
+ *     cannot fit on the screen. A stop that is only partly outside is recorded
+ *     (`visibility: 'clipped'`, with its `onScreen` share) and counted in the
+ *     summary for review;
  *   - focus moves backwards in document order, or any element carries a
  *     positive tabindex (WCAG 2.4.3);
  *   - focus cycles inside the page without ever leaving it, or never ends
@@ -30,22 +39,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { KEYBOARD_DIR, OUT_DIR, ROUTES, readPlan, type RouteSpec, type SurfaceProbe } from './plan'
-
-interface WalkContext {
-  id: 'phone-coarse' | 'desktop-fine'
-  width: number
-  height: number
-  hasTouch: boolean
-  pointer: 'coarse' | 'fine'
-  /** Minimum target edge in CSS px. */
-  minTarget: number
-}
-
-const CONTEXTS: WalkContext[] = [
-  { id: 'phone-coarse', width: 390, height: 844, hasTouch: true, pointer: 'coarse', minTarget: 44 },
-  { id: 'desktop-fine', width: 1440, height: 900, hasTouch: false, pointer: 'fine', minTarget: 24 },
-]
+import {
+  KEYBOARD_DIR,
+  OUT_DIR,
+  ROUTES,
+  readPlan,
+  walkContextsFor,
+  type RouteSpec,
+  type SurfaceProbe,
+  type WalkContext,
+} from './plan'
 
 /** Tab presses per direction before the walk is declared endless. */
 const MAX_STOPS = 400
@@ -61,6 +64,7 @@ type FindingKind =
   | 'pointer-emulation'
   | 'focus-not-visible'
   | 'focus-obscured'
+  | 'focus-clipped'
   | 'focus-order'
   | 'positive-tabindex'
   | 'focus-trap'
@@ -84,8 +88,25 @@ interface TargetResult {
   rule: 'size' | 'hit-area' | 'spacing' | 'inline-exception' | 'user-agent-control' | null
 }
 
+type Visibility = 'visible' | 'no-box' | 'offscreen' | 'covered' | 'clipped'
+
+interface Occluder {
+  selector: string
+  slot: string | null
+  state: string | null
+  opacity: string
+  animation: string
+  rect: { x: number; y: number; width: number; height: number }
+}
+
 interface StopResult {
   kind: 'stop'
+  /**
+   * The element's identity within this page: the same element carries the
+   * same key in the forward and the reverse walk, even when a node inserted
+   * elsewhere (a portal, a loaded page) changes its structural selector.
+   */
+  key: number
   selector: string
   tag: string
   role: string | null
@@ -93,7 +114,18 @@ interface StopResult {
   focusVisible: boolean
   indicator: string[]
   target: TargetResult
-  visibility: 'visible' | 'no-box' | 'offscreen' | 'covered'
+  visibility: Visibility
+  occluders?: Occluder[]
+  screenshot?: string
+  /** Share of the box's area inside the viewport, 0 to 1, two decimals. */
+  onScreen: number
+  /**
+   * Present when the element moved on screen, or the page scrolled, between
+   * the walk first reading the stop and measuring it (after the element's
+   * animations settle): dy is the element's move in CSS px, scrollDy the
+   * page's. Evidence for review.
+   */
+  movedAfterFocus?: { dy: number; scrollDy: number }
   order: 'first' | 'in-order' | 'out-of-order'
   rect: { x: number; y: number; width: number; height: number }
 }
@@ -346,12 +378,26 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
     ok: boolean
     rule: 'size' | 'hit-area' | 'spacing' | 'inline-exception' | 'user-agent-control' | null
   }
-  const visibilityOf = (el: Element): 'visible' | 'no-box' | 'offscreen' | 'covered' => {
+  const visibilityOf = (
+    el: Element
+  ): { visibility: Visibility; onScreen: number; occluders?: Occluder[] } => {
     const { rect } = rectOf(el)
-    if (rect.width < 1 || rect.height < 1) return 'no-box'
+    if (rect.width < 1 || rect.height < 1) return { visibility: 'no-box', onScreen: 0 }
     if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) {
-      return 'offscreen'
+      return { visibility: 'offscreen', onScreen: 0 }
     }
+    // Sample the part of the box that is on screen. Fractions of the whole box
+    // miss it when the box runs past the viewport: a 3,110px button left only
+    // two sample points on screen, both under the sticky header (run
+    // 36091574101), and a 4,138px one and a Search button 4px on screen left
+    // none, which read as visible without a single sample (run 36088534312).
+    // Every point below lies inside the viewport, so no stop passes unsampled.
+    const left = Math.max(rect.left, 0)
+    const top = Math.max(rect.top, 0)
+    const right = Math.min(rect.right, innerWidth)
+    const bottom = Math.min(rect.bottom, innerHeight)
+    const onScreen =
+      Math.round((((right - left) * (bottom - top)) / (rect.width * rect.height)) * 100) / 100
     const points = (
       [
         [0.5, 0.5],
@@ -360,22 +406,56 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
         [0.2, 0.8],
         [0.8, 0.8],
       ] as [number, number][]
-    )
-      .map(
-        ([fx, fy]) => [rect.left + rect.width * fx, rect.top + rect.height * fy] as [number, number]
-      )
-      .filter(([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight)
+    ).map(([fx, fy]) => [left + (right - left) * fx, top + (bottom - top) * fy] as [number, number])
     const labels = Array.from((el as HTMLInputElement).labels ?? [])
+    const occludingElements = new Set<Element>()
     const covered = points.filter(([x, y]) => {
       const hit = document.elementFromPoint(x, y)
       if (!hit) return false
       if (hit === el || el.contains(hit) || hit.contains(el)) return false
-      return !labels.some((label) => label === hit || label.contains(hit) || hit.contains(label))
+      if (labels.some((label) => label === hit || label.contains(hit) || hit.contains(label))) {
+        return false
+      }
+      occludingElements.add(hit)
+      return true
     })
-    return points.length > 0 && covered.length === points.length ? 'covered' : 'visible'
+    if (covered.length === points.length) {
+      const occluders = Array.from(occludingElements, (hit) => {
+        const rect = hit.getBoundingClientRect()
+        const style = getComputedStyle(hit)
+        return {
+          selector: locator(hit),
+          slot: hit.getAttribute('data-slot'),
+          state: hit.getAttribute('data-state'),
+          opacity: style.opacity,
+          animation: style.animationName,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        }
+      })
+      return { visibility: 'covered', onScreen, occluders }
+    }
+    // Half a pixel of slack for subpixel layout.
+    const outside =
+      rect.left < -0.5 ||
+      rect.top < -0.5 ||
+      rect.right > innerWidth + 0.5 ||
+      rect.bottom > innerHeight + 0.5
+    return { visibility: outside ? 'clipped' : 'visible', onScreen }
   }
 
   const visited: Element[] = []
+  // Element identity for comparing the two walks. It lives as long as the
+  // page, so reset() between the walks keeps it.
+  const keys = new WeakMap<Element, number>()
+  let nextKey = 0
+  const keyOf = (el: Element): number => {
+    let key = keys.get(el)
+    if (key === undefined) {
+      key = nextKey++
+      keys.set(el, key)
+    }
+    return key
+  }
   const initial = deepActive()
   const api: WalkerApi = {
     reset() {
@@ -397,6 +477,9 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
     async settleAndStep(direction) {
       const el = deepActive()
       if (!el || el === document.body || el === document.documentElement) return { kind: 'exit' }
+      // Where focus left the element, for telling a stop the browser never
+      // scrolled fully into view from one that moved after it took focus.
+      const atFocus = { top: el.getBoundingClientRect().top, scrollY }
       // Let focus transitions finish before reading the focused style.
       const animations = [el, el.parentElement]
         .filter((e): e is Element => Boolean(e))
@@ -421,8 +504,12 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
       }
       visited.push(el)
       const rect = el.getBoundingClientRect()
+      const { visibility, onScreen, occluders } = visibilityOf(el)
+      const dy = Math.round(rect.top - atFocus.top)
+      const scrollDy = Math.round(scrollY - atFocus.scrollY)
       return {
         kind: 'stop',
+        key: keyOf(el),
         selector: locator(el),
         tag: el.localName,
         role: el.getAttribute('role'),
@@ -430,7 +517,10 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
         focusVisible: el.matches(':focus-visible'),
         indicator: indicatorOf(el),
         target: targetOf(el),
-        visibility: visibilityOf(el),
+        visibility,
+        onScreen,
+        ...(occluders ? { occluders } : {}),
+        ...(dy || scrollDy ? { movedAfterFocus: { dy, scrollDy } } : {}),
         order,
         rect: {
           x: Math.round(rect.x),
@@ -444,10 +534,15 @@ function installWalker(opts: { minTarget: number; pointer: 'coarse' | 'fine' }):
   window.__renderWalk = api
 }
 
-async function walk(page: Page, direction: 'forward' | 'reverse'): Promise<WalkResult> {
+async function walk(
+  page: Page,
+  direction: 'forward' | 'reverse',
+  evidenceName: string
+): Promise<WalkResult> {
   await page.evaluate(() => window.__renderWalk!.reset())
   const stops: StopResult[] = []
   let iframePresses = 0
+  let capturedFailure = false
   for (let press = 0; press < MAX_STOPS + MAX_IFRAME_PRESSES; press++) {
     await page.keyboard.press(direction === 'forward' ? 'Tab' : 'Shift+Tab')
     const step = await page.evaluate((dir) => window.__renderWalk!.settleAndStep(dir), direction)
@@ -479,6 +574,16 @@ async function walk(page: Page, direction: 'forward' | 'reverse'): Promise<WalkR
         stops,
       }
     }
+    if (
+      !capturedFailure &&
+      (step.visibility === 'covered' || (step.visibility === 'clipped' && step.onScreen < 0.5))
+    ) {
+      fs.mkdirSync(KEYBOARD_DIR, { recursive: true })
+      const filename = `${evidenceName}__${direction}__first-visibility-failure.png`
+      await page.screenshot({ path: path.join(KEYBOARD_DIR, filename) })
+      step.screenshot = filename
+      capturedFailure = true
+    }
     stops.push(step)
     if (stops.length >= MAX_STOPS) break
   }
@@ -508,41 +613,47 @@ function stopFindings(result: WalkResult, ctx: WalkContext): Finding[] {
       selector: stop.selector,
       name: stop.name,
     }
-    if (result.direction === 'forward') {
-      if (!stop.focusVisible) {
-        findings.push({
-          ...at,
-          kind: 'focus-not-visible',
-          detail: 'keyboard focus does not match :focus-visible',
-        })
-      } else if (stop.indicator.length === 0) {
-        findings.push({
-          ...at,
-          kind: 'focus-not-visible',
-          detail:
-            'no outline, shadow, colour or surface change on the element, its frame or beside it',
-        })
-      }
-      if (stop.visibility === 'no-box' || stop.visibility === 'offscreen') {
-        findings.push({
-          ...at,
-          kind: 'focus-not-visible',
-          detail: `focused element is ${stop.visibility}`,
-        })
-      } else if (stop.visibility === 'covered') {
-        findings.push({
-          ...at,
-          kind: 'focus-obscured',
-          detail: 'focused element is entirely covered',
-        })
-      }
-      if (!stop.target.ok) {
-        findings.push({
-          ...at,
-          kind: 'target-size',
-          detail: `${stop.target.width}x${stop.target.height}px is below the ${ctx.minTarget}px ${ctx.pointer}-pointer minimum`,
-        })
-      }
+    // Visibility and target requirements apply to Tab and Shift+Tab alike.
+    if (!stop.focusVisible) {
+      findings.push({
+        ...at,
+        kind: 'focus-not-visible',
+        detail: 'keyboard focus does not match :focus-visible',
+      })
+    } else if (stop.indicator.length === 0) {
+      findings.push({
+        ...at,
+        kind: 'focus-not-visible',
+        detail:
+          'no outline, shadow, colour or surface change on the element, its frame or beside it',
+      })
+    }
+    if (stop.visibility === 'no-box' || stop.visibility === 'offscreen') {
+      findings.push({
+        ...at,
+        kind: 'focus-not-visible',
+        detail: `focused element is ${stop.visibility}`,
+      })
+    } else if (stop.visibility === 'covered') {
+      findings.push({
+        ...at,
+        kind: 'focus-obscured',
+        detail: 'focused element is entirely covered',
+      })
+    } else if (stop.visibility === 'clipped' && stop.onScreen < 0.5) {
+      const { x, y, width, height } = stop.rect
+      findings.push({
+        ...at,
+        kind: 'focus-clipped',
+        detail: `only ${Math.round(stop.onScreen * 100)}% of the focused element (${width}x${height}px at ${x},${y}) is inside the ${ctx.width}x${ctx.height}px viewport`,
+      })
+    }
+    if (!stop.target.ok) {
+      findings.push({
+        ...at,
+        kind: 'target-size',
+        detail: `${stop.target.width}x${stop.target.height}px is below the ${ctx.minTarget}px ${ctx.pointer}-pointer minimum`,
+      })
     }
     if (stop.order === 'out-of-order') {
       findings.push({
@@ -656,7 +767,9 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
       capturedAt: new Date().toISOString(),
       regions,
       disposition: 'REVIEW_REQUIRED: inspect the region and record its specific resolution.',
-      pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString('base64'),
+      pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString(
+        'base64'
+      ),
     }
     fs.writeFileSync(
       path.join(directory, `${route.id}__${width}__spacing.json`),
@@ -667,8 +780,28 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
 
 test.describe.configure({ mode: 'parallel' })
 
+/**
+ * How the Shift+Tab walk compares with the Tab walk, by element identity
+ * rather than by selector. The two can differ for a sound reason: a list that
+ * loads another page while the walk passes it has more stops on the way back.
+ * The comparison is evidence for review, not a finding: an element reached in
+ * only one direction is named here so a reviewer can tell which case it is.
+ */
+function compareWalks(forward: WalkResult, reverse: WalkResult) {
+  const back = [...reverse.stops].reverse()
+  const forwardKeys = new Set(forward.stops.map((s) => s.key))
+  const reverseKeys = new Set(back.map((s) => s.key))
+  const brief = (s: StopResult) => ({ selector: s.selector, name: s.name })
+  return {
+    matchesForward:
+      back.length === forward.stops.length && back.every((s, i) => s.key === forward.stops[i].key),
+    forwardOnly: forward.stops.filter((s) => !reverseKeys.has(s.key)).map(brief),
+    reverseOnly: back.filter((s) => !forwardKeys.has(s.key)).map(brief),
+  }
+}
+
 for (const route of ROUTES) {
-  for (const ctx of CONTEXTS) {
+  for (const ctx of walkContextsFor(route)) {
     test(`${route.id} at ${ctx.id}`, async ({ browser }) => {
       test.setTimeout(240_000)
       const plan = readPlan()
@@ -748,9 +881,9 @@ for (const route of ROUTES) {
           })
         }
 
-        forward = await walk(page, 'forward')
+        forward = await walk(page, 'forward', `${planned.id}__${ctx.id}`)
         findings.push(...stopFindings(forward, ctx))
-        reverse = await walk(page, 'reverse')
+        reverse = await walk(page, 'reverse', `${planned.id}__${ctx.id}`)
         findings.push(...stopFindings(reverse, ctx))
         await captureSpacingReview(page, planned, ctx)
       } finally {
@@ -774,12 +907,10 @@ for (const route of ROUTES) {
             end: reverse.end,
             detail: reverse.detail ?? null,
             stopCount: reverse.stops.length,
-            matchesForward:
-              forward !== null &&
-              reverse.stops
-                .map((s) => s.selector)
-                .reverse()
-                .join('\n') === forward.stops.map((s) => s.selector).join('\n'),
+            ...(forward
+              ? compareWalks(forward, reverse)
+              : { matchesForward: false, forwardOnly: [], reverseOnly: [] }),
+            stops: reverse.stops,
           },
           findings,
         }

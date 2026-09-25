@@ -237,6 +237,14 @@
   :focus-visible {
     scroll-margin-block-start: calc(var(--ds-component-header-height, 68px) + 24px);
   }
+  /* Keep the root scrollport clear for native focus and caret reveal, including
+     editors whose focused child does not carry an element scroll margin. */
+  html:has(.portal-header) {
+    scroll-padding-block-start: calc(var(--portal-sticky-header-height, 68px) + 24px);
+  }
+  html:has(.portal-header) :focus-visible {
+    scroll-margin-block-start: 0;
+  }
   @media (forced-colors: active) {
     :focus-visible {
       outline-color: Highlight;

@@ -3,7 +3,6 @@ import { useSuspenseQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useIntl } from 'react-intl'
 import { MapIcon } from '@heroicons/react/24/solid'
-import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import type { PostStatusEntity } from '@/lib/shared/db-types'
@@ -13,6 +12,8 @@ import { usePillsScroll } from '@/lib/client/hooks/use-pills-scroll'
 import { portalQueries } from '@/lib/client/queries/portal'
 import { resolveSelectedRoadmapId } from './resolve-selected-roadmap'
 import { RoadmapColumn } from './roadmap-column'
+import { RoadmapColumnsScrollButton } from './roadmap-columns-scroll-button'
+import { revealFocusedColumn } from './reveal-focused-column'
 import {
   PublicRoadmapFiltersBar,
   PublicRoadmapToolbarFilterButton,
@@ -191,11 +192,15 @@ export function RoadmapBoard({
         <div className="relative flex-1 min-h-0">
           <div
             ref={columnsScroll.ref}
+            // A card focused in a column only partly in view must bring its
+            // column into view: the browser alone left it mostly off screen.
+            onFocus={(event) => revealFocusedColumn(event.currentTarget, event.target)}
             className="flex gap-4 pb-4 h-full overflow-x-auto overflow-y-hidden scrollbar-none snap-x snap-mandatory"
           >
             {statuses.map((status, index) => (
               <div
                 key={status.id}
+                data-roadmap-column=""
                 // flex-1 lets the columns divide the board's runway evenly and
                 // widen with the viewport. Without it the wrapper is shrink-to-fit,
                 // so every column froze at its 300px min-width and the column's own
@@ -216,30 +221,16 @@ export function RoadmapBoard({
           </div>
 
           {columnsScroll.canScrollLeft && (
-            <button
-              type="button"
-              onClick={() => columnsScroll.scrollBy(-320)}
-              aria-label={intl.formatMessage({
-                id: 'portal.roadmap.columns.scrollLeft',
-                defaultMessage: 'Scroll columns left',
-              })}
-              className="absolute start-0 top-0 bottom-4 flex items-center ps-1 pe-10 bg-gradient-to-r from-background/70 to-transparent z-10"
-            >
-              <ChevronLeftIcon className="w-5 h-5 text-muted-foreground/70" />
-            </button>
+            <RoadmapColumnsScrollButton
+              direction="left"
+              onScroll={() => columnsScroll.scrollBy(-320)}
+            />
           )}
           {columnsScroll.canScrollRight && (
-            <button
-              type="button"
-              onClick={() => columnsScroll.scrollBy(320)}
-              aria-label={intl.formatMessage({
-                id: 'portal.roadmap.columns.scrollRight',
-                defaultMessage: 'Scroll columns right',
-              })}
-              className="absolute end-0 top-0 bottom-4 flex items-center pe-1 ps-10 bg-gradient-to-l from-background/70 to-transparent z-10"
-            >
-              <ChevronRightIcon className="w-5 h-5 text-muted-foreground/70" />
-            </button>
+            <RoadmapColumnsScrollButton
+              direction="right"
+              onScroll={() => columnsScroll.scrollBy(320)}
+            />
           )}
         </div>
       )}

@@ -162,9 +162,13 @@ jobs:
       pull-requests: read
     outputs:
       e2e: ${{ steps.filter.outputs.e2e }}
-      # true when the signed-in render lane has something to measure: the web
-      # app, or this workflow (the lane's own definition). Same fail-closed
-      # rules as `e2e`.
+      # true when the signed-in render lane has something to measure: anything
+      # that can change what the portal renders -- the web app, the shared
+      # packages it builds from (packages/db holds the seed the lane renders),
+      # the dependency manifests and lockfile (a React, Tailwind or Radix bump
+      # changes the rendered page without touching apps/web), or this workflow
+      # (the lane's own definition). The same paths as `e2e`, and the same
+      # fail-closed rules.
       render: ${{ steps.filter.outputs.render }}
       # true ONLY when the probe proved this merge-queue entry's git tree is
       # byte-identical to the recorded checkout on which all 8 e2e shards
@@ -212,7 +216,7 @@ jobs:
           else
             echo "e2e=false" >> "$GITHUB_OUTPUT"
           fi
-          if printf '%s\n' "$changed" | grep -E '^(apps/web/|\.github/workflows/ci\.yml$)' >/dev/null; then
+          if printf '%s\n' "$changed" | grep -E '^(apps/web/|packages/|package\.json$|bun\.lock$|\.github/workflows/ci\.yml$)' >/dev/null; then
             echo "render=true" >> "$GITHUB_OUTPUT"
           else
             echo "render=false" >> "$GITHUB_OUTPUT"
@@ -650,12 +654,14 @@ jobs:
     # hub to load 112 and starved memory recall for every agent session. The
     # check now runs here, on a GitHub-hosted runner, and nowhere else.
     #
-    # COST. Pull requests that touch apps/web or this workflow, plus
-    # workflow_dispatch; never push, merge_group or the nightly schedule. It
-    # is not a `needs` of portability-gate, so it adds no time to the required
-    # gate, and it runs beside the end-to-end shards rather than after them.
-    # This repository is public, so GitHub-hosted Linux minutes are not
-    # billed. The PR that added the job records the measured minutes per run.
+    # COST. Pull requests that touch apps/web, packages/, package.json,
+    # bun.lock or this workflow (the e2e lane's paths), plus workflow_dispatch;
+    # never push, merge_group or the nightly schedule. About 5 runner-minutes
+    # per run (4m29s to 4m57s measured on the adding PR; 4m46s on run
+    # 36088534312). It is not a `needs` of portability-gate, so it adds no time
+    # to the required gate, and it runs beside the end-to-end shards rather
+    # than after them. This repository is public, so GitHub-hosted Linux
+    # minutes are not billed.
     name: Signed-in render check
     needs: [changed_paths]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')

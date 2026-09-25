@@ -21,6 +21,7 @@ import { useAuthBroadcast } from '@/lib/client/hooks/use-auth-broadcast'
 import { useSimilarPosts } from '@/lib/client/hooks/use-similar-posts'
 import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session'
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
+import { ReducedMotionConfig } from '@/components/ui/reduced-motion-config'
 import { cn } from '@/lib/shared/utils'
 import {
   resolveSubmitState,
@@ -60,7 +61,16 @@ export interface FeedbackHeaderProps {
   onPostCreated?: (postId: string, boardSlug: string) => void
 }
 
-export function FeedbackHeaderAnimated({
+/** The composer, with its animations following the reduced-motion preference. */
+export function FeedbackHeaderAnimated(props: FeedbackHeaderProps) {
+  return (
+    <ReducedMotionConfig>
+      <FeedbackComposer {...props} />
+    </ReducedMotionConfig>
+  )
+}
+
+function FeedbackComposer({
   boards,
   defaultBoardId,
   user,

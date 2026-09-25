@@ -8,6 +8,7 @@ import { VoteButton } from '@/components/public/vote-button'
 import type { SimilarPost } from '@/lib/client/hooks/use-similar-posts'
 import { cn } from '@/lib/shared/utils'
 import type { PostId } from '@quackback/ids'
+import { ReducedMotionConfig } from '@/components/ui/reduced-motion-config'
 
 interface SimilarPostsCardProps {
   posts: SimilarPost[]
@@ -35,7 +36,16 @@ function useContentHeight() {
 
 const MAX_SIMILAR_POSTS = 3
 
-export function SimilarPostsCard({
+/** The card, with its open and close animations following the reduced-motion preference. */
+export function SimilarPostsCard(props: SimilarPostsCardProps): React.ReactElement {
+  return (
+    <ReducedMotionConfig>
+      <SimilarPostsCardPanel {...props} />
+    </ReducedMotionConfig>
+  )
+}
+
+function SimilarPostsCardPanel({
   posts,
   show,
   className,

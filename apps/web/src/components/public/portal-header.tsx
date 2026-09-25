@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useRouter, useRouterState, useRouteContext } from '@tanstack/react-router'
 import { useTheme } from 'next-themes'
 import { buildNavItems } from './portal-header-nav'
@@ -89,6 +89,34 @@ export function PortalHeader({
   const { theme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  const headerRef = useRef<HTMLElement>(null)
+
+  // The sticky header wraps and expands on small screens. Focus must clear its
+  // actual height, including the navigation row, rather than a one-row token.
+  useLayoutEffect(() => {
+    const header = headerRef.current
+    if (!header) return
+    const root = header.ownerDocument.documentElement
+    const view = header.ownerDocument.defaultView
+    const property = '--portal-sticky-header-height'
+    const previousValue = root.style.getPropertyValue(property)
+    const previousPriority = root.style.getPropertyPriority(property)
+    const measure = () => {
+      root.style.setProperty(property, `${header.getBoundingClientRect().height}px`)
+    }
+
+    measure()
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(header)
+    view?.addEventListener('resize', measure)
+    return () => {
+      observer?.disconnect()
+      view?.removeEventListener('resize', measure)
+      if (previousValue) root.style.setProperty(property, previousValue, previousPriority)
+      else root.style.removeProperty(property)
+    }
+  }, [])
 
   // Avoid hydration mismatch for theme toggle
   useEffect(() => {
@@ -364,7 +392,10 @@ export function PortalHeader({
 
   // Two-row layout: Logo + Auth on top, Navigation below
   return (
-    <header className="portal-header w-full py-2 border-b border-[var(--header-border)] bg-[var(--header-background)] shadow-sm">
+    <header
+      ref={headerRef}
+      className="portal-header w-full py-2 border-b border-[var(--header-border)] bg-[var(--header-background)] shadow-sm"
+    >
       {/* Row 1: Logo + Name + Auth */}
       <div>
         <div className="portal-shell">

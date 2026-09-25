@@ -163,7 +163,20 @@ describe('QB-CI-002 signed-in render lane', () => {
     // The path filter is fail-closed like the e2e one: every non-PR event and
     // any diff failure answers "run".
     expect(ci.match(/echo "render=true" >> "\$GITHUB_OUTPUT"/g)).toHaveLength(3)
-    expect(ci).toContain("grep -E '^(apps/web/|\\.github/workflows/ci\\.yml$)'")
+    // It runs on every pull request that can change what the portal renders:
+    // the e2e lane's paths, including packages/ (the seed it renders) and the
+    // dependency manifests (a UI library bump never touches apps/web).
+    const lines = ci.split('\n')
+    const filterFor = (output: string) => {
+      const at = lines.findIndex(
+        (line, n) => line.includes('grep -E') && lines[n + 1]?.includes(`echo "${output}=true"`)
+      )
+      return lines[at]?.match(/grep -E '([^']+)'/)?.[1]
+    }
+    expect(filterFor('render')).toBe(
+      '^(apps/web/|packages/|package\\.json$|bun\\.lock$|\\.github/workflows/ci\\.yml$)'
+    )
+    expect(filterFor('render')).toBe(filterFor('e2e'))
   })
 })
 

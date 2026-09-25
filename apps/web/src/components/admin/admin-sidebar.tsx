@@ -457,7 +457,7 @@ export function AdminSidebar({ initialUserData, latestVersion }: AdminSidebarPro
         </Link>
 
         <div className="flex items-center gap-1">
-          <NotificationBell className="h-9 w-9" />
+          <NotificationBell className="h-9 w-9" popoverSide="bottom" />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
