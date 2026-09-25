@@ -69,7 +69,8 @@ beforeAll(async () => {
   // One connection holds the lock and one watches pg_locks; the app pool
   // serves the two requests and the fixtures, with the throwaway schema first
   // on its search path so the unqualified table names resolve there.
-  admin = postgres(connection, { max: 2, connect_timeout: 3 })
+  // onnotice: DROP SCHEMA ... CASCADE reports each dropped table as a NOTICE.
+  admin = postgres(connection, { max: 2, connect_timeout: 3, onnotice: () => {} })
   await admin.unsafe(`CREATE SCHEMA "${SCHEMA}"`)
   for (const table of ['user', 'principal', 'account']) {
     await admin.unsafe(`CREATE TABLE "${SCHEMA}"."${table}" (LIKE public."${table}" INCLUDING ALL)`)
@@ -195,15 +196,15 @@ async function raceBehindTheLock(
     await released
   })
 
-  let pending!: Array<Promise<Outcome>>
-  try {
-    await held
-    pending = attempts.map(({ who, run }) =>
-      run().then(
-        (value): Outcome => ({ who, value }),
-        (error: unknown): Outcome => ({ who, error })
-      )
+  // A holder that fails before taking the lock rejects here instead of hanging.
+  await Promise.race([held, holder])
+  const pending = attempts.map(({ who, run }) =>
+    run().then(
+      (value): Outcome => ({ who, value }),
+      (error: unknown): Outcome => ({ who, error })
     )
+  )
+  try {
     const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS
     while ((await lockWaiters()) < attempts.length) {
       if (Date.now() > deadline) {
