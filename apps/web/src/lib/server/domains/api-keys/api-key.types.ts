@@ -19,9 +19,20 @@ export interface ApiKey {
   createdAt: Date
   revokedAt: Date | null
   /**
-   * API scopes the key is limited to. Null for a key created before scopes
-   * existed: it keeps full API access, bounded by its role and its creator's
-   * current role. Internal capability scopes are never listed here.
+   * When migration 9003_venturi_legacy_api_key_bounds.sql bounded this key
+   * because it was created before every key needed scopes and an expiry: it
+   * got read-only scopes (LEGACY_API_KEY_SCOPES) if it had none, and an expiry
+   * if it had none or a later one than a new key may have. Null for every
+   * other key. The API keys settings page shows it, so an administrator knows
+   * to replace the key before it expires.
+   */
+  legacyBoundedAt: Date | null
+  /**
+   * API scopes the key is limited to. Null for a key stored without any API
+   * scope (created before scopes existed, and not bounded by the migration):
+   * it works with LEGACY_API_KEY_SCOPES (read only), never full access, still
+   * bounded by its role and its creator's current role
+   * (effectiveApiKeyScopes). Internal capability scopes are never listed here.
    */
   scopes: ApiKeyScope[] | null
 }

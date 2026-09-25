@@ -29,7 +29,9 @@ const API_KEY_PREFIX = 'qb_'
 const KEY_RANDOM_BYTES = 24 // 48 hex chars
 
 /** Map a database row to the public ApiKey shape (strips keyHash and internal scopes). */
-function toApiKey(row: Omit<ApiKey, 'scopes'> & Record<string, unknown>): ApiKey {
+function toApiKey(
+  row: Omit<ApiKey, 'scopes' | 'legacyBoundedAt'> & Record<string, unknown>
+): ApiKey {
   const parsed = parseStoredApiKeyScopes((row.scopes as string | null | undefined) ?? null)
   return {
     id: row.id,
@@ -41,7 +43,8 @@ function toApiKey(row: Omit<ApiKey, 'scopes'> & Record<string, unknown>): ApiKey
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,
     revokedAt: row.revokedAt,
-    scopes: parsed.legacyFullAccess ? null : parsed.scopes,
+    legacyBoundedAt: (row.legacyBoundedAt as Date | null | undefined) ?? null,
+    scopes: parsed.legacyUnscoped ? null : parsed.scopes,
   }
 }
 
@@ -95,7 +98,7 @@ export async function createApiKey(
     throw new ValidationError('VALIDATION_ERROR', 'API key name must be 255 characters or less')
   }
   // Every key is scoped and expires (landing-page#2309, DEF-15). No caller may
-  // create a key with full access or without an expiry: that is the shape of a
+  // create a key without scopes or without an expiry: that is the shape of a
   // key made before these were required, which never renews (rotateApiKey).
   const scopes = [...new Set(Array.isArray(input.scopes) ? input.scopes : [])]
   if (scopes.length === 0 || !scopes.every(isApiKeyScope)) {

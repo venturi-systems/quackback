@@ -12,7 +12,11 @@ import { UnauthorizedError, ForbiddenError, RateLimitError } from '@/lib/shared/
 import { db, principal, eq } from '@/lib/server/db'
 import type { PrincipalId } from '@quackback/ids'
 import { isAdmin, isTeamMember } from '@/lib/shared/roles'
-import { API_KEY_SCOPES, hasApiKeyScope, type ApiKeyScope } from '@/lib/shared/api-key-scopes'
+import {
+  effectiveApiKeyScopes,
+  hasApiKeyScope,
+  type ApiKeyScope,
+} from '@/lib/shared/api-key-scopes'
 
 export type MemberRole = 'admin' | 'member' | 'user'
 
@@ -26,7 +30,10 @@ export interface ApiAuthContext {
    * current role under the team identity rule (api-key-authority.ts).
    */
   role: MemberRole
-  /** Scopes the key carries (every scope for a legacy key created without any). */
+  /**
+   * Scopes the key carries. A key stored without any API scope gets the
+   * read-only LEGACY_API_KEY_SCOPES (DEF-15), never every scope.
+   */
   scopes: readonly ApiKeyScope[]
   /** Whether the request is in import mode (suppresses side effects, raises rate limit) */
   importMode: boolean
@@ -119,7 +126,7 @@ export async function requireApiKey(request: Request): Promise<ApiAuthContext | 
     apiKey,
     principalId: apiKey.principalId,
     role,
-    scopes: apiKey.scopes ?? [...API_KEY_SCOPES],
+    scopes: effectiveApiKeyScopes(apiKey.scopes),
     importMode: false,
   }
 }

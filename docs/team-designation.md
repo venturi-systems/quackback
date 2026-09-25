@@ -73,12 +73,29 @@ post's status.
 
 Every API key is scoped and expires (`lib/shared/api-key-scopes.ts`,
 `domains/api-keys/api-key.service.ts`). A key created before that can lack
-both. Without scopes it keeps full scope, bounded by its role and its
-creator's role; without a stored expiry it stops working 365 days after it was
-created, the longest lifetime a new key may have. Such a key cannot be
-rotated, because rotation keeps a key's scopes and expiry and would only renew
-its secret; neither can an expired key. Replace either with a new scoped key
-(cutover step 4).
+both. The release that carries this rule bounds every such key once, when its
+database migration runs
+(`packages/db/drizzle/9003_venturi_legacy_api_key_bounds.sql`):
+
+- a key with no API scope can only read feedback and help articles
+  (`read:feedback` and `read:article`, the "Read only" preset). It keeps any
+  internal capability scope. A read-only integration keeps working; one that
+  wrote needs a new key.
+- a key with no expiry expires 90 days after the migration, the default
+  lifetime of a new key. That is the notice to replace it.
+- a key whose expiry is more than a year and a day away expires a year after
+  the migration, the longest lifetime a new key may have.
+- `api_keys.legacy_bounded_at` records when. Admin > Settings > Developers >
+  API Keys shows a notice above the list and a line on each such key.
+
+The code applies the same bounds to any key the migration never saw: a key
+stored without an API scope reads only, never full access, and one stored
+without an expiry stops working 365 days after it was created. Neither is
+still bounded only by its role and its creator's role. A key stored without
+scopes or without an expiry cannot be rotated, because rotation keeps a key's
+scopes and expiry and would only renew its secret; neither can an expired key.
+A bounded key has both, so it rotates, keeping its read-only scopes and its
+expiry. Replace any of them with a new scoped key (cutover step 4).
 
 ## Designation sources
 
@@ -161,26 +178,33 @@ the fork-side steps are:
    owner removes the bootstrap account's team role. The server allows it
    because another qualifying administrator exists.
 4. **Replace keys made before scopes and expiry** (read-only SQL, then Admin >
-   Settings > Developers > API Keys, after step 2). List the active keys that
-   carry no API scope or no stored expiry:
+   Settings > Developers > API Keys, after step 2). The migration has already
+   limited each such key to reading and given it an expiry. List the active
+   keys it bounded, and any it could not see:
 
    ```sql
-   SELECT id, name, key_prefix, created_at, last_used_at, expires_at, scopes
+   SELECT id, name, key_prefix, created_at, last_used_at, expires_at,
+          legacy_bounded_at, scopes
    FROM api_keys
    WHERE revoked_at IS NULL
-     AND (expires_at IS NULL
+     AND (legacy_bounded_at IS NOT NULL
+          OR expires_at IS NULL
           OR scopes IS NULL
           OR NOT (scopes LIKE ANY (ARRAY['%"read:feedback"%', '%"write:feedback"%',
             '%"write:changelog"%', '%"read:article"%', '%"write:article"%',
             '%"read:chat"%', '%"write:chat"%', '%"admin:workspace"%'])));
    ```
 
-   A row without an API scope keeps full scope, a row without a stored expiry
-   works until 365 days after `created_at`, and none of them can be rotated.
-   For each one still in use, the designated administrator creates a scoped
-   key with an expiry, moves the integration to it, and revokes the old key.
-   Revoke a key nobody uses at once. The list is empty when the cutover is
-   done.
+   For each key still in use (`last_used_at` is recent), the designated
+   administrator creates a key with the scopes the integration needs and an
+   expiry, moves the integration to it before `expires_at`, and revokes the
+   old key. Revoke a key nobody uses at once. The list is empty when the
+   cutover is done.
+
+   A key made by the password bootstrap account acts as a Contributor once
+   that account is demoted (step 3), so the team and administrator API refuses
+   it whatever its scopes. Replace it with a key the designated administrator
+   creates.
 
 5. **Break-glass** stays the feedback operations repository's SSM path. If
    step 2 cannot pass (for example the provider reports the address as

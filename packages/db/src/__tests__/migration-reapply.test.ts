@@ -5,15 +5,16 @@ import { sql } from 'drizzle-orm'
 import { createDb, type Database } from '../client'
 
 /**
- * Venturi fork (landing-page#2309, OPT-08): fork migrations 9001 and 9002 and
- * upstream 0118..0125 each leave the database unchanged when they run again.
+ * Venturi fork (landing-page#2309, OPT-08 and DEF-15): fork migrations 9001,
+ * 9002 and 9003 and upstream 0118..0125 each leave the database unchanged when
+ * they run again.
  *
  * CI's database job migrates first, so every table these migrations touch is
  * already at its final shape. The test copies those tables into a scratch
  * schema (`LIKE ... INCLUDING ALL`: columns, defaults, constraints, indexes),
  * puts that schema first on the search path so the migrations' unqualified
  * table names resolve to the copies, seeds every copied table with rows in the
- * shape the first run left them, runs the ten migrations again, and compares
+ * shape the first run left them, runs the eleven migrations again, and compares
  * every column, default and row. `LIKE` copies no foreign keys, so the seeded
  * rows need no parent rows.
  *
@@ -35,6 +36,7 @@ const TAGS = [
   '0123_csat_comment_subscription_backfill',
   '0124_conversation_channel_messenger',
   '0125_conversation_channel_drop_default',
+  '9003_venturi_legacy_api_key_bounds',
 ]
 
 const TABLES = [
@@ -47,6 +49,7 @@ const TABLES = [
   'kb_articles',
   'webhooks',
   'conversations',
+  'api_keys',
 ]
 
 /** Statement chunks exactly as drizzle's migrator splits them. */
@@ -133,7 +136,11 @@ describe.skipIf(!dbAvailable)('fork and upstream v0.13.2 migrations run again', 
         // - 0124 and 0125: a conversation 0124 already renamed to messenger and
         //   an email one;
         // - 9001 and 9002: a locked-out 2FA row and an in-flight hook delivery,
-        //   whose values a re-run must not reset to the column defaults.
+        //   whose values a re-run must not reset to the column defaults;
+        // - 9003: a key it already bounded (read-only scopes, a 90-day expiry,
+        //   legacy_bounded_at set a day ago), a key created after it with
+        //   scopes and an expiry a year and 23 hours away (the day of skew
+        //   slack a new key may carry), and a revoked key with neither.
         const healedBoard = '00000000-0000-4000-8000-000000000121'
         const healedCategory = '00000000-0000-4000-8000-000000001221'
         const healedArticle = '00000000-0000-4000-8000-000000001222'
@@ -179,6 +186,20 @@ describe.skipIf(!dbAvailable)('fork and upstream v0.13.2 migrations run again', 
         await tx.execute(sql`
           INSERT INTO "hook_deliveries" (job_id, hook_type, outcome)
           VALUES ('reapply-job-1', 'webhook', 'processing')
+        `)
+        await tx.execute(sql`
+          INSERT INTO "api_keys"
+            (id, name, key_hash, key_prefix, principal_id, expires_at, created_at,
+             revoked_at, scopes, legacy_bounded_at)
+          VALUES
+            (gen_random_uuid(), 'bounded', repeat('a', 64), 'qb_aaaaaaaaa', gen_random_uuid(),
+             now() + interval '89 days', now() - interval '400 days', NULL,
+             '["read:article", "read:feedback"]', now() - interval '1 day'),
+            (gen_random_uuid(), 'scoped', repeat('b', 64), 'qb_bbbbbbbbb', gen_random_uuid(),
+             now() + interval '365 days' + interval '23 hours', now(), NULL,
+             '["read:feedback","write:feedback"]', NULL),
+            (gen_random_uuid(), 'revoked', repeat('c', 64), 'qb_ccccccccc', gen_random_uuid(),
+             NULL, now() - interval '400 days', now() - interval '1 day', NULL, NULL)
         `)
         for (const table of TABLES) {
           const counted = await tx.execute<{ n: number }>(

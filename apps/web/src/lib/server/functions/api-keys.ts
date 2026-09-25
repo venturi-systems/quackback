@@ -52,7 +52,8 @@ function keyAuditView(key: {
   return {
     name: key.name,
     keyPrefix: key.keyPrefix,
-    scopes: key.scopes ?? 'legacy-full-access',
+    // A key stored without API scopes works read-only (LEGACY_API_KEY_SCOPES).
+    scopes: key.scopes ?? 'legacy-read-only',
     expiresAt: key.expiresAt ? new Date(key.expiresAt).toISOString() : null,
   }
 }

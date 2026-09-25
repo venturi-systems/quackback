@@ -137,8 +137,23 @@ describe('ApiKey shape', () => {
     hoisted.row = { ...base, scopes: '["internal:tier-limits"]' }
     const key = await getApiKeyById('api_key_1' as never)
     expect(key.scopes).toBeNull()
+    expect(key.legacyBoundedAt).toBeNull()
     expect(JSON.stringify(key)).not.toContain('internal:tier-limits')
     expect(key).not.toHaveProperty('keyHash')
+  })
+
+  it('reports when the legacy migration bounded a key, with the scopes it stored', async () => {
+    const legacyBoundedAt = new Date('2026-09-26T00:00:00Z')
+    hoisted.row = {
+      ...base,
+      expiresAt: new Date('2026-12-25T00:00:00Z'),
+      scopes: '["internal:tier-limits", "read:article", "read:feedback"]',
+      legacyBoundedAt,
+    }
+    const key = await getApiKeyById('api_key_1' as never)
+    expect(key.legacyBoundedAt).toEqual(legacyBoundedAt)
+    expect(key.scopes).toEqual(['read:article', 'read:feedback'])
+    expect(JSON.stringify(key)).not.toContain('internal:tier-limits')
   })
 })
 
@@ -163,6 +178,21 @@ describe('legacy keys (DEF-15)', () => {
   it('still accepts a key stored without an expiry inside that year', async () => {
     hoisted.row = { ...stored, scopes: null, expiresAt: null, createdAt: inDays(-30) }
     expect(await verifyApiKey(plainTextKey)).toMatchObject({ id: 'api_key_1', scopes: null })
+  })
+
+  it('accepts a bounded legacy key until its new expiry, then refuses it', async () => {
+    const bounded = {
+      ...stored,
+      scopes: '["read:article", "read:feedback"]',
+      createdAt: inDays(-400),
+      legacyBoundedAt: inDays(-10),
+    }
+    hoisted.row = { ...bounded, expiresAt: inDays(80) }
+    expect(await verifyApiKey(plainTextKey)).toMatchObject({
+      scopes: ['read:article', 'read:feedback'],
+    })
+    hoisted.row = { ...bounded, expiresAt: inDays(-1) }
+    expect(await verifyApiKey(plainTextKey)).toBeNull()
   })
 
   it('refuses to rotate a key created before scopes existed', async () => {
@@ -205,6 +235,23 @@ describe('legacy keys (DEF-15)', () => {
     const result = await rotateApiKey('api_key_1' as never)
     expect(result.plainTextKey).not.toBe(plainTextKey)
     expect(result.apiKey).toMatchObject({ scopes: ['read:feedback'], expiresAt })
+    expect(Object.keys(hoisted.updates[0]).sort()).toEqual(['keyHash', 'keyPrefix', 'lastUsedAt'])
+  })
+
+  it('rotates a bounded legacy key, keeping its read-only scopes and expiry', async () => {
+    const expiresAt = inDays(80)
+    hoisted.row = {
+      ...stored,
+      scopes: '["read:article", "read:feedback"]',
+      expiresAt,
+      createdAt: inDays(-400),
+      legacyBoundedAt: inDays(-10),
+    }
+    const result = await rotateApiKey('api_key_1' as never)
+    expect(result.apiKey).toMatchObject({
+      scopes: ['read:article', 'read:feedback'],
+      expiresAt,
+    })
     expect(Object.keys(hoisted.updates[0]).sort()).toEqual(['keyHash', 'keyPrefix', 'lastUsedAt'])
   })
 

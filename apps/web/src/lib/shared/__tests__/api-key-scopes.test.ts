@@ -4,9 +4,13 @@ import {
   API_KEY_SCOPES,
   API_KEY_MAX_EXPIRY_DAYS,
   API_KEY_EXPIRY_OPTIONS_DAYS,
+  API_KEY_DEFAULT_EXPIRY_DAYS,
   DEFAULT_API_KEY_PRESET,
+  LEGACY_API_KEY_NOTICE_DAYS,
+  LEGACY_API_KEY_SCOPES,
   apiKeyExpiresAt,
   apiKeyRotationBlocker,
+  effectiveApiKeyScopes,
   hasApiKeyScope,
   isApiKeyScope,
   parseStoredApiKeyScopes,
@@ -32,26 +36,73 @@ describe('hasApiKeyScope', () => {
 })
 
 describe('parseStoredApiKeyScopes', () => {
-  it('keeps full access for a legacy key stored without scopes', () => {
+  it('reads only for a key stored without scopes, never full access (DEF-15)', () => {
     expect(parseStoredApiKeyScopes(null)).toEqual({
-      scopes: [...API_KEY_SCOPES],
-      legacyFullAccess: true,
+      scopes: ['read:feedback', 'read:article'],
+      legacyUnscoped: true,
     })
+    expect(parseStoredApiKeyScopes(null).scopes).toEqual([...LEGACY_API_KEY_SCOPES])
+    expect(parseStoredApiKeyScopes(null).scopes).not.toContain('write:feedback')
+    expect(parseStoredApiKeyScopes(null).scopes).not.toContain('admin:workspace')
   })
 
   it('treats a key with only internal capability scopes as legacy', () => {
-    expect(parseStoredApiKeyScopes('["internal:tier-limits"]').legacyFullAccess).toBe(true)
+    expect(parseStoredApiKeyScopes('["internal:tier-limits"]')).toEqual({
+      scopes: [...LEGACY_API_KEY_SCOPES],
+      legacyUnscoped: true,
+    })
   })
 
   it('scopes a key to exactly its stored API scopes', () => {
     expect(parseStoredApiKeyScopes('["read:feedback","read:feedback","bogus"]')).toEqual({
       scopes: ['read:feedback'],
-      legacyFullAccess: false,
+      legacyUnscoped: false,
     })
   })
 
-  it('survives corrupt JSON as legacy', () => {
-    expect(parseStoredApiKeyScopes('{not json').legacyFullAccess).toBe(true)
+  it('reads the jsonb text form the legacy migration writes', () => {
+    expect(
+      parseStoredApiKeyScopes('["internal:tier-limits", "read:article", "read:feedback"]')
+    ).toEqual({ scopes: ['read:article', 'read:feedback'], legacyUnscoped: false })
+  })
+
+  it('survives corrupt JSON as legacy, read only', () => {
+    expect(parseStoredApiKeyScopes('{not json')).toEqual({
+      scopes: [...LEGACY_API_KEY_SCOPES],
+      legacyUnscoped: true,
+    })
+  })
+})
+
+describe('LEGACY_API_KEY_SCOPES', () => {
+  it('is the read-only preset', () => {
+    const readOnly = API_KEY_PRESETS.find((p) => p.id === 'read-only')
+    expect([...LEGACY_API_KEY_SCOPES]).toEqual(readOnly?.scopes)
+    expect(LEGACY_API_KEY_SCOPES.every((scope) => scope.startsWith('read:'))).toBe(true)
+  })
+
+  it('gives the notice period of a new key\'s default lifetime', () => {
+    expect(LEGACY_API_KEY_NOTICE_DAYS).toBe(API_KEY_DEFAULT_EXPIRY_DAYS)
+  })
+})
+
+describe('effectiveApiKeyScopes', () => {
+  it('keeps stored scopes', () => {
+    expect(effectiveApiKeyScopes(['write:feedback'])).toEqual(['write:feedback'])
+  })
+
+  it('reads only for a key stored without scopes', () => {
+    const scopes = effectiveApiKeyScopes(null)
+    expect(scopes).toEqual([...LEGACY_API_KEY_SCOPES])
+    for (const scope of API_KEY_SCOPES) {
+      if (!scope.startsWith('read:')) expect(scopes).not.toContain(scope)
+    }
+  })
+
+  it('returns a copy the caller may change', () => {
+    const scopes = effectiveApiKeyScopes(null)
+    scopes.push('admin:workspace')
+    expect(LEGACY_API_KEY_SCOPES).not.toContain('admin:workspace')
   })
 })
 
