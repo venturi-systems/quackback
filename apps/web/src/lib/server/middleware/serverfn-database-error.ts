@@ -15,17 +15,21 @@
  *
  * `serverFnDatabaseErrorRedaction` is a global function middleware that wraps
  * every server function. When the function fails with a database error
- * (`isDatabaseError`), it logs the original, with its SQL, on the server and
- * throws a plain error with a fixed message instead. Every other error,
- * including app errors that wrap a database error as their `cause`, passes
- * through unchanged, so their classes, codes and messages still reach the
- * caller and any loader that checks them.
+ * (`isDatabaseError`), it logs `databaseErrorLogFields` on the server (the
+ * statement, SQLSTATE and parameter count, never a parameter value, message or
+ * Postgres detail; DEF-63) and throws a plain error with a fixed message
+ * instead. Every other error, including app errors that wrap a database error
+ * as their `cause`, passes through unchanged, so their classes, codes and
+ * messages still reach the caller and any loader that checks them.
  */
 import { createMiddleware } from '@tanstack/react-start'
 import { logger } from '@/lib/server/logger'
-import { isDatabaseError } from '@/lib/server/errors/database-error'
+import { databaseErrorLogFields, isDatabaseError } from '@/lib/server/errors/database-error'
 
 const log = logger.child({ component: 'serverfn-database-error' })
+
+/** The one logger method this middleware calls; tests pass their own. */
+type ErrorLog = { error: (fields: Record<string, unknown>, message: string) => void }
 
 /** What the caller gets instead of a failed query's own message. */
 export const DATABASE_ERROR_MESSAGE = 'The request could not be completed.'
@@ -43,22 +47,28 @@ export function redactDatabaseError(error: unknown): unknown {
  * Core of the middleware, decoupled from the framework so it can be unit
  * tested: runs `next` and replaces a database error it throws.
  */
-export async function withDatabaseErrorRedaction<T>(next: () => Promise<T>): Promise<T> {
+export async function withDatabaseErrorRedaction<T>(
+  next: () => Promise<T>,
+  errorLog: ErrorLog = log
+): Promise<T> {
   try {
     return await next()
   } catch (error) {
     const redacted = redactDatabaseError(error)
     if (redacted !== error) {
-      log.error({ err: error }, 'server function failed in a database query')
+      // Only the redacted shape (DEF-63): the bound parameters, the message and
+      // the Postgres detail can all carry user data, so the error itself is
+      // never handed to the logger.
+      errorLog.error(databaseErrorLogFields(error), 'server function failed in a database query')
     }
     throw redacted
   }
 }
 
 /**
- * Global function middleware: keeps a failed query's SQL and parameters on the
- * server. Register it right after `serverFnDispatchMarker` so it wraps every
- * other middleware and the function itself.
+ * Global function middleware: keeps a failed query's SQL (never its bound
+ * parameters) on the server. Register it right after `serverFnDispatchMarker`
+ * so it wraps every other middleware and the function itself.
  */
 export const serverFnDatabaseErrorRedaction = createMiddleware({ type: 'function' }).server(
   ({ next }) => withDatabaseErrorRedaction(() => Promise.resolve(next()))

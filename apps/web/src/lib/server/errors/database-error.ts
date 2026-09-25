@@ -64,3 +64,53 @@ export function isDatabaseError(error: unknown): boolean {
   if (e.name === 'PostgresError') return true
   return typeof e.code === 'string' && SQLSTATE.test(e.code) && typeof e.severity === 'string'
 }
+
+/**
+ * Postgres error fields that name the failure without carrying a value: the
+ * server's own identifiers for where it happened. `detail`, `message`,
+ * `where` and `hint` are left out because Postgres puts values in them
+ * (`Key (email)=(ann@acme.example) already exists`, `invalid input syntax
+ * for type uuid: "<input>"`).
+ */
+const SAFE_POSTGRES_FIELDS = [
+  ['severity', 'severity'],
+  ['routine', 'routine'],
+  ['schema_name', 'schema'],
+  ['table_name', 'table'],
+  ['column_name', 'column'],
+  ['constraint_name', 'constraint'],
+] as const
+
+/**
+ * What may be logged about a failed query (DEF-63). A failed query's message
+ * is `Failed query: <sql>\nparams: <params>`, its `params` are the bound
+ * values, and its Postgres cause can echo a value in `message` or `detail`.
+ * Any of those can be a user's search text, an email address or a token, so
+ * none of them is returned: only the SQLSTATE, the error class, the
+ * parameterized statement, how many parameters it had, and the Postgres
+ * identifiers above. Never pass the error itself, or its `cause`, to a logger.
+ */
+export function databaseErrorLogFields(error: unknown): Record<string, string | number> {
+  const fields: Record<string, string | number> = {}
+  const code = postgresErrorCode(error)
+  if (code) fields.pg_code = code
+  // drizzle-orm 0.45 never sets `name` on DrizzleQueryError, so fall back to
+  // the class name; a bundler that renames classes only changes this label.
+  if (error instanceof Error) {
+    fields.error_name = error.name !== 'Error' ? error.name : error.constructor?.name || error.name
+  }
+  let current: unknown = error
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
+    if (!current || typeof current !== 'object') break
+    const e = current as Record<string, unknown>
+    if (fields.statement === undefined && typeof e.query === 'string') fields.statement = e.query
+    if (fields.param_count === undefined && Array.isArray(e.params)) {
+      fields.param_count = e.params.length
+    }
+    for (const [from, to] of SAFE_POSTGRES_FIELDS) {
+      if (fields[to] === undefined && typeof e[from] === 'string') fields[to] = e[from] as string
+    }
+    current = e.cause
+  }
+  return fields
+}
