@@ -363,11 +363,20 @@ describe('REQ-21 upstream intake ledger check', () => {
       ['patch_id', '7'.repeat(40)],
       ['neutralized_by', FORK_PARENT],
       ['intake', 'merge'],
+      ['intake_pr', 999],
     ] as const) {
       expect(() => amend({ [field]: value })).toThrow(
         `ledger line 2: amends line 1 but its ${field} differs from that line's`
       )
     }
+    // Leaving out the amended line's intake pull request changes it too.
+    expect(() =>
+      parseLedger(
+        [entry({ intake_pr: 126 }), { ...original, amends_line: 1 }]
+          .map((record) => JSON.stringify(record))
+          .join('\n')
+      )
+    ).toThrow("ledger line 2: amends line 1 but its intake_pr differs from that line's")
     expect(() => amend({ review: { by: 'agent', decision: 'rejected' } })).toThrow(
       'ledger line 2: amends line 1 but its review.decision differs; a decision changes only through an ordinary later record'
     )
@@ -375,6 +384,51 @@ describe('REQ-21 upstream intake ledger check', () => {
     expect(
       amend({ review: { by: 'agent', decision: 'accepted', merged_by: 'owner' }, notes: 'n' })
     ).toHaveLength(2)
+  })
+
+  it('gives a record at most one provenance amendment, naming the record itself', () => {
+    const original = entry({ intake_pr: 126 })
+    const amendment = {
+      ...original,
+      amends_line: 1,
+      review: { by: 'agent lane', decision: 'accepted', merged_by: 'owner' },
+    }
+    const parse = (...records: object[]) =>
+      parseLedger(records.map((record) => JSON.stringify(record)).join('\n'))
+    expect(parse(original, amendment)).toHaveLength(2)
+    // Amending the amendment would amend line 1 a second time under another key.
+    expect(() => parse(original, amendment, { ...amendment, amends_line: 2 })).toThrow(
+      'ledger line 3: amends line 2, which is itself a provenance amendment; an amendment names the record it corrects'
+    )
+    expect(() =>
+      parse(original, amendment, { ...amendment, review: { ...amendment.review, by: 'other' } })
+    ).toThrow(
+      'ledger line 3: amends line 1, which ledger line 2 already amends; a record takes one provenance amendment'
+    )
+    // A blank line between them changes nothing.
+    expect(() =>
+      parseLedger(
+        [original, amendment, '', amendment]
+          .map((record) => (typeof record === 'string' ? record : JSON.stringify(record)))
+          .join('\n')
+      )
+    ).toThrow(
+      'ledger line 4: amends line 1, which ledger line 2 already amends; a record takes one provenance amendment'
+    )
+    // Two records each take their own amendment.
+    const second = entry({ upstream_sha: OTHER_UPSTREAM, intake_pr: 143 })
+    expect(
+      parse(original, second, amendment, { ...second, amends_line: 2, review: amendment.review })
+    ).toHaveLength(4)
+  })
+
+  it('rejects an intake pull request that is not a positive integer', () => {
+    for (const intake_pr of [0, -1, 1.5, '126', null]) {
+      expect(() => parseLedger(JSON.stringify({ ...entry(), intake_pr }))).toThrow(
+        'ledger line 1: intake_pr must be a positive pull request number when present'
+      )
+    }
+    expect(parseLedger(JSON.stringify(entry({ intake_pr: 126 })))[0]!.intake_pr).toBe(126)
   })
 
   it('rejects a ledger line that is not JSON or carries a malformed SHA', () => {
@@ -428,7 +482,8 @@ describe('REQ-21 committed upstream intake ledger', () => {
     // earlier one, so only a repeat of the same decision on the same fork
     // commit is a duplicate. A provenance amendment repeats its line's
     // decision on purpose and is keyed by the line it amends, so amending one
-    // line twice is a duplicate too.
+    // line twice is a duplicate too. parseLedger refuses an amendment of an
+    // amendment, which would amend the original line again under another key.
     const keys = records.map((record) =>
       JSON.stringify([
         record.upstream_sha,

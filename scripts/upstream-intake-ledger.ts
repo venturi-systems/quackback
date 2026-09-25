@@ -46,9 +46,12 @@ const OPTIONAL_SHAS: readonly string[] = ['downstream_commit', 'patch_id', 'neut
  * earlier record without editing that line. It names the earlier record's
  * 1-based line number and repeats that record's identity (`intake`,
  * `upstream_sha`, `merge_base`, `downstream_head`, `downstream_commit`,
- * `patch_id`, `neutralized_by` and `review.decision`), which the check
- * compares; it cannot change a decision. A decision changes only through an
- * ordinary later record.
+ * `patch_id`, `neutralized_by`, `intake_pr` and `review.decision`), which the
+ * check compares; it cannot change a decision or the intake pull request. A
+ * decision changes only through an ordinary later record. An amendment names
+ * an ordinary record, never another amendment, and a record takes at most one
+ * amendment, so the check refuses a second amendment of a line however it is
+ * addressed.
  *
  * `scripts/check-upstream-intake-ledger.ts` enforces the ledger in CI.
  */
