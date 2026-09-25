@@ -124,6 +124,36 @@ jobs:
   # each as an untagged per-arch image BY DIGEST. Native beats QEMU here: the
   # image runs `bun install` plus two Vite/TanStack production builds, which are
   # far too slow under arm64 emulation (and risk job timeouts).
+  #
+  # The linux/arm64 leg stays GitHub-hosted: a recorded exception to the owner
+  # directive that every job runs self-hosted (remediation ledger DEF-92,
+  # measured 2026-09-25).
+  #   - Load: 45 arm64 builds in the 24 h ending 2026-09-25T18:43Z (org
+  #     census). On run 36160291188 the leg took 93 s with a warm cache.
+  #   - Hosted cost: $0. GitHub bills nothing for standard hosted runners in a
+  #     public repository, which this one is.
+  #   - It is a privileged job (packages: write, environment
+  #     container-publish), so the CI trust contract bars it from
+  #     venturi-ci-runner-1, pool and persistent lane alike. The trusted host
+  #     venturi-ci-trusted-1 is x64 only. No self-hosted arm64 runner exists.
+  #   - CodeBuild on ARM (arm1.small $0.0034/min, arm1.medium $0.007/min,
+  #     AWS Price List API) would cost about $9-28/month here, but a Docker
+  #     build needs a privileged project that admits this repository. The
+  #     credentialed venturi-gha project excludes quackback on purpose, as the
+  #     organization's only public repository, and admitting it would put
+  #     a public repository's workflows on a runner that holds AWS
+  #     credentials. That is a security loss, paid for, to replace a free job.
+  #   - A Graviton host (c7g.xlarge, $0.145/h) is about $106/month kept on.
+  #   - QEMU on the x64 pool is not available: its host has no aarch64
+  #     binfmt handler (read 2026-09-25), and the pool is barred for a job
+  #     holding a write token in any case.
+  #   - What the leg protects: the arm64 image in the public multi-arch
+  #     index, which the fork's upstream design ships to self-hosters. No
+  #     organization arm64 host pulls it today (no arm64 EC2 instance was
+  #     running on 2026-09-25), so dropping it would save nothing and would
+  #     remove arm64 from a public image.
+  # Revisit if this repository turns private (hosted minutes then cost money)
+  # or if an organization arm64 runner class is built.
   build:
     needs: resolve-source
     strategy:
