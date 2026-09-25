@@ -12,7 +12,7 @@
 
 import { z } from 'zod'
 import { createServerFn } from '@tanstack/react-start'
-import type { PostId, ChangelogId, StatusId } from '@quackback/ids'
+import { isValidTypeId, type PostId, type ChangelogId, type StatusId } from '@quackback/ids'
 import type { Actor } from '@/lib/server/policy'
 import type {
   EmbedPreview,
@@ -161,10 +161,24 @@ function joinBase(base: string, path: string): string {
 }
 
 /**
+ * Whether an embed reference can reach its read path at all (DEF-45). A post or
+ * changelog is read by id, and the id columns take only a TypeID of that
+ * entity. An article is read by slug, and Postgres rejects a NUL in text.
+ * Embed references come from user-written rich text, so a reference that fails
+ * this is answered like any other that does not resolve: unavailable, with no
+ * query.
+ */
+export function isResolvableEmbedRef(kind: 'post' | 'changelog' | 'article', id: string): boolean {
+  if (kind === 'article') return id.length > 0 && !id.includes('\u0000')
+  return isValidTypeId(id, kind)
+}
+
+/**
  * Resolve an embed reference to a preview using the injected resolvers. Any
  * null (not found / not viewable) or thrown error (the post path may throw a
  * NotFoundError for gated posts) collapses to `{ unavailable: true }` so no
- * exception ever escapes and no gated data leaks.
+ * exception ever escapes and no gated data leaks. A reference no read path
+ * can take (`isResolvableEmbedRef`) is unavailable without a query.
  */
 export async function resolveEmbed(
   kind: 'post' | 'changelog' | 'article',
@@ -173,6 +187,7 @@ export async function resolveEmbed(
   deps: EmbedResolverDeps,
   baseUrl: string
 ): Promise<EmbedPreview> {
+  if (!isResolvableEmbedRef(kind, id)) return { unavailable: true }
   try {
     if (kind === 'post') {
       const detail = await deps.getPostDetail(id as PostId, actor)

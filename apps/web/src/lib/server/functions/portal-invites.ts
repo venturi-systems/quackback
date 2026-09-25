@@ -23,6 +23,7 @@ import { sendPortalInviteEmail } from '@quackback/email'
 import { getSession } from '@/lib/server/auth/session'
 import { safeEmail } from '@/lib/shared/utils/string'
 import { logger } from '@/lib/server/logger'
+import { filterId } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'portal-invites' })
 
@@ -53,8 +54,10 @@ const sendPortalInviteSchema = z.object({
   message: z.string().trim().max(500).optional(),
 })
 
+// The invitation id column takes only an invite TypeID; anything else is
+// refused before any query runs (DEF-45).
 const portalInviteByIdSchema = z.object({
-  inviteId: z.string(),
+  inviteId: filterId('invite'),
 })
 
 // ---------------------------------------------------------------------------

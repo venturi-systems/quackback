@@ -18,6 +18,7 @@ import {
 } from '@/lib/server/domains/posts/post.merge'
 import { toIsoStringOrNull } from '@/lib/shared/utils'
 import { logger } from '@/lib/server/logger'
+import { filterId } from '@/lib/shared/schemas/list-filters'
 
 const log = logger.child({ component: 'post-merge' })
 
@@ -25,26 +26,28 @@ const log = logger.child({ component: 'post-merge' })
 // Schemas
 // ============================================
 
+// Every id here is a post id, which the post id column only takes as a TypeID.
+// The validators refuse anything else before any query runs (DEF-45).
 const mergePostSchema = z.object({
-  duplicatePostId: z.string(),
-  canonicalPostId: z.string(),
+  duplicatePostId: filterId('post'),
+  canonicalPostId: filterId('post'),
 })
 
 const unmergePostSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const getMergedPostsSchema = z.object({
-  canonicalPostId: z.string(),
+  canonicalPostId: filterId('post'),
 })
 
 const getPostMergeInfoSchema = z.object({
-  postId: z.string(),
+  postId: filterId('post'),
 })
 
 const mergePreviewSchema = z.object({
-  canonicalPostId: z.string(),
-  duplicatePostId: z.string(),
+  canonicalPostId: filterId('post'),
+  duplicatePostId: filterId('post'),
 })
 
 // ============================================
