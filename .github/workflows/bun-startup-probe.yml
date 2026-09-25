@@ -1,0 +1,50 @@
+name: Bun startup probe (temporary, HYG-31)
+
+# TEMPORARY MEASUREMENT, removed before review. Every CI setup hang in the
+# last 400 runs was a bun process that printed nothing of its own. This starts
+# the migrate script's module graph thousands of times per Bun version and
+# counts the runs that never exit.
+
+on:
+  pull_request:
+    paths: ['.github/workflows/bun-startup-probe.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Bun ${{ matrix.bun }} startup probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        bun: ['1.3.7', '1.3.9', '1.3.14', '1.4.2']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ matrix.bun }}
+      - run: bun --version
+      - name: Frozen install
+        run: timeout -s KILL 600 bun install --frozen-lockfile
+      - name: Start the migrate module graph 6000 times, 4 at a time
+        timeout-minutes: 30
+        run: |
+          cat > packages/db/src/startup-probe.ts <<'EOF'
+          import { config } from 'dotenv'
+          import { drizzle } from 'drizzle-orm/postgres-js'
+          import { migrate } from 'drizzle-orm/postgres-js/migrator'
+          import postgres from 'postgres'
+          import * as schema from './schema'
+          void [config, drizzle, migrate, postgres, schema]
+          console.log('ok')
+          EOF
+          start=$(date +%s)
+          seq 6000 | xargs -P 4 -I{} sh -c 'timeout -s KILL 30 bun packages/db/src/startup-probe.ts >/dev/null 2>&1; echo $?' > "$RUNNER_TEMP/exits.txt"
+          echo "wall seconds: $(( $(date +%s) - start ))"
+          echo "exit code counts (137 = killed after 30 s without exiting):"
+          sort "$RUNNER_TEMP/exits.txt" | uniq -c
