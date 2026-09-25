@@ -146,6 +146,7 @@
   "portal.feedback.sidebar.boards": "الفئات",
   "portal.feedback.sidebar.viewAllPosts": "عرض جميع المنشورات",
   "portal.feedback.sidebar.poweredBy": "مدعوم بواسطة {brand}",
+  "portal.feedback.sidebar.postCount": "{count, plural, zero {لا منشورات} one {منشور واحد} two {منشوران} few {# منشورات} many {# منشورًا} other {# منشور}}",
   "portal.feedback.similarPosts.heading": "أفكار مشابهة",
   "portal.postDetail.comments": "{count, plural, zero {لا تعليقات} one {تعليق واحد} two {تعليقان} few {# تعليقات} many {# تعليقًا} other {# تعليق}}",
   "portal.postDetail.postActions.ariaLabel": "إجراءات المنشور",

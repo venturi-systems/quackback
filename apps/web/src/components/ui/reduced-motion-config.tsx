@@ -13,6 +13,10 @@ import { MotionConfig, useReducedMotion } from 'framer-motion'
  * focus had been scrolled into view, so a focused control could end up below
  * the viewport (the render check's keyboard walk on the feed at 390px, runs
  * 36075134195 and 36089214718).
+ *
+ * This covers readers who ask for reduced motion only. For everyone else the
+ * tween still runs, and useKeepFocusInView (keep-focus-in-view.ts) keeps
+ * keyboard focus in view while it does; the render check walks both.
  */
 export function ReducedMotionConfig({ children }: { children: ReactNode }) {
   // null until the browser has answered (the server render): animate as

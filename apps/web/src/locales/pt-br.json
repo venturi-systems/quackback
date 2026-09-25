@@ -146,6 +146,7 @@
   "portal.feedback.sidebar.boards": "Quadros",
   "portal.feedback.sidebar.viewAllPosts": "Ver todos os posts",
   "portal.feedback.sidebar.poweredBy": "Desenvolvido por {brand}",
+  "portal.feedback.sidebar.postCount": "{count, plural, one {# publicação} other {# publicações}}",
   "portal.feedback.similarPosts.heading": "Ideias semelhantes",
   "portal.postDetail.comments": "{count, plural, one {# comentário} other {# comentários}}",
   "portal.postDetail.postActions.ariaLabel": "Ações do post",

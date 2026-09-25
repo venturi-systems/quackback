@@ -65,15 +65,31 @@ export function FeedbackSidebar({
                     className={cn('h-4 w-4 shrink-0', isActive && 'text-primary')}
                   />
                   <span className="break-words min-w-0">{board.name}</span>
+                  {/* The count sits apart on screen, but as text it ran into the
+                      name: "Feature Requests127" to the render checker, and a
+                      name followed by a bare number to a screen reader. The
+                      space separates the text; screen readers hear
+                      "Feature Requests 127 posts" instead of the bare figure. */}
                   {board.postCount > 0 && (
-                    <span
-                      className={cn(
-                        'text-[10px] font-semibold ms-auto ps-1 shrink-0 tabular-nums',
-                        isActive ? 'text-primary' : 'text-muted-foreground'
-                      )}
-                    >
-                      {board.postCount}
-                    </span>
+                    <>
+                      {' '}
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'text-[10px] font-semibold ms-auto ps-1 shrink-0 tabular-nums',
+                          isActive ? 'text-primary' : 'text-muted-foreground'
+                        )}
+                      >
+                        {board.postCount}
+                      </span>
+                      <span className="sr-only">
+                        <FormattedMessage
+                          id="portal.feedback.sidebar.postCount"
+                          defaultMessage="{count, plural, one {# post} other {# posts}}"
+                          values={{ count: board.postCount }}
+                        />
+                      </span>
+                    </>
                   )}
                 </button>
               )
