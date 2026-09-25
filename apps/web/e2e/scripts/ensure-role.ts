@@ -62,9 +62,10 @@ async function ensureRole(): Promise<void> {
   }
 
   // Team identity rule: a team role takes effect only for a verified address
-  // at a team domain (the CI .env sets VENTURI_TEAM_EMAIL_DOMAINS=example.com)
-  // from a linked Google or GitHub account. Test users sign in by magic link,
-  // so give a team-role user a verified email and a stand-in GitHub link.
+  // at a configured team domain. The isolated E2E fixture retains example.com
+  // for the seeded admin and adds acme.example for the named design fixtures.
+  // A linked Google or GitHub account is also required. Test users sign in by
+  // magic link, so give a team-role user a verified email and a stand-in GitHub link.
   if (role === 'admin' || role === 'member') {
     await sql`
       UPDATE "user" SET email_verified = true WHERE id = ${userId}

@@ -444,7 +444,7 @@ jobs:
       SECRET_KEY: test-secret-for-ci-only-must-be-at-least-32-characters
       REDIS_URL: redis://localhost:6379
       TRUSTED_ORIGINS: http://acme.localhost:3000
-      VENTURI_TEAM_EMAIL_DOMAINS: example.com
+      VENTURI_TEAM_EMAIL_DOMAINS: example.com,acme.example
       # Duration-balanced shard boundaries.
       #
       # `--shard=i/8` splits by test COUNT, not duration: filterForShard sums
@@ -536,7 +536,7 @@ jobs:
           PORT=3000
           SECRET_KEY=$SECRET_KEY
           REDIS_URL=$REDIS_URL
-          VENTURI_TEAM_EMAIL_DOMAINS=example.com
+          VENTURI_TEAM_EMAIL_DOMAINS=example.com,acme.example
           EOF
 
       # Reuses the existing eight jobs and their disposable service lifecycle.

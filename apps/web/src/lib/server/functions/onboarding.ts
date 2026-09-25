@@ -28,6 +28,7 @@ import { isPathManaged } from '@/lib/server/config-file/managed-paths'
 import { slugify } from '@/lib/shared/utils'
 import { getSetupState, isOnboardingComplete } from '@/lib/shared/db-types'
 import { logger } from '@/lib/server/logger'
+import { acquireTeamRoleLock } from '@/lib/server/domains/principals/team-role-lock'
 
 const log = logger.child({ component: 'onboarding' })
 
@@ -59,13 +60,16 @@ function assertHumanSession(session: Session): void {
  * admin exists yet. A caller that is already admin is a no-op. Any other
  * caller is refused, whatever `setup_state` says. The check and the write run
  * in one transaction under the same advisory lock as the SSO bootstrap
- * promotion (auth/hooks.ts), so two first sign-ins cannot both claim admin.
+ * promotion (auth/hooks.ts), so two first sign-ins cannot both claim admin,
+ * and under the team-role lock every role write holds (team-role-lock.ts),
+ * taken second.
  */
 async function claimBootstrapAdmin(session: Session): Promise<void> {
   assertHumanSession(session)
   const userId = session.user.id as UserId
   await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('quackback:sso_bootstrap'))`)
+    await acquireTeamRoleLock(tx)
 
     const existing = await tx.query.principal.findFirst({
       where: eq(principal.userId, userId),

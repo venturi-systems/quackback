@@ -9,7 +9,8 @@
  * linked Google or GitHub account.
  *
  * Unlike jit-role.test.ts, this file does NOT stub the team-designation
- * module: `handleAutoProvisionAfter` runs against the real team identity rule,
+ * module: `handleAutoProvisionAfter` runs against the real team-role writer
+ * (setUserTeamRole, under the team-role lock) and the real team identity rule,
  * with only the database mocked, so each refusal below is the rule's own.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -17,19 +18,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 type Row = Record<string, unknown>
 
 const hoisted = vi.hoisted(() => ({
-  principal: undefined as undefined | { id: string; role: string },
+  principal: undefined as undefined | { id: string; userId: string; role: string; type: string },
   user: undefined as
-    | undefined
-    | { email: string; emailVerified: boolean; name: string; image: string | null },
+    undefined | { email: string; emailVerified: boolean; name: string; image: string | null },
   providerIds: [] as string[],
   idToken: null as string | null,
   updates: [] as Row[],
   inserts: [] as Row[],
   audits: [] as Row[],
+  locks: [] as unknown[],
 }))
 
-vi.mock('@/lib/server/db', () => ({
-  db: {
+vi.mock('@/lib/server/db', () => {
+  const db = {
+    // The team-role writer's transaction runs on the same mocked tables.
+    transaction: async <T>(fn: (tx: unknown) => Promise<T>) => fn(db),
+    execute: async (q: { values?: unknown[] }) => {
+      hoisted.locks.push(q.values?.[0])
+    },
     query: {
       principal: { findFirst: async () => hoisted.principal },
       account: {
@@ -51,14 +57,18 @@ vi.mock('@/lib/server/db', () => ({
         hoisted.inserts.push(values)
       },
     }),
-  },
-  principal: { userId: 'principal.userId', role: 'principal.role' },
-  user: { id: 'user.id' },
-  account: { userId: 'account.userId', providerId: 'account.providerId' },
-  and: (...parts: unknown[]) => ({ op: 'and', parts }),
-  eq: (col: unknown, val: unknown) => ({ col, val }),
-  desc: (column: unknown) => ({ op: 'desc', column }),
-}))
+  }
+  return {
+    db,
+    principal: { id: 'principal.id', userId: 'principal.userId', role: 'principal.role' },
+    user: { id: 'user.id' },
+    account: { userId: 'account.userId', providerId: 'account.providerId' },
+    and: (...parts: unknown[]) => ({ op: 'and', parts }),
+    eq: (col: unknown, val: unknown) => ({ col, val }),
+    desc: (column: unknown) => ({ op: 'desc', column }),
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values }),
+  }
+})
 
 vi.mock('@/lib/server/audit/log', () => ({
   recordAuditEvent: async (event: Row) => {
@@ -123,13 +133,17 @@ async function signIn(email: string, providerDomain: string) {
 
 beforeEach(() => {
   delete process.env.VENTURI_TEAM_EMAIL_DOMAINS // the default team domain, venturi.systems
-  hoisted.principal = { id: 'principal_abc', role: 'user' }
+  // A stored principal always carries its userId: the team-role writer checks
+  // the identity rule for that user, so a fixture without one would be refused
+  // by the missing identity rather than by the rule under test.
+  hoisted.principal = { id: 'principal_abc', userId: 'user_abc', role: 'user', type: 'user' }
   hoisted.user = undefined
   hoisted.providerIds = []
   hoisted.idToken = null
   hoisted.updates = []
   hoisted.inserts = []
   hoisted.audits = []
+  hoisted.locks = []
 })
 
 afterEach(() => {
@@ -212,5 +226,29 @@ describe('SSO auto-provisioning gives an off-domain OIDC email no team role', ()
     hoisted.idToken = idTokenWith({ roles: ['member'] })
     await signIn('ops@venturi.systems', 'venturi.systems')
     expect(hoisted.updates).toEqual([{ role: 'member' }])
+    // The write ran under the team-role lock.
+    expect(hoisted.locks).toEqual(['quackback:team_roles'])
+  })
+
+  it('control: recreates a soft-removed qualifying principal with the claimed role', async () => {
+    hoisted.principal = undefined
+    hoisted.user = {
+      email: 'ops@venturi.systems',
+      emailVerified: true,
+      name: 'Ops',
+      image: null,
+    }
+    hoisted.providerIds = ['corp-idp', 'google']
+    hoisted.idToken = idTokenWith({ roles: ['admin'] })
+    await signIn('ops@venturi.systems', 'venturi.systems')
+    expect(hoisted.inserts).toEqual([
+      expect.objectContaining({
+        userId: 'user_abc',
+        role: 'admin',
+        displayName: 'Ops',
+        lastSsoSignInAt: expect.any(Date),
+      }),
+    ])
+    expect(hoisted.updates).toEqual([])
   })
 })

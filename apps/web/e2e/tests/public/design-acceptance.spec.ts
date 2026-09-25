@@ -13,6 +13,7 @@ import {
 import { measureRenderedFonts } from '../../utils/rendered-font-evidence'
 import { withDesignBrowserZoom } from '../../utils/browser-zoom-actuator'
 import { assertActualBrowserZoom } from '../../utils/browser-zoom-evidence'
+import { measureFocusIndicator, assertForcedColorsFocus } from '../../utils/forced-colors-focus'
 
 /**
  * Design acceptance in the existing disposable cloud E2E lane.
@@ -37,6 +38,21 @@ async function attach(testInfo: TestInfo, name: string, evidence: unknown) {
   await testInfo.attach(name, {
     body: Buffer.from(JSON.stringify(evidence, null, 2)),
     contentType: 'application/json',
+  })
+}
+
+
+async function recordScreenshot(page: Page, testInfo: TestInfo, state: string) {
+  // Inline evidence survives the existing success-path trace cleanup.
+  // Reuses these tests and the seven-day artifact; no additional CI lane.
+  await attach(testInfo, `screenshot-${state}`, {
+    schema: 'venturi.portal-render-evidence.v1',
+    source: SOURCE,
+    url: page.url(),
+    viewport: page.viewportSize(),
+    state,
+    capturedAt: new Date().toISOString(),
+    pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString('base64'),
   })
 }
 
@@ -240,6 +256,9 @@ for (const width of WIDTHS) {
       const actual = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
       expect(actual).toEqual({ width, height: 1000 })
       await recordReflow(page, testInfo, `${route}-${width}`)
+      if (width === 320 || width === 1440) {
+        await recordScreenshot(page, testInfo, `${route}-${width}`)
+      }
 
       if (route === 'post') {
         const boxes = await page.evaluate(() => {
@@ -782,6 +801,7 @@ test('A06 keyboard focus, forced colors and reduced motion retain the public lig
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   await expect(page.locator('html')).toHaveAttribute('data-venturi-web-theme', 'light')
   const toggle = page.locator('button[aria-controls="portal-mobile-navigation"]')
+  const beforeFocus = await measureFocusIndicator(toggle)
   let reachedToggle = false
   for (let index = 0; index < 40; index += 1) {
     await page.keyboard.press('Tab')
@@ -791,23 +811,13 @@ test('A06 keyboard focus, forced colors and reduced motion retain the public lig
     }
   }
   expect(reachedToggle, 'Menu must be reachable through the actual keyboard sequence').toBe(true)
-  const focus = await toggle.evaluate((element) => {
-    const style = getComputedStyle(element)
-    return {
-      focused: element === document.activeElement,
-      focusVisible: element.matches(':focus-visible'),
-      outline: style.outlineStyle,
-      width: style.outlineWidth,
-      color: style.outlineColor,
-      transition: style.transitionDuration,
-      animation: style.animationDuration,
-    }
+  const focus = await measureFocusIndicator(toggle)
+  await attach(testInfo, 'focus-motion-media', { before: beforeFocus, after: focus })
+  assertForcedColorsFocus(beforeFocus, focus)
+  await testInfo.attach('forced-colors-focus-render', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
   })
-  await attach(testInfo, 'focus-motion-media', focus)
-  expect(focus.focusVisible).toBe(true)
-  if (focus.outline !== 'none') {
-    expect(parseFloat(focus.width)).toBeGreaterThan(0)
-  }
   for (const value of [focus.transition, focus.animation]) {
     for (const duration of value.split(',')) {
       const seconds = parseFloat(duration) * (duration.trim().endsWith('ms') ? 0.001 : 1)
@@ -846,4 +856,75 @@ test('A09 vote-count filter uses actual command-item semantics and survives relo
     text: await active.innerText(),
     writes: 'No post, comment or vote is submitted.',
   })
+})
+
+for (const width of [320, 1440]) {
+  for (const route of ['feed', 'roadmap'] as const) {
+    test(`A10 ${route} search has persistent labels and keyboard recovery at ${width}px`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await openRoute(page, route)
+      const trigger = page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })
+      await trigger.click()
+      const search = page.getByRole('textbox', { name: 'Search', exact: true })
+      await expect(search).toBeFocused()
+      await search.fill('connector')
+      await expect(page.locator('label').filter({ hasText: /^Search$/ })).toBeVisible()
+      await recordReflow(page, testInfo, `${route}-search-open-${width}`)
+      await recordScreenshot(page, testInfo, `${route}-search-open-${width}`)
+      await page.keyboard.press('Escape')
+      await expect(search).toBeHidden()
+      await expect(trigger).toBeFocused()
+      await trigger.click()
+      await expect(search).toHaveValue('connector')
+      await search.press('Enter')
+      await expect(page).toHaveURL(/[?&]search=connector(?:&|$)/)
+      await expect(trigger).toBeFocused()
+      await trigger.click()
+      await page.getByRole('button', { name: 'Clear search', exact: true }).click()
+      await expect(page).not.toHaveURL(/[?&]search=/)
+      await expect(trigger).toBeFocused()
+      if (route === 'feed') {
+        const top = page.getByRole('button', { name: 'Top', exact: true })
+        await top.click()
+        await expect(top).toHaveAttribute('aria-pressed', 'true')
+        await expect(page.getByRole('button', { name: 'Trending', exact: true })).toHaveAttribute(
+          'aria-pressed',
+          'false'
+        )
+      }
+    })
+  }
+}
+
+test('A11 empty search recovery preserves the selected board and sort', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await openRoute(page, 'feed')
+  await page.locator('#portal-main aside nav button').nth(1).click()
+  await expect(page).toHaveURL(/[?&]board=/)
+  const board = new URL(page.url()).searchParams.get('board')
+  expect(board).toBeTruthy()
+  const query = new URLSearchParams({
+    board: board!,
+    sort: 'top',
+    search: 'zz-no-matching-feedback-a11',
+    minVotes: '999999',
+  })
+  await page.goto(`/?${query}`)
+  const status = page.locator('#portal-main [role="status"]')
+  await expect(status).toHaveText('0 posts shown')
+  await expect(page.getByText('Search: zz-no-matching-feedback-a11', { exact: true })).toBeVisible()
+  await recordScreenshot(page, testInfo, 'feed-filtered-empty')
+  await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+  await expect.poll(() => new URL(page.url()).searchParams.get('search')).toBeNull()
+  const restored = new URL(page.url()).searchParams
+  expect(restored.get('minVotes')).toBeNull()
+  expect(restored.get('board')).toBe(board)
+  expect(restored.get('sort')).toBe('top')
+  await expect(status).toHaveText(/^[1-9]\d* posts? shown$/)
+  await expect(page.locator('#portal-main a[href*="/posts/"]').first()).toBeVisible()
+  await expect(page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'Clear all', exact: true })).toBeHidden()
+  await recordScreenshot(page, testInfo, 'feed-results-restored')
 })

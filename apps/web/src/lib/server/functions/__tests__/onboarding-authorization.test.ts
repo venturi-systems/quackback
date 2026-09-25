@@ -354,7 +354,8 @@ describe('saveUseCaseFn: no promotion outside the bootstrap window', () => {
       )
       expect(roleOf('user_portal')).toBe('user')
       expect(store.settingsWrites).toEqual([])
-      expect(store.lockCalls).toBe(1)
+      // The bootstrap lock, then the team-role lock every role write takes.
+      expect(store.lockCalls).toBe(2)
     }
   )
 

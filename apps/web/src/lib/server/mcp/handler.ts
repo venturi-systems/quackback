@@ -160,7 +160,8 @@ export async function resolveAuthContext(request: Request): Promise<McpAuthConte
     }
 
     // The key's own scopes, mapped onto the MCP vocabulary (a write scope
-    // implies its read scope). A legacy key without scopes keeps every scope.
+    // implies its read scope). A key stored without scopes reads only
+    // (effectiveApiKeyScopes in withApiKeyAuth).
     const scopes = ALL_SCOPES.filter((scope) => hasApiKeyScope(authResult.scopes, scope))
 
     // Service principals (API keys) use displayName; human principals use user.name

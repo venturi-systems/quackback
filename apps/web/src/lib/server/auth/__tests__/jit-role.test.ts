@@ -13,19 +13,19 @@
  * mocking a predicate.
  *
  * Venturi fork: the verified-domain gate also covers a claim-mapped role
- * (upstream 59fe3ff6f removed that, and the fork does not take it). The team
- * identity rule is stubbed here; jit-role-team-identity.test.ts runs the same
- * handler against the real rule.
+ * (upstream 59fe3ff6f removed that, and the fork does not take it). The role
+ * write is the team-role writer `setUserTeamRole` (team-designation.ts), which
+ * re-reads the principal under the team-role lock and applies the team
+ * identity and last-administrator rules; it is stubbed here, so these tests
+ * cover what the hook asks it to write. team-designation.test.ts covers the
+ * writer, and jit-role-team-identity.test.ts runs this handler against the
+ * real writer and rule.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const mockFindFirst = vi.fn()
 const mockAccountFindFirst = vi.fn()
-const mockUserFindFirst = vi.fn()
-const mockSet = vi.fn()
-const mockWhere = vi.fn()
-const mockInsertValues = vi.fn()
 const mockRecordAuditEvent = vi.fn()
 // Recordable so a test can assert `readSsoClaims` queries by the CALLBACK
 // provider id rather than a hardcoded 'sso'.
@@ -36,10 +36,7 @@ vi.mock('@/lib/server/db', () => ({
     query: {
       principal: { findFirst: (...args: unknown[]) => mockFindFirst(...args) },
       account: { findFirst: (...args: unknown[]) => mockAccountFindFirst(...args) },
-      user: { findFirst: (...args: unknown[]) => mockUserFindFirst(...args) },
     },
-    update: () => ({ set: mockSet, where: mockWhere }),
-    insert: () => ({ values: (...args: unknown[]) => mockInsertValues(...args) }),
   },
   principal: { userId: 'user_id', role: 'role' },
   user: { id: 'user.id' },
@@ -54,23 +51,34 @@ vi.mock('@/lib/server/audit/log', () => ({
   recordAuditEvent: (...args: unknown[]) => mockRecordAuditEvent(...args),
 }))
 
-// Team identity rule: stubbed here (team-designation.test.ts covers it). By
-// default the account qualifies for a team role.
-const mockTeamRoleGap = vi.fn(async (): Promise<string | null> => null)
-const mockChangeTeamRole = vi.fn(async (): Promise<unknown> => ({ changed: true }))
-vi.mock('@/lib/server/domains/principals/team-designation', () => ({
-  teamRoleGapForUser: () => mockTeamRoleGap(),
-  changeTeamRole: (...args: unknown[]) => mockChangeTeamRole(...(args as [])),
+// The team-role writer: stubbed here (team-designation.test.ts covers it). By
+// default it applies the role and reports the change from 'user'.
+type WriteInput = { userId: string; newRole: string; mode: string; create?: unknown }
+const mockSetUserTeamRole = vi.fn(async (input: WriteInput): Promise<unknown> => ({
+  previousRole: 'user',
+  newRole: input.newRole,
+  principalId: 'principal_abc',
 }))
+vi.mock('@/lib/server/domains/principals/team-designation', () => ({
+  setUserTeamRole: (input: WriteInput) => mockSetUserTeamRole(input),
+}))
+
+const refusal = (code: string) => Object.assign(new Error(code), { code })
+
+/** The hook asked the writer for `role` in `mode`. */
+const expectWrite = (role: string, mode: 'from_user' | 'set' = 'from_user') =>
+  expect(mockSetUserTeamRole).toHaveBeenCalledWith(
+    expect.objectContaining({ userId: 'user_abc', newRole: role, mode })
+  )
+const expectNoWrite = () => expect(mockSetUserTeamRole).not.toHaveBeenCalled()
 
 beforeEach(() => {
   vi.clearAllMocks()
-  mockTeamRoleGap.mockResolvedValue(null)
-  mockChangeTeamRole.mockResolvedValue({ changed: true })
-  mockSet.mockReturnValue({ where: mockWhere })
-  mockWhere.mockResolvedValue(undefined)
-  mockInsertValues.mockResolvedValue(undefined)
-  mockUserFindFirst.mockResolvedValue({ name: 'Returning User', image: null })
+  mockSetUserTeamRole.mockImplementation(async (input: WriteInput) => ({
+    previousRole: 'user',
+    newRole: input.newRole,
+    principalId: 'principal_abc',
+  }))
   mockRecordAuditEvent.mockResolvedValue(undefined)
 })
 
@@ -159,13 +167,40 @@ const callHandlerWith = async (opts: CallOpts = {}) => {
 const callHandler = (autoProvisionRole?: 'admin' | 'member' | 'user') =>
   callHandlerWith({ ssoOidc: { autoProvisionRole } })
 
-describe('handleAutoProvisionAfter -- team identity rule', () => {
-  it('refuses a team role to an OIDC account without a qualifying identity', async () => {
+describe('handleAutoProvisionAfter -- the team-role writer decides', () => {
+  it('writes nothing and audits nothing when the writer refuses the team role', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
-    mockTeamRoleGap.mockResolvedValue('provider_missing')
-    await callHandler('admin')
-    expect(mockSet).not.toHaveBeenCalled()
+    mockSetUserTeamRole.mockRejectedValue(refusal('TEAM_IDENTITY_REQUIRED'))
+    await expect(callHandler('admin')).resolves.toBeUndefined()
+    expectWrite('admin')
     expect(mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('audits nothing when the locked read found nothing to change', async () => {
+    // Another writer set the role between the hook's read and the lock.
+    mockFindFirst.mockResolvedValue({ role: 'user' })
+    mockSetUserTeamRole.mockResolvedValue(null)
+    await callHandler('member')
+    expect(mockRecordAuditEvent).not.toHaveBeenCalled()
+  })
+
+  it('audits the role the locked read saw, not the first read', async () => {
+    mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'user' })
+    mockAccountFindFirst.mockResolvedValue({ idToken: null })
+    mockSetUserTeamRole.mockResolvedValue({
+      previousRole: 'member',
+      newRole: 'admin',
+      principalId: 'principal_abc',
+    })
+    await callHandlerWith({
+      ssoOidc: {
+        autoProvisionRole: 'admin',
+        attributeMapping: { claimPath: 'roles', rules: [], syncOnEverySignIn: true },
+      },
+    })
+    expect(mockRecordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ before: { role: 'member' }, after: { role: 'admin' } })
+    )
   })
 })
 
@@ -180,37 +215,44 @@ describe('handleAutoProvisionAfter -- role assignment', () => {
   it('uses autoProvisionRole=admin from config', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
     await callHandler('admin')
-    expect(mockSet).toHaveBeenCalledWith({ role: 'admin' })
+    expectWrite('admin')
   })
 
   it('uses autoProvisionRole=member from config', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
     await callHandler('member')
-    expect(mockSet).toHaveBeenCalledWith({ role: 'member' })
+    expectWrite('member')
   })
 
   it('defaults to member when autoProvisionRole is undefined', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
     await callHandler(undefined)
-    expect(mockSet).toHaveBeenCalledWith({ role: 'member' })
+    expectWrite('member')
   })
 
   it('does not promote when autoProvisionRole=user (portal-only)', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
     await callHandler('user')
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('does not downgrade existing admin/member', async () => {
     mockFindFirst.mockResolvedValue({ role: 'admin' })
     await callHandler('member')
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('no-ops when the current role already equals the target', async () => {
     mockFindFirst.mockResolvedValue({ role: 'member' })
     await callHandler('member')
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
+  })
+
+  it('asks the writer to change only a principal still at user (JIT mode)', async () => {
+    // The writer re-checks this under the lock, against its own read.
+    mockFindFirst.mockResolvedValue({ role: 'user' })
+    await callHandler('member')
+    expectWrite('member', 'from_user')
   })
 })
 
@@ -218,20 +260,20 @@ describe('handleAutoProvisionAfter -- guards (no-op short-circuits)', () => {
   it('skips when path is not the OAuth callback', async () => {
     await callHandlerWith({ path: '/sign-in/email' })
     expect(mockFindFirst).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('skips when providerId is not "sso" (e.g. google callback)', async () => {
     await callHandlerWith({ providerId: 'google' })
     expect(mockFindFirst).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('skips when autoCreateUsers=false (admin opted out)', async () => {
     mockFindFirst.mockResolvedValue({ role: 'user' })
     await callHandlerWith({ ssoOidc: { autoCreateUsers: false } })
     expect(mockFindFirst).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('skips when the user email is not at the callback provider’s verified domain', async () => {
@@ -239,7 +281,7 @@ describe('handleAutoProvisionAfter -- guards (no-op short-circuits)', () => {
     // scoped findProviderForDomainEmail check returns null and we bail.
     await callHandlerWith({ email: 'alice@other.com' })
     expect(mockFindFirst).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 })
 
@@ -258,12 +300,7 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
       },
     })
     // Taking admin away goes through the team-role writer (last-admin check).
-    expect(mockChangeTeamRole).toHaveBeenCalledWith({
-      principalId: 'principal_abc',
-      newRole: 'member',
-      requireTeamTarget: false,
-    })
-    expect(mockSet).not.toHaveBeenCalled()
+    expectWrite('member', 'set')
   })
 
   it('honours a resolved role="user" under sync mode (demotes existing admin)', async () => {
@@ -283,26 +320,25 @@ describe('handleAutoProvisionAfter -- syncOnEverySignIn', () => {
         },
       },
     })
-    expect(mockChangeTeamRole).toHaveBeenCalledWith(
-      expect.objectContaining({ principalId: 'principal_abc', newRole: 'user' })
-    )
+    expectWrite('user', 'set')
   })
 
   it('keeps the last administrator when sync mode would demote them', async () => {
     mockFindFirst.mockResolvedValue({ id: 'principal_abc', role: 'admin' })
     mockAccountFindFirst.mockResolvedValue({ idToken: null })
-    mockChangeTeamRole.mockRejectedValue(Object.assign(new Error('last'), { code: 'LAST_ADMIN' }))
-    await callHandlerWith({
-      ssoOidc: {
-        autoProvisionRole: 'user',
-        attributeMapping: {
-          claimPath: 'roles',
-          rules: [],
-          syncOnEverySignIn: true,
+    mockSetUserTeamRole.mockRejectedValue(refusal('LAST_ADMIN'))
+    await expect(
+      callHandlerWith({
+        ssoOidc: {
+          autoProvisionRole: 'user',
+          attributeMapping: {
+            claimPath: 'roles',
+            rules: [],
+            syncOnEverySignIn: true,
+          },
         },
-      },
-    })
-    expect(mockSet).not.toHaveBeenCalled()
+      })
+    ).resolves.toBeUndefined()
     expect(mockRecordAuditEvent).not.toHaveBeenCalled()
   })
 })
@@ -392,9 +428,7 @@ describe('handleAutoProvisionAfter -- a claim-mapped role stays gated on the ver
         email: 'james@quackback.io',
         ssoOidc: { autoProvisionRole: 'user', attributeMapping: mapping },
       })
-      expect(mockSet).not.toHaveBeenCalled()
-      expect(mockInsertValues).not.toHaveBeenCalled()
-      expect(mockChangeTeamRole).not.toHaveBeenCalled()
+      expectNoWrite()
       expect(mockRecordAuditEvent).not.toHaveBeenCalled()
     }
   )
@@ -409,9 +443,7 @@ describe('handleAutoProvisionAfter -- a claim-mapped role stays gated on the ver
         attributeMapping: { ...mapping, syncOnEverySignIn: true },
       },
     })
-    expect(mockSet).not.toHaveBeenCalled()
-    expect(mockInsertValues).not.toHaveBeenCalled()
-    expect(mockChangeTeamRole).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('refuses the gate before any claim or identity is read', async () => {
@@ -424,7 +456,7 @@ describe('handleAutoProvisionAfter -- a claim-mapped role stays gated on the ver
     })
     expect(mockAccountFindFirst).not.toHaveBeenCalled()
     expect(mockFindFirst).not.toHaveBeenCalled()
-    expect(mockTeamRoleGap).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('still applies the claim-mapped role to an email at the verified domain', async () => {
@@ -433,7 +465,7 @@ describe('handleAutoProvisionAfter -- a claim-mapped role stays gated on the ver
     await callHandlerWith({
       ssoOidc: { autoProvisionRole: 'user', attributeMapping: mapping },
     })
-    expect(mockSet).toHaveBeenCalledWith({ role: 'member' })
+    expectWrite('member')
   })
 
   it('still gates the default-role fallback on the verified domain (no claim match)', async () => {
@@ -449,7 +481,7 @@ describe('handleAutoProvisionAfter -- a claim-mapped role stays gated on the ver
         },
       },
     })
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 })
 
@@ -472,8 +504,14 @@ describe('handleAutoProvisionAfter -- returning user whose principal was soft-re
         },
       },
     })
-    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ role: 'member' }))
-    expect(mockSet).not.toHaveBeenCalled()
+    // The writer recreates the missing principal, stamped as signed in by SSO.
+    expect(mockSetUserTeamRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newRole: 'member',
+        mode: 'from_user',
+        create: { lastSsoSignInAt: expect.any(Date) },
+      })
+    )
   })
 
   it('recreates the principal with the default role for a returning user at a verified domain', async () => {
@@ -491,8 +529,14 @@ describe('handleAutoProvisionAfter -- returning user whose principal was soft-re
         },
       },
     })
-    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ role: 'member' }))
-    expect(mockSet).not.toHaveBeenCalled()
+    // The writer recreates the missing principal, stamped as signed in by SSO.
+    expect(mockSetUserTeamRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        newRole: 'member',
+        mode: 'from_user',
+        create: { lastSsoSignInAt: expect.any(Date) },
+      })
+    )
   })
 
   it('does not provision a returning user with no claim match and no verified domain', async () => {
@@ -511,8 +555,7 @@ describe('handleAutoProvisionAfter -- returning user whose principal was soft-re
         },
       },
     })
-    expect(mockInsertValues).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('does not recreate an off-domain returning user with a claim-mapped team role (Venturi fork)', async () => {
@@ -528,26 +571,29 @@ describe('handleAutoProvisionAfter -- returning user whose principal was soft-re
         },
       },
     })
-    expect(mockInsertValues).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+    expectNoWrite()
   })
 
   it('does not recreate a returning user with a team role its identity cannot hold (Venturi fork)', async () => {
-    // At the provider's verified domain, but the team identity rule refuses:
-    // the principal is left for the lazy path to recreate as a plain 'user'.
+    // At the provider's verified domain, but the team identity rule refuses
+    // inside the writer (team-designation.test.ts): nothing is created, so the
+    // lazy path recreates the principal as a plain 'user'. The hook swallows
+    // the refusal and audits nothing.
     mockFindFirst.mockResolvedValue(undefined)
-    mockTeamRoleGap.mockResolvedValue('email_domain')
+    mockSetUserTeamRole.mockRejectedValue(refusal('TEAM_IDENTITY_REQUIRED'))
     mockIdTokenClaims({ roles: ['member'] })
-    await callHandlerWith({
-      ssoOidc: {
-        autoProvisionRole: 'user',
-        attributeMapping: {
-          claimPath: 'roles',
-          rules: [{ whenContains: 'member', role: 'member' }],
+    await expect(
+      callHandlerWith({
+        ssoOidc: {
+          autoProvisionRole: 'user',
+          attributeMapping: {
+            claimPath: 'roles',
+            rules: [{ whenContains: 'member', role: 'member' }],
+          },
         },
-      },
-    })
-    expect(mockInsertValues).not.toHaveBeenCalled()
-    expect(mockSet).not.toHaveBeenCalled()
+      })
+    ).resolves.toBeUndefined()
+    expectWrite('member')
+    expect(mockRecordAuditEvent).not.toHaveBeenCalled()
   })
 })

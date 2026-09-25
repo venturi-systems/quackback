@@ -58,7 +58,7 @@ export function validateDesignFixtureEnvironment(
     env.TRUSTED_ORIGINS !== 'http://acme.localhost:3000' ||
     env.SECRET_KEY !== 'test-secret-for-ci-only-must-be-at-least-32-characters' ||
     env.BETTER_AUTH_SECRET !== env.SECRET_KEY ||
-    env.VENTURI_TEAM_EMAIL_DOMAINS !== 'example.com'
+    env.VENTURI_TEAM_EMAIL_DOMAINS !== 'example.com,acme.example'
   )
     fail()
   for (const name of [

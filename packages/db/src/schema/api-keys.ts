@@ -35,20 +35,28 @@ export const apiKeys = pgTable(
       .references(() => principal.id, { onDelete: 'cascade' }),
     /** Last time the key was used for authentication */
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
-    /** Optional expiration date */
+    /** Expiration date. Every key has one (landing-page#2309, DEF-15). */
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     /** When the key was created */
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     /** When the key was revoked (soft delete) */
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     /**
-     * Optional JSON-encoded array of capability scopes. Used by
-     * trusted internal endpoints — e.g. `["internal:tier-limits"]`.
-     * Null/empty means a normal API key with no special capabilities
-     * (subject to the principal's role for authorization). Never
-     * serialized to the public API.
+     * JSON-encoded array of scopes: the key's API scopes (`read:feedback`,
+     * `write:feedback`, ...; lib/shared/api-key-scopes.ts), plus any internal
+     * capability scope a trusted internal endpoint checks, e.g.
+     * `["internal:tier-limits"]`. Venturi fork (landing-page#2309, DEF-15):
+     * every new key stores at least one API scope; a key stored without any
+     * reads only (LEGACY_API_KEY_SCOPES), never full access.
      */
     scopes: text('scopes'),
+    /**
+     * Venturi fork (landing-page#2309, DEF-15): when migration
+     * 9003_venturi_legacy_api_key_bounds bounded this key because it was
+     * created before every key needed scopes and an expiry. Null for every
+     * other key.
+     */
+    legacyBoundedAt: timestamp('legacy_bounded_at', { withTimezone: true }),
   },
   (table) => [
     // Index for listing keys by creator

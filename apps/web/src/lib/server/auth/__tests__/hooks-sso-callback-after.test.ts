@@ -11,7 +11,8 @@
  *
  * Behaviors covered:
  *   - Path / provider / userId guards (no DB writes on miss).
- *   - Advisory-lock acquired inside the transaction.
+ *   - Advisory-lock acquired inside the transaction; an eligible callback
+ *     also takes the team-role lock, second, before it reads.
  *   - Promotion when no human admin exists.
  *   - No promotion when a human admin already exists.
  *   - Service-principal admin is *not* counted as a human (gate uses
@@ -360,9 +361,36 @@ describe('handleSsoCallbackAfter — transaction + locking', () => {
         userId: 'user_first',
       })
     )
+    // The bootstrap lock first, then the team-role lock every role write takes
+    // (never the other order, so the two cannot deadlock).
+    expect(mockExecute).toHaveBeenCalledTimes(2)
+    const first = mockExecute.mock.calls[0][0] as { strings: TemplateStringsArray }
+    expect(first.strings.raw.join('')).toContain('pg_advisory_xact_lock')
+    expect(first.strings.raw.join('')).toContain('quackback:sso_bootstrap')
+    const second = mockExecute.mock.calls[1][0] as {
+      strings: TemplateStringsArray
+      values: unknown[]
+    }
+    expect(second.strings.raw.join('')).toContain('pg_advisory_xact_lock')
+    expect(second.values).toEqual(['quackback:team_roles'])
+    // Both locks are held before the existing-admin read.
+    expect(mockExecute.mock.invocationCallOrder[1]).toBeLessThan(
+      mockTxFindFirst.mock.invocationCallOrder[0]
+    )
+  })
+
+  it('takes only the bootstrap lock when the callback cannot claim bootstrap', async () => {
+    // Off the provider's verified domain: no promotion is possible, so no role
+    // is written and the team-role lock is not needed for the stamp alone.
+    await handleSsoCallbackAfter(
+      ctxFor({
+        path: '/oauth2/callback/:providerId',
+        providerParam: 'sso',
+        userId: 'user_first',
+        email: 'alice@elsewhere.example',
+      })
+    )
     expect(mockExecute).toHaveBeenCalledTimes(1)
-    const arg = mockExecute.mock.calls[0][0] as { strings: TemplateStringsArray }
-    expect(arg.strings.raw.join('')).toContain('pg_advisory_xact_lock')
-    expect(arg.strings.raw.join('')).toContain('quackback:sso_bootstrap')
+    expect(mockTxFindFirst).not.toHaveBeenCalled()
   })
 })

@@ -16,7 +16,31 @@ import { ApiKeyRevealDialog } from './api-key-reveal-dialog'
 import { RevokeApiKeyDialog } from './revoke-api-key-dialog'
 import { RotateApiKeyDialog } from './rotate-api-key-dialog'
 import type { ApiKey } from '@/lib/shared/types'
+import { apiKeyExpiresAt, effectiveApiKeyScopes } from '@/lib/shared/api-key-scopes'
 import { formatDistanceToNow } from 'date-fns'
+
+/** A key's expiry line. A key stored without one expires a year after creation. */
+function expiryLabel(key: ApiKey): string {
+  const expiresAt = apiKeyExpiresAt(key.expiresAt, key.createdAt)
+  if (expiresAt.getTime() <= Date.now()) return 'Expired'
+  const label = `Expires ${formatDistanceToNow(expiresAt, { addSuffix: true })}`
+  return key.expiresAt ? label : `${label} (created before expiry was required)`
+}
+
+/** A key's scopes line. A key stored without scopes reads only (DEF-15). */
+function scopesLabel(key: ApiKey): string {
+  const scopes = effectiveApiKeyScopes(key.scopes).join(', ')
+  return key.scopes ? `Scopes: ${scopes}` : `Scopes: ${scopes} (created before keys had scopes)`
+}
+
+/**
+ * The line on a key the DEF-15 migration limited to reading. The date is the
+ * UTC calendar date, so the server and the browser render the same text.
+ */
+function legacyBoundLabel(boundedAt: Date): string {
+  const day = new Date(boundedAt).toISOString().slice(0, 10)
+  return `Limited to reading on ${day} because it was created before keys needed scopes and an expiry. Replace it before it expires.`
+}
 
 interface ApiKeysSettingsProps {
   apiKeys: ApiKey[]
@@ -54,6 +78,10 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
     setRotateDialogOpen(true)
   }
 
+  // Keys created before every key needed scopes and an expiry, which the
+  // DEF-15 migration limited to reading and gave an expiry.
+  const boundedKeys = apiKeys.filter((key) => key.legacyBoundedAt)
+
   return (
     <div className="space-y-4">
       {/* Empty state */}
@@ -86,6 +114,25 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
         </div>
       )}
 
+      {boundedKeys.length > 0 && (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm"
+          role="note"
+          data-testid="api-keys-legacy-notice"
+        >
+          <p className="font-medium">
+            {boundedKeys.length === 1
+              ? '1 key was created before keys needed scopes and an expiry'
+              : `${boundedKeys.length} keys were created before keys needed scopes and an expiry`}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            They can now only read feedback and help articles, and each stops working on the
+            date shown. Before then, create a key with the scopes the integration needs, move
+            the integration to it, and revoke the old key.
+          </p>
+        </div>
+      )}
+
       {/* API Keys list */}
       {apiKeys.length > 0 && (
         <div className="space-y-3">
@@ -99,7 +146,9 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
                   <KeyIcon className="h-5 w-5 text-muted-foreground" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium truncate">{key.name}</p>
+                  <p className="text-sm font-medium break-words" data-text-origin="user">
+                    {key.name}
+                  </p>
                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 text-xs text-muted-foreground">
                     <code className="rounded bg-muted px-1.5 py-0.5 font-mono w-fit">
                       {key.keyPrefix}...
@@ -120,19 +169,19 @@ export function ApiKeysSettings({ apiKeys }: ApiKeysSettingsProps) {
                       </>
                     )}
                     <span className="hidden sm:inline">·</span>
-                    <span>
-                      {key.expiresAt
-                        ? new Date(key.expiresAt).getTime() <= Date.now()
-                          ? 'Expired'
-                          : `Expires ${formatDistanceToNow(key.expiresAt, { addSuffix: true })}`
-                        : 'Never expires (created before expiry was required)'}
-                    </span>
+                    <span>{expiryLabel(key)}</span>
                   </div>
                   <p className="text-xs text-muted-foreground" data-testid="api-key-scopes">
-                    {key.scopes
-                      ? `Scopes: ${key.scopes.join(', ')}`
-                      : 'Scopes: full access (created before scopes existed)'}
+                    {scopesLabel(key)}
                   </p>
+                  {key.legacyBoundedAt && (
+                    <p
+                      className="text-xs text-amber-600 dark:text-amber-400"
+                      data-testid="api-key-legacy-bound"
+                    >
+                      {legacyBoundLabel(key.legacyBoundedAt)}
+                    </p>
+                  )}
                 </div>
               </div>
 

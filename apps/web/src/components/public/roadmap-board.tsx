@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useIntl } from 'react-intl'
@@ -39,12 +39,24 @@ export function RoadmapBoard({
   isAuthenticated,
 }: RoadmapBoardProps): React.ReactElement {
   const intl = useIntl()
+  const searchTriggerRef = useRef<HTMLButtonElement>(null)
   const { selectedRoadmapId, setSelectedRoadmap } = usePublicRoadmapSelection()
   const { data: roadmaps } = usePublicRoadmaps({ enabled: !initialRoadmaps })
   const columnsScroll = usePillsScroll()
 
-  const { filters, setFilters, clearFilters, toggleBoard, toggleTag, toggleSegment } =
+  const { filters, setFilters, toggleBoard, toggleTag, toggleSegment } =
     usePublicRoadmapFilters()
+
+  const hasAppliedFilters = Boolean(
+    filters.search || filters.board?.length || filters.tags?.length || filters.segmentIds?.length
+  )
+
+  function resetResultFilters(): void {
+    // One update preserves the selected roadmap and sort in the route hook.
+    setFilters({ search: undefined, board: undefined, tags: undefined, segmentIds: undefined })
+    // The reset control disappears after navigation; retain a predictable focus target.
+    searchTriggerRef.current?.focus()
+  }
 
   const { data: boards } = useSuspenseQuery(portalQueries.boards())
   const { data: tags } = useSuspenseQuery(portalQueries.tags())
@@ -128,6 +140,7 @@ export function RoadmapBoard({
         currentSort={filters.sort ?? 'votes'}
         onSortChange={(sort) => setFilters({ sort })}
         currentSearch={filters.search}
+        searchTriggerRef={searchTriggerRef}
         onSearchChange={(search) => setFilters({ search })}
         filterButton={
           <PublicRoadmapToolbarFilterButton
@@ -141,10 +154,32 @@ export function RoadmapBoard({
         }
       />
 
+      {hasAppliedFilters && (
+        <div className="flex flex-wrap items-center gap-2">
+          {filters.search && (
+            <p className="min-w-0 flex-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">
+              {intl.formatMessage({
+                id: 'portal.feedback.toolbar.search',
+                defaultMessage: 'Search',
+              })}
+              {': '}
+              <bdi data-text-origin="user">{filters.search}</bdi>
+            </p>
+          )}
+          <Button type="button" variant="ghost" size="sm" onClick={resetResultFilters}>
+            {intl.formatMessage({
+              id: 'portal.feedback.filter.clearAll',
+              defaultMessage: 'Clear all',
+            })}
+          </Button>
+        </div>
+      )}
+
       <PublicRoadmapFiltersBar
         filters={filters}
         onFiltersChange={setFilters}
-        onClearAll={clearFilters}
+        onClearAll={resetResultFilters}
+        showClearAll={false}
         boards={boards}
         tags={tags}
         segments={isTeamMember ? segments : undefined}

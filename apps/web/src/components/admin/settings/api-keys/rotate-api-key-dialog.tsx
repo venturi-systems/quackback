@@ -14,6 +14,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { rotateApiKeyFn } from '@/lib/server/functions/api-keys'
+import {
+  API_KEY_ROTATION_BLOCKED_MESSAGES,
+  apiKeyRotationBlocker,
+} from '@/lib/shared/api-key-scopes'
 import type { ApiKey } from '@/lib/shared/types'
 
 interface RotateApiKeyDialogProps {
@@ -33,6 +37,9 @@ export function RotateApiKeyDialog({
   const queryClient = useQueryClient()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  // A key made before scopes and expiry were required, or an expired one, is
+  // replaced rather than rotated; the server refuses it too.
+  const blocker = apiKeyRotationBlocker(apiKey)
 
   const handleRotate = async () => {
     setError(null)
@@ -65,11 +72,19 @@ export function RotateApiKeyDialog({
         </DialogHeader>
 
         <div className="py-4">
-          <WarningBox
-            variant="warning"
-            title="The old key will stop working immediately"
-            description="Any applications using the current key will lose access until you update them with the new key. The key name and settings will be preserved."
-          />
+          {blocker ? (
+            <WarningBox
+              variant="warning"
+              title="Replace this key instead"
+              description={API_KEY_ROTATION_BLOCKED_MESSAGES[blocker]}
+            />
+          ) : (
+            <WarningBox
+              variant="warning"
+              title="The old key will stop working immediately"
+              description="Any applications using the current key will lose access until you update them with the new key. The key name and settings will be preserved."
+            />
+          )}
 
           {error && <p className="text-sm text-destructive mt-4">{error}</p>}
         </div>
@@ -81,11 +96,13 @@ export function RotateApiKeyDialog({
             onClick={() => onOpenChange(false)}
             disabled={isPending}
           >
-            Cancel
+            {blocker ? 'Close' : 'Cancel'}
           </Button>
-          <Button onClick={handleRotate} disabled={isPending}>
-            {isPending ? 'Rotating...' : 'Rotate Key'}
-          </Button>
+          {!blocker && (
+            <Button onClick={handleRotate} disabled={isPending}>
+              {isPending ? 'Rotating...' : 'Rotate Key'}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
