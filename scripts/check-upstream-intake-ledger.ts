@@ -20,9 +20,11 @@
  *   a merge commit brings upstream history into this branch and no record
  *   names it, an upstream commit that merge brought in has no record, or a
  *   merge record does not hold against the merge it names;
- * - a ledger line names no decider (`review.by`), or a provenance amendment
- *   (`amends_line`) names no earlier line or does not repeat that line's
- *   identity and decision (see `parseLedger`).
+ * - a ledger line names no decider (`review.by`) or a malformed intake pull
+ *   request (`intake_pr`), or a provenance amendment (`amends_line`) names no
+ *   earlier line, names another amendment or a line an earlier amendment
+ *   already amends, or does not repeat that line's identity and decision (see
+ *   `parseLedger`).
  *
  * A merge intake record (`intake: "merge"`) covers one upstream commit that a
  * merge commit brought in: `downstream_commit` is that merge, `downstream_head`
@@ -48,7 +50,8 @@ const FORK_SHA_FIELDS = ['downstream_head', 'merge_base', 'downstream_commit'] a
 const DECISIONS = ['accepted', 'rejected', 'deferred'] as const
 /**
  * The fields a provenance amendment repeats from the line it amends, so that
- * it can change who decided or merged a record and never what was decided.
+ * it can change who decided or merged a record and never what was decided or
+ * which pull request took the intake in.
  */
 export const AMENDMENT_IDENTITY = [
   'intake',
@@ -58,6 +61,7 @@ export const AMENDMENT_IDENTITY = [
   'downstream_commit',
   'patch_id',
   'neutralized_by',
+  'intake_pr',
 ] as const
 
 /**
@@ -163,6 +167,8 @@ export interface LedgerEntry {
   neutralized_by?: string
   /** On a provenance amendment: the 1-based ledger line it amends. */
   amends_line?: number
+  /** The fork pull request that took the intake in. */
+  intake_pr?: number
   review: {
     decision: (typeof DECISIONS)[number]
     /** Who made the decision. `parseLedger` requires it on every ledger line. */
@@ -190,13 +196,18 @@ export interface HistoryProbe {
 /**
  * Parses the ledger, one JSON record per line; blank lines are skipped. Every
  * record needs its SHAs, a known `review.decision` and a non-empty
- * `review.by`. A provenance amendment (`amends_line`) must name an earlier,
- * non-blank line and repeat that line's `AMENDMENT_IDENTITY` fields and
- * `review.decision`.
+ * `review.by`; an `intake_pr`, when present, is a positive integer. A
+ * provenance amendment (`amends_line`) must name an earlier, non-blank line
+ * that is not itself an amendment and that no earlier amendment names, and
+ * must repeat that line's `AMENDMENT_IDENTITY` fields and `review.decision`.
+ * So each record takes at most one amendment, and every amendment names the
+ * record it corrects directly.
  */
 export function parseLedger(text: string): LedgerEntry[] {
   const entries: LedgerEntry[] = []
   const byLine = new Map<number, Record<string, unknown>>()
+  /** Amended line number to the line of the amendment that names it. */
+  const amendedBy = new Map<number, number>()
   text.split('\n').forEach((line, index) => {
     if (!line.trim()) return
     let record: Record<string, unknown> | null
@@ -221,6 +232,15 @@ export function parseLedger(text: string): LedgerEntry[] {
     }
     if (record.intake !== undefined && record.intake !== 'merge') {
       throw new Error(`ledger line ${index + 1}: intake must be "merge" when present`)
+    }
+    const intakePr = record.intake_pr
+    if (
+      intakePr !== undefined &&
+      (typeof intakePr !== 'number' || !Number.isInteger(intakePr) || intakePr < 1)
+    ) {
+      throw new Error(
+        `ledger line ${index + 1}: intake_pr must be a positive pull request number when present`
+      )
     }
     const review = record.review as
       { decision?: unknown; by?: unknown; merged_by?: unknown } | null | undefined
@@ -253,6 +273,17 @@ export function parseLedger(text: string): LedgerEntry[] {
       if (amended === undefined) {
         throw new Error(`ledger line ${index + 1}: amends_line ${amends} is a blank line`)
       }
+      if (amended.amends_line !== undefined) {
+        throw new Error(
+          `ledger line ${index + 1}: amends line ${amends}, which is itself a provenance amendment; an amendment names the record it corrects`
+        )
+      }
+      const earlier = amendedBy.get(amends)
+      if (earlier !== undefined) {
+        throw new Error(
+          `ledger line ${index + 1}: amends line ${amends}, which ledger line ${earlier} already amends; a record takes one provenance amendment`
+        )
+      }
       for (const field of AMENDMENT_IDENTITY) {
         if (record[field] !== amended[field]) {
           throw new Error(
@@ -265,6 +296,7 @@ export function parseLedger(text: string): LedgerEntry[] {
           `ledger line ${index + 1}: amends line ${amends} but its review.decision differs; a decision changes only through an ordinary later record`
         )
       }
+      amendedBy.set(amends, index + 1)
     }
     byLine.set(index + 1, record)
     entries.push(record as unknown as LedgerEntry)
