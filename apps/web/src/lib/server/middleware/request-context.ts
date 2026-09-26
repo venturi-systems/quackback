@@ -26,6 +26,20 @@ import { runWithLogContext } from '@/lib/server/log-context'
  */
 const HEALTH_PATH = '/api/health'
 
+/**
+ * A path segment that is a secret. Better Auth's password reset link carries
+ * its token in the path (`/api/auth/reset-password/:token`, better-auth 1.6.33
+ * `api/routes/password.mjs:92`), and the token resets that person's password
+ * until it is used or expires (24 hours, `resetPasswordTokenExpiresIn` in
+ * auth/index.ts). The route is written to every log line of the request.
+ */
+const SECRET_PATH_SEGMENT = /\/reset-password\/[^/]+/gi
+
+/** `pathname` as the log writes it: a secret path segment replaced by its name. */
+export function pathForLog(pathname: string): string {
+  return pathname.replace(SECRET_PATH_SEGMENT, '/reset-password/:token')
+}
+
 function deriveRequestId(request: Request): string {
   const header = request.headers.get('x-request-id') ?? request.headers.get('x-correlation-id')
   // Cap to keep a malicious/huge header out of every log line.
@@ -53,7 +67,7 @@ export async function handleRequestWithContext<T extends NextResult>({
 }): Promise<T> {
   const requestId = deriveRequestId(request)
   const pathname = new URL(request.url).pathname
-  const route = `${request.method} ${pathname}`
+  const route = `${request.method} ${pathForLog(pathname)}`
   const start = performance.now()
 
   return runWithLogContext({ request_id: requestId, route }, async () => {

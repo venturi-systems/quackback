@@ -6,7 +6,7 @@
  * echoes x-request-id, and completion/failure are logged once at the boundary.
  */
 import { describe, it, expect } from 'vitest'
-import { handleRequestWithContext } from '../request-context'
+import { handleRequestWithContext, pathForLog } from '../request-context'
 import { getLogContext } from '@/lib/server/log-context'
 import { createLogger } from '@/lib/server/logger'
 
@@ -133,5 +133,40 @@ describe('handleRequestWithContext', () => {
     const failed = cap.records().find((r) => r.msg === 'request failed')
     expect(failed).toBeDefined()
     expect(failed.level).toBe('error')
+  })
+
+  it("writes a password reset link's token as :token, on the route and every line", async () => {
+    // Better Auth's reset link carries the token in the path, and the token
+    // resets that person's password until it is used or expires.
+    const cap = capture()
+    const token = 'rst_SECRET_TOKEN_0b7d'
+    const request = new Request(
+      `http://localhost/api/auth/reset-password/${token}?callbackURL=%2Freset-password`
+    )
+    let seen: ReturnType<typeof getLogContext>
+
+    await handleRequestWithContext({
+      request,
+      log: cap.log,
+      next: async () => {
+        seen = getLogContext()
+        return { response: new Response(null, { status: 302 }) }
+      },
+    })
+
+    expect(seen?.route).toBe('GET /api/auth/reset-password/:token')
+    const completed = cap.records().find((r) => r.msg === 'request completed')
+    expect(completed.route).toBe('GET /api/auth/reset-password/:token')
+    expect(JSON.stringify(cap.records())).not.toContain(token)
+  })
+})
+
+describe('pathForLog', () => {
+  it('replaces only the secret segment and keeps every other path as it is', () => {
+    expect(pathForLog('/api/auth/reset-password/abc123')).toBe('/api/auth/reset-password/:token')
+    expect(pathForLog('/api/auth/Reset-Password/abc123/')).toBe('/api/auth/reset-password/:token/')
+    expect(pathForLog('/api/auth/request-password-reset')).toBe('/api/auth/request-password-reset')
+    expect(pathForLog('/auth/reset-password')).toBe('/auth/reset-password')
+    expect(pathForLog('/api/posts/post_01')).toBe('/api/posts/post_01')
   })
 })
