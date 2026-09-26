@@ -196,11 +196,10 @@ export function probeAddress(
   const label = targetLabel(target, defaultPort(url))
   return new Promise((resolve) => {
     let settled = false
-    let timer: ReturnType<typeof setTimeout> | undefined
     const settle = (result: ProbeResult) => {
       if (settled) return
       settled = true
-      if (timer !== undefined) clearTimeout(timer)
+      clearTimeout(timer)
       resolve({ ...result, target: label })
     }
     // agent: false -- a fresh connection per attempt, closed after it, so a
@@ -221,7 +220,7 @@ export function probeAddress(
     request.on('error', (error: NodeJS.ErrnoException) =>
       settle({ status: 0, error: error.message || error.code || 'request failed' })
     )
-    timer = setTimeout(() => {
+    const timer = setTimeout(() => {
       settle({ status: 0, error: `no response within ${timeoutMs} ms` })
       request.destroy()
     }, timeoutMs)
