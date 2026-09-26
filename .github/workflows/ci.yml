@@ -681,8 +681,8 @@ jobs:
     # 36148907427 and 36153263733 each show portability-gate success and this
     # job failed on the same focus-clipped finding. It adds no wall time: it
     # runs beside the end-to-end shards, never after them, on the same path
-    # filter, and it is the shorter lane (4.7 to 5.7 minutes against a slowest
-    # shard of 13.0 to 15.9 minutes on runs 36189375728, 36199565665,
+    # filter, and it is the shorter lane (4m46s to 5m45s against a slowest
+    # shard of 13m03s to 15m57s on runs 36189375728, 36199565665,
     # 36202612458, 36209030972 and 36221110319).
     #
     # MOTION (DEF-68). Every viewport is walked with motion on as well as with
