@@ -21,10 +21,17 @@ import { config } from '@/lib/server/config'
 import { logger } from '@/lib/server/logger'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import { linkingTrustedProviderIds } from './linking-trust'
-import { betterAuthLoggerOptions } from './better-auth-logger'
+import {
+  answerAuthRequest,
+  betterAuthApiErrorOptions,
+  betterAuthLoggerOptions,
+} from './better-auth-logger'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
 
 const log = logger.child({ component: 'auth-config' })
+
+/** Better Auth's own log calls and the errors its requests fail with (DEF-66). */
+const betterAuthLog = logger.child({ component: 'better-auth' })
 
 // Plugin callbacks (magicLink, emailOTP) stash tokens here instead of
 // emailing — callers that own the email template (invitations,
@@ -218,7 +225,13 @@ async function createAuth() {
     // Better Auth's own log calls go through the app logger, never the console:
     // its routes log raw failed queries, whose message carries every bound
     // value (DEF-66; see better-auth-logger.ts).
-    logger: betterAuthLoggerOptions(logger.child({ component: 'better-auth' })),
+    logger: betterAuthLoggerOptions(betterAuthLog),
+
+    // An error an endpoint throws that is not an APIError is rethrown to
+    // auth.handler below, which logs it through the app logger; otherwise
+    // better-call prints it raw to the console (DEF-66; see
+    // better-auth-logger.ts).
+    onAPIError: betterAuthApiErrorOptions(betterAuthLog),
 
     // Disable the JWT plugin's /token endpoint — conflicts with OAuth's /oauth2/token
     // Does NOT affect magicLink or session management
@@ -657,17 +670,21 @@ export const auth = {
     })
   },
   async handler(request: Request) {
-    const url = new URL(request.url)
-    const isMagicLink = url.pathname.includes('magic-link')
-    if (isMagicLink) {
-      log.debug({ method: request.method, path: url.pathname }, 'magic-link request')
-    }
-    const authInstance = await getAuth()
-    const response = await authInstance.handler(request)
-    if (isMagicLink) {
-      log.debug({ status: response.status }, 'magic-link response')
-    }
-    return response
+    // A failure is logged through the app logger and answered 500, never
+    // printed to the console (DEF-66; see answerAuthRequest).
+    return answerAuthRequest(betterAuthLog, request, async () => {
+      const url = new URL(request.url)
+      const isMagicLink = url.pathname.includes('magic-link')
+      if (isMagicLink) {
+        log.debug({ method: request.method, path: url.pathname }, 'magic-link request')
+      }
+      const authInstance = await getAuth()
+      const response = await authInstance.handler(request)
+      if (isMagicLink) {
+        log.debug({ status: response.status }, 'magic-link response')
+      }
+      return response
+    })
   },
 }
 

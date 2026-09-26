@@ -1,10 +1,21 @@
 import handler, { createServerEntry } from '@tanstack/react-start/server-entry'
+import { routeConsoleToLogger } from '@quackback/logger'
+import { logger } from '@/lib/server/logger'
 import { logStartupBanner } from '@/lib/server/startup'
 import {
   isServerFnRequestWithoutId,
   serverFnNotFound,
 } from '@/lib/server/middleware/serverfn-decode-guard'
 import { protocolRelativePathRedirect } from '@/lib/server/middleware/protocol-relative-redirect'
+
+// In production, every console call in this process is written through the
+// app logger. Dependencies print raw errors to the console, and a failed
+// query's error carries its SQL and every bound value; through the logger, the
+// err serializer and sanitizers reduce it (DEF-63, DEF-66; see
+// packages/logger/src/console.ts). Development keeps the plain console.
+if (process.env.NODE_ENV === 'production') {
+  routeConsoleToLogger(logger.child({ component: 'console' }))
+}
 
 // Cold-start optimization: eagerly warm DB + Redis connections AND preload
 // the modules that bootstrap.ts dynamically imports on first SSR. The
