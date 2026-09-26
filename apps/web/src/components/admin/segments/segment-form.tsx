@@ -238,7 +238,14 @@ function RuleConditionRow({
       {/* Operator */}
       <Select
         value={condition.operator}
-        onValueChange={(val) => onChange({ ...condition, operator: val as RuleOperator })}
+        onValueChange={(val) => {
+          // Radix's native form select can emit an empty value while the
+          // attribute change replaces its options. Keep the valid default
+          // chosen above instead of submitting an invalid blank operator.
+          if (operators.some((option) => option.value === val)) {
+            onChange({ ...condition, operator: val as RuleOperator })
+          }
+        }}
       >
         <SelectTrigger className="h-8 text-xs w-[130px] shrink-0">
           <SelectValue />

@@ -217,14 +217,12 @@ test.describe('Admin Segments Settings', () => {
     const comboboxes = dialog.locator('[role="combobox"]')
     await comboboxes.nth(1).click()
 
-    const optionContainer = page
-      .locator('[role="listbox"]')
-      .or(page.locator('[data-radix-select-content]'))
-
-    if ((await optionContainer.count()) > 0) {
-      await expect(optionContainer.getByText('Email Domain')).toBeVisible()
-      await expect(optionContainer.getByText('Post Count')).toBeVisible()
-    }
+    const optionContainer = page.getByRole('listbox')
+    await expect(optionContainer).toBeVisible()
+    await expect(optionContainer.getByRole('option', { name: 'Email', exact: true })).toBeVisible()
+    await expect(
+      optionContainer.getByRole('option', { name: 'Post Count', exact: true })
+    ).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
@@ -247,24 +245,22 @@ test.describe('Admin Segments Settings', () => {
     const comboboxes = dialog.locator('[role="combobox"]')
     // Select "Post Count" attribute
     await comboboxes.nth(1).click()
-    const optionContainer = page
-      .locator('[role="listbox"]')
-      .or(page.locator('[data-radix-select-content]'))
+    await page.getByRole('option', { name: 'Post Count', exact: true }).click()
 
-    if ((await optionContainer.count()) > 0) {
-      const postCountOption = optionContainer.getByText('Post Count')
-      if ((await postCountOption.count()) > 0) {
-        await postCountOption.click()
-      } else {
-        await page.keyboard.press('Escape')
-      }
-    }
+    // Replacing the attribute's options must preserve its valid default,
+    // even when Radix's native form select emits a transient empty value.
+    const operator = comboboxes.nth(2)
+    await expect(operator).toHaveText('greater than')
+    await operator.click()
+    await page.getByRole('option', { name: 'at least', exact: true }).click()
+    await expect(operator).toHaveText('at least')
 
-    // Fill value input
-    const valueInput = dialog.locator('input[type="number"]').first()
-    if ((await valueInput.count()) > 0) {
-      await valueInput.fill('1')
-    }
+    // Wait for the numeric field to replace the previous text field; a
+    // synchronous count used to skip this fill during the React update.
+    const valueInput = dialog.getByRole('spinbutton')
+    await expect(valueInput).toBeVisible()
+    await valueInput.fill('1')
+    await expect(valueInput).toHaveValue('1')
 
     await dialog.getByRole('button', { name: /create segment/i }).click()
     await expect(dialog).toBeHidden({ timeout: 10000 })

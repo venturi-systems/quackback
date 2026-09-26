@@ -193,6 +193,7 @@ test.describe('Admin Webhooks Settings', () => {
   })
 
   test('can close create webhook dialog with Cancel button', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 640 })
     await page.waitForLoadState('networkidle')
 
     const createButton = page.getByRole('button', { name: 'Create Webhook' })
@@ -209,6 +210,27 @@ test.describe('Admin Webhooks Settings', () => {
 
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden({ timeout: 5000 })
+  })
+
+  test('keyboard navigation reaches Cancel in a short viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 640 })
+    const createButton = page.getByRole('button', { name: 'Create Webhook' })
+    const emptyStateButton = page.getByRole('button', { name: 'Create your first webhook' })
+    await createButton.or(emptyStateButton).first().click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Endpoint URL').focus()
+    const eventCount = await dialog.getByRole('checkbox').count()
+    expect(eventCount).toBeGreaterThan(0)
+    for (let index = 0; index <= eventCount; index++) {
+      await page.keyboard.press('Tab')
+    }
+    const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true })
+    await expect(cancel).toBeFocused()
+    await expect(cancel).toBeInViewport()
+    await page.keyboard.press('Enter')
+    await expect(dialog).toBeHidden()
   })
 
   test('existing webhooks show URL and status badge', async ({ page }) => {
