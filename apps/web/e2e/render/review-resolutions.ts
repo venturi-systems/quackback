@@ -18,7 +18,17 @@
  *
  * Inspected renders: run 36157989437 (quackback #185 head aee8a132c), the
  * spacing-review captures of each route and width named below, and the same
- * captures on the pull request that added this file.
+ * captures on the pull request that added this file; for the sidebar boards,
+ * also the captures and checker reports of main runs 36199565665 and
+ * 36202612458 (c262d3ea4).
+ *
+ * A resolution must hold for every run, not only the inspected one. The seed
+ * gives each board a different post count on each run, and the count's width
+ * decides whether a board name wraps, so the board resolutions say nothing
+ * that depends on one run's count. keyboard-walk.spec.ts stamps a resolution
+ * on its capture before the checker runs, so the capture cannot know whether
+ * the checker flagged that width; summary.md's text-spacing capture table
+ * says whether it did.
  */
 export interface ReviewResolution {
   routes: readonly string[]
@@ -39,14 +49,14 @@ export const REVIEW_RESOLUTIONS: readonly ReviewResolution[] = [
     text: /^Feature Requests \d+$/,
     widths: SIDEBAR_WIDTHS,
     resolution:
-      'Accepted as text-spacing reflow. In the 222px sidebar button the name wraps to "Feature" and "Requests", with the post count set apart at the right edge; every word and the count are whole and legible, nothing clips or overlaps, and the button grows to 54px. The isolated final word is the second word of a two-word name in a narrow column, and keeping it on one line would need nowrap or smaller type. The name and count used to run together in the text ("Feature Requests127"); they are now separated, and screen readers hear "127 posts".',
+      'Accepted as text-spacing reflow. The 222px sidebar button sets the post count apart at its right edge, and whether the name fits beside it depends on the width of that run\'s seeded count. On main run 36202612458 "Feature Requests 114" stayed on one line in a 44px button and the checker did not flag it; on main run 36199565665 "Feature Requests 125" wrapped to "Feature" and "Requests" in a 54px button. Wrapped or not, every word and the count are whole and legible, and nothing clips or overlaps. When it wraps, the isolated final word is the second word of a two-word name in a narrow column, and keeping it on one line would need nowrap or smaller type. The name and count used to run together in the text ("Feature Requests127" on run 36102540996); a space now separates them, and screen readers hear the name, then the count followed by "posts".',
   },
   {
     routes: FEEDS,
     text: /^General Feedback \d+$/,
     widths: SIDEBAR_WIDTHS,
     resolution:
-      'Accepted as text-spacing reflow. In the 222px sidebar button the name wraps to "General" and "Feedback", with the post count set apart at the right edge; every word and the count are whole and legible, nothing clips or overlaps, and the button grows to 54px. The isolated final word is the second word of a two-word name in a narrow column, and keeping it on one line would need nowrap or smaller type. The name and count used to run together in the text ("General Feedback117"); they are now separated, and screen readers hear "117 posts".',
+      'Accepted as text-spacing reflow. The 222px sidebar button sets the post count apart at its right edge, and whether the name fits beside it depends on the width of that run\'s seeded count. On main runs 36199565665 ("General Feedback 112") and 36202612458 ("General Feedback 125") it wrapped to "General" and "Feedback" in a 54px button, with every word and the count whole and legible and nothing clipped or overlapping. The isolated final word is the second word of a two-word name in a narrow column, and keeping it on one line would need nowrap or smaller type. The name and count used to run together in the text ("General Feedback117" on run 36102540996); a space now separates them, and screen readers hear the name, then the count followed by "posts".',
   },
   {
     routes: ['admin-post'],

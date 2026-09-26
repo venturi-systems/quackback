@@ -10,14 +10,24 @@
  *   - a checker run ended on another path than the planned one: a redirect,
  *     such as to sign-in when a session was not honoured, would otherwise
  *     measure the wrong page and pass;
- *   - a planned keyboard walk has no result, or its result has a finding.
+ *   - a planned keyboard walk has no result, or its result has a finding;
+ *   - an authored review item has no reviewed resolution recorded in
+ *     review-resolutions.ts for its route, text and width, so a new or changed
+ *     item fails the job until its render is inspected and resolved.
  *
- * NEEDS_REVIEW is not a failure here: it is the suite's own disposition for
- * prose, user-generated text and text-spacing stress, and each one needs an
- * individual reviewed resolution, which the summary lists for that purpose.
- * Authored-text items print the resolution recorded for them in
+ * NEEDS_REVIEW is not by itself a failure here: it is the suite's own
+ * disposition for prose, user-generated text and text-spacing stress, and each
+ * one needs an individual reviewed resolution, which the summary lists for
+ * that purpose. Authored-text items print the resolution recorded for them in
  * review-resolutions.ts, or "none recorded" when their text, route or width
  * has none, and are listed first so the row limit never hides one.
+ * User-generated text keeps the suite's own disposition: its words stay as
+ * written.
+ *
+ * The text-spacing captures (review/<route>__<width>__spacing.json) are taken
+ * during the keyboard walk, before the checker runs, so they cannot say
+ * whether the checker flagged a region. The summary compares each captured
+ * region with the checker's review items and says so.
  *
  * Writes summary.md beside the reports and appends it to $GITHUB_STEP_SUMMARY
  * when that is set. Usage (from apps/web): bun e2e/render/summarize.ts
@@ -30,6 +40,7 @@ import {
   KEYBOARD_DIR,
   OUT_DIR,
   PLAN_PATH,
+  REVIEW_DIR,
   ROUTES,
   SUITE_DIR,
   walkContextsFor,
@@ -97,6 +108,17 @@ interface KeyboardResult {
     reverseOnly?: unknown[]
   } | null
   findings: { kind: string; selector?: string; name?: string; detail: string; direction?: string }[]
+}
+
+/** The parts of a text-spacing capture (keyboard-walk.spec.ts) the summary reads. */
+interface SpacingCapture {
+  route: string
+  viewport: { width: number; height: number } | null
+  regions: {
+    checkerText: string
+    box: { width: number; height: number }
+    disposition: string
+  }[]
 }
 
 const MAX_ROWS = 80
@@ -281,6 +303,15 @@ if (allReviews.length) {
   const unresolved = ordered.filter(
     (group) => group.f.origin !== 'user' && resolutionOf(group).startsWith('none recorded')
   )
+  if (unresolved.length) {
+    const named = unresolved
+      .slice(0, 5)
+      .map(({ f }) => `${f.route} "${cell(f.text ?? f.reason, 60)}"`)
+      .join('; ')
+    problems.push(
+      `${unresolved.length} authored review items have no recorded resolution in e2e/render/review-resolutions.ts: ${named}${unresolved.length > 5 ? '; more in the review table' : ''}`
+    )
+  }
   out(`#### Review items (${allReviews.length} findings, ${groups.size} distinct elements)`)
   out()
   out(
@@ -296,6 +327,48 @@ if (allReviews.length) {
     )
   }
   if (groups.size > MAX_ROWS) out(`\n${groups.size - MAX_ROWS} more in the artifact.`)
+  out()
+}
+
+// A captured region counts as flagged when the checker has a review item for
+// the same route and text in its text-spacing run at the capture's width.
+const sameText = (a: string | undefined, b: string) =>
+  (a ?? '').replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim()
+const captureFiles = fs.existsSync(REVIEW_DIR)
+  ? fs
+      .readdirSync(REVIEW_DIR)
+      .filter((name) => name.endsWith('__spacing.json'))
+      .sort()
+  : []
+if (captureFiles.length) {
+  out(`#### Text-spacing captures (${captureFiles.length} files)`)
+  out()
+  out(
+    'The keyboard walk captures these regions (`review/<route>__<width>__spacing.json`) before the checker runs, so a capture can only say whether a resolution is on record. The Checker column says whether the checker flagged the same route and text in its text-spacing run at that width on this run. Evidence for review, not a verdict: an authored item the checker flagged without a resolution already fails above.'
+  )
+  out()
+  out('| Route | Width | Text | Box (px) | Checker | Resolution on record |')
+  out('|---|---|---|---|---|---|')
+  for (const name of captureFiles) {
+    const capture = readJson<SpacingCapture>(path.join(REVIEW_DIR, name))
+    if (!capture?.viewport || !Array.isArray(capture.regions)) {
+      out(`| ${cell(name)} | | | | unreadable capture | |`)
+      continue
+    }
+    const width = capture.viewport.width
+    for (const region of capture.regions) {
+      const flagged = allReviews.some(
+        (review) =>
+          review.route === capture.route &&
+          review.width === width &&
+          review.stress &&
+          sameText(review.text, region.checkerText)
+      )
+      out(
+        `| ${capture.route} | ${width}s | ${cell(region.checkerText, 80)} | ${Math.round(region.box.width)}x${Math.round(region.box.height)} | ${flagged ? 'flagged for review' : 'not flagged'} | ${region.disposition.startsWith('RESOLVED') ? 'yes' : 'no'} |`
+      )
+    }
+  }
   out()
 }
 
@@ -383,7 +456,7 @@ if (problems.length) {
   for (const problem of problems) out(`- ${problem}`)
 } else {
   out(
-    'PASS: every route rendered with no checker failure and no keyboard finding. Review items above still need their individual reviewed resolution.'
+    'PASS: every route rendered with no checker failure and no keyboard finding, and every authored review item above has its recorded resolution. User-generated text keeps its words as written.'
   )
 }
 out()
