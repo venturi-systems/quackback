@@ -44,12 +44,25 @@
  * webServer timeout, and a dev server that exits fails the start at once
  * with its exit code (e2e/scripts/dev-server.ts).
  *
+ * WHICH ADDRESS. Each attempt asks every address Playwright's own probe would
+ * try: playwright-core's dualStackLookup resolves the host for IPv6 and for
+ * IPv4 separately and tries them IPv6 first. The runtime's default lookup is
+ * not enough. The CI job maps acme.localhost to 127.0.0.1 in /etc/hosts, but
+ * the dev server does not listen there: the first version of this check
+ * probed only the default lookup's answer (127.0.0.1) and was refused for the
+ * whole start on every shard of runs 36235021000 and 36235057896, while
+ * Playwright's own probe, which also tries the IPv6 answer, reached the
+ * server. Every attempt probes the addresses in parallel and is ready when
+ * any of them answers ready; the ready line names the address that answered.
+ *
  * Upstream nitro fixed the dev worker in 3.0.260903-beta: it waits for the
  * in-flight import and renders errors instead of throwing them. This check
  * stays correct after that upgrade, because it only ever waits for an answer.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
+import { lookup } from 'node:dns/promises'
 import http from 'node:http'
+import { isIP } from 'node:net'
 
 /** The URL the suite drives (playwright.config.ts `use.baseURL`). */
 export const DEV_SERVER_URL = 'http://acme.localhost:3000'
@@ -75,52 +88,193 @@ export const ATTEMPT_TIMEOUT_MS = 20_000
 /** Pause between attempts. */
 export const ATTEMPT_INTERVAL_MS = 250
 
+/**
+ * A line even when nothing changes, so a wait that keeps getting the same
+ * answer is visible in the log instead of silent.
+ */
+export const STILL_WAITING_LOG_MS = 10_000
+
 /** Playwright's rule (playwright-core isURLAvailable): 200 to 403 is available. */
 export function isReadyStatus(status: number): boolean {
   return status >= 200 && status < 404
 }
 
+export interface ProbeTarget {
+  address: string
+  family: 4 | 6
+}
+
+export type LookupAll = (
+  hostname: string,
+  options: { all: true; family: 4 | 6 }
+) => Promise<{ address: string; family: number }[]>
+
 export interface ProbeResult {
   /** HTTP status, or 0 when no status line arrived. */
   status: number
   error?: string
+  /** The address that gave this result, as `host:port`. */
+  target?: string
+}
+
+function settleWithin<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve(fallback)
+      }
+    )
+  })
 }
 
 /**
- * One GET of `url`, as Playwright sends it (`Accept: *\/*`, body discarded),
- * that settles within `timeoutMs` whether or not the server answers.
+ * The addresses Playwright's own probe would try for `hostname`, in its order:
+ * the IPv6 and IPv4 answers interleaved, IPv6 first (playwright-core
+ * dualStackLookup). An IP literal is its own only address. A family that does
+ * not resolve contributes nothing, and neither does a lookup slower than
+ * `timeoutMs`.
  */
-export function probeOnce(url: string, timeoutMs: number): Promise<ProbeResult> {
+export async function resolveProbeTargets(
+  hostname: string,
+  timeoutMs: number = ATTEMPT_TIMEOUT_MS,
+  lookupAll: LookupAll = (name, options) => lookup(name, options)
+): Promise<ProbeTarget[]> {
+  const bare = hostname.replace(/^\[(.*)\]$/, '$1')
+  const literal = isIP(bare)
+  if (literal === 4 || literal === 6) return [{ address: bare, family: literal }]
+  const perFamily = await Promise.all(
+    ([6, 4] as const).map((family) =>
+      settleWithin(
+        lookupAll(bare, { all: true, family }).then((entries) =>
+          entries.map((entry): ProbeTarget => ({ address: entry.address, family }))
+        ),
+        timeoutMs,
+        [] as ProbeTarget[]
+      )
+    )
+  )
+  const targets: ProbeTarget[] = []
+  const seen = new Set<string>()
+  const longest = Math.max(0, ...perFamily.map((list) => list.length))
+  for (let i = 0; i < longest; i++) {
+    for (const list of perFamily) {
+      const target = list[i]
+      if (target && !seen.has(target.address)) {
+        seen.add(target.address)
+        targets.push(target)
+      }
+    }
+  }
+  return targets
+}
+
+function targetLabel(target: ProbeTarget, port: number): string {
+  return target.family === 6 ? `[${target.address}]:${port}` : `${target.address}:${port}`
+}
+
+function defaultPort(url: URL): number {
+  if (url.port) return Number(url.port)
+  return url.protocol === 'https:' ? 443 : 80
+}
+
+/**
+ * One GET of `url` sent to `target`, as Playwright sends it (`Accept: *\/*`,
+ * the URL's own Host header, body discarded), that settles within `timeoutMs`
+ * whether or not the server answers.
+ */
+export function probeAddress(
+  url: URL,
+  target: ProbeTarget,
+  timeoutMs: number
+): Promise<ProbeResult> {
+  const label = targetLabel(target, defaultPort(url))
   return new Promise((resolve) => {
     let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     const settle = (result: ProbeResult) => {
       if (settled) return
       settled = true
-      clearTimeout(timer)
-      resolve(result)
+      if (timer !== undefined) clearTimeout(timer)
+      resolve({ ...result, target: label })
     }
     // agent: false -- a fresh connection per attempt, closed after it, so a
     // held connection is never reused and no pooled socket outlives the check.
-    const request = http.get(url, { agent: false, headers: { Accept: '*/*' } }, (response) => {
-      response.resume()
-      settle({ status: response.statusCode ?? 0 })
-    })
-    request.on('error', (error) => settle({ status: 0, error: error.message }))
-    const timer = setTimeout(() => {
+    const request = http.get(
+      {
+        hostname: target.address,
+        port: defaultPort(url),
+        path: `${url.pathname}${url.search}`,
+        agent: false,
+        headers: { Accept: '*/*', Host: url.host },
+      },
+      (response) => {
+        response.resume()
+        settle({ status: response.statusCode ?? 0 })
+      }
+    )
+    request.on('error', (error: NodeJS.ErrnoException) =>
+      settle({ status: 0, error: error.message || error.code || 'request failed' })
+    )
+    timer = setTimeout(() => {
       settle({ status: 0, error: `no response within ${timeoutMs} ms` })
       request.destroy()
     }, timeoutMs)
   })
 }
 
-function describeProbe(result: ProbeResult): string {
-  return result.error ?? `HTTP ${result.status}`
+export interface ProbeOptions {
+  lookupAll?: LookupAll
 }
 
-export interface WaitOptions {
+/**
+ * One attempt: every address Playwright would try for the URL's host, in
+ * parallel. It settles with the first ready answer, or, when none is ready,
+ * once every address has answered or timed out -- so within `timeoutMs` plus
+ * the lookup, itself bounded by `timeoutMs`.
+ */
+export async function probeOnce(
+  url: string,
+  timeoutMs: number,
+  options: ProbeOptions = {}
+): Promise<ProbeResult> {
+  const parsed = new URL(url)
+  const targets = await resolveProbeTargets(parsed.hostname, timeoutMs, options.lookupAll)
+  if (targets.length === 0) return { status: 0, error: `could not resolve ${parsed.hostname}` }
+  return new Promise((resolve) => {
+    const results: ProbeResult[] = new Array(targets.length)
+    let pending = targets.length
+    targets.forEach((target, index) => {
+      void probeAddress(parsed, target, timeoutMs).then((result) => {
+        results[index] = result
+        pending -= 1
+        if (isReadyStatus(result.status)) resolve(result)
+        else if (pending === 0) {
+          resolve({
+            status: Math.max(...results.map((each) => each.status)),
+            error: results.map(describeProbe).join('; '),
+          })
+        }
+      })
+    })
+  })
+}
+
+export function describeProbe(result: ProbeResult): string {
+  const answer = result.error ?? `HTTP ${result.status}`
+  return result.target ? `${answer} from ${result.target}` : answer
+}
+
+export interface WaitOptions extends ProbeOptions {
   url: string
   attemptTimeoutMs?: number
   intervalMs?: number
+  stillWaitingLogMs?: number
   /** Stops the wait, for example when the dev server exits. */
   signal?: AbortSignal
   log?: (line: string) => void
@@ -154,29 +308,38 @@ function pause(ms: number, signal?: AbortSignal): Promise<void> {
 export async function waitForDevServer(options: WaitOptions): Promise<WaitResult> {
   const attemptTimeoutMs = options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS
   const intervalMs = options.intervalMs ?? ATTEMPT_INTERVAL_MS
+  const stillWaitingLogMs = options.stillWaitingLogMs ?? STILL_WAITING_LOG_MS
   const started = Date.now()
   let attempts = 0
   let last: ProbeResult | undefined
   let reported = ''
+  let reportedAt = started
   while (!options.signal?.aborted) {
     attempts += 1
-    last = await probeOnce(options.url, attemptTimeoutMs)
+    last = await probeOnce(options.url, attemptTimeoutMs, options)
     if (isReadyStatus(last.status)) {
       return { ready: true, attempts, elapsedMs: Date.now() - started, last }
     }
-    // One line per change of answer, not one per attempt: the first seconds
-    // are all "connection refused" while Vite starts.
+    // A line per change of answer (the first seconds are all "connection
+    // refused" while Vite starts), and one at least every stillWaitingLogMs.
     const summary = describeProbe(last)
+    const now = Date.now()
     if (summary !== reported) {
       options.log?.(`quackback e2e: dev server not ready yet (attempt ${attempts}: ${summary})`)
       reported = summary
+      reportedAt = now
+    } else if (now - reportedAt >= stillWaitingLogMs) {
+      options.log?.(
+        `quackback e2e: dev server still not ready after ${attempts} attempts, ${now - started} ms (${summary})`
+      )
+      reportedAt = now
     }
     await pause(intervalMs, options.signal)
   }
   return { ready: false, attempts, elapsedMs: Date.now() - started, last }
 }
 
-export interface DevServerOptions {
+export interface DevServerOptions extends ProbeOptions {
   command: string
   args: string[]
   url: string
@@ -219,6 +382,7 @@ export function startDevServer(options: DevServerOptions): DevServerRun {
     url: options.url,
     attemptTimeoutMs: options.attemptTimeoutMs,
     intervalMs: options.intervalMs,
+    lookupAll: options.lookupAll,
     signal: stopped.signal,
     log,
   }).then((result) => {
