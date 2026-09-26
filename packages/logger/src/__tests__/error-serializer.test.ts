@@ -624,3 +624,86 @@ describe('stacks that carry a failed query (DEF-63 residual 4)', () => {
     )
   })
 })
+
+describe('an Error pino cannot read (verifier finding on main c262d3ea4)', () => {
+  /** An Error whose message is no longer a string. */
+  function messageless(): Error {
+    return Object.assign(new Error('lookup failed'), { message: undefined })
+  }
+
+  /** An Error whose message getter throws. */
+  function unreadable(): Error {
+    return Object.defineProperty(new Error('lookup failed'), 'message', {
+      get() {
+        throw new Error('message getter failed')
+      },
+    })
+  }
+
+  it('writes one line, and does not recurse, for an Error with a non-string message', () => {
+    const sink = capture()
+    sink.log.error({ err: messageless() }, 'as err')
+    sink.log.error({ other: messageless() }, 'under another key')
+    sink.log.error(messageless())
+    sink.log.error({ step: 1 }, 'as a format argument %o', messageless())
+
+    expect(sink.lines).toHaveLength(4)
+    const [asErr, other, alone] = sink.lines.map((line) => JSON.parse(line))
+    expect(asErr.err).toEqual({ type: 'Error', message: '[unserializable]' })
+    expect(other.other).toEqual({ type: 'Error', message: '[unserializable]' })
+    expect(alone.err).toEqual({ type: 'Error', message: '[unserializable]' })
+    expect(alone.msg).toBe('[unserializable]')
+  })
+
+  it('writes one line for an Error whose message getter throws, with no message of its own', () => {
+    const sink = capture()
+    sink.log.error({ err: unreadable() })
+    sink.log.error(unreadable())
+    sink.log.warn({ nested: { error: unreadable() } }, 'nested')
+
+    expect(sink.lines).toHaveLength(3)
+    const [asErr, alone, nested] = sink.lines.map((line) => JSON.parse(line))
+    expect(asErr).toMatchObject({
+      msg: '[unserializable]',
+      err: { type: 'Error', message: '[unserializable]' },
+    })
+    expect(alone).toMatchObject({
+      msg: '[unserializable]',
+      err: { type: 'Error', message: '[unserializable]' },
+    })
+    expect(nested.nested.error).toEqual({ type: 'Error', message: '[unserializable]' })
+  })
+})
+
+describe('a failed query nested past the inspected depth (verifier finding on main c262d3ea4)', () => {
+  /** `value` wrapped in `levels` plain objects. */
+  function nest(value: unknown, levels: number): Record<string, unknown> {
+    let out: Record<string, unknown> = { value }
+    for (let level = 1; level < levels; level++) out = { next: out }
+    return out
+  }
+
+  it('withholds a failed query 70 plain-object levels deep', () => {
+    const sink = capture()
+    sink.log.info({ deep: nest(failedQuery(), 70) }, 'deep')
+
+    expectNoSecrets(sink.lines[0])
+    expect(sink.lines[0]).toContain('[truncated]')
+  })
+
+  it('withholds its text in a string 70 plain-object levels deep', () => {
+    const sink = capture()
+    sink.log.info({ deep: nest({ sql: failedQuery().message }, 70) }, 'deep')
+
+    expectNoSecrets(sink.lines[0])
+  })
+
+  it('keeps an ordinary value nested as deep', () => {
+    const sink = capture()
+    sink.log.info({ deep: nest({ rows: 3, table: 'posts' }, 70) }, 'deep')
+
+    let level = sink.last().deep
+    for (let depth = 1; depth < 70; depth++) level = level.next
+    expect(level.value).toEqual({ rows: 3, table: 'posts' })
+  })
+})

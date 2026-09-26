@@ -29,8 +29,21 @@
  * (`api/index.mjs:201-202`: `const log = optLogLevel === ... ? logger : void 0`
  * then `log?.error(e.message)`), which no `log` option reaches. Unset, Better
  * Auth publishes 'warn' and above to `log`, and that console path stays off.
+ *
+ * The router has a second console path that no logger option reaches. When
+ * Better Auth's onError (`api/index.mjs:193-212`) returns without a response,
+ * better-call 1.4.0 (`dist/router.mjs:83-93`) turns an `APIError` into its
+ * response but prints any other error raw: `console.error('# SERVER_ERROR: ',
+ * error)`. Any failed query an endpoint does not catch goes that way; magic
+ * link verify, for one, binds the email (`findUserByEmail`) and the new
+ * session's token (`createSession`) and catches neither
+ * (`plugins/magic-link/index.mjs:154-173`). `betterAuthApiErrorOptions` gives
+ * Better Auth an `onAPIError.onError` that rethrows such an error: better-call
+ * rethrows it in turn (`router.mjs:87-89`), and `answerAuthRequest` logs it
+ * through the app logger and answers 500, as better-call would have.
  */
-import { errorLogMessage, type AppLogger } from '@quackback/logger'
+import { writeLogCall, type AppLogger } from '@quackback/logger'
+import { isAPIError } from 'better-auth/api'
 
 /** The levels Better Auth passes to `log` ('success' arrives as 'info'). */
 type BetterAuthLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -39,16 +52,6 @@ type BetterAuthLevel = 'debug' | 'info' | 'warn' | 'error'
 export interface BetterAuthLoggerOptions {
   disableColors: true
   log: (level: BetterAuthLevel, message: unknown, ...args: unknown[]) => void
-}
-
-function isErrorLike(value: unknown): value is Error {
-  return (
-    value instanceof Error ||
-    (value !== null &&
-      typeof value === 'object' &&
-      typeof (value as { message?: unknown }).message === 'string' &&
-      typeof (value as { name?: unknown }).name === 'string')
-  )
 }
 
 /** The app logger method for a Better Auth level. */
@@ -67,22 +70,9 @@ export function writeBetterAuthLog(
   message: unknown,
   args: readonly unknown[]
 ): void {
-  const values = typeof message === 'string' ? [...args] : [message, ...args]
-  const err = values.find(isErrorLike)
-  const rest = values.filter((value) => value !== err && value !== undefined)
-  const fields: Record<string, unknown> = {}
-  if (err !== undefined) fields.err = err
-  if (rest.length > 0) fields.args = rest
-  // Always a string, never undefined: pino would otherwise log the error's own
-  // message, which for a failed query is the SQL and every bound value. An
-  // error passed as the message gets the logger's own safe text for it.
-  const text =
-    typeof message === 'string'
-      ? message
-      : message === err
-        ? (errorLogMessage(err) ?? '')
-        : ''
-  appLog[methodFor(level)](fields, text)
+  // The first error is logged as `err` and the rest under `args`; the message
+  // is always a string (see `writeLogCall` in @quackback/logger).
+  writeLogCall(appLog, methodFor(level), message, args)
 }
 
 /**
@@ -93,5 +83,67 @@ export function betterAuthLoggerOptions(appLog: AppLogger): BetterAuthLoggerOpti
   return {
     disableColors: true,
     log: (level, message, ...args) => writeBetterAuthLog(appLog, level, message, args),
+  }
+}
+
+/** The `onAPIError` option this module gives `betterAuth()`. */
+export interface BetterAuthApiErrorOptions {
+  onError: (error: unknown) => void
+}
+
+/**
+ * Words Better Auth's default onError looks for in an error's message
+ * (`api/index.mjs:203-207`) before it logs the message alone.
+ */
+const SCHEMA_WORDS = ['column', 'relation', 'table', 'does not exist']
+
+/**
+ * The `onAPIError` option for `betterAuth()`. Better Auth calls it from the
+ * router's onError for every error except a `FOUND` redirect
+ * (`api/index.mjs:194-197`), without awaiting it, so it is synchronous.
+ *
+ * - An error that is not an `APIError` is rethrown. better-call rethrows it
+ *   out of the handler (`router.mjs:87-89`) instead of printing it to the
+ *   console, and `answerAuthRequest` logs it and answers 500.
+ * - An `APIError` is logged as Better Auth's default logs it, through the app
+ *   logger: its message alone when it names a schema object, and itself under
+ *   its status when it is an internal server error. better-call then turns it
+ *   into its response (`router.mjs:92`), as before.
+ */
+export function betterAuthApiErrorOptions(appLog: AppLogger): BetterAuthApiErrorOptions {
+  return {
+    onError(error) {
+      if (!isAPIError(error)) throw error
+      const message = error.message
+      if (typeof message === 'string' && SCHEMA_WORDS.some((word) => message.includes(word))) {
+        writeBetterAuthLog(appLog, 'error', message, [])
+        return
+      }
+      if (error.status === 'INTERNAL_SERVER_ERROR') {
+        writeBetterAuthLog(appLog, 'error', error.status, [error])
+      }
+    },
+  }
+}
+
+/**
+ * Answer one request to Better Auth through `handle`. An error it throws (one
+ * `betterAuthApiErrorOptions` rethrew, one from a Better Auth request hook
+ * that runs outside the router's catch, or a failure to build the auth
+ * instance) is logged through `appLog`, where the err serializer reduces a
+ * failed query to its safe shape, and answered with the empty 500 better-call
+ * gives an error it prints. Nothing reaches the console.
+ */
+export async function answerAuthRequest(
+  appLog: AppLogger,
+  request: Request,
+  handle: () => Promise<Response>
+): Promise<Response> {
+  try {
+    return await handle()
+  } catch (error) {
+    // The method only: a path can carry a secret (`/reset-password/:token`).
+    appLog.error({ err: error, method: request.method }, 'auth request failed')
+    return new Response(null, { status: 500, statusText: 'Internal Server Error' })
   }
 }

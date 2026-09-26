@@ -8,6 +8,12 @@ export {
   serializeError,
 } from './error-serializer'
 export {
+  CONSOLE_CALL_NOT_LOGGED,
+  routeConsoleToLogger,
+  writeLogCall,
+  type LogCallLevel,
+} from './console'
+export {
   containsDatabaseError,
   databaseErrorLogFields,
   isDatabaseError,
