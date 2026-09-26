@@ -76,7 +76,10 @@ const VALUE_BEARING_FIELDS = ['message', 'detail', 'where', 'hint', 'internal_qu
 /** Deepest cause chain or error nesting followed; real ones are a few levels deep. */
 const MAX_DEPTH = 32
 
-/** Deepest plain-object nesting of log fields that is inspected. */
+/**
+ * Deepest plain-object nesting of log fields that is inspected. A value nested
+ * deeper is kept only when `failedQueryReach` finds no failed query in it.
+ */
 const MAX_SANITIZE_DEPTH = 64
 
 /**
@@ -94,12 +97,16 @@ const MIN_WITHHELD_LENGTH = 4
 
 type ErrorLike = { message: string; stack?: unknown; constructor?: unknown; name?: unknown }
 
-/** Pino's own test for an error: anything with a string `message`. */
+/**
+ * Pino's own test for an error: anything with a string `message`. The message
+ * is read through `readProperty`, so a throwing getter makes a value that is
+ * not error-like rather than a log call that throws.
+ */
 function isErrorLike(value: unknown): value is ErrorLike {
   return (
     value !== null &&
     typeof value === 'object' &&
-    typeof (value as { message?: unknown }).message === 'string'
+    typeof readProperty(value, 'message') === 'string'
   )
 }
 
@@ -113,10 +120,11 @@ function readProperty(value: object, key: string): unknown {
 }
 
 /** The `type` pino's serializer writes: the constructor's name, else `name`. */
-function typeName(error: ErrorLike): string {
-  const ctor = error.constructor
+function typeName(error: object): string {
+  const ctor = readProperty(error, 'constructor')
   if (typeof ctor === 'function' && ctor.name) return ctor.name
-  return typeof error.name === 'string' ? error.name : 'Error'
+  const name = readProperty(error, 'name')
+  return typeof name === 'string' ? name : 'Error'
 }
 
 /**
@@ -364,14 +372,28 @@ function serializeRedacted(
 /**
  * Pino `err` serializer. Any error with a failed query or its text in reach
  * (`failedQueryReach`) gets the redacted shape described above; every other
- * error gets pino's standard serializer, unchanged. A value that is not an
- * error is passed through `sanitizeLogValue`.
+ * error gets pino's standard serializer, unchanged. An `Error` whose message
+ * is not a string, or cannot be read, gets `unreadableError`. Any other value
+ * that is not an error is passed through `sanitizeLogValue`.
  */
 export function serializeError(value: unknown): unknown {
-  if (!isErrorLike(value)) return sanitizeLogValue(value)
+  if (!isErrorLike(value)) {
+    return value instanceof Error ? unreadableError(value) : sanitizeLogValue(value)
+  }
   const reach = failedQueryReach(value)
   if (!reach.found) return pino.stdSerializers.err(value as Error)
   return serializeRedacted(value, redactionContext(reach.errors), 0)
+}
+
+/**
+ * An `Error` that is not error-like: its message is not a string (`err.message
+ * = undefined`) or its getter throws. Pino's serializer leaves such a value as
+ * it is, and `sanitizeLogValue` hands every `Error` back to `serializeError`,
+ * so it is written as its type and a fixed message, with nothing read from it
+ * that could carry a failed query's text or recurse.
+ */
+function unreadableError(error: Error): Record<string, unknown> {
+  return { type: typeName(error), message: UNSERIALIZABLE }
 }
 
 function redactionContext(errors: Error[]): RedactionContext {
@@ -431,7 +453,10 @@ function sanitizeNested(
     const done = memo.get(value)
     return done === IN_PROGRESS ? '[Circular]' : done
   }
-  if (depth >= MAX_SANITIZE_DEPTH) return value
+  // Past the inspected depth, a value is kept only when nothing in its reach
+  // is a failed query; `failedQueryReach` fails closed on a graph too deep or
+  // too large to walk, as the rest of the sanitizer does.
+  if (depth >= MAX_SANITIZE_DEPTH) return failedQueryReach(value).found ? TRUNCATED : value
   memo.set(value, IN_PROGRESS)
   let result: unknown = value
   if (Array.isArray(value)) {
@@ -543,8 +568,28 @@ export function sanitizeLogArguments(args: readonly unknown[]): unknown[] {
   if (error !== undefined && isErrorLike(error)) {
     const reach = failedQueryReach(error)
     if (reach.found) out[1] = messageFor(error, reach.errors)
+  } else if (hasUnreadableMessage(error)) {
+    // Pino would read the message itself, and a throwing getter would throw
+    // out of the log call.
+    out[1] = UNSERIALIZABLE
   }
   return out
+}
+
+/**
+ * Whether `value` is an error whose message pino cannot use when it derives a
+ * call's message from it: an `Error` whose message is not a string (written
+ * by `serializeError` as `unreadableError`), or any object whose `message`
+ * getter throws.
+ */
+function hasUnreadableMessage(value: unknown): boolean {
+  if (value === null || typeof value !== 'object') return false
+  try {
+    const message = (value as { message?: unknown }).message
+    return value instanceof Error && typeof message !== 'string'
+  } catch {
+    return true
+  }
 }
 
 /**
