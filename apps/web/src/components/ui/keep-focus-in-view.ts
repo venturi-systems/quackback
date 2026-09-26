@@ -24,6 +24,12 @@ import { useEffect, type RefObject } from 'react'
  * Its scroller is the nearest ancestor that scrolls vertically (the widget's
  * panel), or the page. The band it keeps focus in honours the scroller's
  * scroll-padding, which on the portal clears the sticky header.
+ *
+ * Finding the scroller reads computed styles up the ancestor chain, so it is
+ * done when focus moves, after each resize, and when an element between the
+ * focused one and its known scroller scrolls (that element has started to
+ * scroll). Every other scroll event only re-reads geometry: the scroller's box
+ * and the focused element's box.
  */
 
 /** Half a pixel of slack for subpixel layout. */
@@ -33,6 +39,15 @@ interface Band {
   scroller: Element
   top: number
   bottom: number
+}
+
+/** The element that scrolls to show a focused element, with its scroll padding. */
+interface Scroller {
+  element: Element
+  /** The page's own scroller, whose band is the viewport. */
+  root: boolean
+  paddingTop: number
+  paddingBottom: number
 }
 
 /**
@@ -51,17 +66,19 @@ function keyboardFocus(doc: Document): Element | null {
   }
 }
 
-/** The part of its scroller, in viewport coordinates, where the element shows. */
-function bandOf(element: Element): Band | null {
+/**
+ * The scroller that holds the element: the nearest ancestor that scrolls
+ * vertically, or the page. Reads computed styles up the ancestor chain.
+ */
+function scrollerOf(element: Element): Scroller | null {
   const doc = element.ownerDocument
   const view = doc.defaultView
   if (!view) return null
-  const viewportBottom = doc.documentElement.clientHeight || view.innerHeight
   const padding = (box: Element) => {
     const style = view.getComputedStyle(box)
     return {
-      top: parseFloat(style.scrollPaddingTop) || 0,
-      bottom: parseFloat(style.scrollPaddingBottom) || 0,
+      paddingTop: parseFloat(style.scrollPaddingTop) || 0,
+      paddingBottom: parseFloat(style.scrollPaddingBottom) || 0,
     }
   }
   for (
@@ -74,21 +91,42 @@ function bandOf(element: Element): Band | null {
       (overflowY === 'auto' || overflowY === 'scroll') &&
       ancestor.scrollHeight > ancestor.clientHeight
     ) {
-      const top = ancestor.getBoundingClientRect().top + ancestor.clientTop
-      const inner = padding(ancestor)
-      return {
-        scroller: ancestor,
-        top: Math.max(top + inner.top, 0),
-        bottom: Math.min(top + ancestor.clientHeight - inner.bottom, viewportBottom),
-      }
+      return { element: ancestor, root: false, ...padding(ancestor) }
     }
   }
-  const root = padding(doc.documentElement)
   return {
-    scroller: doc.scrollingElement ?? doc.documentElement,
-    top: root.top,
-    bottom: viewportBottom - root.bottom,
+    element: doc.scrollingElement ?? doc.documentElement,
+    root: true,
+    ...padding(doc.documentElement),
   }
+}
+
+/**
+ * The part of the scroller, in viewport coordinates, where an element shows.
+ * Reads geometry only, so it is cheap enough for every scroll event.
+ */
+function bandIn(scroller: Scroller, doc: Document): Band {
+  const viewportBottom = doc.documentElement.clientHeight || doc.defaultView?.innerHeight || 0
+  if (scroller.root) {
+    return {
+      scroller: scroller.element,
+      top: scroller.paddingTop,
+      bottom: viewportBottom - scroller.paddingBottom,
+    }
+  }
+  const box = scroller.element
+  const top = box.getBoundingClientRect().top + box.clientTop
+  return {
+    scroller: box,
+    top: Math.max(top + scroller.paddingTop, 0),
+    bottom: Math.min(top + box.clientHeight - scroller.paddingBottom, viewportBottom),
+  }
+}
+
+/** The part of its scroller, in viewport coordinates, where the element shows. */
+function bandOf(element: Element): Band | null {
+  const scroller = scrollerOf(element)
+  return scroller && bandIn(scroller, element.ownerDocument)
 }
 
 function isWhole(rect: DOMRect, band: Band): boolean {
@@ -133,15 +171,42 @@ export function keepFocusInView(region: Element): () => void {
   if (!view || typeof view.ResizeObserver !== 'function') return () => undefined
 
   let tracked: Element | null = null
+  let scroller: Scroller | null = null
   let wasWhole = false
 
-  // Where keyboard focus sits now. Runs when focus moves and whenever anything
-  // scrolls (the browser's own reveal of a newly focused element included),
-  // so a resize is always judged against where the element was just before it.
+  // Whether the tracked element is whole in its scroller's band now. Geometry
+  // only: this is what most scroll events run.
+  const judge = () => {
+    const band = tracked && scroller && bandIn(scroller, doc)
+    wasWhole = Boolean(tracked && band && isWhole(tracked.getBoundingClientRect(), band))
+  }
+
+  // Which element has keyboard focus, which scroller holds it, and where it
+  // sits now. Runs when focus moves and after each resize.
   const measure = () => {
     tracked = keyboardFocus(doc)
-    const band = tracked && bandOf(tracked)
-    wasWhole = Boolean(tracked && band && isWhole(tracked.getBoundingClientRect(), band))
+    scroller = tracked && scrollerOf(tracked)
+    judge()
+  }
+
+  // Runs whenever anything scrolls (the browser's own reveal of a newly
+  // focused element included), so a resize is always judged against where the
+  // element was just before it. It measures afresh when keyboard focus changed
+  // without a focusin (a key pressed after a pointer focused a button makes
+  // the button match :focus-visible), or when the scroll came from an element
+  // between the focused one and its known scroller: that element has started
+  // to scroll, so it is the scroller now. Otherwise it re-reads geometry only.
+  const onScroll = (event: Event) => {
+    const focused = keyboardFocus(doc)
+    const source = event.target
+    const between =
+      focused !== null &&
+      source instanceof view.Element &&
+      source !== scroller?.element &&
+      source.contains(focused) &&
+      (scroller === null || scroller.root || scroller.element.contains(source))
+    if (focused !== tracked || between) measure()
+    else judge()
   }
 
   const onResize = () => {
@@ -157,11 +222,11 @@ export function keepFocusInView(region: Element): () => void {
   const observer = new view.ResizeObserver(onResize)
   observer.observe(region)
   // Scroll events do not bubble; capture sees the page's and every panel's.
-  doc.addEventListener('scroll', measure, { capture: true, passive: true })
+  doc.addEventListener('scroll', onScroll, { capture: true, passive: true })
   doc.addEventListener('focusin', measure, true)
   return () => {
     observer.disconnect()
-    doc.removeEventListener('scroll', measure, { capture: true })
+    doc.removeEventListener('scroll', onScroll, { capture: true })
     doc.removeEventListener('focusin', measure, true)
   }
 }

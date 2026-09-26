@@ -190,6 +190,78 @@ describe('keepFocusInView', () => {
     expect(rootScrollBy).not.toHaveBeenCalled()
   })
 
+  it('reads styles when focus arrives, and only geometry on each later scroll', () => {
+    const { place, focus } = page()
+    focus()
+    const reads = vi.mocked(view.getComputedStyle).mock.calls.length
+    expect(reads).toBeGreaterThan(0)
+    // The reader scrolls the button away and back: twenty scroll events.
+    for (let step = 0; step < 20; step++) {
+      place(step < 10 ? -200 : 300)
+      document.dispatchEvent(new Event('scroll'))
+    }
+    expect(view.getComputedStyle).toHaveBeenCalledTimes(reads)
+    // Geometry still decides: the button ended whole at 300px, so a resize
+    // that carries it below the viewport brings it back.
+    place(860)
+    resize?.()
+    expect(rootScrollBy).toHaveBeenCalledWith({ top: 60, behavior: 'instant' })
+  })
+
+  it('finds the scroller again when a panel around focus starts to scroll', () => {
+    const panel = document.createElement('div')
+    styles.set(panel, { overflowY: 'auto' })
+    // The panel's content fits at first, so the page is the scroller.
+    let panelScrollHeight = 500
+    Object.defineProperty(panel, 'scrollHeight', {
+      configurable: true,
+      get: () => panelScrollHeight,
+    })
+    Object.defineProperty(panel, 'clientHeight', { configurable: true, value: 500 })
+    Object.defineProperty(panel, 'clientTop', { configurable: true, value: 0 })
+    panel.getBoundingClientRect = () => rect(60, 500)
+    const panelScrollBy = vi.fn()
+    panel.scrollBy = panelScrollBy as unknown as typeof panel.scrollBy
+    const region = document.createElement('div')
+    const control = document.createElement('button')
+    control.matches = ((selector: string): boolean =>
+      selector === ':focus-visible') as typeof control.matches
+    panel.append(region, control)
+    document.body.append(panel)
+    let top = 500
+    control.getBoundingClientRect = () => rect(top, 44)
+    stop = keepFocusInView(region)
+
+    control.focus()
+    document.dispatchEvent(new Event('scroll'))
+    // Content arrives and the panel starts to scroll. The reader scrolls it
+    // until the button is below the panel's visible band (60-560px), though
+    // still inside the viewport.
+    panelScrollHeight = 900
+    top = 600
+    panel.dispatchEvent(new Event('scroll'))
+    // The composer grows. Against the page the button was whole before the
+    // resize; against the panel it was not, so the reader is not pulled back.
+    top = 620
+    resize?.()
+    expect(panelScrollBy).not.toHaveBeenCalled()
+    expect(rootScrollBy).not.toHaveBeenCalled()
+  })
+
+  it('measures focus that starts to match :focus-visible after it arrived', () => {
+    const { control, place } = page({ keyboard: false })
+    // A pointer focuses the button: not :focus-visible, so it is not tracked.
+    control.focus()
+    document.dispatchEvent(new Event('scroll'))
+    // A key press makes the button match :focus-visible; no focusin fires.
+    control.matches = ((selector: string): boolean =>
+      selector === ':focus-visible') as typeof control.matches
+    document.dispatchEvent(new Event('scroll'))
+    place(860)
+    resize?.()
+    expect(rootScrollBy).toHaveBeenCalledWith({ top: 60, behavior: 'instant' })
+  })
+
   it('stops watching once disposed', () => {
     const { place, focus } = page()
     focus()

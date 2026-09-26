@@ -42,7 +42,7 @@ import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import {
   KEYBOARD_DIR,
-  OUT_DIR,
+  REVIEW_DIR,
   ROUTES,
   readPlan,
   walkContextsFor,
@@ -719,9 +719,13 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
   if (ctx.viewport !== (feed ? 'desktop-fine' : 'phone-coarse') || ctx.motion !== 'reduce') return
 
   // Only these previously reported widths are captured. This adds no test,
-  // browser context, checker modification or acceptance waiver.
+  // browser context, checker modification or acceptance waiver. The checker
+  // runs after this walk, so a region's disposition says only whether a
+  // resolution is on record for its route, text and width; summarize.ts
+  // compares each region with the checker's review items and says whether the
+  // checker flagged it on this run.
   const widths = feed ? [1024, 1440, 1920, 2560] : [320]
-  const directory = path.join(OUT_DIR, 'review')
+  const directory = REVIEW_DIR
   fs.mkdirSync(directory, { recursive: true })
   await page.addStyleTag({
     content: `
