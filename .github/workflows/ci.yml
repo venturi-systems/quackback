@@ -672,10 +672,18 @@ jobs:
     # bun.lock or this workflow (the e2e lane's paths), plus workflow_dispatch;
     # never push, merge_group or the nightly schedule. About 5 runner-minutes
     # per run (4m29s to 4m57s measured on the adding PR; 4m46s on run
-    # 36088534312). It is not a `needs` of portability-gate, so it adds no time
-    # to the required gate, and it runs beside the end-to-end shards rather
-    # than after them. This repository is public, so GitHub-hosted Linux
-    # minutes are not billed.
+    # 36088534312). This repository is public, so GitHub-hosted Linux minutes
+    # are not billed.
+    #
+    # REQUIRED (REQ-32). It is a `needs` of portability-gate, the one context
+    # the main ruleset requires, so a red render check blocks the merge. Until
+    # it was, the gate passed beside a failed render job: runs 36111217511,
+    # 36148907427 and 36153263733 each show portability-gate success and this
+    # job failed on the same focus-clipped finding. It adds no wall time: it
+    # runs beside the end-to-end shards, never after them, on the same path
+    # filter, and it is the shorter lane (4m46s to 5m45s against a slowest
+    # shard of 13m03s to 15m57s on runs 36189375728, 36199565665,
+    # 36202612458, 36209030972 and 36221110319).
     #
     # MOTION (DEF-68). Every viewport is walked with motion on as well as with
     # reduced motion: 40 keyboard walks instead of 20, on the same runner and
@@ -839,22 +847,47 @@ jobs:
   portability_gate:
     name: ${{ github.event_name == 'workflow_dispatch' && 'portability-gate (manual diagnostic)' || 'portability-gate' }}
     if: ${{ always() }}
-    needs: [static_analysis, database_tests, changed_paths, e2e_tests]
+    needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every independent lane
         env:
+          EVENT_NAME: ${{ github.event_name }}
           STATIC_RESULT: ${{ needs.static_analysis.result }}
           DATABASE_RESULT: ${{ needs.database_tests.result }}
           CHANGED_PATHS_RESULT: ${{ needs.changed_paths.result }}
           E2E_RESULT: ${{ needs.e2e_tests.result }}
           E2E_FILTER: ${{ needs.changed_paths.outputs.e2e }}
           QUEUE_REUSE: ${{ needs.changed_paths.outputs.queue_reuse }}
+          RENDER_RESULT: ${{ needs.signed_in_render.result }}
+          RENDER_FILTER: ${{ needs.changed_paths.outputs.render }}
         run: |
           test "$STATIC_RESULT" = success
           test "$DATABASE_RESULT" = success
           test "$CHANGED_PATHS_RESULT" = success
+          # The signed-in render check (REQ-31, REQ-32) fails on a keyboard-walk
+          # or checker finding and on an authored review item with no recorded
+          # resolution. A `skipped` is accepted only where its own `if:` never
+          # runs it:
+          #   1. push, merge_group and the nightly schedule, which it never
+          #      runs on by design (see the job's COST comment);
+          #   2. a pull request whose path filter reported that nothing under
+          #      the rendered surface moved.
+          # A skip for any other reason -- workflow_dispatch, which always runs
+          # it; a pull request whose filter said "run"; an unset output -- and
+          # every failure or cancellation reds the gate. It is checked before
+          # the e2e lane because an e2e success ends this script.
+          if [ "$RENDER_RESULT" = success ]; then
+            echo "Signed-in render check passed."
+          elif [ "$RENDER_RESULT" = skipped ] && { [ "$EVENT_NAME" = push ] || [ "$EVENT_NAME" = merge_group ] || [ "$EVENT_NAME" = schedule ]; }; then
+            echo "Signed-in render check skipped: it never runs on $EVENT_NAME."
+          elif [ "$RENDER_RESULT" = skipped ] && [ "$EVENT_NAME" = pull_request ] && [ "$RENDER_FILTER" = false ]; then
+            echo "Signed-in render check skipped: path filter found no rendered-surface change."
+          else
+            echo "render result '$RENDER_RESULT' is not acceptable (event=$EVENT_NAME filter=$RENDER_FILTER)." >&2
+            exit 1
+          fi
           # Static analysis and the database lane run on EVERY event, merge
           # queue included -- they are cheap and act as belt-and-braces on
           # the exact tree even when e2e evidence is reused.

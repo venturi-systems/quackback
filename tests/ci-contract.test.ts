@@ -48,7 +48,9 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain("github.event_name == 'workflow_dispatch'")
     expect(ci).toContain("'portability-gate (manual diagnostic)'")
     expect(ci).toContain("|| 'portability-gate'")
-    expect(ci).toContain('needs: [static_analysis, database_tests, changed_paths, e2e_tests]')
+    expect(ci).toContain(
+      'needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]'
+    )
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
     expect(ci).toContain('docker run --rm --read-only --network none')
@@ -140,7 +142,7 @@ describe('QB-CI-002 signed-in render lane', () => {
     }
   })
 
-  it('runs as an advisory pull-request and manual lane beside the required gate', () => {
+  it('runs as a pull-request and manual lane that the required gate needs', () => {
     const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
     const job =
       ci.split('\n  signed_in_render:\n', 2)[1]?.split('\n  portability_gate:\n', 1)[0] ?? ''
@@ -177,6 +179,32 @@ describe('QB-CI-002 signed-in render lane', () => {
       '^(apps/web/|packages/|package\\.json$|bun\\.lock$|\\.github/workflows/ci\\.yml$)'
     )
     expect(filterFor('render')).toBe(filterFor('e2e'))
+    // REQ-32: the required gate needs this job. It accepts `skipped` only
+    // where the job's own `if:` never runs it -- push, merge_group and the
+    // nightly schedule, or a pull request whose render filter said nothing
+    // moved -- and every other result, workflow_dispatch skips included,
+    // fails the gate.
+    const gate = ci.split('\n  portability_gate:\n', 2)[1] ?? ''
+    expect(gate).toContain(
+      'needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]'
+    )
+    expect(gate).toContain('RENDER_RESULT: ${{ needs.signed_in_render.result }}')
+    expect(gate).toContain('RENDER_FILTER: ${{ needs.changed_paths.outputs.render }}')
+    expect(gate).toContain('EVENT_NAME: ${{ github.event_name }}')
+    expect(gate).toContain('if [ "$RENDER_RESULT" = success ]; then')
+    expect(gate).toContain(
+      'elif [ "$RENDER_RESULT" = skipped ] && { [ "$EVENT_NAME" = push ] || [ "$EVENT_NAME" = merge_group ] || [ "$EVENT_NAME" = schedule ]; }; then'
+    )
+    expect(gate).toContain(
+      'elif [ "$RENDER_RESULT" = skipped ] && [ "$EVENT_NAME" = pull_request ] && [ "$RENDER_FILTER" = false ]; then'
+    )
+    expect(gate).toMatch(/render result '\$RENDER_RESULT' is not acceptable[^\n]*\n\s+exit 1/)
+    expect(gate).not.toContain('workflow_dispatch ] ||')
+    // The render verdict is decided before the e2e block, whose success
+    // ends the script with `exit 0`.
+    expect(gate.indexOf('$RENDER_RESULT')).toBeLessThan(
+      gate.indexOf('if [ "$E2E_RESULT" = success ]')
+    )
   })
 })
 
