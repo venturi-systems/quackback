@@ -77,6 +77,8 @@ export const OUT_DIR = path.resolve(
 export const PLAN_PATH = path.join(OUT_DIR, 'plan.json')
 export const KEYBOARD_DIR = path.join(OUT_DIR, 'keyboard')
 export const CHECKER_DIR = path.join(OUT_DIR, 'checker')
+/** The text-spacing captures of the authored review items (keyboard-walk.spec.ts). */
+export const REVIEW_DIR = path.join(OUT_DIR, 'review')
 
 export const SUITE_DIR = path.join(here, 'design-suite')
 
