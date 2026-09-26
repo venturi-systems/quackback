@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { DEV_SERVER_READY, DEV_SERVER_URL } from './e2e/scripts/dev-server-ready'
 import { assertDesignFixtureEnvironmentSync } from './e2e/utils/design-fixture-guard'
 
 // Guard CI before webServer and setup fixtures are instantiated.
@@ -114,10 +115,21 @@ export default defineConfig({
     },
   ],
 
-  /* Run local dev server before starting the tests */
+  /* Run local dev server before starting the tests.
+   *
+   * The command runs `bun run dev` and prints DEV_SERVER_READY on stderr once
+   * the tenant URL answers (HYG-35, e2e/scripts/dev-server-ready.ts).
+   * Playwright takes whichever comes first: that line, or its own probe of
+   * `url`. Its own probe has no per-request timeout, and the dev server can
+   * leave one early request unanswered for good, which held that probe until
+   * this timeout and ran the shard with zero tests. The line cannot be held
+   * that way, because each of its attempts is bounded. `url` stays for
+   * reuseExistingServer. A server that never answers still fails at this
+   * timeout, and one that exits fails at once. */
   webServer: {
-    command: 'bun run dev',
-    url: 'http://acme.localhost:3000',
+    command: 'bun e2e/scripts/dev-server.ts',
+    url: DEV_SERVER_URL,
+    wait: { stderr: DEV_SERVER_READY },
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
   },
