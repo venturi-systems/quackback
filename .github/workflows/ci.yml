@@ -45,7 +45,7 @@ env:
 jobs:
   static_analysis:
     name: Static analysis
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, venturi-ci-ephemeral]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -125,7 +125,7 @@ jobs:
 
   database_tests:
     name: Database migrations and tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, venturi-ci-ephemeral-medium]
     timeout-minutes: 25
     services:
       postgres:
@@ -165,7 +165,7 @@ jobs:
 
   changed_paths:
     name: Changed-path filter
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, venturi-ci-ephemeral]
     timeout-minutes: 5
     # The reuse probe below reads workflow runs and jobs, the PR, and commit
     # trees. Read-only, and scoped to this job so the heavy lanes inherit
@@ -403,7 +403,7 @@ jobs:
     # skipped changed_paths leaves e2e unset and this job does not run --
     # which portability_gate then treats as a failure, never a pass.
     if: needs.changed_paths.outputs.e2e == 'true' && needs.changed_paths.outputs.queue_reuse != 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, venturi-ci-ephemeral-medium]
     # A cancelled shard reports NOTHING -- no counts, no failure list -- so the
     # cap has to be comfortably above the slowest honest run, and the run has to
     # be short enough that it is.
@@ -666,14 +666,18 @@ jobs:
     # rendered design check at all, and the checker's only runs were manual
     # sweeps on the services hub over SSM. On 2026-09-24 those sweeps drove the
     # hub to load 112 and starved memory recall for every agent session. The
-    # check now runs here, on a GitHub-hosted runner, and nowhere else.
+    # check now runs here, on the ephemeral self-hosted pool
+    # (venturi-ci-ephemeral-medium, per-job isolation, Docker per slot), and
+    # nowhere else.
     #
     # COST. Pull requests that touch apps/web, packages/, package.json,
     # bun.lock or this workflow (the e2e lane's paths), plus workflow_dispatch;
     # never push, merge_group or the nightly schedule. About 5 runner-minutes
     # per run (4m29s to 4m57s measured on the adding PR; 4m46s on run
-    # 36088534312). This repository is public, so GitHub-hosted Linux minutes
-    # are not billed.
+    # 36088534312, both on the GitHub-hosted runner it used until 2026-09-28).
+    # The pool bills no Actions minutes, so the org Actions budget stop cannot
+    # switch this check off (CI trust contract, infra
+    # docs/runbooks/workflow-security-controls.md, "Runner trust tiers").
     #
     # REQUIRED (REQ-32). It is a `needs` of portability-gate, the one context
     # the main ruleset requires, so a red render check blocks the merge. Until
@@ -695,7 +699,7 @@ jobs:
     name: Signed-in render check
     needs: [changed_paths]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, venturi-ci-ephemeral-medium]
     timeout-minutes: 45
     services:
       postgres:
@@ -848,7 +852,7 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && 'portability-gate (manual diagnostic)' || 'portability-gate' }}
     if: ${{ always() }}
     needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, venturi-ci-ephemeral]
     timeout-minutes: 5
     steps:
       - name: Require every independent lane

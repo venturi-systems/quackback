@@ -51,7 +51,15 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain(
       'needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]'
     )
-    expect(ci).toContain('runs-on: ubuntu-latest')
+    // Every lane runs on the ephemeral self-hosted pool (CI trust contract,
+    // infra docs/runbooks/workflow-security-controls.md, "Runner trust tiers"):
+    // the small class for the filter, static analysis and the gate, the medium
+    // class for the lanes that carry a service container or a browser. No lane
+    // may drift back to a GitHub-hosted image, which the org Actions budget
+    // stop can switch off.
+    expect(ci).toContain('runs-on: [self-hosted, venturi-ci-ephemeral]')
+    expect(ci).toContain('runs-on: [self-hosted, venturi-ci-ephemeral-medium]')
+    expect(ci).not.toMatch(/runs-on:.*ubuntu-/)
     expect(ci).toContain('services:\n      postgres:')
     expect(ci).toContain('docker run --rm --read-only --network none')
     expect(ci).toContain(
@@ -150,7 +158,7 @@ describe('QB-CI-002 signed-in render lane', () => {
     expect(job).toContain(
       "if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')"
     )
-    expect(job).toContain('runs-on: ubuntu-latest')
+    expect(job).toContain('runs-on: [self-hosted, venturi-ci-ephemeral-medium]')
     expect(job).toContain('timeout-minutes: 45')
     // The checker runs unmodified: the job refuses any bytes but the pinned ones.
     expect(job).toContain('sha256sum --check --strict')
@@ -391,7 +399,7 @@ describe('QB-GOV-001 repository governance contract', () => {
   // REQ-03: a closed pull request's caches are deleted when it closes. The
   // workflow runs the base branch's definition (pull_request_target), checks
   // nothing out, and is the only workflow here that holds actions: write.
-  it('evicts a closed pull request\'s caches without checking anything out', () => {
+  it("evicts a closed pull request's caches without checking anything out", () => {
     const evict = readFileSync(join(workflowDir, 'cache-eviction.yml'), 'utf8')
     expect(evict).toMatch(/^on:\n {2}pull_request_target:\n {4}types: \[closed\]\n/m)
     expect(evict).toContain('\npermissions: {}\n')

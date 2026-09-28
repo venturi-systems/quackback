@@ -1,0 +1,8 @@
+# Custom labels of the ephemeral self-hosted pool (CI trust contract, infra
+# docs/runbooks/workflow-security-controls.md, "Runner trust tiers"), so
+# actionlint recognises the runs-on values ci.yml and the release workflows use.
+self-hosted-runner:
+  labels:
+    - venturi-ci-ephemeral
+    - venturi-ci-ephemeral-medium
+    - venturi-ci-ephemeral-large
