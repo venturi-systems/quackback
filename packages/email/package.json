@@ -16,7 +16,7 @@
     "@react-email/components": "^1.0.11",
     "nodemailer": "^10.0.10",
     "react": "^19.3.0",
-    "resend": "^6.28.1"
+    "resend": "^6.29.0"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.2",
