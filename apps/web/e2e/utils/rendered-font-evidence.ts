@@ -13,6 +13,7 @@ type NodeFontEvidence = {
   nodeId: number | null
   matchCount: number | null
   status: 'pass' | 'review-required'
+  observationStatus: 'measured' | 'incomplete'
   fonts: FontEvidence[]
   totalGlyphCount: number
   reasons: string[]
@@ -21,7 +22,8 @@ type NodeFontEvidence = {
 export type RenderedFontEvidence = {
   schema: 'venturi.rendered-font-evidence.v1'
   status: 'pass' | 'review-required'
-  expectedFamily: string
+  observationStatus: 'measured' | 'incomplete'
+  expectedFamily: string | null
   startedAt: string
   finishedAt: string
   requestedPathCount: number
@@ -31,7 +33,7 @@ export type RenderedFontEvidence = {
 }
 
 /**
- * Prepared review artifact; NOT_RUN. Observes an existing Chromium page only.
+ * Observes an existing Chromium page only.
  * Supply every finding.lines[].fragments[].nodePath from the same unchanged
  * typography snapshot. Duplicate paths share one query; inputIndices retain
  * their provenance. Pass is scoped to these text-parent nodes at measurement.
@@ -47,9 +49,29 @@ export async function measureRenderedFonts(
   nodePaths: string[],
   expectedFamily = 'DM Sans'
 ): Promise<RenderedFontEvidence> {
+  return collectRenderedFonts(page, nodePaths, expectedFamily)
+}
+
+/**
+ * Collect glyph identities without selecting a locale's approved font policy.
+ * Complete observations still require visual and language-aware review.
+ */
+export async function observeRenderedFonts(
+  page: Page,
+  nodePaths: string[]
+): Promise<RenderedFontEvidence> {
+  return collectRenderedFonts(page, nodePaths, null)
+}
+
+async function collectRenderedFonts(
+  page: Page,
+  nodePaths: string[],
+  expectedFamily: string | null
+): Promise<RenderedFontEvidence> {
   const result: RenderedFontEvidence = {
     schema: 'venturi.rendered-font-evidence.v1',
     status: 'review-required',
+    observationStatus: 'incomplete',
     expectedFamily,
     startedAt: new Date().toISOString(),
     finishedAt: '',
@@ -71,6 +93,7 @@ export async function measureRenderedFonts(
       nodeId: null,
       matchCount: null,
       status: 'review-required',
+      observationStatus: 'incomplete',
       fonts: [],
       totalGlyphCount: 0,
       reasons: [],
@@ -80,7 +103,7 @@ export async function measureRenderedFonts(
   })
   result.uniquePathCount = result.nodes.length
   if (!result.nodes.length) result.reasons.push('no-text-parent-paths-supplied')
-  if (typeof expectedFamily !== 'string' || !expectedFamily.trim()) {
+  if (expectedFamily !== null && (typeof expectedFamily !== 'string' || !expectedFamily.trim())) {
     result.reasons.push('expected-family-missing')
   }
 
@@ -139,20 +162,31 @@ export async function measureRenderedFonts(
                     : null,
               }
               node.fonts.push(evidence)
-              if (
-                evidence.familyName !== expectedFamily &&
-                !evidence.familyName?.startsWith(`${expectedFamily} `)
-              )
-                node.reasons.push('unexpected-rendered-font-family')
-              if (!evidence.postScriptName) node.reasons.push('postscript-font-identity-missing')
-              if (evidence.isCustomFont !== true)
-                node.reasons.push('custom-font-evidence-missing-or-system-fallback')
+              if (!evidence.familyName?.trim()) node.reasons.push('font-family-identity-missing')
+              if (!evidence.postScriptName?.trim())
+                node.reasons.push('postscript-font-identity-missing')
+              if (evidence.isCustomFont === null) node.reasons.push('font-kind-evidence-missing')
+              if (expectedFamily !== null) {
+                if (
+                  evidence.familyName !== expectedFamily &&
+                  !evidence.familyName?.startsWith(expectedFamily + ' ')
+                )
+                  node.reasons.push('unexpected-rendered-font-family')
+                if (evidence.isCustomFont !== true)
+                  node.reasons.push('custom-font-evidence-missing-or-system-fallback')
+              }
               if (evidence.glyphCount === null) node.reasons.push('glyph-count-evidence-invalid')
               else node.totalGlyphCount += evidence.glyphCount
             }
             if (node.totalGlyphCount <= 0) node.reasons.push('no-positive-rendered-glyph-count')
             node.reasons = [...new Set(node.reasons)]
-            if (!node.reasons.length) node.status = 'pass'
+            const policyReasons = [
+              'unexpected-rendered-font-family',
+              'custom-font-evidence-missing-or-system-fallback',
+            ]
+            if (node.reasons.every((reason) => policyReasons.includes(reason)))
+              node.observationStatus = 'measured'
+            if (expectedFamily !== null && !node.reasons.length) node.status = 'pass'
           } catch {
             // No transport error strings are retained: they can contain URLs.
             node.reasons.push('node-or-platform-font-api-evidence-unavailable')
@@ -174,10 +208,37 @@ export async function measureRenderedFonts(
   if (
     !result.reasons.length &&
     result.nodes.length > 0 &&
+    result.nodes.every((node) => node.observationStatus === 'measured')
+  ) {
+    result.observationStatus = 'measured'
+  }
+  if (expectedFamily === null) {
+    result.reasons.push('font-family-policy-requires-locale-review')
+  } else if (
+    !result.reasons.length &&
+    result.nodes.length > 0 &&
     result.nodes.every((node) => node.status === 'pass')
   ) {
     result.status = 'pass'
   }
   result.finishedAt = new Date().toISOString()
   return result
+}
+
+/** Compare complete glyph observations without timestamps or ephemeral CDP node IDs. */
+export function renderedFontsMatch(
+  before: RenderedFontEvidence,
+  after: RenderedFontEvidence
+): boolean {
+  if (before.observationStatus !== 'measured' || after.observationStatus !== 'measured') {
+    return false
+  }
+  const binding = (evidence: RenderedFontEvidence) => ({
+    expectedFamily: evidence.expectedFamily,
+    nodes: evidence.nodes.map(({ nodePath, fonts }) => ({
+      nodePath,
+      fonts: fonts.map((font) => JSON.stringify(font)).sort(),
+    })),
+  })
+  return JSON.stringify(binding(before)) === JSON.stringify(binding(after))
 }

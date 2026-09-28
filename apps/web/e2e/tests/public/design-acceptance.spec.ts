@@ -10,7 +10,11 @@ import {
   measureTypography,
   type TypographyRegion,
 } from '../../utils/design-acceptance'
-import { measureRenderedFonts } from '../../utils/rendered-font-evidence'
+import {
+  measureRenderedFonts,
+  observeRenderedFonts,
+  renderedFontsMatch,
+} from '../../utils/rendered-font-evidence'
 import { withDesignBrowserZoom } from '../../utils/browser-zoom-actuator'
 import { assertActualBrowserZoom } from '../../utils/browser-zoom-evidence'
 import { measureFocusIndicator, assertForcedColorsFocus } from '../../utils/forced-colors-focus'
@@ -41,7 +45,6 @@ async function attach(testInfo: TestInfo, name: string, evidence: unknown) {
   })
 }
 
-
 async function recordScreenshot(page: Page, testInfo: TestInfo, state: string) {
   // Inline evidence survives the existing success-path trace cleanup.
   // Reuses these tests and the seven-day artifact; no additional CI lane.
@@ -52,7 +55,9 @@ async function recordScreenshot(page: Page, testInfo: TestInfo, state: string) {
     viewport: page.viewportSize(),
     state,
     capturedAt: new Date().toISOString(),
-    pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString('base64'),
+    pngBase64: (await page.screenshot({ fullPage: true, animations: 'disabled' })).toString(
+      'base64'
+    ),
   })
 }
 
@@ -259,21 +264,8 @@ async function recordReflow(page: Page, testInfo: TestInfo, state: string) {
   return evidence
 }
 
-async function recordAuthoredFeedTypography(page: Page, testInfo: TestInfo, state: string) {
-  const evidence = await measureTypography(page, feedRegions(), { artifactRevision: SOURCE, state })
-  const paths = [
-    ...new Set(
-      evidence.findings.flatMap((finding) =>
-        finding.lines.flatMap((line) => line.fragments.map((fragment) => fragment.nodePath))
-      )
-    ),
-  ]
-  const fonts = await measureRenderedFonts(page, paths, 'DM Sans')
-  const afterFonts = await measureTypography(page, feedRegions(), {
-    artifactRevision: SOURCE,
-    state,
-  })
-  const binding = (snapshot: typeof evidence) => ({
+function typographyBinding(snapshot: Awaited<ReturnType<typeof measureTypography>>) {
+  return {
     viewport: snapshot.environment.viewportOrCanvas,
     fontReadiness: snapshot.environment.fontReadiness,
     coverage: snapshot.coverage,
@@ -288,18 +280,40 @@ async function recordAuthoredFeedTypography(page: Page, testInfo: TestInfo, stat
         linePolicyStatus,
       })
     ),
+  }
+}
+
+async function recordAuthoredFeedTypography(page: Page, testInfo: TestInfo, state: string) {
+  const evidence = await measureTypography(page, feedRegions(), { artifactRevision: SOURCE, state })
+  const paths = [
+    ...new Set(
+      evidence.findings.flatMap((finding) =>
+        finding.lines.flatMap((line) => line.fragments.map((fragment) => fragment.nodePath))
+      )
+    ),
+  ]
+  const fonts = await measureRenderedFonts(page, paths, 'DM Sans')
+  const afterGlyphFonts = await measureRenderedFonts(page, paths, 'DM Sans')
+  const afterFonts = await measureTypography(page, feedRegions(), {
+    artifactRevision: SOURCE,
+    state,
   })
-  const stableSnapshot = JSON.stringify(binding(evidence)) === JSON.stringify(binding(afterFonts))
+
+  const stableSnapshot =
+    JSON.stringify(typographyBinding(evidence)) === JSON.stringify(typographyBinding(afterFonts)) &&
+    renderedFontsMatch(fonts, afterGlyphFonts)
   const scopedAcceptance =
     evidence.coverage.every((item) => item.status === 'measured') &&
     evidence.findings.every((finding) =>
       ['pass', 'exempt', 'not-applicable'].includes(finding.linePolicyStatus)
     ) &&
     fonts.status === 'pass' &&
+    afterGlyphFonts.status === 'pass' &&
     stableSnapshot
   await attach(testInfo, `typography-${state}`, {
     evidence,
     actualGlyphFonts: fonts,
+    afterGlyphFonts,
     afterFonts,
     stableSnapshot,
     scopedAcceptance: scopedAcceptance ? 'pass' : 'review-required',
@@ -858,12 +872,38 @@ for (const { locale, language, direction } of [
           artifactRevision: SOURCE,
           state: `${locale}-${width}`,
         })
+        const paths = typography.findings.flatMap((finding) =>
+          finding.lines.flatMap((line) => line.fragments.map((fragment) => fragment.nodePath))
+        )
+        const actualGlyphFonts = await observeRenderedFonts(page, paths)
+        await recordScreenshot(page, testInfo, locale + '-' + width)
+        const afterGlyphFonts = await observeRenderedFonts(page, paths)
+        const afterCapture = await measureTypography(page, feedRegions(locale, 'localized'), {
+          artifactRevision: SOURCE,
+          state: locale + '-' + width,
+        })
+        const stableSnapshot =
+          JSON.stringify(typographyBinding(typography)) ===
+            JSON.stringify(typographyBinding(afterCapture)) &&
+          renderedFontsMatch(actualGlyphFonts, afterGlyphFonts)
         await attach(testInfo, `localized-review-${locale}-${width}`, {
           typography,
+          actualGlyphFonts,
+          afterGlyphFonts,
+          afterCapture,
+          stableSnapshot,
           acceptance:
-            'REVIEW_REQUIRED: this test asserts catalog direction and geometry only; glyph-font and localized typography dispositions are still required.',
+            'REVIEW_REQUIRED: direction, geometry and stable glyph observations are checked; locale font selection, shaping and composition need specific visual review.',
         })
         expect(typography.coverage.filter((item) => item.status !== 'measured')).toEqual([])
+        expect(
+          actualGlyphFonts.observationStatus,
+          'Every text parent needs complete glyph evidence'
+        ).toBe('measured')
+        expect(actualGlyphFonts.status, 'Observation does not approve a locale font').toBe(
+          'review-required'
+        )
+        expect(stableSnapshot, 'Locale text, geometry or fonts changed during capture').toBe(true)
         expect(await page.locator('#feedback-title').innerText()).not.toBe('Feedback')
       })
     }
@@ -944,7 +984,9 @@ for (const width of [320, 1440]) {
     }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 })
       await openRoute(page, route)
-      const trigger = page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })
+      const trigger = page
+        .locator('#portal-main')
+        .getByRole('button', { name: 'Search', exact: true })
       await trigger.click()
       const search = page.getByRole('textbox', { name: 'Search', exact: true })
       await expect(search).toBeFocused()
@@ -977,7 +1019,9 @@ for (const width of [320, 1440]) {
   }
 }
 
-test('A11 empty search recovery preserves the selected board and sort', async ({ page }, testInfo) => {
+test('A11 empty search recovery preserves the selected board and sort', async ({
+  page,
+}, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await openRoute(page, 'feed')
   await page.locator('#portal-main aside nav button').nth(1).click()
@@ -1003,7 +1047,9 @@ test('A11 empty search recovery preserves the selected board and sort', async ({
   expect(restored.get('sort')).toBe('top')
   await expect(status).toHaveText(/^[1-9]\d* posts? shown$/)
   await expect(page.locator('#portal-main a[href*="/posts/"]').first()).toBeVisible()
-  await expect(page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })).toBeFocused()
+  await expect(
+    page.locator('#portal-main').getByRole('button', { name: 'Search', exact: true })
+  ).toBeFocused()
   await expect(page.getByRole('button', { name: 'Clear all', exact: true })).toBeHidden()
   await recordScreenshot(page, testInfo, 'feed-results-restored')
 })
