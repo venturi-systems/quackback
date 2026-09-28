@@ -14,6 +14,12 @@ export {
   type LogCallLevel,
 } from './console'
 export {
+  PROCESS_ERROR_NOT_LOGGED,
+  UNCAUGHT_EXCEPTION_MESSAGE,
+  UNHANDLED_REJECTION_MESSAGE,
+  routeProcessErrorsToLogger,
+} from './process-errors'
+export {
   containsDatabaseError,
   databaseErrorLogFields,
   isDatabaseError,

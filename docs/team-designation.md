@@ -124,11 +124,13 @@ moment earlier is the one the rules check:
 - unlinking the last Google or GitHub account of the only such administrator
   is refused.
 
-The unlink check runs before Better Auth unlinks, not in the same transaction:
-two administrators who each unlink their last Google or GitHub account at the
-same moment can both pass it. Either recovers without break-glass by signing
-in with Google or GitHub again, which links the provider back onto the
-verified account.
+The unlink gate (`handleUnlinkAccountGate` in `auth/hooks.ts`) performs every
+Google or GitHub unlink itself: it reads the caller's links, counts the other
+eligible administrators and deletes the account in one transaction under the
+team-role lock. Two administrators who each unlink their last Google or GitHub
+account at the same moment, or an unlink racing a demotion, are serialized:
+whoever takes the lock second counts what the first one committed, so neither
+path leaves the workspace without an administrator who can act (DEF-62).
 
 ## Cutover after deploy (feedback.venturi.systems)
 
