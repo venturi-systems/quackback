@@ -30,6 +30,7 @@ export function OAuthConnectionActions({
   const deleteMutation = useDeleteIntegration()
   const [showSuccess, setShowSuccess] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [connectError, setConnectError] = useState<string | null>(null)
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
 
   useEffect(() => {
@@ -45,14 +46,30 @@ export function OAuthConnectionActions({
     return () => clearTimeout(timer)
   }, [search, searchParamKey])
 
+  useEffect(() => {
+    // A restored browser history entry retains React state, including pending UI.
+    const handlePageShow = () => setConnecting(false)
+    window.addEventListener('pageshow', handlePageShow)
+    return () => window.removeEventListener('pageshow', handlePageShow)
+  }, [])
+
   const handleConnect = async () => {
+    setConnectError(null)
     setConnecting(true)
+    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const url = await getConnectUrl()
+      const url = await Promise.race([
+        getConnectUrl(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Connection request timed out')), 30_000)
+        }),
+      ])
       window.location.href = url
-    } catch (err) {
-      console.error('Failed to get connect URL:', err)
+    } catch {
+      setConnectError(`Unable to start the ${displayName} connection. Please try again.`)
       setConnecting(false)
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
@@ -70,6 +87,12 @@ export function OAuthConnectionActions({
           <CheckCircleIcon className="h-4 w-4" />
           <span>Connected successfully!</span>
         </div>
+      )}
+
+      {connectError && (
+        <p role="alert" className="max-w-sm text-sm text-destructive">
+          {connectError}
+        </p>
       )}
 
       <div className="flex items-center gap-2">
