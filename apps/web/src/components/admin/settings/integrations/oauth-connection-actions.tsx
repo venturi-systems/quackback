@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useSearch } from '@tanstack/react-router'
 import { ArrowPathIcon, CheckCircleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,8 @@ export function OAuthConnectionActions({
   const deleteMutation = useDeleteIntegration()
   const [showSuccess, setShowSuccess] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const connectAttempt = useRef(0)
+  const [connectError, setConnectError] = useState<string | null>(null)
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false)
 
   useEffect(() => {
@@ -45,14 +47,39 @@ export function OAuthConnectionActions({
     return () => clearTimeout(timer)
   }, [search, searchParamKey])
 
-  const handleConnect = async () => {
-    setConnecting(true)
-    try {
-      const url = await getConnectUrl()
-      window.location.href = url
-    } catch (err) {
-      console.error('Failed to get connect URL:', err)
+  useEffect(() => {
+    // A restored browser history entry retains React state, including pending UI.
+    const handlePageShow = () => {
+      connectAttempt.current += 1
       setConnecting(false)
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      connectAttempt.current += 1
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [])
+
+  const handleConnect = async () => {
+    const attempt = ++connectAttempt.current
+    setConnectError(null)
+    setConnecting(true)
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      const url = await Promise.race([
+        getConnectUrl(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('Connection request timed out')), 30_000)
+        }),
+      ])
+      if (attempt !== connectAttempt.current) return
+      window.location.href = url
+    } catch {
+      if (attempt !== connectAttempt.current) return
+      setConnectError(`Unable to start the ${displayName} connection. Please try again.`)
+      setConnecting(false)
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
@@ -70,6 +97,12 @@ export function OAuthConnectionActions({
           <CheckCircleIcon className="h-4 w-4" />
           <span>Connected successfully!</span>
         </div>
+      )}
+
+      {connectError && (
+        <p role="alert" className="max-w-sm text-sm text-destructive">
+          {connectError}
+        </p>
       )}
 
       <div className="flex items-center gap-2">
