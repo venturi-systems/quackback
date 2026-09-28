@@ -227,21 +227,24 @@ function GateCard({
   return (
     <div className="portal-gate__layout">
       <div className="portal-gate__intro">
-        <h1 className="portal-gate__title">{header.title}</h1>
+        <h1 className="portal-gate__title">
+          {isBaseStep ? (
+            <FormattedMessage
+              id="portal.gate.welcomeTitle"
+              defaultMessage="Help shape {workspace}"
+              values={{ workspace: workspaceName || 'Venturi' }}
+            />
+          ) : (
+            header.title
+          )}
+        </h1>
         {notice}
         {isBaseStep ? (
           <p className="portal-gate__lead" data-testid="portal-gate-lead">
-            {anyoneCanRead ? (
-              <FormattedMessage
-                id="portal.gate.leadOpen"
-                defaultMessage="Share product ideas, vote on requests and follow the roadmap. Anyone who signs in can read and take part."
-              />
-            ) : (
-              <FormattedMessage
-                id="portal.gate.leadPrivate"
-                defaultMessage="Share product ideas, vote on requests and follow the roadmap. This portal is private: only people given access can read it."
-              />
-            )}
+            <FormattedMessage
+              id="portal.gate.value"
+              defaultMessage="Share product ideas, vote on requests and follow the roadmap."
+            />
           </p>
         ) : (
           <p className="portal-gate__lead">{header.description}</p>
@@ -249,27 +252,61 @@ function GateCard({
       </div>
 
       <section className="portal-gate__signin" aria-label="Sign in">
-        {signingIn ? (
-          <div className="portal-gate__signing-in" aria-live="polite">
-            <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden="true" />
-            <FormattedMessage id="portal.auth.signingIn" defaultMessage="Signing in..." />
-          </div>
-        ) : (
-          <PortalAuthFormInline
-            mode={mode}
-            authConfig={authConfig}
-            workspaceName={workspaceName}
-            callbackUrl={safeCallback}
-            onModeSwitch={setMode}
-            onContextChange={setStepCtx}
-          />
-        )}
+        <div className="portal-gate__form">
+          {isBaseStep && (
+            <div className="portal-gate__form-intro">
+              <h2 className="portal-gate__signin-title">
+                {mode === 'signup' ? (
+                  <FormattedMessage
+                    id="portal.gate.createAccount"
+                    defaultMessage="Create an account"
+                  />
+                ) : (
+                  <FormattedMessage id="portal.gate.signInTitle" defaultMessage="Sign in" />
+                )}
+              </h2>
+              <p className="portal-gate__access" data-testid="portal-gate-access">
+                {anyoneCanRead ? (
+                  <FormattedMessage
+                    id="portal.gate.accessOpen"
+                    defaultMessage="Anyone who signs in can read and take part."
+                  />
+                ) : (
+                  <FormattedMessage
+                    id="portal.gate.accessPrivate"
+                    defaultMessage="This portal is private: only people given access can read it."
+                  />
+                )}
+              </p>
+            </div>
+          )}
+          {signingIn ? (
+            <div className="portal-gate__signing-in" aria-live="polite">
+              <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <FormattedMessage id="portal.auth.signingIn" defaultMessage="Signing in..." />
+            </div>
+          ) : (
+            <PortalAuthFormInline
+              mode={mode}
+              authConfig={authConfig}
+              workspaceName={workspaceName}
+              callbackUrl={safeCallback}
+              onModeSwitch={setMode}
+              onContextChange={setStepCtx}
+            />
+          )}
+        </div>
       </section>
 
       {isBaseStep && (
-        <div className="portal-gate__roles">
-          <PortalRolesExplainer visibility={visibility} />
-        </div>
+        <details className="portal-gate__roles">
+          <summary className="portal-gate__roles-summary">
+            <h2 id="portal-gate-roles-title">
+              <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />
+            </h2>
+          </summary>
+          <PortalRolesExplainer visibility={visibility} labelledBy="portal-gate-roles-title" />
+        </details>
       )}
     </div>
   )

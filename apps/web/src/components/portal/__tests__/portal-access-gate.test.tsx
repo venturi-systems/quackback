@@ -106,9 +106,16 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
   it('says what the portal is and that anyone who signs in can take part', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
     expect(screen.getByTestId('portal-gate-lead')).toHaveTextContent(
-      'Share product ideas, vote on requests and follow the roadmap. Anyone who signs in can read and take part.'
+      'Share product ideas, vote on requests and follow the roadmap.'
     )
-    expect(screen.getByRole('heading', { level: 2, name: 'Who can do what' })).toBeVisible()
+    expect(screen.getByTestId('portal-gate-access')).toHaveTextContent(
+      'Anyone who signs in can read and take part.'
+    )
+    expect(screen.getByRole('heading', { level: 1, name: 'Help shape Acme' })).toBeVisible()
+    const disclosure = screen.getByText('Who can do what').closest('details')
+    expect(disclosure).not.toHaveAttribute('open')
+    expect(disclosure?.querySelector('summary')).toHaveTextContent('Who can do what')
+    expect(disclosure).toHaveTextContent('Read ideas and the roadmap')
     expect(screen.getByRole('region', { name: 'Sign in' })).toContainElement(
       screen.getByTestId('auth-form-body')
     )
@@ -116,7 +123,7 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
 
   it('calls the portal private only when sign-in does not grant read access', () => {
     render(<PortalAccessGate {...baseProps} visibility="private" />)
-    expect(screen.getByTestId('portal-gate-lead')).toHaveTextContent(
+    expect(screen.getByTestId('portal-gate-access')).toHaveTextContent(
       'This portal is private: only people given access can read it.'
     )
   })

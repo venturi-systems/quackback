@@ -311,15 +311,83 @@
   text-wrap: balance;
 }
 
-/* Sign-in page: reading-start composition in task order. The heading and
-   lead span the page, the sign-in actions keep a form-sized column, and the
-   who-can-do-what summary uses the full width below them (three role columns
-   on wide screens), so no idle column sits beside a short form. */
+/* The public entry pairs its introduction with the existing auth controls.
+   Local prose and form measures preserve readability within the full canvas. */
 .portal-gate__layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: clamp(24px, 4vw, 48px);
   align-items: start;
+}
+
+.portal-gate__layout > .portal-gate__intro {
+  min-width: 0;
+  max-inline-size: var(--ds-primitive-dimension-container-article);
+}
+
+.portal-gate__layout > .portal-gate__signin {
+  border-block-start: 1px solid var(--border);
+  padding-block-start: 24px;
+}
+
+.portal-gate__form {
+  max-inline-size: 26rem;
+}
+
+.portal-gate__form-intro {
+  margin-block-end: 24px;
+}
+
+.portal-gate__signin-title {
+  margin: 0 0 12px;
+  font: var(--ds-typography-heading-24);
+}
+
+.portal-gate__access {
+  margin: 0;
+  color: var(--ds-color-text-secondary);
+  font: var(--ds-typography-body-16);
+  text-wrap: balance;
+}
+
+.portal-gate__roles {
+  grid-column: 1 / -1;
+  border-block-start: 1px solid var(--border);
+}
+
+.portal-gate__roles-summary {
+  padding-block: 16px;
+  cursor: pointer;
+}
+
+.portal-gate__roles-summary h2 {
+  display: inline;
+  margin: 0;
+  font: var(--ds-typography-heading-18);
+}
+
+.portal-gate__roles-summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+
+.portal-gate .portal-roles__who,
+.portal-gate .portal-roles__note,
+.portal-gate .portal-roles__list {
+  font: var(--ds-typography-body-16);
+}
+
+@media (min-width: 1024px) {
+  .portal-gate__layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .portal-gate__layout > .portal-gate__signin {
+    border-block-start: 0;
+    border-inline-start: 1px solid var(--border);
+    padding-block-start: 0;
+    padding-inline-start: clamp(24px, 4vw, 64px);
+  }
 }
 
 .portal-gate__title {
@@ -352,7 +420,7 @@
 
 .portal-gate__signin {
   width: 100%;
-  max-width: 26rem;
+  min-width: 0;
 }
 
 .portal-gate__signing-in {

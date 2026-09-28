@@ -70,17 +70,22 @@ const ROLE_GROUPS: RoleGroup[] = [
 export function PortalRolesExplainer({
   headingLevel = 2,
   visibility,
+  labelledBy,
 }: {
   headingLevel?: 2 | 3
+  /** Reuse the containing disclosure's visible heading when embedded there. */
+  labelledBy?: string
   visibility?: 'public' | 'authenticated' | 'private'
 }) {
   const Heading = headingLevel === 2 ? 'h2' : 'h3'
   const RoleHeading = headingLevel === 2 ? 'h3' : 'h4'
   return (
-    <section className="portal-roles" aria-labelledby="portal-roles-title">
-      <Heading id="portal-roles-title" className="portal-roles__title">
-        <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />
-      </Heading>
+    <section className="portal-roles" aria-labelledby={labelledBy ?? 'portal-roles-title'}>
+      {!labelledBy && (
+        <Heading id="portal-roles-title" className="portal-roles__title">
+          <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />
+        </Heading>
+      )}
       <div className="portal-roles__grid">
         {ROLE_GROUPS.map((group) => {
           const who =
