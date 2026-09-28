@@ -98,7 +98,7 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
   // and footer.
   it('is a full public page with the Venturi header, a main landmark and the footer', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Venturi feedback home' })).toBeInTheDocument()
     expect(screen.getByRole('main')).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
   })
