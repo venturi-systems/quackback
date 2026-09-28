@@ -238,7 +238,10 @@ function AccessiblePublicPortalPage({
     <div className="portal-shell py-6">
       <section className="portal-introduction" aria-labelledby="feedback-title">
         <h1 id="feedback-title">
-          <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
+          <FormattedMessage
+            id="portal.feedback.exploreTitle"
+            defaultMessage="Help shape what comes next"
+          />
         </h1>
         <p>
           <FormattedMessage
@@ -246,6 +249,23 @@ function AccessiblePublicPortalPage({
             defaultMessage="Share an idea, support a request, and follow what the team is working on."
           />
         </p>
+        <nav
+          aria-label="Explore the product"
+          className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"
+        >
+          <a
+            href="/roadmap"
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            Explore the roadmap
+          </a>
+          <a
+            href="/changelog"
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            Read release updates
+          </a>
+        </nav>
         <PortalParticipation />
       </section>
       <Suspense
