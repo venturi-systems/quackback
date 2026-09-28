@@ -26,6 +26,36 @@ function mount(getConnectUrl: () => Promise<string>) {
 }
 
 describe('OAuth connection recovery', () => {
+  it('ignores the old timeout after page restoration and a new connection attempt', async () => {
+    vi.useFakeTimers()
+    mount(() => new Promise<string>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    fireEvent(window, new Event('pageshow'))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await act(async () => vi.advanceTimersByTimeAsync(20_000))
+    expect(screen.getByRole('button', { name: 'Connecting...' })).toBeDisabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    await act(async () => vi.advanceTimersByTimeAsync(10_000))
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+  })
+
+  it('ignores a late connect URL from before the page was restored', async () => {
+    let resolveRequest!: (url: string) => void
+    mount(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveRequest = resolve
+        })
+    )
+    const originalUrl = window.location.href
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    fireEvent(window, new Event('pageshow'))
+    await act(async () => resolveRequest('https://example.com/obsolete-oauth'))
+    expect(window.location.href).toBe(originalUrl)
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+  })
+
   it('restores the Connect button when the browser restores the page', async () => {
     vi.useFakeTimers()
     mount(() => new Promise<string>(() => {}))
