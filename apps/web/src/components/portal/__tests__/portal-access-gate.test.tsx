@@ -39,6 +39,7 @@ vi.mock('@/lib/client/post-auth-navigation', () => ({ navigateAfterAuth: vi.fn()
 
 import { PortalAccessGate } from '../portal-access-gate'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
+import { SIGN_IN_FAILED_MESSAGE } from '@/lib/server/auth/redirect-errors'
 
 const baseProps = {
   reason: 'unauthenticated' as const,
@@ -112,8 +113,10 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
       'Anyone who signs in can read and take part.'
     )
     expect(screen.getByRole('heading', { level: 1, name: 'Help shape Acme' })).toBeVisible()
+    // Owner decision 5: the page states who can do what when it loads; the
+    // disclosure only lets a visitor fold it away.
     const disclosure = screen.getByText('Who can do what').closest('details')
-    expect(disclosure).not.toHaveAttribute('open')
+    expect(disclosure).toHaveAttribute('open')
     expect(disclosure?.querySelector('summary')).toHaveTextContent('Who can do what')
     expect(disclosure).toHaveTextContent('Read ideas and the roadmap')
     expect(screen.getByRole('region', { name: 'Sign in' })).toContainElement(
@@ -244,13 +247,25 @@ describe('PortalAccessGate — refused sign-in notice', () => {
     )
   })
 
-  it.each(['123', 'bogus', '__proto__', 'constructor', 'toString', '<script>'])(
-    'shows nothing for the unknown code %j',
-    (error) => {
-      render(<PortalAccessGate {...baseProps} error={error} />)
-      expect(screen.queryByTestId('auth-notice')).not.toBeInTheDocument()
-    }
-  )
+  // DEF-47 residual: a cancelled consent (access_denied) or a lost OAuth
+  // state (state_mismatch) has no message of its own and used to leave the
+  // gate unexplained. Any such code shows the generic failure, never itself.
+  it.each([
+    'access_denied',
+    'state_mismatch',
+    '123',
+    'bogus',
+    '__proto__',
+    'constructor',
+    'toString',
+    '<script>',
+  ])('shows the generic sign-in failure for the unknown code %j', (error) => {
+    render(<PortalAccessGate {...baseProps} error={error} />)
+    const notice = screen.getByTestId('auth-notice')
+    expect(notice).toHaveTextContent(SIGN_IN_FAILED_MESSAGE)
+    expect(notice.textContent).not.toContain(error)
+    expect(screen.getByTestId('auth-form-body')).toBeInTheDocument()
+  })
 
   it('shows nothing when there is no code', () => {
     render(<PortalAccessGate {...baseProps} />)

@@ -70,6 +70,15 @@ export const AUTH_BLOCK_MESSAGES: Record<AuthBlockCode, string> = {
 }
 
 /**
+ * What a visitor is told when a sign-in redirect carries an `error` code that
+ * has no message of its own, such as better-auth's `state_mismatch` or the
+ * `access_denied` a provider returns when consent is cancelled. The code
+ * itself comes from the URL and is never shown.
+ */
+export const SIGN_IN_FAILED_MESSAGE =
+  'Sign-in failed. Try again or contact your administrator if the problem persists.'
+
+/**
  * The message for a redirect `error` code, or null for anything that is not
  * one of the codes above. The code usually comes from a URL, so it is looked
  * up as an own property only: `__proto__`, `constructor` and similar keys
