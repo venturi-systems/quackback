@@ -393,26 +393,23 @@ describe('the anonymous-principal sweep', () => {
     // Either the sweep finishes on its own, having skipped the held row, or it
     // queues behind the uncommitted vote and would delete the principal (and,
     // by cascade, the vote) the moment the vote commits.
-    let outcome: 'finished' | 'blocked' | undefined
-    try {
+    const awaitOutcome = async (): Promise<'finished' | 'blocked'> => {
       const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS
-      while (!outcome) {
-        if (settled) {
-          outcome = 'finished'
-          break
-        }
+      for (;;) {
+        if (settled) return 'finished'
         const [row] = await admin<[{ waiting: number }]>`
           SELECT count(*)::int AS waiting
           FROM pg_stat_activity
           WHERE application_name = ${APP_NAME} AND wait_event_type = 'Lock'
         `
-        if (row.waiting > 0) {
-          outcome = 'blocked'
-          break
-        }
+        if (row.waiting > 0) return 'blocked'
         if (Date.now() > deadline) throw new Error('The sweep neither finished nor blocked')
         await new Promise((resolve) => setTimeout(resolve, 20))
       }
+    }
+    let outcome: 'finished' | 'blocked'
+    try {
+      outcome = await awaitOutcome()
     } finally {
       commit()
       await writing

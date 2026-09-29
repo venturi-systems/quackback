@@ -1,5 +1,5 @@
 import handler, { createServerEntry } from '@tanstack/react-start/server-entry'
-import { routeConsoleToLogger } from '@quackback/logger'
+import { routeConsoleToLogger, routeProcessErrorsToLogger } from '@quackback/logger'
 import { logger } from '@/lib/server/logger'
 import { logStartupBanner } from '@/lib/server/startup'
 import {
@@ -17,8 +17,13 @@ import {
 // query's error carries its SQL and every bound value; through the logger, the
 // err serializer and sanitizers reduce it (DEF-63, DEF-66; see
 // packages/logger/src/console.ts). Development keeps the plain console.
+// An unhandled rejection or an uncaught exception is reported by the runtime,
+// not the console, so it is routed too: written through the logger at fatal,
+// then the process exits with code 1 as Bun would have
+// (packages/logger/src/process-errors.ts).
 if (process.env.NODE_ENV === 'production') {
   routeConsoleToLogger(logger.child({ component: 'console' }))
+  routeProcessErrorsToLogger(logger.child({ component: 'process' }))
 }
 
 // Cold-start optimization: eagerly warm DB + Redis connections AND preload

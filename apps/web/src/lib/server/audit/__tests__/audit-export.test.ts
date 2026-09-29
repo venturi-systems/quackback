@@ -114,12 +114,15 @@ describe('auditExportPages', () => {
 function parseCsvLine(line: string): string[] {
   const cells: string[] = []
   let i = 0
-  while (i <= line.length) {
-    if (line[i] === '"') {
+  // Every line holds at least one cell, and each cell that ends in a comma
+  // is followed by another, so a trailing comma yields a final empty cell.
+  let anotherCell = true
+  while (anotherCell) {
+    if (line.startsWith('"', i)) {
       let j = i + 1
       let text = ''
       while (j < line.length) {
-        if (line[j] === '"' && line[j + 1] === '"') {
+        if (line.startsWith('""', j)) {
           text += '"'
           j += 2
         } else if (line[j] === '"') {
@@ -131,10 +134,13 @@ function parseCsvLine(line: string): string[] {
         }
       }
       cells.push(text)
+      // j now sits on the separator after the closing quote, or at the end.
+      anotherCell = j < line.length
       i = j + 1
     } else {
       const comma = line.indexOf(',', i)
-      const end = comma === -1 ? line.length : comma
+      anotherCell = comma !== -1
+      const end = anotherCell ? comma : line.length
       cells.push(line.slice(i, end))
       i = end + 1
     }

@@ -32,6 +32,7 @@ import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
+import { VenturiLandingFooter } from '@/components/public/shell/venturi-landing-footer'
 import { PortalRolesExplainer } from '@/components/portal/portal-roles-explainer'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
@@ -226,7 +227,7 @@ function GateCard({
   }
 
   return (
-    <div className="portal-gate__layout">
+    <div className="portal-gate__layout" id="feedback-entry-top">
       <div className="portal-gate__intro">
         <h1 className="portal-gate__title">
           {isBaseStep ? (
@@ -289,6 +290,7 @@ function GateCard({
           ) : (
             <PortalAuthFormInline
               mode={mode}
+              providerAppearance="brand"
               authConfig={authConfig}
               workspaceName={workspaceName}
               callbackUrl={safeCallback}
@@ -350,7 +352,10 @@ export function PortalAccessGate({
       {/* Keep the sign-in page visually consistent with the portal. */}
       {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
       {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
-      <PublicPageFrame className="portal-gate">
+      <PublicPageFrame
+        className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
+        footer={reason === 'unauthenticated' ? <VenturiLandingFooter /> : undefined}
+      >
         <GateCard
           reason={reason}
           visibility={visibility}

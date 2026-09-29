@@ -6,6 +6,7 @@
  *  - Skips when another instance already holds an unexpired lock.
  *  - Takes over an expired lock (ON CONFLICT DO UPDATE setWhere).
  *  - Executes `fn` only when the lock was acquired.
+ *  - Logs and skips the tick, without rejecting, when the lock cannot be taken.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -24,6 +25,18 @@ vi.mock('@/lib/server/db', () => ({
 vi.mock('@/lib/server/utils/execute-rows', () => ({
   getExecuteRows: () => mockExecuteRows,
 }))
+
+const logSpies = vi.hoisted(() => ({
+  error: vi.fn(),
+  warn: vi.fn(),
+  info: vi.fn(),
+  debug: vi.fn(),
+}))
+
+vi.mock('@/lib/server/logger', () => {
+  const child = () => ({ ...logSpies, child })
+  return { logger: { ...logSpies, child } }
+})
 
 // ---------------------------------------------------------------------------
 // Module under test — import AFTER mocks
@@ -92,6 +105,26 @@ describe('withSweepLock', () => {
     // The finally-block DELETE must still fire so the next interval tick
     // isn't blocked for the full TTL after a transient sweep failure.
     expect(mockExecute).toHaveBeenCalledTimes(2)
+  })
+
+  it('logs and skips fn, without rejecting, when the acquire INSERT fails', async () => {
+    // The sweepers call withSweepLock fire-and-forget, so a rejection here
+    // would be unhandled and the runtime would print the failed query raw
+    // (DEF-63). A database outage must skip the tick instead.
+    const failure = new Error('Failed query: INSERT INTO sweep_lock ...\nparams: audit_prune,3600')
+    mockExecute.mockRejectedValueOnce(failure)
+    const fn = vi.fn()
+
+    await expect(withSweepLock('audit_prune', 60_000, fn)).resolves.toBeUndefined()
+
+    expect(fn).not.toHaveBeenCalled()
+    // No release DELETE: the lock was never taken.
+    expect(mockExecute).toHaveBeenCalledOnce()
+    expect(logSpies.error).toHaveBeenCalledOnce()
+    expect(logSpies.error).toHaveBeenCalledWith(
+      { err: failure, name: 'audit_prune' },
+      'lock acquire failed'
+    )
   })
 
   it('does NOT call execute when lock is acquired by another instance', async () => {

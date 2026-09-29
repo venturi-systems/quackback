@@ -344,7 +344,35 @@ jobs:
           DIGEST=$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest.Digest}}' | tr -d '"')
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
+      # The installer downloads cosign from GitHub releases and retries each
+      # download itself, three times within about seven seconds. A releases
+      # outage longer than that failed this job on 2026-09-28 (run 36469447169:
+      # HTTP 500 four times; the index was pushed but stayed unsigned until the
+      # job was re-run).
+      # Two more attempts, 30 and then 90 seconds later, ride out a short
+      # outage. Each attempt is the same pinned installer with its own
+      # signature check; the last one fails the job as before.
       - name: Install cosign
+        id: cosign-install
+        continue-on-error: true
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Wait before retrying the cosign install
+        if: steps.cosign-install.outcome == 'failure'
+        run: sleep 30
+
+      - name: Install cosign (second attempt)
+        id: cosign-install-retry
+        if: steps.cosign-install.outcome == 'failure'
+        continue-on-error: true
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Wait before the last cosign install attempt
+        if: steps.cosign-install-retry.outcome == 'failure'
+        run: sleep 90
+
+      - name: Install cosign (last attempt)
+        if: steps.cosign-install-retry.outcome == 'failure'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       # Keyless cosign signature over the pushed index digest, required by the

@@ -21,7 +21,7 @@ import { DefaultErrorPage } from '@/components/shared/error-page'
 import { OttHandler } from '@/components/shared/ott-handler'
 import { documentLocale, htmlLangDir } from '@/lib/shared/document-locale'
 import { normalizeLocale, DEFAULT_LOCALE, type SupportedLocale } from '@/lib/shared/i18n'
-import { SITE_TITLE, statusPageTitle } from '@/lib/shared/route-head'
+import { SITE_TITLE, socialCardMeta, statusPageTitle } from '@/lib/shared/route-head'
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -134,10 +134,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         property: 'og:type',
         content: 'website',
       },
-      {
-        name: 'twitter:card',
-        content: 'summary',
-      },
+      // Every page, the sign-in gate included, previews as the Venturi social
+      // card. No route below sets its own image or card type.
+      ...socialCardMeta(),
     ],
     links: [
       {

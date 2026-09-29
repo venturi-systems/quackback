@@ -68,6 +68,8 @@ interface PortalAuthFormInlineProps {
   onModeSwitch?: (mode: 'login' | 'signup') => void
   /** Lets the surrounding dialog adapt its header to the form's step. */
   onContextChange?: (ctx: { step: AuthFormStep; email: string }) => void
+  /** Opt-in for the unauthenticated landing; shared sign-in surfaces keep their defaults. */
+  providerAppearance?: 'default' | 'brand'
 }
 
 /**
@@ -162,6 +164,7 @@ export function PortalAuthFormInline({
   callbackUrl,
   onModeSwitch,
   onContextChange,
+  providerAppearance = 'default',
 }: PortalAuthFormInlineProps) {
   const intl = useIntl()
   // Readable message for a failed sign-in step: a network failure gets a
@@ -706,7 +709,20 @@ export function PortalAuthFormInline({
                 return (
                   <OAuthButton
                     key={provider.id}
-                    icon={IconComp ? <IconComp className="h-5 w-5" /> : null}
+                    icon={
+                      providerAppearance === 'brand' && provider.id === 'google' ? (
+                        <img
+                          src="/auth/google-g.png"
+                          alt=""
+                          aria-hidden="true"
+                          width={20}
+                          height={20.4}
+                          className="h-auto w-5"
+                        />
+                      ) : IconComp ? (
+                        <IconComp className="h-5 w-5" />
+                      ) : null
+                    }
                     label={provider.name}
                     mode={mode}
                     loading={loadingAction === provider.id}
