@@ -732,18 +732,13 @@ test.describe('Rich Text Editor', () => {
   test('can create bullet list', async () => {
     const editor = globalPage.locator('.tiptap')
 
-    // Click inside editor and type content first
+    // The create-post editor is borderless (no top toolbar; only the
+    // selection bubble menu), so a list starts through the StarterKit input
+    // rule: "- " at the start of a line opens a bullet list.
     await editor.click()
-    await globalPage.keyboard.type('First item')
+    await globalPage.keyboard.type('- First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
-
-    // Select all text to convert to a list
-    await globalPage.keyboard.press('ControlOrMeta+a')
-
-    // Click bullet list button to convert text to list
-    const bulletListButton = globalPage.locator('button:has(svg.lucide-list)')
-    await bulletListButton.click()
 
     // Verify list structure
     await expect(editor.locator('ul')).toBeVisible()
@@ -753,18 +748,12 @@ test.describe('Rich Text Editor', () => {
   test('can create numbered list', async () => {
     const editor = globalPage.locator('.tiptap')
 
-    // Click inside editor and type content first
+    // Same editor as above: "1. " at the start of a line opens an ordered
+    // list through the StarterKit input rule.
     await editor.click()
-    await globalPage.keyboard.type('First item')
+    await globalPage.keyboard.type('1. First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
-
-    // Select all text to convert to a list
-    await globalPage.keyboard.press('ControlOrMeta+a')
-
-    // Click numbered list button to convert text to list
-    const numberedListButton = globalPage.locator('button:has(svg.lucide-list-ordered)')
-    await numberedListButton.click()
 
     // Verify list structure
     await expect(editor.locator('ol')).toBeVisible()
@@ -779,17 +768,14 @@ test.describe('Rich Text Editor', () => {
     // Triple-click to select text
     await editor.click({ clickCount: 3 })
 
-    // Set up dialog handler BEFORE clicking the button
-    globalPage.on('dialog', async (dialog) => {
-      await dialog.accept('https://example.com')
-    })
-
-    // Click link button
-    const linkButton = globalPage.locator('button:has(svg.lucide-link)')
-    await linkButton.click()
-
-    // Wait a moment for the link to be applied
-    await globalPage.waitForTimeout(200)
+    // The selection bubble menu's link button opens a popover with a URL
+    // field (LinkButton in rich-text-editor.tsx); Enter applies it. The
+    // button's accessible name is its title.
+    await globalPage.getByRole('button', { name: 'Insert Link' }).click()
+    const urlField = globalPage.getByPlaceholder('https://example.com')
+    await expect(urlField).toBeVisible()
+    await urlField.fill('https://example.com')
+    await urlField.press('Enter')
 
     // Verify link was created
     const link = editor.locator('a')
