@@ -3,9 +3,12 @@ import { getOtpCode } from '../../utils/db-helpers'
 
 const TEST_EMAIL = 'demo@example.com'
 
-// Configure test to run serially (no parallelization)
-// This prevents OTP race conditions across different describe blocks
-test.describe.configure({ mode: 'serial' })
+// Run the file's tests one at a time and in order (no parallelization), which
+// prevents OTP race conditions across the describe blocks. Default mode, not
+// serial: serial mode skipped every test after the known failure "shows error
+// when submitting without description", so 28 tests never ran in CI. After a
+// failure the fresh worker signs in again in beforeAll.
+test.describe.configure({ mode: 'default' })
 
 /**
  * Helper function to get OTP code with retries
