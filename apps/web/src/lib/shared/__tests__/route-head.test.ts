@@ -1,9 +1,15 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   SITE_TITLE,
+  SOCIAL_CARD_ALT,
+  SOCIAL_CARD_URL,
   gateHead,
   portalGateHead,
   portalGateOf,
+  socialCardMeta,
   statusPageTitle,
   statusTitle,
   type HeadMatch,
@@ -85,5 +91,32 @@ describe('portalGateOf and portalGateHead', () => {
 describe('gateHead', () => {
   it('falls back to the company name when the workspace has none', () => {
     expect(gateHead({ workspaceName: '' }).meta[0]).toEqual({ title: 'Sign in · Venturi' })
+  })
+})
+
+describe('socialCardMeta', () => {
+  it('names the Venturi social card for this host as a large 1200 x 630 image', () => {
+    expect(SOCIAL_CARD_URL).toBe('https://venturi.systems/og-image-feedback.png')
+    expect(socialCardMeta()).toEqual([
+      { property: 'og:image', content: SOCIAL_CARD_URL },
+      { property: 'og:image:width', content: '1200' },
+      { property: 'og:image:height', content: '630' },
+      { property: 'og:image:alt', content: SOCIAL_CARD_ALT },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:image', content: SOCIAL_CARD_URL },
+      { name: 'twitter:image:alt', content: SOCIAL_CARD_ALT },
+    ])
+  })
+
+  it('is the only preview image and card type the routes name', () => {
+    // The portal and help center heads named the workspace logo, an SVG that
+    // link previews do not show, so a shared portal link carried no image.
+    const routes = fileURLToPath(new URL('../../../routes/', import.meta.url))
+    const naming = readdirSync(routes, { recursive: true, encoding: 'utf8' })
+      .filter((file) => /\.tsx?$/.test(file))
+      .filter((file) =>
+        /og:image|twitter:image|twitter:card/.test(readFileSync(join(routes, file), 'utf8'))
+      )
+    expect(naming).toEqual([])
   })
 })

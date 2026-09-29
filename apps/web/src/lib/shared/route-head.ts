@@ -41,6 +41,34 @@ export interface HeadMeta {
   content?: string
 }
 
+/** An Open Graph (`property`) or Twitter (`name`) head `meta` entry. */
+export type SocialMeta = { property: string; content: string } | { name: string; content: string }
+
+/**
+ * The Venturi social card that names feedback.venturi.systems, the link
+ * preview image of every portal page. The public site renders and serves it
+ * (landing-page scripts/render-social-card.mjs writes
+ * public/og-image-feedback.png), so a card change needs no portal release.
+ * It replaces the workspace logo, an SVG that most link previews do not show.
+ */
+export const SOCIAL_CARD_URL = 'https://venturi.systems/og-image-feedback.png'
+
+/** The alternative text every Venturi site gives its social card. */
+export const SOCIAL_CARD_ALT = 'Venturi, the attribution layer for AI'
+
+/** Open Graph and Twitter tags that show the social card as a large image. */
+export function socialCardMeta(): SocialMeta[] {
+  return [
+    { property: 'og:image', content: SOCIAL_CARD_URL },
+    { property: 'og:image:width', content: '1200' },
+    { property: 'og:image:height', content: '630' },
+    { property: 'og:image:alt', content: SOCIAL_CARD_ALT },
+    { name: 'twitter:card', content: 'summary_large_image' },
+    { name: 'twitter:image', content: SOCIAL_CARD_URL },
+    { name: 'twitter:image:alt', content: SOCIAL_CARD_ALT },
+  ]
+}
+
 /**
  * The title of the status page this request renders, or null for an ordinary
  * page. A route that throws `notFound()` leaves its match with status
