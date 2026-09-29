@@ -115,6 +115,20 @@ export type AuditEventType =
   | 'webhook.deleted'
   | 'webhook.secret_rotated'
   | 'audit.exported'
+  // landing-page#2309 extras report section 1: tags, roadmaps and changelog
+  | 'tag.created'
+  | 'tag.updated'
+  | 'tag.deleted'
+  | 'roadmap.created'
+  | 'roadmap.updated'
+  | 'roadmap.deleted'
+  | 'roadmap.reordered'
+  | 'roadmap.post.added'
+  | 'roadmap.post.removed'
+  | 'changelog.created'
+  | 'changelog.updated'
+  | 'changelog.published' // the entry gained a publish date (now or scheduled)
+  | 'changelog.deleted'
 
 export type AuditEventOutcome = 'success' | 'failure'
 

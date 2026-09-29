@@ -2,6 +2,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
+  apiKeyAuditSource,
+  recordContentAudit,
+  roadmapAuditView,
+} from '@/lib/server/audit/content-audit'
+import {
   successResponse,
   createdResponse,
   badRequestResponse,
@@ -58,7 +63,7 @@ export const Route = createFileRoute('/api/v1/roadmaps/')({
        */
       POST: async ({ request }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           // Parse and validate body
           const body = await request.json()
@@ -78,6 +83,11 @@ export const Route = createFileRoute('/api/v1/roadmaps/')({
             slug: parsed.data.slug,
             description: parsed.data.description,
             isPublic: parsed.data.isPublic,
+          })
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'roadmap.created',
+            target: { type: 'roadmap', id: roadmap.id },
+            after: roadmapAuditView(roadmap),
           })
 
           return createdResponse({

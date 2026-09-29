@@ -2,6 +2,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
+  apiKeyAuditSource,
+  recordContentAudit,
+  tagAuditView,
+} from '@/lib/server/audit/content-audit'
+import {
   successResponse,
   createdResponse,
   badRequestResponse,
@@ -55,7 +60,7 @@ export const Route = createFileRoute('/api/v1/tags/')({
        */
       POST: async ({ request }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           // Parse and validate body
           const body = await request.json()
@@ -74,6 +79,11 @@ export const Route = createFileRoute('/api/v1/tags/')({
             name: parsed.data.name,
             color: parsed.data.color,
             description: parsed.data.description,
+          })
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'tag.created',
+            target: { type: 'tag', id: tag.id },
+            after: tagAuditView(tag),
           })
 
           return createdResponse({

@@ -2,6 +2,12 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
+  apiKeyAuditSource,
+  auditSnapshot,
+  recordContentAudit,
+  roadmapAuditView,
+} from '@/lib/server/audit/content-audit'
+import {
   successResponse,
   noContentResponse,
   badRequestResponse,
@@ -54,7 +60,7 @@ export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const roadmapId = parseTypeId<RoadmapId>(params.roadmapId, 'roadmap', 'roadmap ID')
 
@@ -67,12 +73,22 @@ export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId')({
             })
           }
 
-          const { updateRoadmap } = await import('@/lib/server/domains/roadmaps/roadmap.service')
+          const { getRoadmap, updateRoadmap } =
+            await import('@/lib/server/domains/roadmaps/roadmap.service')
 
+          const before = await auditSnapshot(async () =>
+            roadmapAuditView(await getRoadmap(roadmapId))
+          )
           const roadmap = await updateRoadmap(roadmapId, {
             name: parsed.data.name,
             description: parsed.data.description,
             isPublic: parsed.data.isPublic,
+          })
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'roadmap.updated',
+            target: { type: 'roadmap', id: roadmap.id },
+            before,
+            after: roadmapAuditView(roadmap),
           })
 
           return successResponse({
@@ -95,13 +111,22 @@ export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const roadmapId = parseTypeId<RoadmapId>(params.roadmapId, 'roadmap', 'roadmap ID')
 
-          const { deleteRoadmap } = await import('@/lib/server/domains/roadmaps/roadmap.service')
+          const { deleteRoadmap, getRoadmap } =
+            await import('@/lib/server/domains/roadmaps/roadmap.service')
 
+          const before = await auditSnapshot(async () =>
+            roadmapAuditView(await getRoadmap(roadmapId))
+          )
           await deleteRoadmap(roadmapId)
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'roadmap.deleted',
+            target: { type: 'roadmap', id: roadmapId },
+            before,
+          })
 
           return noContentResponse()
         } catch (error) {

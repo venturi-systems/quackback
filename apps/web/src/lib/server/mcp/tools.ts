@@ -69,6 +69,13 @@ import {
   getChangelogById,
 } from '@/lib/server/domains/changelog/changelog.service'
 import { listChangelogs } from '@/lib/server/domains/changelog/changelog.query'
+import {
+  auditSnapshot,
+  changelogAuditView,
+  mcpAuditSource,
+  recordChangelogChange,
+  recordContentAudit,
+} from '@/lib/server/audit/content-audit'
 import { publishedAtToPublishState, type PublishState } from '@/lib/shared/schemas/changelog'
 import {
   addPostToRoadmap,
@@ -1226,6 +1233,13 @@ Examples:
           },
           { principalId: auth.principalId, name: auth.name }
         )
+        await recordChangelogChange(
+          mcpAuditSource(auth),
+          'changelog.created',
+          result.id,
+          null,
+          changelogAuditView(result)
+        )
 
         return jsonResult({
           id: result.id,
@@ -1268,6 +1282,9 @@ Examples:
           publishState = { type: 'draft' }
         }
 
+        const before = await auditSnapshot(async () =>
+          changelogAuditView(await getChangelogById(args.changelogId as ChangelogId))
+        )
         const result = await updateChangelog(args.changelogId as ChangelogId, {
           title: args.title,
           content: args.content,
@@ -1277,6 +1294,13 @@ Examples:
             displayDate: args.displayDate === null ? null : new Date(args.displayDate),
           }),
         })
+        await recordChangelogChange(
+          mcpAuditSource(auth),
+          'changelog.updated',
+          result.id,
+          before,
+          changelogAuditView(result)
+        )
 
         return jsonResult({
           id: result.id,
@@ -1307,7 +1331,15 @@ Examples:
       const roleDenied = requireTeamRole(auth)
       if (roleDenied) return roleDenied
       try {
+        const before = await auditSnapshot(async () =>
+          changelogAuditView(await getChangelogById(args.changelogId as ChangelogId))
+        )
         await deleteChangelog(args.changelogId as ChangelogId)
+        await recordContentAudit(mcpAuditSource(auth), {
+          event: 'changelog.deleted',
+          target: { type: 'changelog', id: args.changelogId },
+          before,
+        })
 
         return jsonResult({ deleted: true, changelogId: args.changelogId })
       } catch (err) {
@@ -1475,6 +1507,13 @@ Examples:
             auth.principalId
           )
         }
+        await recordContentAudit(mcpAuditSource(auth), {
+          event: args.action === 'add' ? 'roadmap.post.added' : 'roadmap.post.removed',
+          target: { type: 'roadmap', id: args.roadmapId },
+          ...(args.action === 'add'
+            ? { after: { postId: args.postId } }
+            : { before: { postId: args.postId } }),
+        })
 
         return jsonResult({
           action: args.action,

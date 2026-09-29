@@ -35,8 +35,20 @@ import {
 import { toIsoString, toIsoStringOrNull } from '@/lib/shared/utils'
 import { filterId, filterText } from '@/lib/shared/schemas/list-filters'
 import { logger } from '@/lib/server/logger'
+import {
+  auditSnapshot,
+  changelogAuditView,
+  recordChangelogChange,
+  recordContentAudit,
+  sessionAuditSource,
+} from '@/lib/server/audit/content-audit'
 
 const log = logger.child({ component: 'changelog' })
+
+/** Entry state before a change, for the audit row; null if unreadable. */
+function changelogSnapshot(id: ChangelogId) {
+  return auditSnapshot(async () => changelogAuditView(await getChangelogById(id)))
+}
 
 // ============================================================================
 // Admin Server Functions (Require Auth)
@@ -69,6 +81,13 @@ export const createChangelogFn = createServerFn({ method: 'POST' })
           name: authorName,
         }
       )
+      await recordChangelogChange(
+        sessionAuditSource(auth),
+        'changelog.created',
+        entry.id,
+        null,
+        changelogAuditView(entry)
+      )
 
       return {
         ...entry,
@@ -91,8 +110,9 @@ export const updateChangelogFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ changelog_id: data.id }, 'update changelog')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await changelogSnapshot(data.id as ChangelogId)
       const entry = await updateChangelog(data.id as ChangelogId, {
         title: data.title,
         content: data.content,
@@ -101,6 +121,13 @@ export const updateChangelogFn = createServerFn({ method: 'POST' })
         publishState: data.publishState as PublishState | undefined,
         ...(data.displayDate !== undefined && { displayDate: data.displayDate }),
       })
+      await recordChangelogChange(
+        sessionAuditSource(auth),
+        'changelog.updated',
+        entry.id,
+        before,
+        changelogAuditView(entry)
+      )
 
       return {
         ...entry,
@@ -124,9 +151,15 @@ export const deleteChangelogFn = createServerFn({ method: 'POST' })
     log.debug({ changelog_id: data.id }, 'delete changelog')
     try {
       // Soft delete (sets deletedAt) — safe for members to perform.
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await changelogSnapshot(data.id as ChangelogId)
       await deleteChangelog(data.id as ChangelogId)
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'changelog.deleted',
+        target: { type: 'changelog', id: data.id },
+        before,
+      })
 
       return { success: true }
     } catch (error) {

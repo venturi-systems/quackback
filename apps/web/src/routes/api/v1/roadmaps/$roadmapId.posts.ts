@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
+import { apiKeyAuditSource, recordContentAudit } from '@/lib/server/audit/content-audit'
 import {
   successResponse,
   createdResponse,
@@ -68,7 +69,7 @@ export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId/posts')({
        */
       POST: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const roadmapId = parseTypeId<RoadmapId>(params.roadmapId, 'roadmap', 'roadmap ID')
 
@@ -86,6 +87,11 @@ export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId/posts')({
           const { addPostToRoadmap } = await import('@/lib/server/domains/roadmaps/roadmap.service')
 
           await addPostToRoadmap({ roadmapId, postId })
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'roadmap.post.added',
+            target: { type: 'roadmap', id: roadmapId },
+            after: { postId },
+          })
 
           return createdResponse({
             message: 'Post added to roadmap',
