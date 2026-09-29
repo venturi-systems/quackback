@@ -76,7 +76,7 @@ export function FeedbackSidebar({
                       <span
                         aria-hidden="true"
                         className={cn(
-                          'text-[10px] font-semibold ms-auto ps-1 shrink-0 tabular-nums',
+                          'text-xs font-semibold ms-auto ps-1 shrink-0 tabular-nums',
                           isActive ? 'text-primary' : 'text-muted-foreground'
                         )}
                       >
