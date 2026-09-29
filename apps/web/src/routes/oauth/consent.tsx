@@ -13,9 +13,8 @@ export const Route = createFileRoute('/oauth/consent')({
   // otherwise leave the bare site title). A request without a client id also
   // answers 400 (lib/server/middleware/oauth-consent-status.ts).
   head: ({ matches }) => {
-    const search = matches.find((match) => match.routeId === '/oauth/consent')?.search as
-      | { client_id?: string | number | boolean }
-      | undefined
+    const own = matches.find((match) => match.routeId === '/oauth/consent')
+    const search = own?.search as unknown as { client_id?: string | number | boolean } | undefined
     return {
       meta: [
         {
