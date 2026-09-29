@@ -95,12 +95,10 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       expect(geometry.document).toBeLessThanOrEqual(width)
       for (const item of geometry.text)
         expect(item.size, item.text ?? '').toBeGreaterThanOrEqual(item.heading ? 18 : 16)
-      if (width >= 1024) {
-        expect(geometry.form.x).toBeGreaterThan(geometry.intro.x + geometry.intro.width)
-        expect(Math.abs(geometry.form.y - geometry.intro.y)).toBeLessThanOrEqual(1)
-      } else {
-        expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.y + geometry.intro.height)
-      }
+      // The entry is one centered component at every width; the form is bounded,
+      // while the public shell and marketing footer retain their full-width gutters.
+      expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.y + geometry.intro.height)
+      expect(Math.abs(geometry.form.x + geometry.form.width / 2 - width / 2)).toBeLessThanOrEqual(1)
       const typography = await measureTypography(
         page,
         [
@@ -140,6 +138,29 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         })
       }
       await summary.click()
+      const compact = await page.evaluate(() => {
+        const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
+        const footer = document.querySelector('.venturi-landing-footer')!.getBoundingClientRect()
+        const form = document.querySelector('.portal-gate__form')!.getBoundingClientRect()
+        return {
+          gap: footer.top - layout.bottom,
+          formWidth: form.width,
+          targets: Array.from(document.querySelectorAll('.venturi-landing-footer a')).map(
+            (element) => {
+              const rect = element.getBoundingClientRect()
+              return { text: element.textContent, width: rect.width, height: rect.height }
+            }
+          ),
+        }
+      })
+      expect(compact.gap).toBeLessThanOrEqual(40)
+      expect(compact.formWidth).toBeLessThanOrEqual(416)
+      for (const target of compact.targets) {
+        expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
+        expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
+      }
+      await expect(page.getByRole('link', { name: 'Software notices' })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Source code (AGPL-3.0)' })).toHaveCount(0)
       if ([390, 1440, 2560].includes(width)) {
         await testInfo.attach(`entry-initial-${width}`, {
           body: await page.screenshot({ fullPage: true }),
@@ -162,13 +183,16 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           await zoomPage.locator('.portal-gate__roles-summary').click()
           await zoomPage.addStyleTag({
             content: `
-            .portal-gate__layout * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }
-            .portal-gate__layout p { margin-block-end: 2em !important; }
+            .portal-gate--entry * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }
+            .portal-gate--entry p { margin-block-end: 2em !important; }
           `,
           })
           const reflow = await measureReflow(
             zoomPage,
-            [{ selector: '.portal-gate__layout', expectInteractive: true }],
+            [
+              { selector: '.portal-gate__layout', expectInteractive: true },
+              { selector: '.venturi-landing-footer', expectInteractive: true },
+            ],
             {
               artifactRevision: process.env.GITHUB_SHA!,
               state: `entry-zoom-${factor}`,
@@ -187,6 +211,17 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         }
       )
     }
+    // The quiet utility link must reach an anonymous source offer, including
+    // the exact version served by this build, without entering a sign-in flow.
+    await page.getByRole('link', { name: 'Software notices' }).click()
+    await expect(page.getByRole('heading', { name: 'Software notices', exact: true })).toBeVisible()
+    const source = await page
+      .getByRole('link', { name: 'View the source for this version' })
+      .getAttribute('href')
+    expect(source).toMatch(
+      /^https:\/\/github\.com\/venturi-systems\/quackback\/tree\/[0-9a-f]{7,40}$/
+    )
+    expect(process.env.GITHUB_SHA!.startsWith(source!.split('/').at(-1)!)).toBe(true)
   } finally {
     setPortalVisibility('public')
   }

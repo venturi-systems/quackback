@@ -72,6 +72,23 @@ describe('PortalAccessGate — inline auth form', () => {
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
   })
 
+  it('opts only the unauthenticated gate into the landing footer and branded providers', () => {
+    const { container, rerender } = render(<PortalAccessGate {...baseProps} />)
+    expect(container.querySelector('.portal-gate--entry')).toBeInTheDocument()
+    expect(screen.getByTestId('venturi-landing-footer')).toBeInTheDocument()
+    expect(screen.queryByTestId('venturi-site-footer')).not.toBeInTheDocument()
+    expect(formProps.providerAppearance).toBe('brand')
+    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+      'href',
+      '/software-notices'
+    )
+    rerender(<PortalAccessGate {...baseProps} reason="unauthorized" />)
+    expect(container.querySelector('.portal-gate--entry')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
+    expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Source code (AGPL-3.0)' })).toBeInTheDocument()
+  })
+
   it('seeds the form mode from autoOpenSignin', () => {
     render(<PortalAccessGate {...baseProps} autoOpenSignin="signup" />)
     expect(formProps.mode).toBe('signup')
@@ -98,7 +115,7 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
   // and footer.
   it('is a full public page with the Venturi header, a main landmark and the footer', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Venturi home' })).toHaveLength(2)
     expect(screen.getByRole('main')).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
   })
