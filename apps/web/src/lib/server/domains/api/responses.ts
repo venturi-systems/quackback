@@ -53,6 +53,30 @@ export interface ApiErrorResponse {
 }
 
 /**
+ * The `ANY` handler of a REST route: 405 for every method the route does not
+ * define, with the Allow header RFC 9110 section 15.5.6 requires. TanStack
+ * Start answers a method a server route has no handler for by rendering the
+ * app, so a GET on a POST-only route used to return 200 with an empty HTML
+ * page. The framework prefers a route's own GET for HEAD, so Allow lists HEAD
+ * wherever GET is defined.
+ */
+export function methodNotAllowed(methods: readonly string[]): () => Response {
+  const allowed = [...methods]
+  if (allowed.includes('GET') && !allowed.includes('HEAD')) allowed.push('HEAD')
+  const allow = allowed.join(', ')
+  return () =>
+    jsonResponse(
+      {
+        error: {
+          code: 'METHOD_NOT_ALLOWED',
+          message: `This endpoint accepts ${allow} requests.`,
+        },
+      },
+      { status: 405, headers: { Allow: allow } }
+    )
+}
+
+/**
  * Create a successful JSON response
  */
 export function successResponse<T>(

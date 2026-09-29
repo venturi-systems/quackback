@@ -12,6 +12,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { TagId } from '@quackback/ids'
@@ -29,6 +30,7 @@ const updateTagSchema = z.object({
 export const Route = createFileRoute('/api/v1/tags/$tagId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/tags/:tagId
        * Get a single tag by ID

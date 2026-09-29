@@ -6,6 +6,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 
 const identifyUserSchema = z.object({
@@ -20,6 +21,7 @@ const identifyUserSchema = z.object({
 export const Route = createFileRoute('/api/v1/users/identify')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST']),
       /**
        * POST /api/v1/users/identify
        * Create or update a portal user by email.

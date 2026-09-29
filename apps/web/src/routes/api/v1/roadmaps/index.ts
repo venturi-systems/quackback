@@ -11,6 +11,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 
 // Input validation schema
@@ -28,6 +29,7 @@ const createRoadmapSchema = z.object({
 export const Route = createFileRoute('/api/v1/roadmaps/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/roadmaps
        * List all roadmaps

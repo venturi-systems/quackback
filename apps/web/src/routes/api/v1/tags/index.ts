@@ -11,6 +11,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 
 // Input validation schema
@@ -27,6 +28,7 @@ const createTagSchema = z.object({
 export const Route = createFileRoute('/api/v1/tags/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/tags
        * List all tags

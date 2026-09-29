@@ -11,6 +11,7 @@
  * Fails open on Redis errors (the limiter returns `null` count then).
  */
 import { createFileRoute } from '@tanstack/react-router'
+import { methodNotAllowed } from '@/lib/server/domains/api/responses'
 import type { UserId } from '@quackback/ids'
 import type { SQL } from 'drizzle-orm'
 import { auth } from '@/lib/server/auth'
@@ -132,6 +133,7 @@ export async function handleMentionSuggest({ request }: { request: Request }): P
 export const Route = createFileRoute('/api/v1/mentions/suggest')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       GET: handleMentionSuggest,
     },
   },

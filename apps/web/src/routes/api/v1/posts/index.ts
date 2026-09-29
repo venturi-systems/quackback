@@ -7,6 +7,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import {
   parseTypeId,
@@ -31,6 +32,7 @@ const createPostSchema = z.object({
 export const Route = createFileRoute('/api/v1/posts/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/posts
        * List posts with optional filtering and pagination

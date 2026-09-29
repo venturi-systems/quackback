@@ -7,6 +7,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { RoadmapId, PostId, StatusId } from '@quackback/ids'
@@ -19,6 +20,7 @@ const addPostSchema = z.object({
 export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId/posts')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/roadmaps/:roadmapId/posts
        * List posts in a roadmap

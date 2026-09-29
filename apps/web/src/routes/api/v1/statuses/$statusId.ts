@@ -7,6 +7,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { StatusId } from '@quackback/ids'
@@ -25,6 +26,7 @@ const updateStatusSchema = z.object({
 export const Route = createFileRoute('/api/v1/statuses/$statusId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/statuses/:statusId
        * Get a single status by ID

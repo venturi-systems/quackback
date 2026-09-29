@@ -19,6 +19,8 @@ vi.mock('@/lib/server/integrations/apps/cors', () => ({
 }))
 vi.mock('@/lib/server/domains/api/responses', () => ({
   handleDomainError: (e: unknown) => ({ error: String(e) }),
+  // The route's ANY handler is built when the module loads.
+  methodNotAllowed: () => () => new Response(null, { status: 405 }),
 }))
 vi.mock('@/lib/server/domains/boards/board.public', () => ({
   listPublicBoardsWithStats: (...args: unknown[]) => mockListPublicBoardsWithStats(...args),

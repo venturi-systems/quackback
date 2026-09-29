@@ -1,13 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import { apiKeyAuditSource, recordContentAudit } from '@/lib/server/audit/content-audit'
-import { noContentResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  noContentResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { RoadmapId, PostId } from '@quackback/ids'
 
 export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId/posts/$postId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['DELETE']),
       /**
        * DELETE /api/v1/roadmaps/:roadmapId/posts/:postId
        * Remove a post from a roadmap

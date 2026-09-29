@@ -1,6 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  successResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { ForbiddenError, NotFoundError } from '@/lib/shared/errors'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { PrincipalId } from '@quackback/ids'
@@ -41,6 +45,7 @@ async function fetchTeamMemberWithUser(principalId: PrincipalId) {
 export const Route = createFileRoute('/api/v1/principals/$principalId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/principals/:principalId
        * Get a single team member by ID

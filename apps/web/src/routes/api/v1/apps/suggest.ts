@@ -1,6 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { badRequestResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  badRequestResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { fromUuid, type SegmentId } from '@quackback/ids'
 import { db, posts, boards } from '@/lib/server/db'
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
@@ -10,6 +14,7 @@ import type { Actor } from '@/lib/server/policy'
 export const Route = createFileRoute('/api/v1/apps/suggest')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['OPTIONS', 'GET']),
       OPTIONS: () => preflightResponse(),
 
       GET: async ({ request }) => {

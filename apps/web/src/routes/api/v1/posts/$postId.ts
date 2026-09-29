@@ -7,6 +7,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import {
   parseTypeId,
@@ -29,6 +30,7 @@ const updatePostSchema = z.object({
 export const Route = createFileRoute('/api/v1/posts/$postId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/posts/:postId
        * Get a single post by ID

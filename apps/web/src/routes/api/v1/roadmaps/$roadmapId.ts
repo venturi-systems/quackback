@@ -12,6 +12,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { RoadmapId } from '@quackback/ids'
@@ -26,6 +27,7 @@ const updateRoadmapSchema = z.object({
 export const Route = createFileRoute('/api/v1/roadmaps/$roadmapId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/roadmaps/:roadmapId
        * Get a single roadmap by ID

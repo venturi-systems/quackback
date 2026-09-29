@@ -6,6 +6,7 @@ import {
   badRequestResponse,
   notFoundResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { db, segments, principal, eq, and, isNull, inArray } from '@/lib/server/db'
 import { addMember, removeMember } from '@/lib/server/domains/segments/segment-membership.service'
@@ -51,6 +52,7 @@ async function validatePrincipals(
 export const Route = createFileRoute('/api/v1/segments/$slug/members')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST', 'DELETE']),
       /**
        * POST /api/v1/segments/:slug/members
        * Add the given principalIds to the segment identified by :slug.

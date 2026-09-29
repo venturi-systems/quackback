@@ -7,6 +7,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 // Input validation schema — `audience` and `access` are intentionally
 // excluded, matching the strip on PATCH /api/v1/boards/:boardId. Visibility
@@ -29,6 +30,7 @@ const createBoardSchema = z.object({
 export const Route = createFileRoute('/api/v1/boards/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/boards
        * List all boards
