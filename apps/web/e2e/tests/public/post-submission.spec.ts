@@ -733,12 +733,14 @@ test.describe('Rich Text Editor', () => {
     const editor = globalPage.locator('.tiptap')
 
     // The create-post editor is borderless (no top toolbar; only the
-    // selection bubble menu), so a list starts through the StarterKit input
-    // rule: "- " at the start of a line opens a bullet list.
+    // selection bubble menu), so the list comes from StarterKit's keyboard
+    // shortcut for toggleBulletList (Mod-Shift-8) on the selected lines.
     await editor.click()
-    await globalPage.keyboard.type('- First item')
+    await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
+    await globalPage.keyboard.press('ControlOrMeta+a')
+    await globalPage.keyboard.press('ControlOrMeta+Shift+8')
 
     // Verify list structure
     await expect(editor.locator('ul')).toBeVisible()
@@ -748,12 +750,14 @@ test.describe('Rich Text Editor', () => {
   test('can create numbered list', async () => {
     const editor = globalPage.locator('.tiptap')
 
-    // Same editor as above: "1. " at the start of a line opens an ordered
-    // list through the StarterKit input rule.
+    // Same editor as above: StarterKit's shortcut for toggleOrderedList
+    // (Mod-Shift-7) on the selected lines.
     await editor.click()
-    await globalPage.keyboard.type('1. First item')
+    await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
+    await globalPage.keyboard.press('ControlOrMeta+a')
+    await globalPage.keyboard.press('ControlOrMeta+Shift+7')
 
     // Verify list structure
     await expect(editor.locator('ol')).toBeVisible()
