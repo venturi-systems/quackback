@@ -221,7 +221,6 @@ export const Route = createFileRoute('/_portal')({
 
     const workspaceName = loaderData?.org?.name ?? 'Venturi'
     const description = `Share feedback, vote on feature requests, and track the ${workspaceName} roadmap.`
-    const logoUrl = loaderData?.brandingData?.logoUrl || '/venturi-mark.svg'
 
     const meta: Array<Record<string, string>> = [
       // A portal page that is not found, or failed to load, says so in the
@@ -231,7 +230,6 @@ export const Route = createFileRoute('/_portal')({
       { property: 'og:site_name', content: workspaceName },
       { property: 'og:title', content: workspaceName },
       { property: 'og:description', content: description },
-      { property: 'og:image', content: logoUrl },
       { name: 'twitter:title', content: workspaceName },
       { name: 'twitter:description', content: description },
     ]
