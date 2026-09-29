@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect, Link } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { FormattedMessage } from 'react-intl'
 import { lazy, Suspense } from 'react'
@@ -253,18 +253,24 @@ function AccessiblePublicPortalPage({
           aria-label="Explore the product"
           className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"
         >
-          <a
-            href="/roadmap"
+          <Link
+            to="/roadmap"
             className="inline-flex min-h-11 items-center underline underline-offset-4"
           >
-            Explore the roadmap
-          </a>
-          <a
-            href="/changelog"
+            <FormattedMessage
+              id="portal.feedback.exploreRoadmap"
+              defaultMessage="Explore the roadmap"
+            />
+          </Link>
+          <Link
+            to="/changelog"
             className="inline-flex min-h-11 items-center underline underline-offset-4"
           >
-            Read release updates
-          </a>
+            <FormattedMessage
+              id="portal.feedback.readUpdates"
+              defaultMessage="Read release updates"
+            />
+          </Link>
         </nav>
         <PortalParticipation />
       </section>

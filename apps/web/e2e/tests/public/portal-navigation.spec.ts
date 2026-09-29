@@ -18,7 +18,9 @@ test.describe('Portal identity and exploration', () => {
       await navigation.getByRole('link', { name: 'Roadmap', exact: true }).click()
       await expect(page).toHaveURL(/\/roadmap/)
       await brand.click()
-      await expect(page).toHaveURL(/\/$/)
+      await expect(page).toHaveURL(
+        (url) => url.pathname === '/' && url.searchParams.get('sort') === 'trending'
+      )
       await page.getByRole('link', { name: 'Read release updates' }).click()
       await expect(page).toHaveURL(/\/changelog/)
     })

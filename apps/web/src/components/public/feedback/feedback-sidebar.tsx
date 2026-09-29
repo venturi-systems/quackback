@@ -98,7 +98,10 @@ export function FeedbackSidebar({ boards, currentBoard, onBoardChange }: Feedbac
             href="https://venturi.systems/"
             className="group inline-flex min-h-11 items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1 rounded-full bg-muted/50 hover:bg-muted border border-transparent hover:border-border/50"
           >
-            <span>About Venturi</span>
+            <FormattedMessage
+              id="portal.feedback.sidebar.aboutVenturi"
+              defaultMessage="About Venturi"
+            />
           </a>
         </div>
       </div>
