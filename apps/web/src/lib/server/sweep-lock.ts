@@ -13,6 +13,13 @@
  *
  * If a process dies mid-sweep, the TTL auto-releases the lock so the
  * next interval tick proceeds — no orphaned locks left behind.
+ *
+ * If the lock cannot be read or taken (the database is down or the INSERT
+ * times out), the tick is skipped and the failure is written through the app
+ * logger; the next tick tries again. The sweepers start the lock
+ * fire-and-forget (`void withSweepLock(...)` in startup.ts), so a rejection
+ * here would be unhandled: the runtime would print the failed query's SQL and
+ * bound values raw and end the process (DEF-63).
  */
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/server/db'
@@ -28,6 +35,8 @@ const log = logger.child({ component: 'sweep-lock' })
  * @param ttlMs  - how long the lock is held before auto-expiry. Must be
  *                 longer than the expected runtime of `fn`.
  * @param fn     - the sweeper to run. Called only when the lock was acquired.
+ * @returns a promise that rejects only when `fn` rejects; a failure to take
+ *          the lock is logged and skips `fn`.
  */
 export async function withSweepLock(
   name: string,
@@ -37,17 +46,23 @@ export async function withSweepLock(
   // INSERT ON CONFLICT DO UPDATE with setWhere: only take over an expired
   // row. The first INSERT wins; subsequent callers get zero rows returned
   // because the existing row hasn't expired yet.
-  const result = await db.execute(sql`
-    INSERT INTO sweep_lock (name, acquired_at, expires_at)
-    VALUES (${name}, now(), now() + make_interval(secs => ${ttlMs / 1000}))
-    ON CONFLICT (name) DO UPDATE
-      SET acquired_at = now(),
-          expires_at = now() + make_interval(secs => ${ttlMs / 1000})
-      WHERE sweep_lock.expires_at < now()
-    RETURNING name, acquired_at
-  `)
-
-  const rows = getExecuteRows(result) as Array<{ acquired_at: Date | string }>
+  let rows: Array<{ acquired_at: Date | string }>
+  try {
+    const result = await db.execute(sql`
+      INSERT INTO sweep_lock (name, acquired_at, expires_at)
+      VALUES (${name}, now(), now() + make_interval(secs => ${ttlMs / 1000}))
+      ON CONFLICT (name) DO UPDATE
+        SET acquired_at = now(),
+            expires_at = now() + make_interval(secs => ${ttlMs / 1000})
+        WHERE sweep_lock.expires_at < now()
+      RETURNING name, acquired_at
+    `)
+    rows = getExecuteRows(result) as Array<{ acquired_at: Date | string }>
+  } catch (err) {
+    // Skip this tick; the next one tries again. Never rethrow: see above.
+    log.error({ err, name }, 'lock acquire failed')
+    return
+  }
   if (rows.length === 0) return // Another instance owns this lock
 
   const acquiredAt = rows[0]?.acquired_at

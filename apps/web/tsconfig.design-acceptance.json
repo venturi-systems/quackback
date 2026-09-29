@@ -8,6 +8,7 @@
     "playwright.config.ts",
     "e2e/tests/public/design-acceptance.spec.ts",
     "e2e/tests/auth/unified-login.spec.ts",
+    "e2e/tests/auth/public-entry.spec.ts",
     "e2e/tests/public/design-accessibility-roles.spec.ts",
     "e2e/utils/design-acceptance.ts",
     "e2e/utils/design-fixture-guard.ts",
