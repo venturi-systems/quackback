@@ -686,13 +686,13 @@
 }
 
 /* Explicit unauthenticated entry variant. Shared and signed-in shells keep
-   their existing height, typography, footer and provider defaults. */
-.portal-gate--entry.public-frame {
-  min-height: auto;
-}
-.portal-gate--entry > .public-frame__main {
-  flex: none;
-}
+   their existing typography, footer and provider defaults. The entry keeps
+   the frame's full-viewport column (.public-frame min-height: 100vh, main
+   flex: 1), so on a window taller than the composition the footer closes
+   the viewport instead of leaving an empty band under it. A natural-height
+   entry left 72px of that band at 1728x1000, 152px at 1920x1080 and 372px
+   at 2560x1300 (owner report 2026-09-29); windows shorter than the
+   composition render exactly as before. */
 .portal-gate--entry .public-frame__content {
   padding-block: 32px;
 }
