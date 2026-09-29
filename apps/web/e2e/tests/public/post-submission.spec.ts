@@ -1,5 +1,6 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test'
 import { getOtpCode } from '../../utils/db-helpers'
+import { flushMagicLinkRateLimit } from '../../utils/access-helpers'
 
 const TEST_EMAIL = 'demo@example.com'
 
@@ -75,6 +76,11 @@ let globalPage: Page
 
 // Set up authentication once for the entire file
 test.beforeAll(async ({ browser }) => {
+  // Each worker signs in once, and a worker restarts after any failure, so a
+  // run can send more codes to TEST_EMAIL than the sign-in limiter allows
+  // (3 per 15 minutes); that 429 used to fail every later test in the file.
+  // Clear the limiter's counters for this run first; product limits stay.
+  flushMagicLinkRateLimit()
   globalContext = await browser.newContext()
   globalPage = await globalContext.newPage()
   await loginWithOTP(globalPage)

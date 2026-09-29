@@ -69,18 +69,19 @@ test.describe('Portal Auth Dialog', () => {
     await page.getByRole('button', { name: /log in/i }).click()
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
 
-    await expect(page.getByText(/sign in to your account to vote and comment/i)).toBeVisible()
+    // The dialog's sign-in tagline (auth-step-header.tsx, surface `dialog`).
+    await expect(page.getByText(/sign in to vote and comment on feedback/i)).toBeVisible()
   })
 
   test('login dialog has a Sign up switch link for users without an account', async ({ page }) => {
     await page.getByRole('button', { name: /log in/i }).click()
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
 
-    // "Don't have an account? Sign up" link
-    const signUpLink = page.getByRole('dialog').getByRole('button', { name: /sign up/i })
-    if ((await signUpLink.count()) > 0) {
-      await expect(signUpLink.first()).toBeVisible()
-    }
+    // "New here? Create an account" (portal-auth-form-inline.tsx). The check
+    // used to look for a "Sign up" button inside an `if`, so it passed without
+    // finding anything once the label changed.
+    const signUpLink = page.getByRole('dialog').getByRole('button', { name: /create an account/i })
+    await expect(signUpLink).toBeVisible()
   })
 
   // ---------------------------------------------------------------------------
@@ -410,15 +411,15 @@ test.describe('Portal Auth Dialog', () => {
       timeout: 5000,
     })
 
-    // Click the "Sign up" mode-switch link inside the dialog
-    const signUpModeLink = page.getByRole('dialog').getByRole('button', { name: /sign up/i })
-    expect(await signUpModeLink.count()).toBeGreaterThan(0)
-    if ((await signUpModeLink.count()) > 0) {
-      await signUpModeLink.first().click()
-      await expect(page.getByRole('heading', { name: /create an account/i })).toBeVisible({
-        timeout: 5000,
-      })
-    }
+    // Click the "Create an account" mode switch inside the dialog
+    const signUpModeLink = page
+      .getByRole('dialog')
+      .getByRole('button', { name: /create an account/i })
+    await expect(signUpModeLink).toBeVisible()
+    await signUpModeLink.click()
+    await expect(page.getByRole('heading', { name: /create an account/i })).toBeVisible({
+      timeout: 5000,
+    })
   })
 
   test('switching from signup to login changes the dialog title', async ({ page }) => {
