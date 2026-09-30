@@ -1,4 +1,4 @@
-import { test, expect, Page, BrowserContext } from '@playwright/test'
+import { test, expect, Page, BrowserContext, type TestInfo } from '@playwright/test'
 import { getOtpCode } from '../../utils/db-helpers'
 import { flushMagicLinkRateLimit } from '../../utils/access-helpers'
 
@@ -652,6 +652,53 @@ test.describe('Board Selector', () => {
 })
 
 // Phase 2: Rich Text Editor Tests
+/**
+ * Open the slash menu in the create-post editor and pick a list item.
+ *
+ * The item is applied by clicking its button (SlashMenuList prevents the
+ * mousedown blur); if the list has not formed, the query is typed again and
+ * Enter picks the highlighted item. Each step attaches the editor's HTML and
+ * the popover's buttons to the report, so a failure shows what the page did.
+ */
+async function startListFromSlashMenu(
+  editor: ReturnType<Page['locator']>,
+  query: string,
+  itemName: RegExp,
+  listTag: 'ul' | 'ol',
+  testInfo: TestInfo
+) {
+  const snapshot = async (label: string) => {
+    const state = await globalPage.evaluate((name) => {
+      const tiptap = document.querySelector('.tiptap')
+      const buttons = Array.from(document.querySelectorAll('button')).filter((b) =>
+        new RegExp(name).test(b.textContent ?? '')
+      )
+      return {
+        editorHtml: tiptap?.innerHTML ?? null,
+        activeElement: document.activeElement?.tagName + '.' + document.activeElement?.className,
+        matchingButtons: buttons.map((b) => b.outerHTML.slice(0, 300)),
+      }
+    }, itemName.source)
+    await testInfo.attach(label, { body: JSON.stringify(state, null, 2), contentType: 'application/json' })
+  }
+  await editor.click()
+  await editor.type(query)
+  const item = globalPage.getByRole('button', { name: itemName })
+  await expect(item).toBeVisible()
+  await snapshot(`${listTag}-1-menu-open`)
+  await item.click()
+  await globalPage.waitForTimeout(300)
+  await snapshot(`${listTag}-2-after-click`)
+  if ((await editor.locator(listTag).count()) === 0) {
+    await editor.click()
+    await editor.type(query)
+    await expect(item).toBeVisible()
+    await globalPage.keyboard.press('Enter')
+    await globalPage.waitForTimeout(300)
+    await snapshot(`${listTag}-3-after-enter`)
+  }
+}
+
 test.describe('Rich Text Editor', () => {
   test.beforeEach(async () => {
     // Navigate to home for each test
@@ -729,19 +776,14 @@ test.describe('Rich Text Editor', () => {
     await expect(editor.locator('em')).toContainText('italic text')
   })
 
-  test('can create bullet list', async () => {
+  test('can create bullet list', async ({}, testInfo) => {
     const editor = globalPage.locator('.tiptap')
 
     // The create-post editor is borderless (no top toolbar) and Enter inserts
     // a line break outside a list (enterAsHardBreak), so a list starts the
     // way the product offers it: the slash menu. "/bullet" matches the
     // "Bullet List" item; inside the list, Enter splits list items.
-    await editor.click()
-    await editor.type('/bullet')
-    // The slash menu lists its block types as buttons (SlashMenuList, as
-    // e2e/tests/admin/help-center.spec.ts drives it); a click applies the
-    // item where Enter in this run did not.
-    await globalPage.getByRole('button', { name: /Bullet List/ }).click()
+    await startListFromSlashMenu(editor, '/bullet', /Bullet List/, 'ul', testInfo)
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
@@ -751,13 +793,11 @@ test.describe('Rich Text Editor', () => {
     await expect(editor.locator('li')).toHaveCount(2)
   })
 
-  test('can create numbered list', async () => {
+  test('can create numbered list', async ({}, testInfo) => {
     const editor = globalPage.locator('.tiptap')
 
     // Same editor as above: the slash menu's "Numbered List" item.
-    await editor.click()
-    await editor.type('/numbered')
-    await globalPage.getByRole('button', { name: /Numbered List/ }).click()
+    await startListFromSlashMenu(editor, '/numbered', /Numbered List/, 'ol', testInfo)
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
