@@ -3,9 +3,9 @@
  *
  * Rendered in place (HTTP 200) when the visitor may not read the portal yet.
  * Portal chrome, boards, posts and roadmap content are not rendered before
- * access is granted. The page is a left-aligned public page with the Venturi
- * header and footer that says what the portal is, who can read it, and who
- * can do what, next to the sign-in form.
+ * access is granted. The unauthenticated page is a compact sign-in surface
+ * with the Venturi header, access guidance and an optional permissions
+ * disclosure. Signed-in access-denied rendering keeps its existing shell.
  *
  * Two variants:
  *   - unauthenticated: explanation, the shared portal auth form, and the
@@ -229,24 +229,21 @@ function GateCard({
   return (
     <div className="portal-gate__layout" id="feedback-entry-top">
       <div className="portal-gate__intro">
-        <h1 className="portal-gate__title">
-          {isBaseStep ? (
-            <FormattedMessage
-              id="portal.gate.welcomeTitle"
-              defaultMessage="Help shape {workspace}"
-              values={{ workspace: workspaceName || 'Venturi' }}
-            />
-          ) : (
-            header.title
-          )}
-        </h1>
+        <h1 className="portal-gate__title">{header.title}</h1>
         {notice}
         {isBaseStep ? (
-          <p className="portal-gate__lead" data-testid="portal-gate-lead">
-            <FormattedMessage
-              id="portal.gate.value"
-              defaultMessage="Share product ideas, vote on requests and follow the roadmap."
-            />
+          <p className="portal-gate__access" data-testid="portal-gate-access">
+            {anyoneCanRead ? (
+              <FormattedMessage
+                id="portal.gate.accessOpen"
+                defaultMessage="Anyone who signs in can read and take part."
+              />
+            ) : (
+              <FormattedMessage
+                id="portal.gate.accessPrivate"
+                defaultMessage="This portal is private: only people given access can read it."
+              />
+            )}
           </p>
         ) : (
           <p className="portal-gate__lead">{header.description}</p>
@@ -255,33 +252,6 @@ function GateCard({
 
       <section className="portal-gate__signin" aria-label="Sign in">
         <div className="portal-gate__form">
-          {isBaseStep && (
-            <div className="portal-gate__form-intro">
-              <h2 className="portal-gate__signin-title">
-                {mode === 'signup' ? (
-                  <FormattedMessage
-                    id="portal.gate.createAccount"
-                    defaultMessage="Create an account"
-                  />
-                ) : (
-                  <FormattedMessage id="portal.gate.signInTitle" defaultMessage="Sign in" />
-                )}
-              </h2>
-              <p className="portal-gate__access" data-testid="portal-gate-access">
-                {anyoneCanRead ? (
-                  <FormattedMessage
-                    id="portal.gate.accessOpen"
-                    defaultMessage="Anyone who signs in can read and take part."
-                  />
-                ) : (
-                  <FormattedMessage
-                    id="portal.gate.accessPrivate"
-                    defaultMessage="This portal is private: only people given access can read it."
-                  />
-                )}
-              </p>
-            </div>
-          )}
           {signingIn ? (
             <div className="portal-gate__signing-in" aria-live="polite">
               <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -301,12 +271,9 @@ function GateCard({
         </div>
       </section>
 
-      {/* Owner decision 5 (landing-page#2309): the sign-in page states who
-          can post, vote, comment, set status and manage the roadmap. The
-          explanation stays a disclosure a keyboard can fold away, but it is
-          open when the page loads, so the page states it by default. */}
+      {/* Keep permissions available on demand without lengthening the initial sign-in view. */}
       {isBaseStep && (
-        <details className="portal-gate__roles" open>
+        <details className="portal-gate__roles">
           <summary className="portal-gate__roles-summary">
             <h2 id="portal-gate-roles-title">
               <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />
@@ -315,6 +282,7 @@ function GateCard({
           <PortalRolesExplainer visibility={visibility} labelledBy="portal-gate-roles-title" />
         </details>
       )}
+      <VenturiLandingFooter />
     </div>
   )
 }
@@ -354,7 +322,7 @@ export function PortalAccessGate({
       {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
       <PublicPageFrame
         className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
-        footer={reason === 'unauthenticated' ? <VenturiLandingFooter /> : undefined}
+        footer={reason === 'unauthenticated' ? <></> : undefined}
       >
         <GateCard
           reason={reason}
