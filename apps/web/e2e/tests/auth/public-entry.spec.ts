@@ -45,8 +45,11 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     ).toBeVisible()
     const roles = page.locator('details.portal-gate__roles')
     const summary = roles.locator('summary')
-    await expect(roles).not.toHaveAttribute('open', '')
-    await expect(page.locator('.portal-roles__grid')).toBeHidden()
+    // Owner decision 5 (landing-page#2309): the page states who can do what
+    // when it loads. The disclosure is open by default and folds on demand.
+    await expect(roles).toHaveAttribute('open', '')
+    await expect(page.locator('.portal-roles__grid')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Contributor', exact: true })).toBeVisible()
     await summary.focus()
     const focus = await measureFocusIndicator(summary)
     expect(
@@ -59,10 +62,11 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       contentType: 'application/json',
     })
     await page.keyboard.press('Enter')
+    await expect(roles).not.toHaveAttribute('open', '')
+    await expect(page.locator('.portal-roles__grid')).toBeHidden()
+    await page.keyboard.press('Space')
     await expect(roles).toHaveAttribute('open', '')
     await expect(page.getByRole('heading', { name: 'Contributor', exact: true })).toBeVisible()
-    await page.keyboard.press('Space')
-    await expect(roles).not.toHaveAttribute('open', '')
     await expect(summary).toBeFocused()
 
     const records = []
@@ -70,7 +74,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       320, 390, 639, 640, 641, 767, 768, 769, 1023, 1024, 1025, 1440, 1920, 2560,
     ]) {
       await page.setViewportSize({ width, height: 1000 })
-      await summary.click()
+      // Measured in the state the page loads in: the explanation open.
       await expect(roles).toHaveAttribute('open', '')
       await page.evaluate(() => document.fonts.ready.then(() => undefined))
       const geometry = await page.evaluate(() => {
@@ -137,7 +141,9 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           contentType: 'image/png',
         })
       }
+      // The folded state, then open again for the next width.
       await summary.click()
+      await expect(roles).not.toHaveAttribute('open', '')
       const compact = await page.evaluate(() => {
         const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
         const footer = document.querySelector('.venturi-landing-footer')!.getBoundingClientRect()
@@ -162,11 +168,13 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       await expect(page.getByRole('link', { name: 'Software notices' })).toBeVisible()
       await expect(page.getByRole('link', { name: 'Source code (AGPL-3.0)' })).toHaveCount(0)
       if ([390, 1440, 2560].includes(width)) {
-        await testInfo.attach(`entry-initial-${width}`, {
+        await testInfo.attach(`entry-folded-${width}`, {
           body: await page.screenshot({ fullPage: true }),
           contentType: 'image/png',
         })
       }
+      await summary.click()
+      await expect(roles).toHaveAttribute('open', '')
     }
     await testInfo.attach('entry-layout-evidence', {
       body: Buffer.from(JSON.stringify(records)),
@@ -180,7 +188,8 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           await zoomPage.goto('/')
           await expect(zoomPage.locator('.portal-gate__layout')).toBeVisible()
           const zoom = await setZoom(factor)
-          await zoomPage.locator('.portal-gate__roles-summary').click()
+          // The explanation is open on load, so the reflow check covers it.
+          await expect(zoomPage.locator('details.portal-gate__roles')).toHaveAttribute('open', '')
           await zoomPage.addStyleTag({
             content: `
             .portal-gate--entry * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }

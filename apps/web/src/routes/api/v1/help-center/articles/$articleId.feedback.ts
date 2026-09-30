@@ -6,6 +6,7 @@ import {
   badRequestResponse,
   notFoundResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import { isFeatureEnabled } from '@/lib/server/domains/settings/settings.service'
@@ -19,13 +20,18 @@ const feedbackBody = z.object({
 export const Route = createFileRoute('/api/v1/help-center/articles/$articleId/feedback')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST']),
       POST: async ({ request, params }) => {
         if (!(await isFeatureEnabled('helpCenter'))) return notFoundResponse('Knowledge base')
 
         try {
           const { principalId } = await withApiKeyAuth(request, { role: 'team' })
 
-          const articleId = parseTypeId<HelpCenterArticleId>(params.articleId, 'article', 'article ID')
+          const articleId = parseTypeId<HelpCenterArticleId>(
+            params.articleId,
+            'article',
+            'article ID'
+          )
 
           const body = await request.json()
           const parsed = feedbackBody.safeParse(body)

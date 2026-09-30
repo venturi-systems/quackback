@@ -1,13 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { recordApiKeyAuditSafely } from '@/lib/server/audit/audit-safe'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  successResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { WebhookId } from '@quackback/ids'
 
 export const Route = createFileRoute('/api/v1/webhooks/$webhookId/rotate')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST']),
       /**
        * POST /api/v1/webhooks/:webhookId/rotate
        * Rotate a webhook's signing secret

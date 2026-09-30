@@ -19,7 +19,6 @@
     "chromium | tests/admin/settings-widget.spec.ts | Admin Widget Settings > shows Content card with image uploads toggle",
     "chromium-auth | tests/auth/identity-providers.spec.ts | (1) button-only provider surfaces in the portal OIDC button list",
     "chromium-auth | tests/auth/unified-login.spec.ts | (4) /?prompt=login shows the dialog with OIDC button and recovery-code link",
-    "chromium-public | tests/public/auth.spec.ts | Portal Auth Dialog > login dialog shows descriptive text about signing in",
     "chromium-public | tests/public/notifications.spec.ts | Portal Notifications (unauthenticated) > redirects away from /notifications when not logged in",
     "chromium-public | tests/public/post-list-filters.spec.ts | Public Post List — chip filters > Add filter → Vote count → 5+ filters posts and adds a chip",
     "chromium-public | tests/public/post-list-filters.spec.ts | Public Post List — chip filters > Clear all wipes filters and the hint reappears",

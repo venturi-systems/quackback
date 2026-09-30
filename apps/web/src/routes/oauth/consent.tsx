@@ -3,11 +3,29 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { ExternalLink, Globe, ShieldCheck } from 'lucide-react'
 import { oauthConsentSearch, oauthText } from '@/lib/shared/auth-route-search'
+import { statusTitle } from '@/lib/shared/route-head'
 
 export const Route = createFileRoute('/oauth/consent')({
   // Tolerant and value-preserving: a numeric `state` or a missing `client_id`
   // renders the page instead of failing validation with HTTP 500.
   validateSearch: oauthConsentSearch,
+  // The server-rendered title names the page it is (the root head would
+  // otherwise leave the bare site title). A request without a client id also
+  // answers 400 (lib/server/middleware/oauth-consent-status.ts).
+  head: ({ matches }) => {
+    const own = matches.find((match) => match.routeId === '/oauth/consent')
+    const search = own?.search as unknown as { client_id?: string | number | boolean } | undefined
+    return {
+      meta: [
+        {
+          title: oauthText(search?.client_id)
+            ? statusTitle('Authorize an application')
+            : statusTitle('Incomplete authorization request'),
+        },
+        { name: 'robots', content: 'noindex, nofollow' },
+      ],
+    }
+  },
   component: ConsentPage,
 })
 

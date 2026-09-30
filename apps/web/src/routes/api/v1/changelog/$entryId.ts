@@ -2,10 +2,18 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
+  apiKeyAuditSource,
+  auditSnapshot,
+  changelogAuditView,
+  recordChangelogChange,
+  recordContentAudit,
+} from '@/lib/server/audit/content-audit'
+import {
   successResponse,
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import {
@@ -50,6 +58,7 @@ function formatChangelogResponse(entry: {
 export const Route = createFileRoute('/api/v1/changelog/$entryId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/changelog/:entryId
        * Get a single changelog entry by ID
@@ -77,7 +86,7 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const entryId = parseTypeId<ChangelogId>(
             params.entryId,
@@ -108,6 +117,9 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
             }
           }
 
+          const before = await auditSnapshot(async () =>
+            changelogAuditView(await getChangelogById(entryId))
+          )
           const updated = await updateChangelog(entryId, {
             title: parsed.data.title,
             content: parsed.data.content,
@@ -117,6 +129,14 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
                 parsed.data.displayDate === null ? null : new Date(parsed.data.displayDate),
             }),
           })
+
+          await recordChangelogChange(
+            apiKeyAuditSource(auth, request.headers),
+            'changelog.updated',
+            updated.id,
+            before,
+            changelogAuditView(updated)
+          )
 
           return successResponse(formatChangelogResponse(updated))
         } catch (error) {
@@ -131,7 +151,7 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
       DELETE: async ({ request, params }) => {
         try {
           // Soft delete (deleteChangelog sets deletedAt) — team OK.
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const entryId = parseTypeId<ChangelogId>(
             params.entryId,
@@ -139,7 +159,15 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
             'changelog entry ID'
           )
 
+          const before = await auditSnapshot(async () =>
+            changelogAuditView(await getChangelogById(entryId))
+          )
           await deleteChangelog(entryId)
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'changelog.deleted',
+            target: { type: 'changelog', id: entryId },
+            before,
+          })
           return noContentResponse()
         } catch (error) {
           return handleDomainError(error)

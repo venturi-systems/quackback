@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { handleDomainError } from '@/lib/server/domains/api/responses'
+import { handleDomainError, methodNotAllowed } from '@/lib/server/domains/api/responses'
 import { appJsonResponse, preflightResponse } from '@/lib/server/integrations/apps/cors'
 import type { Actor } from '@/lib/server/policy'
 import type { SegmentId } from '@quackback/ids'
@@ -8,6 +8,7 @@ import type { SegmentId } from '@quackback/ids'
 export const Route = createFileRoute('/api/v1/apps/boards')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['OPTIONS', 'GET']),
       OPTIONS: () => preflightResponse(),
 
       GET: async ({ request }) => {

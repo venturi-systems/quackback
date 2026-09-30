@@ -271,7 +271,7 @@ export function CommentForm({
                       defaultMessage: 'Set status',
                     })}
                   </span>
-                  <span className="rounded-full border border-border px-1.5 py-px text-[11px] leading-4 text-muted-foreground">
+                  <span className="rounded-full border border-border px-1.5 py-px text-xs leading-4 text-muted-foreground">
                     {intl.formatMessage({
                       id: 'portal.commentForm.teamOnlyTag',
                       defaultMessage: 'Team only',
@@ -361,7 +361,7 @@ export function CommentForm({
                           />
                           <span className="flex-1 text-start">{status.name}</span>
                           {isCurrent && !isSelected && (
-                            <span className="text-muted-foreground text-[10px]">current</span>
+                            <span className="text-muted-foreground text-xs">current</span>
                           )}
                           {isSelected && <CheckIcon className="size-3.5 text-primary shrink-0" />}
                         </button>

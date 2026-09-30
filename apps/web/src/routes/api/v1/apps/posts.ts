@@ -1,7 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { badRequestResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  badRequestResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import { contentJsonToMarkdown } from '@/lib/server/markdown-tiptap'
 import type { BoardId, PostId } from '@quackback/ids'
@@ -32,6 +36,7 @@ const createPostSchema = z.object({
 export const Route = createFileRoute('/api/v1/apps/posts')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['OPTIONS', 'POST']),
       OPTIONS: () => preflightResponse(),
 
       POST: async ({ request }) => {

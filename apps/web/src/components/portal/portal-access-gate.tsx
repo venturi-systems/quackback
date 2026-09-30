@@ -179,7 +179,8 @@ function GateCard({
   const anyoneCanRead = visibility === 'authenticated'
 
   // Why the last sign-in or access attempt was refused, kept on the page
-  // (the redirect's toast alone disappears). Unknown codes render nothing.
+  // (the redirect's toast alone disappears). A code without its own message
+  // shows the generic sign-in failure; the raw code is never shown.
   const notice = <AuthNotice code={error} className="portal-gate__notice" />
 
   if (reason === 'unauthorized') {
@@ -300,8 +301,12 @@ function GateCard({
         </div>
       </section>
 
+      {/* Owner decision 5 (landing-page#2309): the sign-in page states who
+          can post, vote, comment, set status and manage the roadmap. The
+          explanation stays a disclosure a keyboard can fold away, but it is
+          open when the page loads, so the page states it by default. */}
       {isBaseStep && (
-        <details className="portal-gate__roles">
+        <details className="portal-gate__roles" open>
           <summary className="portal-gate__roles-summary">
             <h2 id="portal-gate-roles-title">
               <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />

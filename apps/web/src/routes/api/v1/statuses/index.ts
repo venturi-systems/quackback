@@ -7,6 +7,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 
 // Input validation schema
@@ -27,6 +28,7 @@ const createStatusSchema = z.object({
 export const Route = createFileRoute('/api/v1/statuses/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/statuses
        * List all statuses

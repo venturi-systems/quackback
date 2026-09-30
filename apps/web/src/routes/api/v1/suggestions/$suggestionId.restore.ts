@@ -4,6 +4,7 @@ import {
   successResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { isTypeId, isValidTypeId } from '@quackback/ids'
 import type { FeedbackSuggestionId, MergeSuggestionId } from '@quackback/ids'
@@ -11,6 +12,7 @@ import type { FeedbackSuggestionId, MergeSuggestionId } from '@quackback/ids'
 export const Route = createFileRoute('/api/v1/suggestions/$suggestionId/restore')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST']),
       /**
        * POST /api/v1/suggestions/:suggestionId/restore
        * Restore a dismissed suggestion back to pending

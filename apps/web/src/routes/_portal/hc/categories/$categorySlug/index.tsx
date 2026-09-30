@@ -50,7 +50,7 @@ function AuthorAvatar({ author, index }: { author: Author; index: number }) {
 
   return (
     <span
-      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[10px] font-bold text-white overflow-hidden border-2 border-background ${bg}`}
+      className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold text-white overflow-hidden border-2 border-background ${bg}`}
       style={{ marginLeft: index === 0 ? 0 : -8 }}
       title={author.name}
     >
@@ -85,7 +85,7 @@ function ArticleRow({
           {title}
         </span>
         {description && (
-          <span className="block text-xs text-muted-foreground/60 mt-0.5 line-clamp-1">
+          <span className="block text-xs text-muted-foreground/60 mt-0.5 break-words">
             {description}
           </span>
         )}
@@ -166,7 +166,7 @@ function CategoryIndexPage() {
                 <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0" />
                 <span className="min-w-0 break-words">All categories</span>
               </Link>
-              <p className="mb-1.5 shrink-0 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+              <p className="mb-1.5 shrink-0 px-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">
                 Browse
               </p>
               <ScrollArea className="min-h-0 flex-1" scrollBarClassName="w-1.5">

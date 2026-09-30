@@ -1,6 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  successResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import { serializeConversation } from './-serialize'
 import type { ConversationId, SegmentId } from '@quackback/ids'
@@ -8,6 +12,7 @@ import type { ConversationId, SegmentId } from '@quackback/ids'
 export const Route = createFileRoute('/api/v1/conversations/$conversationId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       /** GET /api/v1/conversations/:id — single conversation (team API key). */
       GET: async ({ request, params }) => {
         try {

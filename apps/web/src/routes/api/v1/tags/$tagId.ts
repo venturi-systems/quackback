@@ -2,10 +2,17 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
+  apiKeyAuditSource,
+  auditSnapshot,
+  recordContentAudit,
+  tagAuditView,
+} from '@/lib/server/audit/content-audit'
+import {
   successResponse,
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { TagId } from '@quackback/ids'
@@ -23,6 +30,7 @@ const updateTagSchema = z.object({
 export const Route = createFileRoute('/api/v1/tags/$tagId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/tags/:tagId
        * Get a single tag by ID
@@ -55,7 +63,7 @@ export const Route = createFileRoute('/api/v1/tags/$tagId')({
        */
       PATCH: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const tagId = parseTypeId<TagId>(params.tagId, 'tag', 'tag ID')
 
@@ -68,12 +76,19 @@ export const Route = createFileRoute('/api/v1/tags/$tagId')({
             })
           }
 
-          const { updateTag } = await import('@/lib/server/domains/tags/tag.service')
+          const { getTagById, updateTag } = await import('@/lib/server/domains/tags/tag.service')
 
+          const before = await auditSnapshot(async () => tagAuditView(await getTagById(tagId)))
           const tag = await updateTag(tagId, {
             name: parsed.data.name,
             color: parsed.data.color,
             description: parsed.data.description,
+          })
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'tag.updated',
+            target: { type: 'tag', id: tag.id },
+            before,
+            after: tagAuditView(tag),
           })
 
           return successResponse({
@@ -94,13 +109,19 @@ export const Route = createFileRoute('/api/v1/tags/$tagId')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          await withApiKeyAuth(request, { role: 'team' })
+          const auth = await withApiKeyAuth(request, { role: 'team' })
 
           const tagId = parseTypeId<TagId>(params.tagId, 'tag', 'tag ID')
 
-          const { deleteTag } = await import('@/lib/server/domains/tags/tag.service')
+          const { deleteTag, getTagById } = await import('@/lib/server/domains/tags/tag.service')
 
+          const before = await auditSnapshot(async () => tagAuditView(await getTagById(tagId)))
           await deleteTag(tagId)
+          await recordContentAudit(apiKeyAuditSource(auth, request.headers), {
+            event: 'tag.deleted',
+            target: { type: 'tag', id: tagId },
+            before,
+          })
 
           return noContentResponse()
         } catch (error) {

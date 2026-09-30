@@ -14,8 +14,19 @@ import {
   deleteTag,
 } from '@/lib/server/domains/tags/tag.service'
 import { logger } from '@/lib/server/logger'
+import {
+  auditSnapshot,
+  recordContentAudit,
+  sessionAuditSource,
+  tagAuditView,
+} from '@/lib/server/audit/content-audit'
 
 const log = logger.child({ component: 'tags' })
+
+/** Tag state before a change, for the audit row; null if unreadable. */
+function tagSnapshot(id: TagId) {
+  return auditSnapshot(async () => tagAuditView(await getTagById(id)))
+}
 
 // ============================================
 // Schemas
@@ -110,7 +121,7 @@ export const createTagFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ name: data.name }, 'create tag')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
       const tag = await createTag({
         name: data.name,
@@ -118,6 +129,11 @@ export const createTagFn = createServerFn({ method: 'POST' })
         description: data.description,
       })
       log.info({ tag_id: tag.id }, 'tag created')
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'tag.created',
+        target: { type: 'tag', id: tag.id },
+        after: tagAuditView(tag),
+      })
       return tag
     } catch (error) {
       log.error({ err: error }, 'create tag failed')
@@ -133,14 +149,21 @@ export const updateTagFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ tag_id: data.id }, 'update tag')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await tagSnapshot(data.id as TagId)
       const tag = await updateTag(data.id as TagId, {
         name: data.name,
         color: data.color,
         description: data.description,
       })
       log.info({ tag_id: tag.id }, 'tag updated')
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'tag.updated',
+        target: { type: 'tag', id: tag.id },
+        before,
+        after: tagAuditView(tag),
+      })
       return tag
     } catch (error) {
       log.error({ err: error }, 'update tag failed')
@@ -156,10 +179,16 @@ export const deleteTagFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ tag_id: data.id }, 'delete tag')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await tagSnapshot(data.id as TagId)
       await deleteTag(data.id as TagId)
       log.info({ tag_id: data.id }, 'tag deleted')
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'tag.deleted',
+        target: { type: 'tag', id: data.id },
+        before,
+      })
       return { id: data.id as TagId }
     } catch (error) {
       log.error({ err: error }, 'delete tag failed')

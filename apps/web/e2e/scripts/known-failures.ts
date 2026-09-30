@@ -10,7 +10,11 @@
  *
  *   - a failure NOT in `known-failures.json` fails the shard immediately;
  *   - a test that IS in `known-failures.json` and passed fails the shard too,
- *     demanding the entry be deleted. The list can only shrink.
+ *     demanding the entry be deleted. The list can only shrink;
+ *   - a planned test that did not run fails the shard unless it is itself on
+ *     the list. Playwright reports it as `skipped`, the same word it uses for
+ *     a test that asked to be skipped, so it looked like a pass: in a serial
+ *     file every test after a known failure was silently never run.
  *
  * A one-directional list would rot back into a rubber stamp: entries would sit
  * there long after the tests were fixed and would silently re-absorb the next
@@ -22,7 +26,7 @@
  * as "nothing failed" is the false-green this whole lane exists to prevent.
  */
 
-export type TestOutcome = 'passed' | 'failed' | 'skipped' | 'flaky'
+export type TestOutcome = 'passed' | 'failed' | 'skipped' | 'flaky' | 'didNotRun'
 
 export interface TestRecord {
   id: string
@@ -32,7 +36,7 @@ export interface TestRecord {
 interface JsonSpec {
   title?: string
   file?: string
-  tests?: Array<{ projectName?: string; status?: string }>
+  tests?: Array<{ projectName?: string; status?: string; expectedStatus?: string }>
 }
 
 interface JsonSuite {
@@ -61,8 +65,17 @@ export function testId(project: string, file: string, titlePath: string[]): stri
   return `${project} | ${file} | ${titlePath.join(' > ')}`
 }
 
-/** Playwright's per-test `status` vocabulary, mapped onto ours. */
-function toOutcome(status: string | undefined): TestOutcome {
+/**
+ * Playwright's per-test `status` vocabulary, mapped onto ours.
+ *
+ * Playwright reports `skipped` for two different things. A test that asked to
+ * be skipped (`test.skip()`, `test.fixme()`, a runtime skip condition) also
+ * carries `expectedStatus: 'skipped'`. A planned test that never ran -- because
+ * an earlier test in a serial group failed, a worker crashed or the run was
+ * interrupted -- keeps its `expectedStatus` of `passed`. Its own list reporter
+ * prints the second kind as "did not run", and so does this gate.
+ */
+function toOutcome(status: string | undefined, expectedStatus: string | undefined): TestOutcome {
   switch (status) {
     case 'expected':
       return 'passed'
@@ -71,7 +84,7 @@ function toOutcome(status: string | undefined): TestOutcome {
     case 'flaky':
       return 'flaky'
     default:
-      return 'skipped'
+      return expectedStatus === 'skipped' ? 'skipped' : 'didNotRun'
   }
 }
 
@@ -92,7 +105,7 @@ export function collectOutcomes(report: JsonReport): TestRecord[] {
             ...nextPath,
             spec.title ?? '',
           ]),
-          outcome: toOutcome(test.status),
+          outcome: toOutcome(test.status, test.expectedStatus),
         })
       }
     }
@@ -111,6 +124,8 @@ export interface RatchetResult {
   nowPassing: string[]
   /** On the known list and failed. Tolerated; reported for visibility. */
   stillFailing: string[]
+  /** Planned, never ran, and not on the known list. Blocks the shard. */
+  didNotRun: string[]
   /** Non-test problems -- no report, zero tests. Blocks the shard. */
   fatal: string[]
 }
@@ -137,6 +152,7 @@ export function ratchet(
   const newFailures: string[] = []
   const nowPassing: string[] = []
   const stillFailing: string[] = []
+  const didNotRun: string[] = []
   const fatal: string[] = []
 
   if (records.length === 0) {
@@ -186,16 +202,25 @@ export function ratchet(
       else newFailures.push(id)
     } else if (outcome === 'passed' && known.has(id)) {
       nowPassing.push(id)
+    } else if (outcome === 'didNotRun' && !known.has(id)) {
+      // A test that never ran proves nothing. Accepting it would let one
+      // failure silence every test after it in a serial group.
+      didNotRun.push(id)
     }
     // `flaky` passed on retry, and `skipped` never ran: neither proves a known
     // failure is fixed, so neither may retire a baseline entry.
   }
 
   return {
-    ok: fatal.length === 0 && newFailures.length === 0 && nowPassing.length === 0,
+    ok:
+      fatal.length === 0 &&
+      newFailures.length === 0 &&
+      nowPassing.length === 0 &&
+      didNotRun.length === 0,
     newFailures: newFailures.sort(),
     nowPassing: nowPassing.sort(),
     stillFailing: stillFailing.sort(),
+    didNotRun: didNotRun.sort(),
     fatal,
   }
 }
@@ -208,6 +233,15 @@ export function formatReport(result: RatchetResult): string {
     for (const id of result.newFailures) lines.push(`  + ${id}`)
     lines.push('')
     lines.push('Fix these. Do not add them to e2e/known-failures.json: that list only shrinks.')
+  }
+  if (result.didNotRun.length > 0) {
+    lines.push(`${result.didNotRun.length} planned test(s) did NOT RUN:`)
+    for (const id of result.didNotRun) lines.push(`  ? ${id}`)
+    lines.push('')
+    lines.push(
+      'A test that never ran is not a pass. The usual cause is a serial group in which an ' +
+        'earlier test failed; run the group in default mode so each test runs on its own.'
+    )
   }
   if (result.nowPassing.length > 0) {
     lines.push(`${result.nowPassing.length} known failure(s) now PASS. Delete them from`)

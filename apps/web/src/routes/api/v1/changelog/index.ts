@@ -2,10 +2,16 @@ import { createFileRoute } from '@tanstack/react-router'
 import { z } from 'zod'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import {
+  apiKeyAuditSource,
+  changelogAuditView,
+  recordChangelogChange,
+} from '@/lib/server/audit/content-audit'
+import {
   successResponse,
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { createChangelog } from '@/lib/server/domains/changelog/changelog.service'
 import { listChangelogs } from '@/lib/server/domains/changelog/changelog.query'
@@ -25,6 +31,7 @@ const createChangelogSchema = z.object({
 export const Route = createFileRoute('/api/v1/changelog/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/changelog
        * List all changelog entries
@@ -109,6 +116,13 @@ export const Route = createFileRoute('/api/v1/changelog/')({
               principalId: authResult.principalId,
               name: authorName,
             }
+          )
+          await recordChangelogChange(
+            apiKeyAuditSource(authResult, request.headers),
+            'changelog.created',
+            entry.id,
+            null,
+            changelogAuditView(entry)
           )
 
           return createdResponse({

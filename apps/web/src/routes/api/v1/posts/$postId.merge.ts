@@ -5,6 +5,7 @@ import {
   successResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { PostId } from '@quackback/ids'
@@ -16,6 +17,7 @@ const mergeSchema = z.object({
 export const Route = createFileRoute('/api/v1/posts/$postId/merge')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST']),
       /**
        * POST /api/v1/posts/:postId/merge
        * Merge this post (duplicate) into a canonical post (admin only)

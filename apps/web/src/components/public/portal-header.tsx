@@ -196,7 +196,9 @@ export function PortalHeader({
       aria-label={mobile ? 'Mobile portal navigation' : 'Portal navigation'}
       className={cn(
         'portal-nav gap-1',
-        mobile ? 'flex flex-col py-2' : 'flex items-center whitespace-nowrap'
+        // Desktop: the tabs wrap onto a second row as whole items when the
+        // row is narrow, never clipped or held on one line (v6.6).
+        mobile ? 'flex flex-col py-2' : 'flex flex-wrap items-center'
       )}
     >
       {navItems.map((item) => {
@@ -222,7 +224,7 @@ export function PortalHeader({
             {intl.formatMessage({ id: item.messageId, defaultMessage: item.defaultMessage })}
             {item.to === '/support' && supportUnreadTotal > 0 && (
               <span
-                className="ms-1.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-[18px] text-primary-foreground"
+                className="ms-1.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold leading-[18px] text-primary-foreground"
                 aria-label={intl.formatMessage(
                   {
                     id: 'portal.support.unreadBadge',

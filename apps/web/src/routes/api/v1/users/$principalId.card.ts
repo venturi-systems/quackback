@@ -11,6 +11,7 @@
  * fallback).
  */
 import { createFileRoute } from '@tanstack/react-router'
+import { methodNotAllowed } from '@/lib/server/domains/api/responses'
 import type { PrincipalId, UserId } from '@quackback/ids'
 import { auth } from '@/lib/server/auth'
 import { db, principal, user, eq } from '@/lib/server/db'
@@ -108,6 +109,7 @@ export async function handlePrincipalCard({
 export const Route = createFileRoute('/api/v1/users/$principalId/card')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       GET: handlePrincipalCard,
     },
   },

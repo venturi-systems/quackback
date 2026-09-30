@@ -7,6 +7,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { WEBHOOK_EVENTS } from '@/lib/server/events/integrations/webhook/constants'
 import { parseTypeIdArray } from '@/lib/server/domains/api/validation'
@@ -23,6 +24,7 @@ const createWebhookSchema = z.object({
 export const Route = createFileRoute('/api/v1/webhooks/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/webhooks
        * List all webhooks

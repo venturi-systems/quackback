@@ -7,6 +7,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { BoardId } from '@quackback/ids'
@@ -24,6 +25,7 @@ const updateBoardSchema = z.object({
 export const Route = createFileRoute('/api/v1/boards/$boardId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/boards/:boardId
        * Get a single board by ID

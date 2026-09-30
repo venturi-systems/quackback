@@ -1,11 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { badRequestResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  badRequestResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { appJsonResponse, preflightResponse } from '@/lib/server/integrations/apps/cors'
 
 export const Route = createFileRoute('/api/v1/apps/linked')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['OPTIONS', 'GET']),
       OPTIONS: () => preflightResponse(),
 
       GET: async ({ request }) => {

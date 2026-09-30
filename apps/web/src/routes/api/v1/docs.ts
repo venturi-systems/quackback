@@ -1,9 +1,11 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { methodNotAllowed } from '@/lib/server/domains/api/responses'
 import { config } from '@/lib/server/config'
 
 export const Route = createFileRoute('/api/v1/docs')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       /**
        * GET /api/v1/docs
        * Serves Swagger UI for interactive API documentation.

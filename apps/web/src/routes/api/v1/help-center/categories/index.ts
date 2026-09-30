@@ -7,6 +7,7 @@ import {
   badRequestResponse,
   notFoundResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { isFeatureEnabled } from '@/lib/server/domains/settings/settings.service'
 import {
@@ -53,6 +54,7 @@ function formatCategory(cat: {
 export const Route = createFileRoute('/api/v1/help-center/categories/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       GET: async ({ request }) => {
         if (!(await isFeatureEnabled('helpCenter'))) return notFoundResponse('Knowledge base')
 
