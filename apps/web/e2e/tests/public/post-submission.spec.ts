@@ -732,15 +732,18 @@ test.describe('Rich Text Editor', () => {
   test('can create bullet list', async () => {
     const editor = globalPage.locator('.tiptap')
 
-    // The create-post editor is borderless (no top toolbar; only the
-    // selection bubble menu), so the list comes from StarterKit's keyboard
-    // shortcut for toggleBulletList (Mod-Shift-8) on the selected lines.
+    // The create-post editor is borderless (no top toolbar) and Enter inserts
+    // a line break outside a list (enterAsHardBreak), so a list starts the
+    // way the product offers it: the slash menu. "/bullet" matches the
+    // "Bullet List" item and Enter picks it; inside the list, Enter splits
+    // list items.
     await editor.click()
+    await globalPage.keyboard.type('/bullet')
+    await expect(globalPage.getByText('Bullet List', { exact: true })).toBeVisible()
+    await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
-    await globalPage.keyboard.press('ControlOrMeta+a')
-    await globalPage.keyboard.press('ControlOrMeta+Shift+8')
 
     // Verify list structure
     await expect(editor.locator('ul')).toBeVisible()
@@ -750,14 +753,14 @@ test.describe('Rich Text Editor', () => {
   test('can create numbered list', async () => {
     const editor = globalPage.locator('.tiptap')
 
-    // Same editor as above: StarterKit's shortcut for toggleOrderedList
-    // (Mod-Shift-7) on the selected lines.
+    // Same editor as above: the slash menu's "Numbered List" item.
     await editor.click()
+    await globalPage.keyboard.type('/numbered')
+    await expect(globalPage.getByText('Numbered List', { exact: true })).toBeVisible()
+    await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
-    await globalPage.keyboard.press('ControlOrMeta+a')
-    await globalPage.keyboard.press('ControlOrMeta+Shift+7')
 
     // Verify list structure
     await expect(editor.locator('ol')).toBeVisible()
