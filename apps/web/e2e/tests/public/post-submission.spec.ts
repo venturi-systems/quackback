@@ -735,12 +735,13 @@ test.describe('Rich Text Editor', () => {
     // The create-post editor is borderless (no top toolbar) and Enter inserts
     // a line break outside a list (enterAsHardBreak), so a list starts the
     // way the product offers it: the slash menu. "/bullet" matches the
-    // "Bullet List" item and Enter picks it; inside the list, Enter splits
-    // list items.
+    // "Bullet List" item; inside the list, Enter splits list items.
     await editor.click()
-    await globalPage.keyboard.type('/bullet')
-    await expect(globalPage.getByText('Bullet List', { exact: true })).toBeVisible()
-    await globalPage.keyboard.press('Enter')
+    await editor.type('/bullet')
+    // The slash menu lists its block types as buttons (SlashMenuList, as
+    // e2e/tests/admin/help-center.spec.ts drives it); a click applies the
+    // item where Enter in this run did not.
+    await globalPage.getByRole('button', { name: /Bullet List/ }).click()
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
@@ -755,9 +756,8 @@ test.describe('Rich Text Editor', () => {
 
     // Same editor as above: the slash menu's "Numbered List" item.
     await editor.click()
-    await globalPage.keyboard.type('/numbered')
-    await expect(globalPage.getByText('Numbered List', { exact: true })).toBeVisible()
-    await globalPage.keyboard.press('Enter')
+    await editor.type('/numbered')
+    await globalPage.getByRole('button', { name: /Numbered List/ }).click()
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
