@@ -681,6 +681,15 @@ async function startListFromSlashMenu(
     }, itemName.source)
     await testInfo.attach(label, { body: JSON.stringify(state, null, 2), contentType: 'application/json' })
   }
+  // Browser-side errors thrown by the item's command chain surface here, not
+  // in the test's own assertions.
+  const errors: string[] = []
+  const onPageError = (error: Error) => errors.push(`pageerror: ${error.message}`)
+  const onConsole = (message: { type(): string; text(): string }) => {
+    if (message.type() === 'error') errors.push(`console: ${message.text()}`)
+  }
+  globalPage.on('pageerror', onPageError)
+  globalPage.on('console', onConsole)
   await editor.click()
   await editor.type(query)
   const item = globalPage.getByRole('button', { name: itemName })
@@ -689,6 +698,10 @@ async function startListFromSlashMenu(
   await item.click()
   await globalPage.waitForTimeout(300)
   await snapshot(`${listTag}-2-after-click`)
+  await testInfo.attach(`${listTag}-errors-after-click`, {
+    body: JSON.stringify(errors, null, 2),
+    contentType: 'application/json',
+  })
   if ((await editor.locator(listTag).count()) === 0) {
     await editor.click()
     await editor.type(query)
@@ -697,6 +710,12 @@ async function startListFromSlashMenu(
     await globalPage.waitForTimeout(300)
     await snapshot(`${listTag}-3-after-enter`)
   }
+  globalPage.off('pageerror', onPageError)
+  globalPage.off('console', onConsole)
+  await testInfo.attach(`${listTag}-errors`, {
+    body: JSON.stringify(errors, null, 2),
+    contentType: 'application/json',
+  })
 }
 
 test.describe('Rich Text Editor', () => {
@@ -776,6 +795,7 @@ test.describe('Rich Text Editor', () => {
     await expect(editor.locator('em')).toContainText('italic text')
   })
 
+  // eslint-disable-next-line no-empty-pattern -- testInfo needs the fixture slot
   test('can create bullet list', async ({}, testInfo) => {
     const editor = globalPage.locator('.tiptap')
 
@@ -793,6 +813,7 @@ test.describe('Rich Text Editor', () => {
     await expect(editor.locator('li')).toHaveCount(2)
   })
 
+  // eslint-disable-next-line no-empty-pattern -- testInfo needs the fixture slot
   test('can create numbered list', async ({}, testInfo) => {
     const editor = globalPage.locator('.tiptap')
 
