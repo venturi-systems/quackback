@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect, Link } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { FormattedMessage } from 'react-intl'
 import { lazy, Suspense } from 'react'
@@ -238,7 +238,10 @@ function AccessiblePublicPortalPage({
     <div className="portal-shell py-6">
       <section className="portal-introduction" aria-labelledby="feedback-title">
         <h1 id="feedback-title">
-          <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
+          <FormattedMessage
+            id="portal.feedback.exploreTitle"
+            defaultMessage="Help shape what comes next"
+          />
         </h1>
         <p>
           <FormattedMessage
@@ -246,6 +249,29 @@ function AccessiblePublicPortalPage({
             defaultMessage="Share an idea, support a request, and follow what the team is working on."
           />
         </p>
+        <nav
+          aria-label="Explore the product"
+          className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm"
+        >
+          <Link
+            to="/roadmap"
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            <FormattedMessage
+              id="portal.feedback.exploreRoadmap"
+              defaultMessage="Explore the roadmap"
+            />
+          </Link>
+          <Link
+            to="/changelog"
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+          >
+            <FormattedMessage
+              id="portal.feedback.readUpdates"
+              defaultMessage="Read release updates"
+            />
+          </Link>
+        </nav>
         <PortalParticipation />
       </section>
       <Suspense
