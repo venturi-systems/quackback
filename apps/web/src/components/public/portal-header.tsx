@@ -118,7 +118,7 @@ export function PortalHeader({
     }
   }, [])
 
-  // Avoid hydration mismatch for theme toggle
+  // Keep hydration-dependent controls unavailable until their handlers are ready.
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -416,6 +416,7 @@ export function PortalHeader({
           className="min-h-11 w-full justify-between sm:hidden"
           aria-expanded={mobileNavOpen}
           aria-controls="portal-mobile-navigation"
+          disabled={!mounted}
           onClick={() => setMobileNavOpen((open) => !open)}
         >
           <FormattedMessage id="portal.header.menu" defaultMessage="Menu" />
