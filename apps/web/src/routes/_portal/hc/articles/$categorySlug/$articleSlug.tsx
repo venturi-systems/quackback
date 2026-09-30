@@ -65,7 +65,6 @@ export const Route = createFileRoute('/_portal/hc/articles/$categorySlug/$articl
         { property: 'og:type', content: 'article' },
         { property: 'og:url', content: canonicalUrl },
         { property: 'og:site_name', content: workspaceName },
-        { name: 'twitter:card', content: 'summary' },
         { name: 'twitter:title', content: pageTitle },
         ...(description ? [{ name: 'twitter:description', content: description }] : []),
       ],

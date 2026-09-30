@@ -7,6 +7,7 @@ import {
   badRequestResponse,
   notFoundResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId, parseOptionalTypeId } from '@/lib/server/domains/api/validation'
 import { isFeatureEnabled } from '@/lib/server/domains/settings/settings.service'
@@ -69,6 +70,7 @@ function formatArticle(article: {
 export const Route = createFileRoute('/api/v1/help-center/articles/$articleId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       GET: async ({ request, params }) => {
         if (!(await isFeatureEnabled('helpCenter'))) return notFoundResponse('Knowledge base')
 

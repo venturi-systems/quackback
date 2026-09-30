@@ -1,8 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { methodNotAllowed } from '@/lib/server/domains/api/responses'
 
 export const Route = createFileRoute('/api/v1/openapi/json')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       /**
        * GET /api/v1/openapi/json
        * Returns the OpenAPI 3.1 specification for the Venturi Feedback API.

@@ -1,10 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  successResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 
 export const Route = createFileRoute('/api/v1/principals/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       /**
        * GET /api/v1/principals
        * List all team members (admin and member roles)

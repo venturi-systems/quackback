@@ -125,10 +125,7 @@ test.describe('server-rendered status titles (DEF-44)', () => {
 // framework's redirect named the scheme the server sees behind the proxy.
 // The server entry now answers with a relative Location (src/server.ts).
 test.describe('paths that begin with //', () => {
-  test('redirect to the collapsed path with a relative Location', async ({
-    request,
-    baseURL,
-  }) => {
+  test('redirect to the collapsed path with a relative Location', async ({ request, baseURL }) => {
     for (const [path, location] of [
       ['//evil.example', '/evil.example'],
       ['//evil.example/x?y=1', '/evil.example/x?y=1'],
@@ -139,5 +136,29 @@ test.describe('paths that begin with //', () => {
       expect(res.status(), `${path} status`).toBe(308)
       expect(res.headers()['location'], `${path} location`).toBe(location)
     }
+  })
+})
+
+// A consent URL that names no application renders the page's own
+// explanation. It used to answer 200 under the bare site title; it now
+// answers 400 with a title that says what the page is.
+test.describe('an incomplete OAuth consent request', () => {
+  test('answers 400 with its own title, and a named client is not affected', async ({
+    request,
+  }) => {
+    for (const path of ['/oauth/consent', '/oauth/consent?client_id=%5B1%5D&scope=%7B%7D']) {
+      const res = await request.get(path)
+      expect(res.status(), `${path} status`).toBe(400)
+      const body = await res.text()
+      expect(body, `${path} title`).toContain(
+        '<title>Incomplete authorization request · Venturi Feedback</title>'
+      )
+      expect(body, `${path} explanation`).toContain('This authorization request is incomplete')
+    }
+    const named = await request.get('/oauth/consent?client_id=123')
+    expect(named.status()).toBe(200)
+    expect(await named.text()).toContain(
+      '<title>Authorize an application · Venturi Feedback</title>'
+    )
   })
 })

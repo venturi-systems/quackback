@@ -444,7 +444,7 @@ export function PostCard({
             {tags.slice(0, 3).map((tag) => (
               <span
                 key={tag.id}
-                className="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium"
+                className="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium"
                 style={{
                   backgroundColor: tag.color + '20',
                   color: tag.color,
@@ -454,7 +454,7 @@ export function PostCard({
               </span>
             ))}
             {tags.length > 3 && (
-              <span className="text-[10px] text-muted-foreground/60">+{tags.length - 3}</span>
+              <span className="text-xs text-muted-foreground/60">+{tags.length - 3}</span>
             )}
           </div>
         )}
@@ -477,7 +477,7 @@ export function PostCard({
                   }
                 />
               )}
-              <AvatarFallback className="bg-muted text-[10px]">
+              <AvatarFallback className="bg-muted text-xs">
                 {getInitials(authorName)}
               </AvatarFallback>
             </Avatar>

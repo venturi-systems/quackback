@@ -119,6 +119,36 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
     expect(screen.queryByRole('button', { name: /create an account/i })).not.toBeInTheDocument()
   })
 
+  it('uses the official Google image only in the explicit brand variant and preserves GitHub', () => {
+    getEnabledOAuthProvidersMock.mockReturnValue([
+      { id: 'google', name: 'Google', type: 'social' },
+      { id: 'github', name: 'GitHub', type: 'social' },
+    ])
+    const props = {
+      mode: 'login' as const,
+      authConfig: {
+        found: true,
+        oauth: { google: true, github: true, password: false, magicLink: false },
+      },
+    }
+    const original = renderForm(props)
+    const originalGoogle = screen.getByRole('button', { name: /sign in with google/i }).innerHTML
+    const originalGitHub = screen.getByRole('button', { name: /sign in with github/i }).innerHTML
+    original.unmount()
+    const explicitDefault = renderForm({ ...props, providerAppearance: 'default' })
+    expect(screen.getByRole('button', { name: /sign in with google/i }).innerHTML).toBe(
+      originalGoogle
+    )
+    explicitDefault.unmount()
+    renderForm({ ...props, providerAppearance: 'brand' })
+    const google = screen.getByRole('button', { name: /sign in with google/i })
+    expect(google.querySelector('img')).toHaveAttribute('src', '/auth/google-g.png')
+    expect(google.querySelector('img')).toHaveAttribute('alt', '')
+    expect(screen.getByRole('button', { name: /sign in with github/i }).innerHTML).toBe(
+      originalGitHub
+    )
+  })
+
   it('shows a no-methods message when neither email methods nor OAuth are configured', () => {
     render(
       <PortalAuthFormInline

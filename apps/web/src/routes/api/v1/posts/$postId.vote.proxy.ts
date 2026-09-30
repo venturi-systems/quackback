@@ -6,6 +6,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { PostId, PrincipalId } from '@quackback/ids'
@@ -18,6 +19,7 @@ const bodySchema = z.object({
 export const Route = createFileRoute('/api/v1/posts/$postId/vote/proxy')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST', 'DELETE']),
       /**
        * POST /api/v1/posts/:postId/vote/proxy
        * Add a proxy vote on behalf of a user (insert-only, never toggles)
@@ -84,7 +86,9 @@ export const Route = createFileRoute('/api/v1/posts/$postId/vote/proxy')({
        */
       DELETE: async ({ request, params }) => {
         try {
-          const { principalId: removedByPrincipalId } = await withApiKeyAuth(request, { role: 'team' })
+          const { principalId: removedByPrincipalId } = await withApiKeyAuth(request, {
+            role: 'team',
+          })
 
           const postId = parseTypeId<PostId>(params.postId, 'post', 'post ID')
 

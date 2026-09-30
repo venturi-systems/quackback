@@ -6,6 +6,7 @@ import {
   noContentResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { CommentId } from '@quackback/ids'
@@ -19,6 +20,7 @@ const updateCommentSchema = z.object({
 export const Route = createFileRoute('/api/v1/comments/$commentId')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'PATCH', 'DELETE']),
       /**
        * GET /api/v1/comments/:commentId
        * Get a single comment by ID
@@ -83,7 +85,8 @@ export const Route = createFileRoute('/api/v1/comments/$commentId')({
             { principalId, role },
             {
               contentJson: (parsed.data.contentJson ?? undefined) as
-                import('@/lib/shared/db-types').TiptapContent | undefined,
+                | import('@/lib/shared/db-types').TiptapContent
+                | undefined,
             }
           )
 

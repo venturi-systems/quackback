@@ -39,6 +39,7 @@ import { getSession } from '@/lib/server/auth/session'
 import { db, principal, user, invitation, account, eq, ne, and } from '@/lib/server/db'
 import { logger } from '@/lib/server/logger'
 import { recordAuditSafely, sessionAuditActor } from '@/lib/server/audit/audit-safe'
+import { requireSettings } from '@/lib/server/domains/settings/settings.helpers'
 
 const log = logger.child({ component: 'settings' })
 
@@ -157,6 +158,17 @@ async function auditSettingsChange(
     },
     'request'
   )
+}
+
+/** The logo and header fields a branding audit row records. */
+type BrandingField = 'logoKey' | 'headerLogoKey' | 'headerDisplayMode' | 'headerDisplayName'
+
+/** One branding field's value before a change, for the audit row; null if unreadable. */
+async function brandingBefore(field: BrandingField): Promise<Record<string, string | null> | null> {
+  return readForAudit(async () => {
+    const org = await requireSettings()
+    return { [field]: org[field] ?? null }
+  })
 }
 
 export const fetchDeveloperConfig = createServerFn({ method: 'GET' }).handler(async () => {
@@ -670,8 +682,11 @@ export const saveLogoKeyFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ key: data.key }, 'save logo key')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await saveLogoKey(data.key)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await brandingBefore('logoKey')
+      const result = await saveLogoKey(data.key)
+      await auditSettingsChange(auth, 'branding.logo', before, { logoKey: result.key })
+      return result
     } catch (error) {
       log.error({ err: error }, 'save logo key failed')
       throw error
@@ -681,8 +696,11 @@ export const saveLogoKeyFn = createServerFn({ method: 'POST' })
 export const deleteLogoFn = createServerFn({ method: 'POST' }).handler(async () => {
   log.info('delete logo')
   try {
-    await requireAuth({ roles: ['admin'] })
-    return await deleteLogoKey()
+    const auth = await requireAuth({ roles: ['admin'] })
+    const before = await brandingBefore('logoKey')
+    const result = await deleteLogoKey()
+    await auditSettingsChange(auth, 'branding.logo', before, { logoKey: null })
+    return result
   } catch (error) {
     log.error({ err: error }, 'delete logo failed')
     throw error
@@ -694,8 +712,13 @@ export const saveHeaderLogoKeyFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ key: data.key }, 'save header logo key')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await saveHeaderLogoKey(data.key)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await brandingBefore('headerLogoKey')
+      const result = await saveHeaderLogoKey(data.key)
+      await auditSettingsChange(auth, 'branding.header_logo', before, {
+        headerLogoKey: result.key,
+      })
+      return result
     } catch (error) {
       log.error({ err: error }, 'save header logo key failed')
       throw error
@@ -705,8 +728,11 @@ export const saveHeaderLogoKeyFn = createServerFn({ method: 'POST' })
 export const deleteHeaderLogoFn = createServerFn({ method: 'POST' }).handler(async () => {
   log.info('delete header logo')
   try {
-    await requireAuth({ roles: ['admin'] })
-    return await deleteHeaderLogoKey()
+    const auth = await requireAuth({ roles: ['admin'] })
+    const before = await brandingBefore('headerLogoKey')
+    const result = await deleteHeaderLogoKey()
+    await auditSettingsChange(auth, 'branding.header_logo', before, { headerLogoKey: null })
+    return result
   } catch (error) {
     log.error({ err: error }, 'delete header logo failed')
     throw error
@@ -718,8 +744,13 @@ export const updateHeaderDisplayModeFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ mode: data.mode }, 'update header display mode')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await updateHeaderDisplayMode(data.mode)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await brandingBefore('headerDisplayMode')
+      const result = await updateHeaderDisplayMode(data.mode)
+      await auditSettingsChange(auth, 'branding.header_display_mode', before, {
+        headerDisplayMode: result,
+      })
+      return result
     } catch (error) {
       log.error({ err: error }, 'update header display mode failed')
       throw error
@@ -731,8 +762,13 @@ export const updateHeaderDisplayNameFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.info({ name: data.name }, 'update header display name')
     try {
-      await requireAuth({ roles: ['admin'] })
-      return await updateHeaderDisplayName(data.name)
+      const auth = await requireAuth({ roles: ['admin'] })
+      const before = await brandingBefore('headerDisplayName')
+      const result = await updateHeaderDisplayName(data.name)
+      await auditSettingsChange(auth, 'branding.header_display_name', before, {
+        headerDisplayName: result,
+      })
+      return result
     } catch (error) {
       log.error({ err: error }, 'update header display name failed')
       throw error

@@ -32,6 +32,7 @@ import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
+import { VenturiLandingFooter } from '@/components/public/shell/venturi-landing-footer'
 import { PortalRolesExplainer } from '@/components/portal/portal-roles-explainer'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
@@ -178,7 +179,8 @@ function GateCard({
   const anyoneCanRead = visibility === 'authenticated'
 
   // Why the last sign-in or access attempt was refused, kept on the page
-  // (the redirect's toast alone disappears). Unknown codes render nothing.
+  // (the redirect's toast alone disappears). A code without its own message
+  // shows the generic sign-in failure; the raw code is never shown.
   const notice = <AuthNotice code={error} className="portal-gate__notice" />
 
   if (reason === 'unauthorized') {
@@ -225,7 +227,7 @@ function GateCard({
   }
 
   return (
-    <div className="portal-gate__layout">
+    <div className="portal-gate__layout" id="feedback-entry-top">
       <div className="portal-gate__intro">
         <h1 className="portal-gate__title">
           {isBaseStep ? (
@@ -288,6 +290,7 @@ function GateCard({
           ) : (
             <PortalAuthFormInline
               mode={mode}
+              providerAppearance="brand"
               authConfig={authConfig}
               workspaceName={workspaceName}
               callbackUrl={safeCallback}
@@ -298,8 +301,12 @@ function GateCard({
         </div>
       </section>
 
+      {/* Owner decision 5 (landing-page#2309): the sign-in page states who
+          can post, vote, comment, set status and manage the roadmap. The
+          explanation stays a disclosure a keyboard can fold away, but it is
+          open when the page loads, so the page states it by default. */}
       {isBaseStep && (
-        <details className="portal-gate__roles">
+        <details className="portal-gate__roles" open>
           <summary className="portal-gate__roles-summary">
             <h2 id="portal-gate-roles-title">
               <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />
@@ -345,7 +352,10 @@ export function PortalAccessGate({
       {/* Keep the sign-in page visually consistent with the portal. */}
       {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
       {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
-      <PublicPageFrame className="portal-gate">
+      <PublicPageFrame
+        className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
+        footer={reason === 'unauthenticated' ? <VenturiLandingFooter /> : undefined}
+      >
         <GateCard
           reason={reason}
           visibility={visibility}

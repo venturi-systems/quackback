@@ -8,32 +8,36 @@ import { describe, expect, it } from 'vitest'
  * clamp or a forced single line. These views have no render harness, so this
  * test reads their source.
  *
- * Reviewed exceptions, each listed per file below:
+ * Reviewed exception, listed per file below:
  * - line-clamp-2 in the notification bell's compact rows: an excerpt, not a
  *   label. Every row opens its post or the notifications page, and both show
  *   the text whole.
- * - line-clamp-1 on a help-center article description: an excerpt. The row
- *   opens the article, which shows the description whole.
- * - whitespace-nowrap on a notification time: a short date or relative time
- *   that the app generates, not user text.
+ *
+ * A notification time and a help-center article description no longer need
+ * one: the time keeps its width through flex layout (shrink-0 in a wrapping
+ * row) and the description wraps, since nowrap and clamping are prohibited
+ * v6.6 remedies.
  */
 const SRC = path.resolve(__dirname, '..', '..')
 
 const FORCED = /\b(truncate|line-clamp-\d+|text-ellipsis|whitespace-nowrap)\b/g
 
 const VIEWS: Array<{ file: string; userText: number; reviewed: string[] }> = [
-  { file: 'routes/_portal/notifications.tsx', userText: 2, reviewed: ['whitespace-nowrap'] },
+  { file: 'routes/_portal/notifications.tsx', userText: 2, reviewed: [] },
   {
     file: 'components/notifications/notification-item.tsx',
     userText: 1,
-    reviewed: ['line-clamp-2', 'whitespace-nowrap'],
+    reviewed: ['line-clamp-2'],
   },
   { file: 'routes/_portal/support.index.tsx', userText: 1, reviewed: [] },
   {
     file: 'routes/_portal/hc/categories/$categorySlug/index.tsx',
     userText: 2,
-    reviewed: ['line-clamp-1'],
+    reviewed: [],
   },
+  { file: 'components/public/portal-header.tsx', userText: 0, reviewed: [] },
+  { file: 'components/help-center/help-center-search.tsx', userText: 0, reviewed: [] },
+  { file: 'components/help-center/help-center-category-grid.tsx', userText: 0, reviewed: [] },
   {
     file: 'routes/_portal/hc/articles/$categorySlug/$articleSlug.tsx',
     userText: 1,

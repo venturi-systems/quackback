@@ -30,7 +30,7 @@ function EditorAvatars({ editors }: { editors: Editor[] }) {
         {editors.slice(0, 3).map((e, i) => (
           <span
             key={e.name}
-            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-muted border border-background text-[9px] font-semibold text-muted-foreground overflow-hidden"
+            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-muted border border-background text-xs font-semibold text-muted-foreground overflow-hidden"
             style={{ marginLeft: i === 0 ? 0 : -6 }}
             title={e.name}
           >
@@ -76,7 +76,7 @@ export function HelpCenterCategoryGrid({ categories, editors = {} }: HelpCenterC
                 {cat.name}
               </h3>
               {cat.description && (
-                <p className="mt-1 text-sm text-muted-foreground line-clamp-2 leading-relaxed">
+                <p className="mt-1 text-sm text-muted-foreground break-words leading-relaxed">
                   {cat.description}
                 </p>
               )}

@@ -234,7 +234,9 @@ function NotificationRow({ notification, onMarkAsRead, style }: NotificationRowP
             {notification.body}
           </p>
         )}
-        <div className="flex items-baseline gap-2 mt-2">
+        {/* The time keeps its own width and moves below a long post title
+            as a whole, instead of being held on one line (v6.6). */}
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mt-2">
           {notification.post && (
             <>
               {/* The post title is the only pointer to the post, so it is shown
@@ -249,7 +251,7 @@ function NotificationRow({ notification, onMarkAsRead, style }: NotificationRowP
             </>
           )}
           <time
-            className="text-xs text-muted-foreground/70 whitespace-nowrap"
+            className="shrink-0 text-xs text-muted-foreground/70"
             dateTime={createdAt.toISOString()}
           >
             {isToday(createdAt)

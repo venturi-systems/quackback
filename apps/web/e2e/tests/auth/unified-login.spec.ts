@@ -45,8 +45,12 @@ const CORP_DOMAIN = 'unified-corp-e2e.com'
 const CORP_EMAIL = `employee@${CORP_DOMAIN}`
 const DISCOVERY_URL = 'https://idp.example.org/.well-known/openid-configuration'
 
-// Serial: tests mutate shared workspace state (portal config, providers).
-test.describe.configure({ mode: 'serial' })
+// Default mode, not serial: the tests share workspace state (portal config,
+// providers), so they must run one at a time and in order, which default mode
+// does. Serial mode also skips every test after a failure, and "(4)" is a
+// known failure: that silently skipped (5), (6) and (3a) on every CI run.
+// Each test restores the state it changes, so none depends on another passing.
+test.describe.configure({ mode: 'default' })
 
 test.beforeAll(() => {
   flushMagicLinkRateLimit()

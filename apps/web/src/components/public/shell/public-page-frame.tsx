@@ -12,10 +12,13 @@ export function PublicPageFrame({
   children,
   headerActions,
   className,
+  footer,
 }: {
   children: ReactNode
   headerActions?: ReactNode
   className?: string
+  /** Override only for explicitly scoped public entry compositions. */
+  footer?: ReactNode
 }) {
   return (
     <div className={`public-frame ${className ?? ''}`.trim()}>
@@ -28,7 +31,7 @@ export function PublicPageFrame({
           <InShell>{children}</InShell>
         </div>
       </main>
-      <VenturiSiteFooter />
+      {footer ?? <VenturiSiteFooter />}
     </div>
   )
 }

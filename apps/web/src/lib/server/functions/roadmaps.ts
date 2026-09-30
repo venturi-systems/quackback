@@ -26,8 +26,19 @@ import {
 import { getRoadmapPosts } from '@/lib/server/domains/roadmaps/roadmap.query'
 import { logger } from '@/lib/server/logger'
 import { roadmapPostListSchema } from '@/lib/shared/schemas/list-filters'
+import {
+  auditSnapshot,
+  recordContentAudit,
+  roadmapAuditView,
+  sessionAuditSource,
+} from '@/lib/server/audit/content-audit'
 
 const log = logger.child({ component: 'roadmaps' })
+
+/** Roadmap state before a change, for the audit row; null if unreadable. */
+function roadmapSnapshot(id: RoadmapId) {
+  return auditSnapshot(async () => roadmapAuditView(await getRoadmap(id)))
+}
 
 // ============================================
 // Schemas
@@ -156,13 +167,18 @@ export const createRoadmapFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ name: data.name, slug: data.slug }, 'create roadmap')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
       const roadmap = await createRoadmap({
         name: data.name,
         slug: data.slug,
         description: data.description,
         isPublic: data.isPublic,
+      })
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'roadmap.created',
+        target: { type: 'roadmap', id: roadmap.id },
+        after: roadmapAuditView(roadmap),
       })
       // Serialize branded types to plain strings for turbo-stream
       return {
@@ -189,12 +205,19 @@ export const updateRoadmapFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ roadmap_id: data.id }, 'update roadmap')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await roadmapSnapshot(data.id as RoadmapId)
       const roadmap = await updateRoadmap(data.id as RoadmapId, {
         name: data.name,
         description: data.description,
         isPublic: data.isPublic,
+      })
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'roadmap.updated',
+        target: { type: 'roadmap', id: roadmap.id },
+        before,
+        after: roadmapAuditView(roadmap),
       })
       // Serialize branded types to plain strings for turbo-stream
       return {
@@ -221,9 +244,15 @@ export const deleteRoadmapFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ roadmap_id: data.id }, 'delete roadmap')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
+      const before = await roadmapSnapshot(data.id as RoadmapId)
       await deleteRoadmap(data.id as RoadmapId)
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'roadmap.deleted',
+        target: { type: 'roadmap', id: data.id },
+        before,
+      })
       return { id: String(data.id) }
     } catch (error) {
       log.error({ err: error }, 'delete roadmap failed')
@@ -248,6 +277,11 @@ export const addPostToRoadmapFn = createServerFn({ method: 'POST' })
         },
         auth.principal.id
       )
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'roadmap.post.added',
+        target: { type: 'roadmap', id: data.roadmapId },
+        after: { postId: data.postId },
+      })
       return { success: true }
     } catch (error) {
       log.error({ err: error }, 'add post to roadmap failed')
@@ -270,6 +304,11 @@ export const removePostFromRoadmapFn = createServerFn({ method: 'POST' })
         data.roadmapId as RoadmapId,
         auth.principal.id
       )
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'roadmap.post.removed',
+        target: { type: 'roadmap', id: data.roadmapId },
+        before: { postId: data.postId },
+      })
       return { success: true }
     } catch (error) {
       log.error({ err: error }, 'remove post from roadmap failed')
@@ -285,9 +324,14 @@ export const reorderRoadmapsFn = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     log.debug({ count: data.roadmapIds.length }, 'reorder roadmaps')
     try {
-      await requireAuth({ roles: ['admin', 'member'] })
+      const auth = await requireAuth({ roles: ['admin', 'member'] })
 
       await reorderRoadmaps(data.roadmapIds as RoadmapId[])
+      await recordContentAudit(sessionAuditSource(auth), {
+        event: 'roadmap.reordered',
+        target: { type: 'roadmap' },
+        after: { order: data.roadmapIds },
+      })
       return { success: true }
     } catch (error) {
       log.error({ err: error }, 'reorder roadmaps failed')

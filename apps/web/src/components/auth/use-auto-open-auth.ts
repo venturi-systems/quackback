@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useRouter } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
-import { authBlockMessage } from '@/lib/server/auth/redirect-errors'
+import { authBlockMessage, SIGN_IN_FAILED_MESSAGE } from '@/lib/server/auth/redirect-errors'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 
 /** Opens the auth dialog once when the portal root is reached with a `?auth`
@@ -26,10 +26,7 @@ export function useAutoOpenAuthDialog(args: {
     // Toast at most once per mount regardless of dep changes.
     if (!errorToasted.current && args.error) {
       errorToasted.current = true
-      toast.error(
-        authBlockMessage(args.error) ??
-          'Sign-in failed. Try again or contact your administrator if the problem persists.'
-      )
+      toast.error(authBlockMessage(args.error) ?? SIGN_IN_FAILED_MESSAGE)
     }
 
     // Open the dialog when explicitly requested via ?auth.

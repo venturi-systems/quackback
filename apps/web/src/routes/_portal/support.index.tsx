@@ -150,7 +150,7 @@ function SupportListPage() {
                         })}
                     </span>
                     {(c.unreadCount ?? 0) > 0 && (
-                      <span className="inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-[18px] text-primary-foreground">
+                      <span className="inline-flex min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold leading-[18px] text-primary-foreground">
                         {c.unreadCount}
                       </span>
                     )}

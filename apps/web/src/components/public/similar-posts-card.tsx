@@ -65,7 +65,7 @@ function SimilarPostsCardPanel({
           className={cn('overflow-hidden', className)}
         >
           <div ref={contentRef}>
-            <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground mb-2">
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
               <LightBulbIcon className="h-3.5 w-3.5 text-muted-foreground/60" />
               {intl.formatMessage({
                 id: 'portal.feedback.similarPosts.heading',
@@ -92,7 +92,7 @@ function SimilarPostsCardPanel({
                   </div>
                   <div className="flex-1 min-w-0">
                     {post.status && (
-                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <span
                           className="size-1.5 rounded-full shrink-0"
                           style={{ backgroundColor: post.status.color }}

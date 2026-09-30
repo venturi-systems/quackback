@@ -5,11 +5,13 @@ import {
   handleDomainError,
   decodeCursor,
   encodeCursor,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 
 export const Route = createFileRoute('/api/v1/users/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       /**
        * GET /api/v1/users
        * List all portal users (role='user')

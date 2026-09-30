@@ -31,8 +31,11 @@ const ENFORCED_EMAIL = `routed-user@${ENFORCED_DOMAIN}`
 
 const DISCOVERY_URL = 'https://idp.example.org/.well-known/openid-configuration'
 
-// Serial: both tests share the seeded workspace state.
-test.describe.configure({ mode: 'serial' })
+// Default mode, not serial: both tests share the seeded workspace state and
+// run in order in one worker. Serial mode skipped (2) whenever the known
+// failure (1) failed, so (2) never ran in CI; beforeAll seeds again for the
+// fresh worker that follows a failure.
+test.describe.configure({ mode: 'default' })
 
 test.beforeAll(() => {
   // Button-only: enabled + creds, no verified domain → public button.

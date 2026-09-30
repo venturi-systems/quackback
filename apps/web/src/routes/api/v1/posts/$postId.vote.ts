@@ -1,12 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  successResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { parseTypeId } from '@/lib/server/domains/api/validation'
 import type { PostId } from '@quackback/ids'
 
 export const Route = createFileRoute('/api/v1/posts/$postId/vote')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['POST']),
       /**
        * POST /api/v1/posts/:postId/vote
        * Toggle vote on a post (vote if not voted, unvote if already voted)

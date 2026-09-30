@@ -570,7 +570,7 @@ export function MetadataSidebar({
                   disabled={isUpdating}
                   className={cn(
                     'group inline-flex items-center gap-0.5 ps-1.5 pe-1 py-0.5',
-                    'rounded-full text-[11px] font-medium border',
+                    'rounded-full text-xs font-medium border',
                     'hover:opacity-80',
                     'transition-all duration-150',
                     'disabled:opacity-50 disabled:cursor-not-allowed'
@@ -593,7 +593,7 @@ export function MetadataSidebar({
                       disabled={isUpdating}
                       className={cn(
                         'inline-flex items-center gap-0.5 px-1.5 py-0.5',
-                        'rounded-full text-[11px] font-medium',
+                        'rounded-full text-xs font-medium',
                         'text-muted-foreground/70 hover:text-muted-foreground',
                         'border border-dashed border-border/60 hover:border-border',
                         'hover:bg-muted/40',
@@ -646,7 +646,7 @@ export function MetadataSidebar({
               {tags.map((tag) => (
                 <span
                   key={tag.id}
-                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                   style={{
                     backgroundColor: tag.color + '20',
                     color: tag.color,
@@ -681,7 +681,7 @@ export function MetadataSidebar({
                     disabled={isPending}
                     className={cn(
                       'group inline-flex max-w-full items-center gap-1 ps-1.5 pe-1 py-0.5',
-                      'rounded-md text-[11px] font-medium text-start',
+                      'rounded-md text-xs font-medium text-start',
                       'bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20',
                       'hover:bg-blue-500/15 hover:border-blue-500/30',
                       'transition-all duration-150',
@@ -710,7 +710,7 @@ export function MetadataSidebar({
                       disabled={!!pendingRoadmapId}
                       className={cn(
                         'inline-flex items-center gap-0.5 px-1.5 py-0.5',
-                        'rounded-md text-[11px] font-medium',
+                        'rounded-md text-xs font-medium',
                         'text-muted-foreground/70 hover:text-muted-foreground',
                         'border border-dashed border-border/60 hover:border-border',
                         'hover:bg-muted/40',
@@ -894,7 +894,7 @@ export function MetadataSidebar({
                     }
                   />
                 )}
-                <AvatarFallback className="text-[9px]">{getInitials(authorName)}</AvatarFallback>
+                <AvatarFallback className="text-xs">{getInitials(authorName)}</AvatarFallback>
               </Avatar>
               <span className="text-sm font-medium text-foreground underline decoration-muted-foreground/30 underline-offset-2">
                 {authorName ||
@@ -919,7 +919,7 @@ export function MetadataSidebar({
                     }
                   />
                 )}
-                <AvatarFallback className="text-[9px]">{getInitials(authorName)}</AvatarFallback>
+                <AvatarFallback className="text-xs">{getInitials(authorName)}</AvatarFallback>
               </Avatar>
               <span className="text-sm font-medium text-foreground">
                 {authorName ||

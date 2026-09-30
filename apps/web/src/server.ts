@@ -7,6 +7,10 @@ import {
   serverFnNotFound,
 } from '@/lib/server/middleware/serverfn-decode-guard'
 import { protocolRelativePathRedirect } from '@/lib/server/middleware/protocol-relative-redirect'
+import {
+  asBadRequest,
+  isIncompleteConsentRequest,
+} from '@/lib/server/middleware/oauth-consent-status'
 
 // In production, every console call in this process is written through the
 // app logger. Dependencies print raw errors to the console, and a failed
@@ -56,6 +60,11 @@ export default createServerEntry({
     // for it before any request middleware runs, which h3 answers 500; it is
     // a client error, so answer 404 here (DEF-59).
     if (isServerFnRequestWithoutId(request)) return serverFnNotFound()
+    // A consent URL that names no application renders the page's own
+    // explanation; the status says so too (400, not 200).
+    if (isIncompleteConsentRequest(request)) {
+      return Promise.resolve(handler.fetch(request)).then(asBadRequest)
+    }
     return handler.fetch(request)
   },
 })

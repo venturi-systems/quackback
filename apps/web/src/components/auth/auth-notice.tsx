@@ -1,10 +1,18 @@
 import { ExclamationCircleIcon } from '@heroicons/react/24/outline'
-import { authBlockMessage } from '@/lib/server/auth/redirect-errors'
+import { authBlockMessage, SIGN_IN_FAILED_MESSAGE } from '@/lib/server/auth/redirect-errors'
 
-/** The durable message for a sign-in or access redirect code, or null.
- *  The code comes from the URL; authBlockMessage only matches own keys. */
+/**
+ * The durable message for a sign-in or access redirect code, or null when
+ * there is no code. The code comes from the URL: a known code gets its own
+ * message (authBlockMessage matches own keys only), and any other code gets
+ * the generic sign-in failure, the same text the toast shows. A cancelled
+ * Google or GitHub consent (`access_denied`) or a lost OAuth state
+ * (`state_mismatch`) used to leave the page with no explanation at all.
+ * The code itself is never shown.
+ */
 export function authNoticeMessage(code: string | null | undefined): string | null {
-  return authBlockMessage(code)
+  if (typeof code !== 'string' || code.trim() === '') return null
+  return authBlockMessage(code) ?? SIGN_IN_FAILED_MESSAGE
 }
 
 /**

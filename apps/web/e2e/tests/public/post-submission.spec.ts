@@ -1,11 +1,15 @@
-import { test, expect, Page, BrowserContext } from '@playwright/test'
+import { test, expect, Page, BrowserContext, type TestInfo } from '@playwright/test'
 import { getOtpCode } from '../../utils/db-helpers'
+import { flushMagicLinkRateLimit } from '../../utils/access-helpers'
 
 const TEST_EMAIL = 'demo@example.com'
 
-// Configure test to run serially (no parallelization)
-// This prevents OTP race conditions across different describe blocks
-test.describe.configure({ mode: 'serial' })
+// Run the file's tests one at a time and in order (no parallelization), which
+// prevents OTP race conditions across the describe blocks. Default mode, not
+// serial: serial mode skipped every test after the known failure "shows error
+// when submitting without description", so 28 tests never ran in CI. After a
+// failure the fresh worker signs in again in beforeAll.
+test.describe.configure({ mode: 'default' })
 
 /**
  * Helper function to get OTP code with retries
@@ -72,6 +76,11 @@ let globalPage: Page
 
 // Set up authentication once for the entire file
 test.beforeAll(async ({ browser }) => {
+  // Each worker signs in once, and a worker restarts after any failure, so a
+  // run can send more codes to TEST_EMAIL than the sign-in limiter allows
+  // (3 per 15 minutes); that 429 used to fail every later test in the file.
+  // Clear the limiter's counters for this run first; product limits stay.
+  flushMagicLinkRateLimit()
   globalContext = await browser.newContext()
   globalPage = await globalContext.newPage()
   await loginWithOTP(globalPage)
@@ -643,6 +652,72 @@ test.describe('Board Selector', () => {
 })
 
 // Phase 2: Rich Text Editor Tests
+/**
+ * Open the slash menu in the create-post editor and pick a list item.
+ *
+ * The item is applied by clicking its button (SlashMenuList prevents the
+ * mousedown blur); if the list has not formed, the query is typed again and
+ * Enter picks the highlighted item. Each step attaches the editor's HTML and
+ * the popover's buttons to the report, so a failure shows what the page did.
+ */
+async function startListFromSlashMenu(
+  editor: ReturnType<Page['locator']>,
+  query: string,
+  itemName: RegExp,
+  listTag: 'ul' | 'ol',
+  testInfo: TestInfo
+) {
+  const snapshot = async (label: string) => {
+    const state = await globalPage.evaluate((name) => {
+      const tiptap = document.querySelector('.tiptap')
+      const buttons = Array.from(document.querySelectorAll('button')).filter((b) =>
+        new RegExp(name).test(b.textContent ?? '')
+      )
+      return {
+        editorHtml: tiptap?.innerHTML ?? null,
+        activeElement: document.activeElement?.tagName + '.' + document.activeElement?.className,
+        matchingButtons: buttons.map((b) => b.outerHTML.slice(0, 300)),
+      }
+    }, itemName.source)
+    await testInfo.attach(label, { body: JSON.stringify(state, null, 2), contentType: 'application/json' })
+  }
+  // Browser-side errors thrown by the item's command chain surface here, not
+  // in the test's own assertions.
+  const errors: string[] = []
+  const onPageError = (error: Error) => errors.push(`pageerror: ${error.message}`)
+  const onConsole = (message: { type(): string; text(): string }) => {
+    if (message.type() === 'error') errors.push(`console: ${message.text()}`)
+  }
+  globalPage.on('pageerror', onPageError)
+  globalPage.on('console', onConsole)
+  await editor.click()
+  await editor.type(query)
+  const item = globalPage.getByRole('button', { name: itemName })
+  await expect(item).toBeVisible()
+  await snapshot(`${listTag}-1-menu-open`)
+  await item.click()
+  await globalPage.waitForTimeout(300)
+  await snapshot(`${listTag}-2-after-click`)
+  await testInfo.attach(`${listTag}-errors-after-click`, {
+    body: JSON.stringify(errors, null, 2),
+    contentType: 'application/json',
+  })
+  if ((await editor.locator(listTag).count()) === 0) {
+    await editor.click()
+    await editor.type(query)
+    await expect(item).toBeVisible()
+    await globalPage.keyboard.press('Enter')
+    await globalPage.waitForTimeout(300)
+    await snapshot(`${listTag}-3-after-enter`)
+  }
+  globalPage.off('pageerror', onPageError)
+  globalPage.off('console', onConsole)
+  await testInfo.attach(`${listTag}-errors`, {
+    body: JSON.stringify(errors, null, 2),
+    contentType: 'application/json',
+  })
+}
+
 test.describe('Rich Text Editor', () => {
   test.beforeEach(async () => {
     // Navigate to home for each test
@@ -720,42 +795,33 @@ test.describe('Rich Text Editor', () => {
     await expect(editor.locator('em')).toContainText('italic text')
   })
 
-  test('can create bullet list', async () => {
+  // eslint-disable-next-line no-empty-pattern -- testInfo needs the fixture slot
+  test('can create bullet list', async ({}, testInfo) => {
     const editor = globalPage.locator('.tiptap')
 
-    // Click inside editor and type content first
-    await editor.click()
+    // The create-post editor is borderless (no top toolbar) and Enter inserts
+    // a line break outside a list (enterAsHardBreak), so a list starts the
+    // way the product offers it: the slash menu. "/bullet" matches the
+    // "Bullet List" item; inside the list, Enter splits list items.
+    await startListFromSlashMenu(editor, '/bullet', /Bullet List/, 'ul', testInfo)
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
-
-    // Select all text to convert to a list
-    await globalPage.keyboard.press('ControlOrMeta+a')
-
-    // Click bullet list button to convert text to list
-    const bulletListButton = globalPage.locator('button:has(svg.lucide-list)')
-    await bulletListButton.click()
 
     // Verify list structure
     await expect(editor.locator('ul')).toBeVisible()
     await expect(editor.locator('li')).toHaveCount(2)
   })
 
-  test('can create numbered list', async () => {
+  // eslint-disable-next-line no-empty-pattern -- testInfo needs the fixture slot
+  test('can create numbered list', async ({}, testInfo) => {
     const editor = globalPage.locator('.tiptap')
 
-    // Click inside editor and type content first
-    await editor.click()
+    // Same editor as above: the slash menu's "Numbered List" item.
+    await startListFromSlashMenu(editor, '/numbered', /Numbered List/, 'ol', testInfo)
     await globalPage.keyboard.type('First item')
     await globalPage.keyboard.press('Enter')
     await globalPage.keyboard.type('Second item')
-
-    // Select all text to convert to a list
-    await globalPage.keyboard.press('ControlOrMeta+a')
-
-    // Click numbered list button to convert text to list
-    const numberedListButton = globalPage.locator('button:has(svg.lucide-list-ordered)')
-    await numberedListButton.click()
 
     // Verify list structure
     await expect(editor.locator('ol')).toBeVisible()
@@ -770,17 +836,14 @@ test.describe('Rich Text Editor', () => {
     // Triple-click to select text
     await editor.click({ clickCount: 3 })
 
-    // Set up dialog handler BEFORE clicking the button
-    globalPage.on('dialog', async (dialog) => {
-      await dialog.accept('https://example.com')
-    })
-
-    // Click link button
-    const linkButton = globalPage.locator('button:has(svg.lucide-link)')
-    await linkButton.click()
-
-    // Wait a moment for the link to be applied
-    await globalPage.waitForTimeout(200)
+    // The selection bubble menu's link button opens a popover with a URL
+    // field (LinkButton in rich-text-editor.tsx); Enter applies it. The
+    // button's accessible name is its title.
+    await globalPage.getByRole('button', { name: 'Insert Link' }).click()
+    const urlField = globalPage.getByPlaceholder('https://example.com')
+    await expect(urlField).toBeVisible()
+    await urlField.fill('https://example.com')
+    await urlField.press('Enter')
 
     // Verify link was created
     const link = editor.locator('a')

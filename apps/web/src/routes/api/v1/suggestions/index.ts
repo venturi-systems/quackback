@@ -1,11 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
-import { successResponse, handleDomainError } from '@/lib/server/domains/api/responses'
+import {
+  successResponse,
+  handleDomainError,
+  methodNotAllowed,
+} from '@/lib/server/domains/api/responses'
 import { encodeCursor, decodeCursor } from '@/lib/server/domains/api/responses'
 
 export const Route = createFileRoute('/api/v1/suggestions/')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       /**
        * GET /api/v1/suggestions
        * List AI-generated feedback suggestions with filtering and pagination

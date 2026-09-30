@@ -7,6 +7,7 @@ import {
   createdResponse,
   badRequestResponse,
   handleDomainError,
+  methodNotAllowed,
 } from '@/lib/server/domains/api/responses'
 import { parseTypeId, parseOptionalTypeId } from '@/lib/server/domains/api/validation'
 import type { Role } from '@/lib/shared/roles'
@@ -25,6 +26,7 @@ const createCommentSchema = z.object({
 export const Route = createFileRoute('/api/v1/posts/$postId/comments')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET', 'POST']),
       /**
        * GET /api/v1/posts/:postId/comments
        * List comments for a post (threaded)
@@ -178,7 +180,8 @@ export const Route = createFileRoute('/api/v1/posts/$postId/comments')({
               postId,
               content: parsed.data.content,
               contentJson: (parsed.data.contentJson ?? undefined) as
-                import('@/lib/shared/db-types').TiptapContent | undefined,
+                | import('@/lib/shared/db-types').TiptapContent
+                | undefined,
               parentId,
               isPrivate: parsed.data.isPrivate,
               createdAt,

@@ -25,7 +25,6 @@ export const Route = createFileRoute('/_portal/hc/')({
       editors,
       helpCenterConfig: helpCenterConfig ?? null,
       workspaceName: settings?.name ?? 'Help Center',
-      logoUrl: settings?.brandingData?.logoUrl || '/venturi-mark.svg',
     }
   },
   head: ({ loaderData, matches }) => {
@@ -35,7 +34,7 @@ export const Route = createFileRoute('/_portal/hc/')({
     if (gated) return gated
     if (!loaderData) return {}
 
-    const { helpCenterConfig, workspaceName, logoUrl } = loaderData
+    const { helpCenterConfig, workspaceName } = loaderData
     const title = helpCenterConfig?.homepageTitle ?? 'How can we help?'
     const description =
       helpCenterConfig?.homepageDescription ?? 'Search our knowledge base or browse by category'
@@ -48,7 +47,6 @@ export const Route = createFileRoute('/_portal/hc/')({
         { name: 'description', content: description },
         { property: 'og:title', content: pageTitle },
         { property: 'og:description', content: description },
-        { property: 'og:image', content: logoUrl },
         { name: 'twitter:title', content: pageTitle },
         { name: 'twitter:description', content: description },
       ],

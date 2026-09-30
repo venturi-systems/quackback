@@ -3,6 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   collectOutcomes,
+  formatReport,
   MIN_TESTS_PER_SHARD,
   ratchet,
   testId,
@@ -18,7 +19,14 @@ import {
 
 /** A report shaped exactly like Playwright's, verified against 1.62.1 output. */
 function report(
-  specs: Array<{ file: string; describe?: string; title: string; project: string; status: string }>
+  specs: Array<{
+    file: string
+    describe?: string
+    title: string
+    project: string
+    status: string
+    expectedStatus?: string
+  }>
 ): JsonReport {
   const byFile = new Map<string, JsonReport['suites']>()
   const suites: NonNullable<JsonReport['suites']> = []
@@ -36,7 +44,14 @@ function report(
     target.specs!.push({
       title: s.title,
       file: s.file,
-      tests: [{ projectName: s.project, status: s.status }],
+      tests: [
+        {
+          projectName: s.project,
+          status: s.status,
+          // Playwright writes 'passed' unless the test asked to be skipped.
+          expectedStatus: s.expectedStatus ?? (s.status === 'skipped' ? 'skipped' : 'passed'),
+        },
+      ],
     })
   }
   void byFile
@@ -124,6 +139,85 @@ describe('e2e known-failure ratchet', () => {
     }
   })
 
+  // --- tests that never ran ---------------------------------------------------
+
+  it('tells a test that asked to be skipped from a planned test that never ran', () => {
+    const records = collectOutcomes(
+      report([
+        {
+          file: 'tests/a.spec.ts',
+          title: 'skips itself',
+          project: 'chromium',
+          status: 'skipped',
+          expectedStatus: 'skipped',
+        },
+        {
+          file: 'tests/a.spec.ts',
+          title: 'after a serial failure',
+          project: 'chromium',
+          status: 'skipped',
+          expectedStatus: 'passed',
+        },
+      ])
+    )
+    expect(records.map((r) => r.outcome)).toEqual(['skipped', 'didNotRun'])
+  })
+
+  it('fails a shard in which a planned test did not run, even though nothing new failed', () => {
+    // The shape main CI 36489804273 shard 4 produced: a known failure in a
+    // serial file, and every later test in that file reported as skipped.
+    const records = collectOutcomes(
+      report([
+        ...passing,
+        { file: 'tests/a.spec.ts', title: 'known bad', project: 'chromium', status: 'unexpected' },
+        {
+          file: 'tests/a.spec.ts',
+          title: 'acceptance check',
+          project: 'chromium',
+          status: 'skipped',
+          expectedStatus: 'passed',
+        },
+      ])
+    )
+    const result = ratchet(records, ['chromium | tests/a.spec.ts | known bad'])
+    expect(result.newFailures).toEqual([])
+    expect(result.didNotRun).toEqual(['chromium | tests/a.spec.ts | acceptance check'])
+    expect(result.ok).toBe(false)
+    expect(formatReport(result)).toContain('did NOT RUN')
+    expect(formatReport(result)).not.toContain('E2E ratchet: OK.')
+  })
+
+  it('tolerates a test that did not run only when it is itself a known failure', () => {
+    const records = collectOutcomes(
+      report([
+        ...passing,
+        {
+          file: 'tests/a.spec.ts',
+          title: 'known bad',
+          project: 'chromium',
+          status: 'skipped',
+          expectedStatus: 'passed',
+        },
+      ])
+    )
+    const result = ratchet(records, ['chromium | tests/a.spec.ts | known bad'])
+    expect(result.didNotRun).toEqual([])
+    expect(result.nowPassing).toEqual([])
+    expect(result.ok).toBe(true)
+  })
+
+  it('still accepts a test that skipped itself', () => {
+    const records = collectOutcomes(
+      report([
+        ...passing,
+        { file: 'tests/a.spec.ts', title: 'optional', project: 'chromium', status: 'skipped' },
+      ])
+    )
+    const result = ratchet(records, [])
+    expect(result.didNotRun).toEqual([])
+    expect(result.ok).toBe(true)
+  })
+
   it('treats the same title in two projects as two distinct tests', () => {
     const records = collectOutcomes(
       report([
@@ -207,15 +301,20 @@ describe('e2e known-failure ratchet', () => {
     expect(result.ok).toBe(true)
     expect(result.stillFailing).toEqual(['known'])
     expect(ratchet(records, [], { expectedIds }).ok).toBe(false)
-    expect(ratchet([{ id: 'known', outcome: 'passed' }], ['known'], { expectedIds: ['known'] }).ok).toBe(false)
+    expect(
+      ratchet([{ id: 'known', outcome: 'passed' }], ['known'], { expectedIds: ['known'] }).ok
+    ).toBe(false)
   })
 
   it('collects planned identities without needing execution statuses', () => {
     const planned: JsonReport = {
-      suites: [{
-        title: 'tests/a.spec.ts', file: 'tests/a.spec.ts',
-        specs: [{ title: 'planned', tests: [{ projectName: 'chromium' }] }],
-      }],
+      suites: [
+        {
+          title: 'tests/a.spec.ts',
+          file: 'tests/a.spec.ts',
+          specs: [{ title: 'planned', tests: [{ projectName: 'chromium' }] }],
+        },
+      ],
     }
     expect(collectOutcomes(planned).map(({ id }) => id)).toEqual([
       'chromium | tests/a.spec.ts | planned',

@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { methodNotAllowed } from '@/lib/server/domains/api/responses'
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db, posts, boards, principal } from '@/lib/server/db'
 import { aiTokensThisMonth } from '@/lib/server/domains/ai/usage-counter'
@@ -15,6 +16,7 @@ import { authenticateAdminToken } from '@/lib/server/domains/api-keys/admin-toke
 export const Route = createFileRoute('/api/v1/admin/usage')({
   server: {
     handlers: {
+      ANY: methodNotAllowed(['GET']),
       GET: async ({ request }) => {
         const auth = await authenticateAdminToken(request)
         if (auth) return auth

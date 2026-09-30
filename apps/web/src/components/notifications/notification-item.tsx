@@ -165,10 +165,10 @@ function FullContent({ notification, icon: Icon, iconClass, bgClass, isUnread }:
               </p>
             )}
             {notification.post && (
-              <p className="text-[11px] text-muted-foreground/60 mt-1">{notification.post.title}</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">{notification.post.title}</p>
             )}
           </div>
-          <span className="text-[11px] text-muted-foreground/60 whitespace-nowrap flex-shrink-0 mt-0.5">
+          <span className="text-xs text-muted-foreground/60 flex-shrink-0 mt-0.5">
             {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
           </span>
         </div>
