@@ -1,7 +1,9 @@
 import { test, expect, BrowserContext } from '@playwright/test'
 import { portalStorageState } from '../../utils/portal-auth'
 
-test.describe.configure({ mode: 'serial' })
+// Keep this shared-context file sequential without skipping unrelated tests after a failure.
+// CI already uses one worker per isolated fixture; default mode retains independent retries.
+test.describe.configure({ mode: 'default' })
 
 test.describe('Public Voting', () => {
   let sharedContext: BrowserContext
@@ -196,10 +198,12 @@ test.describe('Public Voting', () => {
       // Wait for URL to change to post detail page
       await page.waitForURL(/\/posts\//)
 
-      // Wait for detail page vote button specifically.
-      // The VoteSidebar vote button is in a Suspense boundary; use aria-pressed to confirm it loaded.
-      // Both list and detail use text-sm, so just use the first vote button on the detail page.
-      const detailVoteButton = page.getByTestId('vote-button').first()
+      // The URL can change while the previous list is still mounted. Wait for the
+      // detail subtree and its Suspense-loaded vote control before reading or voting.
+      const postDetail = page.getByTestId('post-detail')
+      await expect(postDetail).toBeVisible({ timeout: 10000 })
+      const detailVoteButton = postDetail.getByTestId('vote-button')
+      await expect(detailVoteButton).toHaveCount(1, { timeout: 10000 })
       await expect(detailVoteButton).toBeVisible({ timeout: 10000 })
 
       const voteCountSpan = detailVoteButton.getByTestId('vote-count')
@@ -479,7 +483,9 @@ test.describe('Voting — independence and persistence', () => {
       await page.waitForLoadState('networkidle')
 
       // Detail page vote button — use first vote button (VoteSidebar, in DOM order)
-      const detailVoteButton = page.locator('[data-testid="post-detail"] [data-testid="vote-button"]').first()
+      const detailVoteButton = page
+        .locator('[data-testid="post-detail"] [data-testid="vote-button"]')
+        .first()
       await expect(detailVoteButton).toBeVisible({ timeout: 10000 })
 
       const detailCount = await detailVoteButton.getByTestId('vote-count').textContent()
