@@ -283,7 +283,7 @@ export const createBoardsBatchFn = createServerFn({ method: 'POST' })
   .validator(createBoardsBatchSchema)
   .handler(async ({ data }) => {
     log.debug({ count: data.boards.length }, 'create boards batch')
-    await requireAuth({ roles: ['admin', 'member'] })
+    const auth = await requireAuth({ roles: ['admin', 'member'] })
 
     // Pre-flight against the tier limit so we never call createBoard
     // (which throws on overage) past capacity. This means the loop is
@@ -313,6 +313,19 @@ export const createBoardsBatchFn = createServerFn({ method: 'POST' })
         // tier the default starts at signed-in instead (DEF-42).
         access: defaultAccessWithinPolicy(accessForPreset('public')),
       })
+      // One board.created row per board the batch creates, written once the
+      // board exists, exactly as createBoardFn records a single create
+      // (landing-page#2309, DEF-81). A board that fails to create, or one
+      // dropped by the tier cap above, never gets a row.
+      await recordAuditSafely(
+        {
+          event: 'board.created',
+          actor: sessionAuditActor(auth),
+          target: { type: 'board', id: board.id },
+          after: boardAuditView(board),
+        },
+        'request'
+      )
       createdBoards.push(serializeBoard(board))
     }
 
