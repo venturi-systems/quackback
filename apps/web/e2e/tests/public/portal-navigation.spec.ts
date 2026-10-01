@@ -10,7 +10,18 @@ test.describe('Portal identity and exploration', () => {
       const brand = page.locator('.venturi-brand__product')
       await expect(brand).toHaveAttribute('href', '/')
       await expect(page.getByRole('heading', { name: 'Feedback', exact: true })).toBeVisible()
-      if (width < 640) await page.getByRole('button', { name: 'Menu', exact: true }).click()
+      const menu = page.getByRole('button', { name: 'Menu', exact: true })
+      if (width < 640) {
+        // The approved production header intentionally does not expose a hydration
+        // flag. Poll the user-visible expanded state so a fast click cannot land
+        // between SSR markup and React's event binding.
+        await expect.poll(async () => {
+          if ((await menu.getAttribute('aria-expanded')) !== 'true') {
+            await menu.click()
+          }
+          return menu.getAttribute('aria-expanded')
+        }).toBe('true')
+      }
       const navigation = page.getByRole('navigation', {
         name: width < 640 ? 'Mobile portal navigation' : 'Portal navigation',
         exact: true,
@@ -22,7 +33,14 @@ test.describe('Portal identity and exploration', () => {
       await expect(page).toHaveURL(
         (url) => url.pathname === '/' && url.searchParams.get('sort') === 'trending'
       )
-      if (width < 640) await page.getByRole('button', { name: 'Menu', exact: true }).click()
+      if (width < 640) {
+        await expect.poll(async () => {
+          if ((await menu.getAttribute('aria-expanded')) !== 'true') {
+            await menu.click()
+          }
+          return menu.getAttribute('aria-expanded')
+        }).toBe('true')
+      }
       await navigation.getByRole('link', { name: 'Changelog', exact: true }).click()
       await expect(page).toHaveURL(/\/changelog/)
     })
