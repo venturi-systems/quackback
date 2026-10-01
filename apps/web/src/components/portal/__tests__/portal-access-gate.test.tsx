@@ -118,7 +118,7 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
     expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
     expect(screen.getByRole('main')).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'Source and sitemap' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
   })
 
   it('shows access guidance and keeps the permissions disclosure collapsed', () => {
