@@ -41,15 +41,55 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     await page.goto('/')
     await page.waitForLoadState('networkidle')
     await expect(
-      page.getByRole('heading', { level: 1, name: 'Help shape Acme Corp' })
+      page.getByRole('heading', { level: 1, name: 'Sign in to access Acme Corp' })
     ).toBeVisible()
     const roles = page.locator('details.portal-gate__roles')
     const summary = roles.locator('summary')
-    // Owner decision 5 (landing-page#2309): the page states who can do what
-    // when it loads. The disclosure is open by default and folds on demand.
-    await expect(roles).toHaveAttribute('open', '')
-    await expect(page.locator('.portal-roles__grid')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Contributor', exact: true })).toBeVisible()
+    // REQ-FEEDBACK-AUTH-VIEWPORT: no optional guide or marketing footer on landing.
+    await expect(roles).not.toHaveAttribute('open', '')
+    await expect(page.locator('.portal-roles__grid')).toBeHidden()
+    await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(0)
+    await expect(page.getByRole('navigation', { name: 'Footer', exact: true })).toHaveCount(0)
+    const initialViewports = []
+    for (const [width, height] of [
+      [1440, 900],
+      [1366, 768],
+      [1280, 720],
+      [768, 1024],
+      [390, 844],
+      [375, 667],
+    ]) {
+      await page.setViewportSize({ width, height })
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      const initial = await page.evaluate(() => {
+        const root = document.documentElement
+        const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
+        const footer = document.querySelector('.venturi-landing-footer')!.getBoundingClientRect()
+        const disclosure = document.querySelector('.portal-gate__roles')!.getBoundingClientRect()
+        return {
+          width: innerWidth,
+          height: innerHeight,
+          documentWidth: root.scrollWidth,
+          documentHeight: root.scrollHeight,
+          layoutTop: layout.top,
+          footerBottom: footer.bottom,
+          utilityGap: footer.top - disclosure.bottom,
+          overflow: getComputedStyle(root).overflowY,
+        }
+      })
+      expect(initial.documentHeight).toBeLessThanOrEqual(height)
+      expect(initial.documentWidth).toBeLessThanOrEqual(width)
+      expect(initial.layoutTop).toBeGreaterThanOrEqual(0)
+      expect(initial.footerBottom).toBeLessThanOrEqual(height)
+      expect(initial.utilityGap).toBeGreaterThanOrEqual(0)
+      expect(initial.utilityGap).toBeLessThanOrEqual(16)
+      expect(initial.overflow).not.toMatch(/hidden|clip/)
+      initialViewports.push(initial)
+    }
+    await testInfo.attach('entry-initial-viewport', {
+      body: Buffer.from(JSON.stringify(initialViewports)),
+      contentType: 'application/json',
+    })
     await summary.focus()
     const focus = await measureFocusIndicator(summary)
     expect(
@@ -62,19 +102,20 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       contentType: 'application/json',
     })
     await page.keyboard.press('Enter')
-    await expect(roles).not.toHaveAttribute('open', '')
-    await expect(page.locator('.portal-roles__grid')).toBeHidden()
-    await page.keyboard.press('Space')
     await expect(roles).toHaveAttribute('open', '')
     await expect(page.getByRole('heading', { name: 'Contributor', exact: true })).toBeVisible()
+    await page.keyboard.press('Space')
+    await expect(roles).not.toHaveAttribute('open', '')
+    await expect(page.locator('.portal-roles__grid')).toBeHidden()
     await expect(summary).toBeFocused()
+    await page.keyboard.press('Enter')
 
     const records = []
     for (const width of [
       320, 390, 639, 640, 641, 767, 768, 769, 1023, 1024, 1025, 1440, 1920, 2560,
     ]) {
       await page.setViewportSize({ width, height: 1000 })
-      // Measured in the state the page loads in: the explanation open.
+      // Expanded permissions remain readable after the visitor requests them.
       await expect(roles).toHaveAttribute('open', '')
       await page.evaluate(() => document.fonts.ready.then(() => undefined))
       const geometry = await page.evaluate(() => {
@@ -100,7 +141,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       for (const item of geometry.text)
         expect(item.size, item.text ?? '').toBeGreaterThanOrEqual(item.heading ? 18 : 16)
       // The entry is one centered component at every width; the form is bounded,
-      // while the public shell and marketing footer retain their full-width gutters.
+      // while compact source and Sitemap access remain in the same column.
       expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.y + geometry.intro.height)
       expect(Math.abs(geometry.form.x + geometry.form.width / 2 - width / 2)).toBeLessThanOrEqual(1)
       const typography = await measureTypography(
@@ -145,11 +186,12 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       await summary.click()
       await expect(roles).not.toHaveAttribute('open', '')
       const compact = await page.evaluate(() => {
-        const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
         const footer = document.querySelector('.venturi-landing-footer')!.getBoundingClientRect()
         const form = document.querySelector('.portal-gate__form')!.getBoundingClientRect()
         return {
-          gap: footer.top - layout.bottom,
+          gap:
+            footer.top -
+            document.querySelector('.portal-gate__roles')!.getBoundingClientRect().bottom,
           formWidth: form.width,
           targets: Array.from(document.querySelectorAll('.venturi-landing-footer a')).map(
             (element) => {
@@ -165,8 +207,8 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
         expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
       }
-      await expect(page.getByRole('link', { name: 'Software notices' })).toBeVisible()
-      await expect(page.getByRole('link', { name: 'Source code (AGPL-3.0)' })).toHaveCount(0)
+      await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(0)
+      await expect(page.getByRole('link', { name: 'Source code', exact: true })).toBeVisible()
       if ([390, 1440, 2560].includes(width)) {
         await testInfo.attach(`entry-folded-${width}`, {
           body: await page.screenshot({ fullPage: true }),
@@ -188,7 +230,11 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           await zoomPage.goto('/')
           await expect(zoomPage.locator('.portal-gate__layout')).toBeVisible()
           const zoom = await setZoom(factor)
-          // The explanation is open on load, so the reflow check covers it.
+          await expect(zoomPage.locator('details.portal-gate__roles')).not.toHaveAttribute(
+            'open',
+            ''
+          )
+          await zoomPage.locator('details.portal-gate__roles summary').click()
           await expect(zoomPage.locator('details.portal-gate__roles')).toHaveAttribute('open', '')
           await zoomPage.addStyleTag({
             content: `
@@ -210,7 +256,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           )
           expect(reflow.issues).toEqual([])
           await expect(
-            zoomPage.getByRole('heading', { level: 1, name: 'Help shape Acme Corp' })
+            zoomPage.getByRole('heading', { level: 1, name: 'Sign in to access Acme Corp' })
           ).toBeVisible()
           await expect(zoomPage.getByLabel(/email/i)).toBeVisible()
           await testInfo.attach(`entry-zoom-${factor}`, {
@@ -220,9 +266,15 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         }
       )
     }
-    // The quiet utility link must reach an anonymous source offer, including
-    // the exact version served by this build, without entering a sign-in flow.
-    await page.getByRole('link', { name: 'Software notices' }).click()
+    // Source access remains direct on the entry; notices stay publicly reachable
+    // from the marketing Sitemap without being repeated on the authentication page.
+    const directSource = await page
+      .getByRole('link', { name: 'Source code', exact: true })
+      .getAttribute('href')
+    expect(directSource).toMatch(
+      /^https:\/\/github\.com\/venturi-systems\/quackback\/tree\/[0-9a-f]{7,40}$/
+    )
+    await page.goto('/software-notices')
     await expect(page.getByRole('heading', { name: 'Software notices', exact: true })).toBeVisible()
     const source = await page
       .getByRole('link', { name: 'View the source for this version' })

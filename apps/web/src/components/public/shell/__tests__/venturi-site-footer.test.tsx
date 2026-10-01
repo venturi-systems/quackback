@@ -5,7 +5,7 @@ import { VenturiSiteFooter } from '../venturi-site-footer'
 
 // The footer mirrors the public website's contract (landing-page
 // src/content/site.ts legalLinks): the same five legal links, in the same
-// order, with the same labels, after the related sites and software notices.
+// order, with the same labels, after the related sites and the AGPL link.
 describe('VenturiSiteFooter', () => {
   it('ends with the legal row in the public website order and labels', () => {
     render(<VenturiSiteFooter />)
@@ -37,9 +37,11 @@ describe('VenturiSiteFooter', () => {
       'href',
       'https://docs.venturi.systems/'
     )
-    expect(within(related).getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+    // Tests do not define the build commit, so the AGPL link names the
+    // repository rather than a commit.
+    expect(within(related).getByRole('link', { name: 'Source code (AGPL-3.0)' })).toHaveAttribute(
       'href',
-      '/software-notices'
+      'https://github.com/venturi-systems/quackback'
     )
   })
 })
