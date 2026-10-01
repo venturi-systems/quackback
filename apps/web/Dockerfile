@@ -80,22 +80,26 @@ RUN bun build packages/db/src/migrate.ts \
 # ============================================================================
 # Production runner
 # ============================================================================
-FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS runner
+FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS runner-base
 
-# Pin the patched OpenSSL package set so the immutable production artifact is
-# both reproducible and free of the vulnerabilities present in 3.5.6-r0.
-#
-# These revisions must exist in the base image's apk index, which moves when the
-# base moves. Alpine keeps only the current revision, so a pin that has aged out
-# fails the build outright with `unable to select packages` rather than silently
-# installing something else. The bun 1.4.0-alpine base is Alpine 3.22.5, whose
-# index carries 3.5.8-r0; 3.5.7-r0 is preinstalled there but is no longer
-# fetchable. Re-check with:
-#   docker run --rm oven/bun:<tag>-alpine apk policy libcrypto3 libssl3 openssl
-RUN apk add --no-cache --upgrade \
-    libcrypto3=3.5.8-r0 \
-    libssl3=3.5.8-r0 \
-    openssl=3.5.8-r0
+# Retain the reviewed, upstream-signed packages in the build context. Alpine's
+# release repositories replace old package revisions, so networked exact pins
+# cannot reproduce this layer once an index advances. See docker/openssl/README.md.
+# The read-only mount keeps the archives out of the runtime image layers.
+RUN --network=none --mount=type=bind,source=docker/openssl,target=/opt/openssl,readonly \
+    case "$(cat /etc/alpine-release)" in 3.22.*) ;; *) echo "Review retained OpenSSL packages for this Alpine release" >&2; exit 1 ;; esac && \
+    for package in libcrypto3 libssl3 openssl; do \
+      if apk info --installed "$package>3.5.9-r0" >/dev/null; then \
+        echo "Advance retained OpenSSL packages before replacing newer $package" >&2; exit 1; \
+      fi; \
+    done && \
+    cd /opt/openssl && sha256sum -c SHA256SUMS && \
+    apk add --no-cache --no-network --repositories-file /dev/null --upgrade \
+      "/opt/openssl/$(apk --print-arch)/libcrypto3-3.5.9-r0.apk" \
+      "/opt/openssl/$(apk --print-arch)/libssl3-3.5.9-r0.apk" \
+      "/opt/openssl/$(apk --print-arch)/openssl-3.5.9-r0.apk"
+
+FROM runner-base AS runner
 
 WORKDIR /app
 
