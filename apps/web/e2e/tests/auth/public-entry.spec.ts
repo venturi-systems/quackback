@@ -64,7 +64,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       const initial = await page.evaluate(() => {
         const root = document.documentElement
         const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
-        const footer = document.querySelector('.venturi-site-footer')!.getBoundingClientRect()
+        const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
         const disclosure = document.querySelector('.portal-gate__roles')!.getBoundingClientRect()
         return {
           width: innerWidth,
@@ -186,7 +186,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       await summary.click()
       await expect(roles).not.toHaveAttribute('open', '')
       const compact = await page.evaluate(() => {
-        const footer = document.querySelector('.venturi-site-footer')!.getBoundingClientRect()
+        const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
         const form = document.querySelector('.portal-gate__form')!.getBoundingClientRect()
         return {
           gap:
