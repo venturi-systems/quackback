@@ -733,25 +733,6 @@
 .portal-gate--entry .portal-roles__grid {
   grid-template-columns: minmax(0, 1fr);
 }
-.venturi-landing-footer nav {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0 24px;
-}
-.venturi-landing-footer a {
-  display: inline-flex;
-  align-items: center;
-  min-inline-size: var(--ds-component-touch-minimum);
-  min-block-size: var(--ds-component-touch-minimum);
-  color: var(--ds-color-text-secondary);
-  font: var(--ds-typography-body-14);
-  text-decoration: none;
-}
-.venturi-landing-footer a:hover {
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-}
 @media (max-height: 700px) {
   .portal-gate--entry .public-frame__content {
     padding-block: 8px;

@@ -44,4 +44,23 @@ describe('VenturiSiteFooter', () => {
       'https://github.com/venturi-systems/quackback'
     )
   })
+  it('can route the public entry through Software notices while retaining the legal row', () => {
+    render(
+      <VenturiSiteFooter
+        sourceLink={{ label: 'Software notices', href: '/software-notices' }}
+      />
+    )
+
+    const footer = screen.getByRole('contentinfo')
+    expect(within(footer).getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+      'href',
+      '/software-notices'
+    )
+    expect(
+      within(footer).queryByRole('link', { name: 'Source code (AGPL-3.0)' })
+    ).not.toBeInTheDocument()
+    expect(
+      within(footer).getByRole('navigation', { name: 'Legal and sitemap' })
+    ).toBeInTheDocument()
+  })
 })
