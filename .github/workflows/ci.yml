@@ -176,6 +176,7 @@ jobs:
       pull-requests: read
     outputs:
       e2e: ${{ steps.filter.outputs.e2e }}
+      runner_base: ${{ steps.runner_filter.outputs.runner_base }}
       # true when the signed-in render lane has something to measure: anything
       # that can change what the portal renders -- the web app, the shared
       # packages it builds from (packages/db holds the seed the lane renders),
@@ -234,6 +235,30 @@ jobs:
             echo "render=true" >> "$GITHUB_OUTPUT"
           else
             echo "render=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether the retained runner packages need native validation
+        id: runner_filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          # No scheduled workload is added. A dispatch is an explicit diagnostic;
+          # event diffs fail closed when unavailable, including a new branch.
+          if [ "$EVENT_NAME" = schedule ]; then
+            echo "runner_base=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT_NAME" = workflow_dispatch ] || [ -z "$BASE_SHA" ] ||
+             ! changed="$(git diff --name-only "$BASE_SHA" HEAD)"; then
+            echo "runner_base=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -E '^(apps/web/Dockerfile$|docker/openssl/|\.dockerignore$|\.github/workflows/ci\.yml$)' >/dev/null; then
+            echo "runner_base=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "runner_base=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Reuse exact-tree PR evidence for a merge-queue entry
@@ -653,6 +678,51 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  runner_base:
+    # Validates the retained signed packages before merge on each native
+    # production architecture. Previously ARM package failures were discovered
+    # only by the post-merge publishing matrix. No existing job is removed.
+    # COST: expected under one runner-minute per affected architecture, only
+    # when runner inputs or this validation path change (or manual dispatch).
+    # No scheduled run is added; standard hosted Linux minutes are free for
+    # this public repository. No publishing credentials or permissions are used.
+    name: Runner package layer (${{ matrix.arch }})
+    needs: [changed_paths]
+    if: needs.changed_paths.outputs.runner_base == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            alpine_arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            alpine_arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          persist-credentials: false
+      - name: Build the exact offline package layer
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: docker build --platform "$PLATFORM" --target runner-base --progress=plain -t quackback-runner-base -f apps/web/Dockerfile .
+      - name: Verify native packages and runtime
+        env:
+          ALPINE_ARCH: ${{ matrix.alpine_arch }}
+        run: |
+          docker run --rm --network none --entrypoint sh quackback-runner-base -eu -c '
+            test "$(apk --print-arch)" = "$1"
+            apk info --installed "libcrypto3=3.5.9-r0" "libssl3=3.5.9-r0" "openssl=3.5.9-r0"
+            openssl version
+            bun --version
+            test ! -e /opt/openssl
+          ' sh "$ALPINE_ARCH"
+
   signed_in_render:
     # REQ-31 (venturi-systems/landing-page#2309). Renders the built portal as
     # its seeded fixture identities -- a signed-in administrator, a signed-in
@@ -847,7 +917,8 @@ jobs:
   portability_gate:
     name: ${{ github.event_name == 'workflow_dispatch' && 'portability-gate (manual diagnostic)' || 'portability-gate' }}
     if: ${{ always() }}
-    needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]
+    needs:
+      [static_analysis, database_tests, changed_paths, e2e_tests, runner_base, signed_in_render]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -860,12 +931,24 @@ jobs:
           E2E_RESULT: ${{ needs.e2e_tests.result }}
           E2E_FILTER: ${{ needs.changed_paths.outputs.e2e }}
           QUEUE_REUSE: ${{ needs.changed_paths.outputs.queue_reuse }}
+          RUNNER_BASE_RESULT: ${{ needs.runner_base.result }}
+          RUNNER_BASE_FILTER: ${{ needs.changed_paths.outputs.runner_base }}
           RENDER_RESULT: ${{ needs.signed_in_render.result }}
           RENDER_FILTER: ${{ needs.changed_paths.outputs.render }}
         run: |
           test "$STATIC_RESULT" = success
           test "$DATABASE_RESULT" = success
           test "$CHANGED_PATHS_RESULT" = success
+          # Only a positive path-filter skip is accepted. A missing filter,
+          # failed or cancelled matrix, or unexpected skip blocks the gate.
+          if [ "$RUNNER_BASE_RESULT" = success ]; then
+            echo "Native runner package layers passed."
+          elif [ "$RUNNER_BASE_RESULT" = skipped ] && [ "$RUNNER_BASE_FILTER" = false ]; then
+            echo "Runner package layers skipped by their path filter."
+          else
+            echo "runner package result '$RUNNER_BASE_RESULT' is not acceptable (filter=$RUNNER_BASE_FILTER)." >&2
+            exit 1
+          fi
           # The signed-in render check (REQ-31, REQ-32) fails on a keyboard-walk
           # or checker finding and on an authored review item with no recorded
           # resolution. A `skipped` is accepted only where its own `if:` never

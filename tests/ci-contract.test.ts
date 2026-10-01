@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -35,6 +36,7 @@ describe('QB-CI-001 consolidated validation contract', () => {
       '  database_tests:',
       '  changed_paths:',
       '  e2e_tests:',
+      '  runner_base:',
       '  signed_in_render:',
       '  portability_gate:',
     ])
@@ -48,8 +50,8 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).toContain("github.event_name == 'workflow_dispatch'")
     expect(ci).toContain("'portability-gate (manual diagnostic)'")
     expect(ci).toContain("|| 'portability-gate'")
-    expect(ci).toContain(
-      'needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]'
+    expect(ci.replace(/\s+/g, ' ')).toContain(
+      'needs: [static_analysis, database_tests, changed_paths, e2e_tests, runner_base, signed_in_render]'
     )
     expect(ci).toContain('runs-on: ubuntu-latest')
     expect(ci).toContain('services:\n      postgres:')
@@ -113,6 +115,55 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci).not.toContain('continue-on-error')
     expect(ci.toLowerCase()).not.toContain('codebuild-')
   })
+})
+
+describe('QB-CI-003 offline package lane', () => {
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+
+  it('validates both production architectures using the exact package stage', () => {
+    const job = ci.split('\n  runner_base:\n', 2)[1]?.split('\n  signed_in_render:\n', 1)[0] ?? ''
+    expect(job).toContain("if: needs.changed_paths.outputs.runner_base == 'true'")
+    expect(job).toContain('platform: linux/amd64')
+    expect(job).toContain('platform: linux/arm64')
+    expect(job).toContain('runner: ubuntu-latest')
+    expect(job).toContain('runner: ubuntu-24.04-arm')
+    expect(job).toContain('--target runner-base')
+    expect(job).toContain('docker run --rm --network none')
+  })
+
+  it.each([
+    ['success', 'true', 0],
+    ['skipped', 'false', 0],
+    ['skipped', 'true', 1],
+    ['skipped', '', 1],
+    ['failure', 'true', 1],
+    ['cancelled', 'true', 1],
+  ])(
+    'requires a successful package lane or positive path skip: %s/%s',
+    (result, filter, expected) => {
+      const gate = ci.split('\n  portability_gate:\n', 2)[1] ?? ''
+      const script = gate.split('        run: |\n', 2)[1]?.replace(/^ {10}/gm, '')
+      expect(script).toBeTruthy()
+      const run = spawnSync('bash', ['-e', '-c', script ?? 'exit 99'], {
+        env: {
+          ...process.env,
+          EVENT_NAME: 'pull_request',
+          STATIC_RESULT: 'success',
+          DATABASE_RESULT: 'success',
+          CHANGED_PATHS_RESULT: 'success',
+          E2E_RESULT: 'success',
+          E2E_FILTER: 'true',
+          QUEUE_REUSE: 'false',
+          RENDER_RESULT: 'success',
+          RENDER_FILTER: 'true',
+          RUNNER_BASE_RESULT: result,
+          RUNNER_BASE_FILTER: filter,
+        },
+        encoding: 'utf8',
+      })
+      expect(run.status, run.stderr).toBe(expected)
+    }
+  )
 })
 
 describe('QB-CI-002 signed-in render lane', () => {
@@ -185,8 +236,8 @@ describe('QB-CI-002 signed-in render lane', () => {
     // moved -- and every other result, workflow_dispatch skips included,
     // fails the gate.
     const gate = ci.split('\n  portability_gate:\n', 2)[1] ?? ''
-    expect(gate).toContain(
-      'needs: [static_analysis, database_tests, changed_paths, e2e_tests, signed_in_render]'
+    expect(gate.replace(/\s+/g, ' ')).toContain(
+      'needs: [static_analysis, database_tests, changed_paths, e2e_tests, runner_base, signed_in_render]'
     )
     expect(gate).toContain('RENDER_RESULT: ${{ needs.signed_in_render.result }}')
     expect(gate).toContain('RENDER_FILTER: ${{ needs.changed_paths.outputs.render }}')
@@ -230,7 +281,7 @@ describe('root dependency contract', () => {
 
     const base = dockerfile.match(/^FROM (oven\/bun:(\S+?))@(sha256:[0-9a-f]{64}) AS base$/m)
     const runner = dockerfile.match(
-      /^FROM (oven\/bun:(\S+?)-alpine)@(sha256:[0-9a-f]{64}) AS runner$/m
+      /^FROM (oven\/bun:(\S+?)-alpine)@(sha256:[0-9a-f]{64}) AS runner-base$/m
     )
 
     expect(base, 'base stage must be a digest-pinned oven/bun image').not.toBeNull()
@@ -242,16 +293,41 @@ describe('root dependency contract', () => {
     // Both stages must track one Bun version, or the runner executes a build
     // produced by a different toolchain than the one that compiled it.
     expect(runner?.[2]).toEqual(base?.[2])
+    expect(dockerfile).toMatch(/^FROM runner-base AS runner$/m)
 
     // The OpenSSL family is pinned to explicit alpine package revisions, and
     // to the SAME revision across all three -- a mismatched libssl3/libcrypto3
     // pair is the failure this pin exists to prevent.
     const opensslPins = ['libcrypto3', 'libssl3', 'openssl'].map((pkg) => {
-      const found = dockerfile.match(new RegExp(`\\b${pkg}=(\\d+\\.\\d+\\.\\d+-r\\d+)`))
+      const found = dockerfile.match(new RegExp(`/${pkg}-(\\d+\\.\\d+\\.\\d+-r\\d+)\\.apk`))
       expect(found, `${pkg} must be pinned to an explicit alpine revision`).not.toBeNull()
       return found?.[1]
     })
     expect(new Set(opensslPins).size, `OpenSSL pins disagree: ${opensslPins.join(', ')}`).toBe(1)
+    expect(dockerfile).toContain('RUN --network=none --mount=type=bind,source=docker/openssl')
+    expect(dockerfile).toContain('sha256sum -c SHA256SUMS')
+    expect(dockerfile).toContain(
+      'apk add --no-cache --no-network --repositories-file /dev/null --upgrade'
+    )
+    expect(dockerfile).not.toContain('--allow-untrusted')
+
+    const packageDir = join(process.cwd(), 'docker', 'openssl')
+    const checksums = readFileSync(join(packageDir, 'SHA256SUMS'), 'utf8').trim().split('\n')
+    const expectedFiles = ['aarch64', 'x86_64'].flatMap((arch) =>
+      ['libcrypto3', 'libssl3', 'openssl'].map((pkg) => `${arch}/${pkg}-${opensslPins[0]}.apk`)
+    )
+    expect(checksums.map((line) => line.trim().split(/\s+/)[1]).sort()).toEqual(
+      expectedFiles.sort()
+    )
+    for (const line of checksums) {
+      const [digest, file] = line.trim().split(/\s+/)
+      expect(
+        createHash('sha256')
+          .update(readFileSync(join(packageDir, file)))
+          .digest('hex'),
+        file
+      ).toBe(digest)
+    }
   })
 })
 
@@ -391,7 +467,7 @@ describe('QB-GOV-001 repository governance contract', () => {
   // REQ-03: a closed pull request's caches are deleted when it closes. The
   // workflow runs the base branch's definition (pull_request_target), checks
   // nothing out, and is the only workflow here that holds actions: write.
-  it('evicts a closed pull request\'s caches without checking anything out', () => {
+  it("evicts a closed pull request's caches without checking anything out", () => {
     const evict = readFileSync(join(workflowDir, 'cache-eviction.yml'), 'utf8')
     expect(evict).toMatch(/^on:\n {2}pull_request_target:\n {4}types: \[closed\]\n/m)
     expect(evict).toContain('\npermissions: {}\n')
