@@ -28,7 +28,7 @@ import { config } from '@/lib/server/config'
 import { isPathManaged } from '@/lib/server/config-file/managed-paths'
 import { boardAccessManagedPath } from '@/lib/shared/policy-managed-paths'
 import type { CreateBoardInput, UpdateBoardInput, BoardWithDetails } from './board.types'
-import { slugify } from '@/lib/shared/utils'
+import { slugify } from '@/lib/shared/utils/slug'
 import { type BoardAccess } from '@/lib/server/db'
 import { getTierLimits } from '@/lib/server/domains/settings/tier-limits.service'
 import {

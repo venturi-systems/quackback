@@ -1,3 +1,4 @@
+import { slugify } from '../slug'
 /**
  * Tests for string utility functions.
  */
@@ -12,7 +13,6 @@ import {
   truncate,
   formatStatus,
   getStatusEmoji,
-  slugify,
   contentPreview,
   safeEmail,
 } from '../string'

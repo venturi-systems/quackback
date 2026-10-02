@@ -5,7 +5,8 @@ import { FormattedMessage, useIntl } from 'react-intl'
 import { Link, useHydrated } from '@tanstack/react-router'
 import { LinkIcon } from '@heroicons/react/16/solid'
 import { cn } from '@/lib/shared/utils'
-import { findSimilarPostsFn, type SimilarPost } from '@/lib/server/functions/public-posts'
+import type { SimilarPost } from '@/lib/server/functions/public-posts'
+import { similarPostsQuery } from '@/lib/client/queries/similar-posts'
 import type { PostId } from '@quackback/ids'
 
 /**
@@ -48,15 +49,6 @@ function SimilarPostRow({ post }: { post: SimilarPost }) {
       </span>
     </Link>
   )
-}
-
-export function similarPostsQuery(postTitle: string) {
-  return {
-    queryKey: ['similarPosts', 'detail', postTitle],
-    queryFn: () => findSimilarPostsFn({ data: { title: postTitle, limit: 3 } }),
-    enabled: postTitle.length >= 5,
-    staleTime: 5 * 60_000,
-  }
 }
 
 interface SimilarPostsSectionProps {
