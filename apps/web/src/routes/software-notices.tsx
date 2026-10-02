@@ -4,7 +4,10 @@ import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer
 import { sourceCodeUrl } from '@/lib/shared/venturi-identity'
 
 export const Route = createFileRoute('/software-notices')({
-  head: () => ({ meta: [{ title: 'Software notices | Venturi Feedback' }] }),
+  head: () => ({
+    meta: [{ title: 'Software notices | Venturi Feedback' }],
+    links: [{ rel: 'icon', type: 'image/svg+xml', href: '/venturi-mark.svg' }],
+  }),
   component: SoftwareNotices,
 })
 
@@ -12,7 +15,7 @@ export const Route = createFileRoute('/software-notices')({
 function SoftwareNotices() {
   const commit = typeof __GIT_COMMIT__ === 'string' ? __GIT_COMMIT__ : null
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div className="software-notices min-h-screen flex flex-col bg-background text-foreground">
       <VenturiSiteHeader />
       <main id="main-content" className="portal-shell flex-1 py-10">
         <div className="max-w-3xl space-y-6">

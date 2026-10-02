@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render as rtlRender, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { IntlProvider } from 'react-intl'
+import { renderToString } from 'react-dom/server'
 
 // Shared spy so tests can assert navigate was (or was not) called.
 const navigate = vi.fn()
@@ -147,6 +148,28 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
     expect(screen.getByRole('button', { name: /sign in with github/i }).innerHTML).toBe(
       originalGitHub
     )
+  })
+
+  it('FB-03 gates only branded public entry controls before hydration', () => {
+    getEnabledOAuthProvidersMock.mockReturnValue([{ id: 'google', name: 'Google', type: 'social' }])
+    const props = {
+      mode: 'login' as const,
+      authConfig: { found: true, oauth: { google: true, password: false, magicLink: false } },
+    }
+    const serverMarkup = (appearance: 'brand' | 'default') =>
+      renderToString(
+        <IntlProvider locale="en" messages={{}}>
+          <PortalAuthFormInline {...props} providerAppearance={appearance} />
+        </IntlProvider>
+      )
+    const publicGate = document.createElement('div')
+    publicGate.innerHTML = serverMarkup('brand')
+    expect(publicGate.querySelector('button')).toBeDisabled()
+    expect(publicGate.querySelector('[role="status"]')).toHaveTextContent('enable JavaScript')
+    const dialog = document.createElement('div')
+    dialog.innerHTML = serverMarkup('default')
+    expect(dialog.querySelector('fieldset')).toBeNull()
+    expect(dialog.querySelector('[role="status"]')).toBeNull()
   })
 
   it('shows a no-methods message when neither email methods nor OAuth are configured', () => {

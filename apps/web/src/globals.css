@@ -275,6 +275,13 @@ body,
   box-shadow: none;
 }
 
+/* Public entry and notices need an opaque sticky surface. Keep the signed-in
+   portal and unauthorized-account appearance unchanged. */
+.portal-gate--entry .venturi-site-header,
+.software-notices .venturi-site-header {
+  background: var(--ds-color-surface-page);
+}
+
 .portal-header__logo {
   min-width: 0;
   letter-spacing: -0.01em;
