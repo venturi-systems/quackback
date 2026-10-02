@@ -68,8 +68,8 @@ describe('bounded uncertain creation recovery', () => {
         new Date('2026-10-02T00:02:00Z')
       )
     ).toMatchObject({ node_id: 'I_1' })
-    const request = fetcher.mock.calls.find(([url]) =>
-      String(url).startsWith('https://api.github.com')
+    const request = fetcher.mock.calls.find(
+      ([url]) => new URL(String(url)).origin === 'https://api.github.com'
     )![0]
     expect(new URL(request).searchParams.get('since')).toBe('2026-10-02T00:00:00.000Z')
   })
@@ -83,7 +83,7 @@ describe('bounded uncertain creation recovery', () => {
       recoverCreatedIssue('o/r', String(repoId), postId, snapshot, new Date())
     ).rejects.toBeInstanceOf(RecoveryReviewRequired)
     expect(
-      fetcher.mock.calls.filter(([url]) => String(url).startsWith('https://api.github.com'))
+      fetcher.mock.calls.filter(([url]) => new URL(String(url)).origin === 'https://api.github.com')
     ).toHaveLength(5)
   })
   it('holds duplicate immutable markers rather than choosing an arbitrary issue', async () => {
