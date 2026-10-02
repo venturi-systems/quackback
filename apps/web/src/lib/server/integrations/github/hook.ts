@@ -1,3 +1,4 @@
+import { isGovernedFeatureBoard } from '@/lib/server/feature-pipeline/semantic-tags'
 /**
  * GitHub hook handler.
  * Creates GitHub issues when feedback events occur.
@@ -31,6 +32,9 @@ export const githubHook: HookHandler = {
     if (event.type !== 'post.created') {
       return { success: true }
     }
+
+    if (await isGovernedFeatureBoard(event.data.post.boardId as import('@quackback/ids').BoardId))
+      return { success: true }
 
     log.debug({ event_type: event.type, repo: ownerRepo }, 'creating issue')
 

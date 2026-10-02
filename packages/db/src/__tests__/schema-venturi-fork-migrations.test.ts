@@ -38,7 +38,7 @@ const UPSTREAM_0126_WHEN = 1783728000000
 const FORK_BEFORE_0118 = ['9001_venturi_two_factor_lockout', '9002_venturi_hook_delivery_outcome']
 
 /** Fork migrations taken after upstream 0125. */
-const FORK_AFTER_0125 = ['9003_venturi_legacy_api_key_bounds']
+const FORK_AFTER_0125 = ['9003_venturi_legacy_api_key_bounds', '9004_venturi_feature_pipeline']
 
 describe('two_factor lockout columns', () => {
   it('declares the Better Auth 1.6.30 lockout columns', () => {
@@ -128,6 +128,20 @@ describe('fork migration journal', () => {
           // each key it changes.
           expect(statement, e.tag).toMatch(/"legacy_bounded_at" IS NULL/)
           expect(statement, e.tag).toMatch(/"legacy_bounded_at" = now\(\)/)
+        } else if (
+          e.tag === '9004_venturi_feature_pipeline' &&
+          /^(CREATE TABLE IF NOT EXISTS |CREATE INDEX IF NOT EXISTS |CREATE OR REPLACE FUNCTION |DROP TRIGGER IF EXISTS )/i.test(
+            statement
+          )
+        ) {
+          // Schema objects are created once; function definitions replace the same names.
+        } else if (
+          e.tag === '9004_venturi_feature_pipeline' &&
+          /^CREATE CONSTRAINT TRIGGER /i.test(statement)
+        ) {
+          const match = statement.match(/^CREATE CONSTRAINT TRIGGER (\w+) .* ON (\w+) DEFERRABLE/)
+          expect(match).not.toBeNull()
+          expect(statements).toContain(`DROP TRIGGER IF EXISTS ${match![1]} ON ${match![2]};`)
         } else {
           throw new Error(`${e.tag}: classify this statement's re-run behavior: ${statement}`)
         }

@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   acceptSuggestionFn,
@@ -37,6 +38,7 @@ export function useSuggestionActions({
             body: string
             boardId?: string
             statusId?: string
+            tagIds?: string[]
             authorPrincipalId?: string
           }
         | { swapDirection: boolean }
@@ -52,7 +54,8 @@ export function useSuggestionActions({
       invalidate()
       onResolved?.()
     },
-    onError: () => {
+    onError: (error) => {
+      toast.error(error.message)
       invalidate()
     },
   })

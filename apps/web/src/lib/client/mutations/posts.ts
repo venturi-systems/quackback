@@ -354,7 +354,13 @@ export function useCreatePost() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (input: CreatePostInput & { authorPrincipalId?: string }) =>
+    mutationFn: (
+      input: CreatePostInput & {
+        authorPrincipalId?: string
+        requestOrigin?: 'external' | 'internal'
+        requestOriginEvidence?: string
+      }
+    ) =>
       createPostFn({
         data: {
           title: input.title,
@@ -364,6 +370,8 @@ export function useCreatePost() {
           statusId: input.statusId,
           tagIds: input.tagIds,
           authorPrincipalId: input.authorPrincipalId,
+          requestOrigin: input.requestOrigin,
+          requestOriginEvidence: input.requestOriginEvidence,
         },
       }),
     onSuccess: (result) => {

@@ -1,3 +1,6 @@
+import { getWidgetAuthHeaders } from '@/lib/client/widget-auth'
+import { CapabilitySelector } from '@/components/public/feedback/capability-selector'
+import type { TagId } from '@quackback/ids'
 import { useCallback, useEffect, useMemo, memo, useRef, useState } from 'react'
 import { usePillsScroll } from '@/lib/client/hooks/use-pills-scroll'
 import { Squares2X2Icon, PencilIcon } from '@heroicons/react/24/solid'
@@ -255,6 +258,7 @@ function WidgetHomeForm({
   const [name, setName] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [capabilityId, setCapabilityId] = useState<TagId | undefined>()
 
   const [similarPostResults, setSimilarPostResults] = useState<SearchResult | null>(null)
   const [isSimilarSearching, setIsSimilarSearching] = useState(false)
@@ -413,6 +417,7 @@ function WidgetHomeForm({
   function collapseForm() {
     setExpanded(false)
     setTitle('')
+    setCapabilityId(undefined)
     setContentJson(null)
     setContentHtml('')
     setEmail('')
@@ -504,6 +509,7 @@ function WidgetHomeForm({
       const result = await createPublicPostFn({
         data: {
           boardId: selectedBoardId,
+          tagIds: capabilityId ? [capabilityId] : [],
           title: title.trim(),
           content: contentHtml.trim(),
           contentJson: (contentJson ?? undefined) as TiptapContent | undefined,
@@ -656,6 +662,13 @@ function WidgetHomeForm({
                     transition={{ duration: 0.2, delay: 0.1 }}
                     className="px-3 pb-2"
                   >
+                    <CapabilitySelector
+                      getAuthHeaders={getWidgetAuthHeaders}
+                      refreshKey={isIdentified ? 'identified' : 'unidentified'}
+                      boardId={selectedBoardId ?? ''}
+                      value={capabilityId}
+                      onChange={setCapabilityId}
+                    />
                     <RichTextEditor
                       value={contentJson || ''}
                       onChange={handleEditorChange}

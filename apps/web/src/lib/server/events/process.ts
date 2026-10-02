@@ -9,6 +9,7 @@ import { Queue, Worker, UnrecoverableError, type JobsOptions } from 'bullmq'
 import { getQueueRedis, REDIS_READY_TIMEOUT_MS } from '@/lib/server/queue/redis-config'
 import { getHook } from './registry'
 import { getHookTargets } from './targets'
+import { durableHookJobs } from './durable-jobs'
 import { isRetryableError } from './hook-utils'
 import type { HookResult } from './hook-types'
 import type { EventData } from './types'
@@ -225,8 +226,10 @@ async function persistExternalLink(data: HookJobData, result: HookResult): Promi
  * Process an event by resolving targets and enqueuing hooks.
  * Target resolution is awaited (~10-50ms). Hook execution runs in the background.
  */
-export async function processEvent(event: EventData): Promise<void> {
-  const targets = await getHookTargets(event)
+export async function processEvent(event: EventData, opts?: { durable?: boolean }): Promise<void> {
+  const targets = opts?.durable
+    ? await getHookTargets(event, { strict: true })
+    : await getHookTargets(event)
   if (targets.length === 0) return
 
   log.debug(
@@ -237,10 +240,12 @@ export async function processEvent(event: EventData): Promise<void> {
   const queue = await ensureQueue()
 
   await queue.addBulk(
-    targets.map(({ type, target, config: hookConfig }) => ({
-      name: `${event.type}:${type}`,
-      data: { hookType: type, event, target, config: hookConfig },
-    }))
+    opts?.durable
+      ? durableHookJobs(event, targets)
+      : targets.map(({ type, target, config: hookConfig }) => ({
+          name: `${event.type}:${type}`,
+          data: { hookType: type, event, target, config: hookConfig },
+        }))
   )
 }
 

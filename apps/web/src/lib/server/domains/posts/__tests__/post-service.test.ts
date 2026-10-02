@@ -39,6 +39,16 @@ vi.mock('@/lib/server/db', async () => {
         postStatuses: { findFirst: (...args: unknown[]) => mockPostStatusesFindFirst(...args) },
         principal: { findFirst: (...args: unknown[]) => mockPrincipalFindFirst(...args) },
       },
+      transaction: vi.fn(async (fn) =>
+        fn({
+          select: () => ({
+            from: () => ({ where: () => ({ for: async () => [await mockPostsFindFirst()] }) }),
+          }),
+          update: dbUpdate,
+          delete: dbDelete,
+          insert: dbInsert,
+        })
+      ),
       select: dbSelect,
       update: dbUpdate,
       delete: dbDelete,

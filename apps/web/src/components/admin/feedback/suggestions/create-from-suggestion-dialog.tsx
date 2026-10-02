@@ -1,3 +1,5 @@
+import type { TagId } from '@quackback/ids'
+import { CapabilitySelector } from '@/components/public/feedback/capability-selector'
 import { useState, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useRouteContext } from '@tanstack/react-router'
@@ -54,6 +56,7 @@ function CreateFromSuggestionContent({
   onClose: () => void
   onCreated: () => void
 }) {
+  const [capabilityId, setCapabilityId] = useState<TagId | undefined>()
   const [title, setTitle] = useState(suggestion.suggestedTitle ?? '')
   const [body, setBody] = useState(suggestion.suggestedBody ?? '')
   const [boardId, setBoardId] = useState(suggestion.board?.id ?? '')
@@ -127,8 +130,9 @@ function CreateFromSuggestionContent({
       boardId: boardId || undefined,
       statusId: statusId || undefined,
       authorPrincipalId: authorPrincipalId || undefined,
+      tagIds: capabilityId ? [capabilityId] : [],
     })
-  }, [title, body, boardId, statusId, authorPrincipalId, accept])
+  }, [title, body, boardId, statusId, authorPrincipalId, capabilityId, accept])
 
   const handleKeyDown = useKeyboardSubmit(handleSubmit, onClose)
 
@@ -191,6 +195,8 @@ function CreateFromSuggestionContent({
               autoFocus
               className="w-full text-lg sm:text-xl font-semibold bg-transparent border-0 outline-none placeholder:text-muted-foreground/50 focus:ring-0"
             />
+
+            <CapabilitySelector boardId={boardId} value={capabilityId} onChange={setCapabilityId} />
 
             {/* Body textarea */}
             <textarea

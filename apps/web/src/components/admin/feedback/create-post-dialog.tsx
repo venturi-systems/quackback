@@ -1,9 +1,11 @@
+import type { TagId } from '@quackback/ids'
 import { useState, useCallback, lazy, Suspense } from 'react'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
 import { ModalFooter } from '@/components/shared/modal-footer'
 import { useForm, Controller } from 'react-hook-form'
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { createPostSchema } from '@/lib/shared/schemas/posts'
+import { CapabilitySelector } from '@/components/public/feedback/capability-selector'
 import { useCreatePost } from '@/lib/client/mutations/posts'
 import type { CreatePostInput } from '@/lib/shared/types'
 import { useSimilarPosts } from '@/lib/client/hooks/use-similar-posts'
@@ -62,6 +64,9 @@ export function CreatePostDialog({
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
   const setOpen = controlledOnOpenChange ?? setInternalOpen
+  const [capabilityId, setCapabilityId] = useState<TagId | undefined>()
+  const [requestOrigin, setRequestOrigin] = useState<'auto' | 'external' | 'internal'>('auto')
+  const [requestOriginEvidence, setRequestOriginEvidence] = useState('')
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
 
   const { upload: uploadImage } = usePostImageUpload()
@@ -113,7 +118,9 @@ export function CreatePostDialog({
         content: data.content,
         boardId: data.boardId,
         statusId: data.statusId,
-        tagIds: data.tagIds,
+        tagIds: [...new Set([...(data.tagIds ?? []), ...(capabilityId ? [capabilityId] : [])])],
+        requestOrigin: requestOrigin === 'auto' ? undefined : requestOrigin,
+        requestOriginEvidence,
         contentJson,
         authorPrincipalId,
       } as CreatePostInput & { authorPrincipalId?: string },
@@ -123,6 +130,9 @@ export function CreatePostDialog({
           form.reset()
           setContentJson(null)
           setAuthorPrincipalId(currentUser.principalId)
+          setCapabilityId(undefined)
+          setRequestOrigin('auto')
+          setRequestOriginEvidence('')
           void onPostCreated?.({ id: String(result.id) })
         },
       }
@@ -135,6 +145,9 @@ export function CreatePostDialog({
       form.reset()
       setContentJson(null)
       setAuthorPrincipalId(currentUser.principalId)
+      setCapabilityId(undefined)
+      setRequestOrigin('auto')
+      setRequestOriginEvidence('')
       createPostMutation.reset()
     }
   }
@@ -186,6 +199,43 @@ export function CreatePostDialog({
                     placeholder="What's the feedback about?"
                     autoFocus
                   />
+
+                  <CapabilitySelector
+                    boardId={watchedBoardId}
+                    value={capabilityId}
+                    onChange={setCapabilityId}
+                  />
+                  <div className="space-y-2 py-2">
+                    <label htmlFor="request-origin" className="text-sm">
+                      Request origin
+                    </label>
+                    <select
+                      id="request-origin"
+                      className="w-full rounded border p-2 text-sm"
+                      value={requestOrigin}
+                      onChange={(event) =>
+                        setRequestOrigin(event.target.value as typeof requestOrigin)
+                      }
+                    >
+                      <option value="auto">Use the selected author's account</option>
+                      <option value="external">Customer or external party</option>
+                      <option value="internal">Internal proposal</option>
+                    </select>
+                    {requestOrigin === 'external' && (
+                      <label className="block text-sm">
+                        Source of the external request
+                        <textarea
+                          className="mt-1 w-full rounded border p-2"
+                          required
+                          minLength={8}
+                          maxLength={2000}
+                          value={requestOriginEvidence}
+                          onChange={(event) => setRequestOriginEvidence(event.target.value)}
+                          placeholder="Record the request source and relevant context."
+                        />
+                      </label>
+                    )}
+                  </div>
 
                   <FormField
                     control={form.control}

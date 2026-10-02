@@ -338,3 +338,38 @@ describe('Event Processing (BullMQ)', () => {
     })
   })
 })
+
+describe('durable processEvent opt-in', () => {
+  it('requires strict resolution and reuses retained queue identities after acknowledgment loss', async () => {
+    mockGetHookTargets.mockResolvedValue([
+      {
+        type: 'email',
+        target: { email: 'subscriber@example.com', unsubscribeUrl: 'first' },
+        config: {},
+      },
+    ])
+    const event = makeEvent()
+    await processEvent(event, { durable: true })
+    const first = mockQueueAddBulk.mock.calls.at(-1)?.[0]
+    mockGetHookTargets.mockResolvedValue([
+      {
+        type: 'email',
+        target: { email: 'subscriber@example.com', unsubscribeUrl: 'rotated' },
+        config: {},
+      },
+    ])
+    await processEvent(event, { durable: true })
+    const retry = mockQueueAddBulk.mock.calls.at(-1)?.[0]
+    expect(mockGetHookTargets).toHaveBeenLastCalledWith(event, { strict: true })
+    expect(first[0].opts.jobId).toBe(retry[0].opts.jobId)
+    expect(retry[0].opts).toMatchObject({ removeOnComplete: false, removeOnFail: false })
+  })
+  it('propagates strict target resolution failure before queue admission', async () => {
+    mockQueueAddBulk.mockClear()
+    mockGetHookTargets.mockRejectedValueOnce(new Error('target lookup failed'))
+    await expect(processEvent(makeEvent(), { durable: true })).rejects.toThrow(
+      'target lookup failed'
+    )
+    expect(mockQueueAddBulk).not.toHaveBeenCalled()
+  })
+})

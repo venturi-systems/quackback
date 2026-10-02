@@ -84,6 +84,7 @@ const toggleVoteSchema = z.object({
 
 const createPublicPostSchema = z.object({
   boardId: filterId('board'),
+  tagIds: z.array(filterId('tag')).max(25).optional(),
   title: filterText().min(1, 'Title is required').max(200),
   content: filterText().max(10000).optional().default(''),
   contentJson: tiptapContentSchema.optional(),
@@ -422,7 +423,7 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
         throw new Error('Portal access required')
       }
       const ctx = await requireAuth()
-      const { boardId: boardIdRaw, title, content, contentJson, metadata } = data
+      const { boardId: boardIdRaw, title, content, contentJson, metadata, tagIds } = data
       const boardId = boardIdRaw as BoardId
 
       // Resolve the actor first so getPublicBoardById can apply
@@ -481,6 +482,7 @@ export const createPublicPostFn = createServerFn({ method: 'POST' })
           contentJson: contentJson ? sanitizeTiptapContent(contentJson) : undefined,
           statusId: defaultStatus?.id,
           widgetMetadata: metadata,
+          tagIds: tagIds as TagId[] | undefined,
         },
         author,
         { headers: getRequestHeaders() }

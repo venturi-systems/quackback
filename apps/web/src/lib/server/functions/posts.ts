@@ -80,6 +80,8 @@ const createPostSchema = z.object({
   boardId: z.string(),
   statusId: z.string().optional(),
   tagIds: z.array(z.string()).optional().default([]),
+  requestOrigin: z.enum(['external', 'internal']).optional(),
+  requestOriginEvidence: z.string().max(2000).optional(),
   authorPrincipalId: z.string().optional(),
 })
 
@@ -362,6 +364,10 @@ export const createPostFn = createServerFn({ method: 'POST' })
           boardId: data.boardId as BoardId,
           statusId: data.statusId as StatusId | undefined,
           tagIds: data.tagIds as TagId[] | undefined,
+          requestOrigin: data.requestOrigin,
+          requestOriginEvidence: data.requestOriginEvidence,
+          trackedByPrincipalId:
+            author.principalId !== auth.principal.id ? auth.principal.id : undefined,
         },
         author,
         { headers: getRequestHeaders() }

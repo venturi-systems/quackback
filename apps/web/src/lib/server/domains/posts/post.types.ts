@@ -16,6 +16,8 @@ export interface CreatePostInput {
   contentJson?: TiptapContent | null
   statusId?: StatusId
   tagIds?: TagId[]
+  requestOrigin?: 'external' | 'internal'
+  requestOriginEvidence?: string
   widgetMetadata?: Record<string, string>
   /** Override creation timestamp (admin-only, for imports) */
   createdAt?: Date
