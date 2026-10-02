@@ -64,7 +64,10 @@ describe('NotFoundPage', () => {
 
     const main = screen.getByRole('main')
     expect(within(main).getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible()
-    expect(screen.getByRole('link', { name: 'Venturi feedback home' })).toHaveAttribute('href', '/')
+    expect(screen.getByRole('link', { name: 'Venturi home' })).toHaveAttribute(
+      'href',
+      'https://venturi.systems/'
+    )
     expect(screen.getByRole('contentinfo')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Go to feedback home' })).toHaveAttribute('href', '/')
     expect(screen.getByRole('link', { name: 'Go to venturi.systems' })).toHaveAttribute(
@@ -82,7 +85,7 @@ describe('NotFoundPage', () => {
     )
 
     expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible()
-    expect(screen.queryByRole('link', { name: 'Venturi feedback home' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Venturi home' })).not.toBeInTheDocument()
     expect(screen.queryByRole('contentinfo')).not.toBeInTheDocument()
     expect(screen.queryByRole('main')).not.toBeInTheDocument()
   })

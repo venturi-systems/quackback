@@ -10,7 +10,12 @@ interface FeedbackSidebarProps {
   workspaceSlug?: string
 }
 
-export function FeedbackSidebar({ boards, currentBoard, onBoardChange }: FeedbackSidebarProps) {
+export function FeedbackSidebar({
+  boards,
+  currentBoard,
+  onBoardChange,
+  workspaceSlug,
+}: FeedbackSidebarProps) {
   return (
     <aside className="w-64 shrink-0 hidden lg:block">
       <div className="sticky top-24">
@@ -92,16 +97,22 @@ export function FeedbackSidebar({ boards, currentBoard, onBoardChange }: Feedbac
           </nav>
         </div>
 
-        {/* The company site is a distinct destination from the product portal. */}
+        {/* Venturi feedback link */}
         <div className="flex justify-center mt-3">
           <a
-            href="https://venturi.systems/"
+            href={`https://venturi.systems/?utm_campaign=${encodeURIComponent(workspaceSlug || 'feedback')}&utm_content=feedback-board&utm_medium=referral&utm_source=feedback-portal`}
             className="group inline-flex min-h-11 items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1 rounded-full bg-muted/50 hover:bg-muted border border-transparent hover:border-border/50"
           >
-            <FormattedMessage
-              id="portal.feedback.sidebar.aboutVenturi"
-              defaultMessage="About Venturi"
-            />
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary " />
+            <span>
+              <FormattedMessage
+                id="portal.feedback.sidebar.poweredBy"
+                defaultMessage="{brand} feedback"
+                values={{
+                  brand: <span className="font-semibold">Venturi</span>,
+                }}
+              />
+            </span>
           </a>
         </div>
       </div>

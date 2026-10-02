@@ -390,10 +390,21 @@ test.describe('Board Selector', () => {
     const postCards = globalPage.locator('a[href*="/posts/"]:has(h3)')
     await expect(postCards.first()).toBeVisible({ timeout: 15000 })
 
-    // Open the form
-    await globalPage.getByPlaceholder("What's your idea?").click()
+    // Open the form after the filtered feed has hydrated. The trigger and the
+    // title input share a placeholder, so poll the editor's visible state and
+    // retry only while the first click is still waiting for React handlers.
+    const createPostInput = globalPage.getByPlaceholder("What's your idea?")
+    await expect(createPostInput).toBeVisible({ timeout: 10000 })
     const editor = globalPage.locator('.tiptap')
-    await expect(editor).toBeVisible({ timeout: 10000 })
+    await expect.poll(
+      async () => {
+        if (!(await editor.isVisible())) {
+          await createPostInput.click()
+        }
+        return editor.isVisible()
+      },
+      { timeout: 10000 }
+    ).toBe(true)
 
     // Board selector should show the filtered board (Feature Requests)
     const boardSelector = globalPage.locator('[role="combobox"]')
