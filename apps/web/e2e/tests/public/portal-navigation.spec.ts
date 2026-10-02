@@ -42,9 +42,19 @@ test.describe('Portal identity and exploration', () => {
     test(`clear product destinations at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       await page.goto('/')
-      const brand = page.locator('.venturi-brand__product')
+      const brand = page.getByRole('link', { name: 'Venturi Feedback home', exact: true })
       await expect(brand).toHaveAttribute('href', '/')
-      await expect(page.getByRole('heading', { name: 'Feedback', exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Product ideas', exact: true })).toBeVisible()
+      await expect(page.locator('.venturi-brand__product')).toHaveCount(0)
+      await expect(
+        page.getByRole('link', { name: 'Software notices', exact: true })
+      ).toHaveAttribute('href', '/software-notices')
+      await expect(page.getByRole('link', { name: /Source code/ })).toHaveCount(0)
+      if (width >= 1024) {
+        await expect(
+          page.getByRole('link', { name: 'About Venturi', exact: true })
+        ).toHaveAttribute('href', /^https:\/\/venturi\.systems\//)
+      }
       const menu = page.getByRole('button', { name: 'Menu', exact: true })
       if (width < 640) {
         await expect(menu).toBeEnabled()
