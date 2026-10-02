@@ -48,7 +48,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     // REQ-FEEDBACK-AUTH-VIEWPORT: the guide is optional and the standard footer remains present.
     await expect(roles).not.toHaveAttribute('open', '')
     await expect(page.locator('.portal-roles__grid')).toBeHidden()
-    await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
+    await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(0)
     await expect(page.getByRole('navigation', { name: 'Legal and sitemap' })).toHaveCount(1)
     const initialViewports = []
     for (const [width, height] of [
@@ -82,7 +82,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       expect(initial.layoutTop).toBeGreaterThanOrEqual(0)
       expect(initial.footerBottom).toBeLessThanOrEqual(height)
       expect(initial.utilityGap).toBeGreaterThanOrEqual(0)
-      expect(initial.utilityGap).toBeLessThanOrEqual(120)
+      expect(initial.utilityGap).toBeLessThanOrEqual(32)
       expect(initial.overflow).not.toMatch(/hidden|clip/)
       initialViewports.push(initial)
     }
@@ -193,22 +193,20 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
             footer.top -
             document.querySelector('.portal-gate__roles')!.getBoundingClientRect().bottom,
           formWidth: form.width,
-          targets: Array.from(document.querySelectorAll('.venturi-site-footer a')).map(
-            (element) => {
-              const rect = element.getBoundingClientRect()
-              return { text: element.textContent, width: rect.width, height: rect.height }
-            }
-          ),
+          targets: Array.from(document.querySelectorAll('.venturi-footer a')).map((element) => {
+            const rect = element.getBoundingClientRect()
+            return { text: element.textContent, width: rect.width, height: rect.height }
+          }),
         }
       })
-      expect(compact.gap).toBeLessThanOrEqual(120)
+      expect(compact.gap).toBeLessThanOrEqual(32)
       expect(compact.formWidth).toBeLessThanOrEqual(416)
       for (const target of compact.targets) {
         expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
         expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
       }
-      await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
-      await expect(page.getByRole('link', { name: 'Software notices', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(0)
+      await expect(page.getByRole('link', { name: 'Source code', exact: true })).toBeVisible()
       if ([390, 1440, 2560].includes(width)) {
         await testInfo.attach(`entry-folded-${width}`, {
           body: await page.screenshot({ fullPage: true }),
@@ -266,10 +264,10 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         }
       )
     }
-    // Source access remains public through the standard footer's Software notices link.
-    await expect(page.getByRole('link', { name: 'Software notices', exact: true })).toHaveAttribute(
+    // The concise entry label retains direct public access to the exact build source.
+    await expect(page.getByRole('link', { name: 'Source code', exact: true })).toHaveAttribute(
       'href',
-      '/software-notices'
+      /^https:\/\/github\.com\/venturi-systems\/quackback(?:\/tree\/[a-f0-9]{40})?$/
     )
     await page.goto('/software-notices')
     await expect(page.getByRole('heading', { name: 'Software notices', exact: true })).toBeVisible()

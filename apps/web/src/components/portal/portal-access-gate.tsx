@@ -322,11 +322,7 @@ export function PortalAccessGate({
       <PublicPageFrame
         className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
         footer={
-          reason === 'unauthenticated' ? (
-            <VenturiSiteFooter
-              sourceLink={{ label: 'Software notices', href: '/software-notices' }}
-            />
-          ) : undefined
+          reason === 'unauthenticated' ? <VenturiSiteFooter sourceLabel="Source code" /> : undefined
         }
       >
         <GateCard

@@ -693,8 +693,15 @@
   min-block-size: 100svh;
 }
 .portal-gate--entry .public-frame__main {
-  display: grid;
-  align-content: center;
+  flex: 0 0 auto;
+  margin-block-start: auto;
+}
+.portal-gate--entry .venturi-footer {
+  margin-block: 0 auto;
+  padding-block: 16px;
+}
+.portal-gate--entry .venturi-footer a {
+  min-inline-size: var(--ds-component-touch-minimum);
 }
 .portal-gate--entry .public-frame__content {
   inline-size: 100%;

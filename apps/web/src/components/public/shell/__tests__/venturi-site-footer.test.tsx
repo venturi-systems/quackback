@@ -44,17 +44,13 @@ describe('VenturiSiteFooter', () => {
       'https://github.com/venturi-systems/quackback'
     )
   })
-  it('can route the public entry through Software notices while retaining the legal row', () => {
-    render(
-      <VenturiSiteFooter
-        sourceLink={{ label: 'Software notices', href: '/software-notices' }}
-      />
-    )
+  it('retains build source access with a concise entry label and the legal row', () => {
+    render(<VenturiSiteFooter sourceLabel="Source code" />)
 
     const footer = screen.getByRole('contentinfo')
-    expect(within(footer).getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+    expect(within(footer).getByRole('link', { name: 'Source code', exact: true })).toHaveAttribute(
       'href',
-      '/software-notices'
+      'https://github.com/venturi-systems/quackback'
     )
     expect(
       within(footer).queryByRole('link', { name: 'Source code (AGPL-3.0)' })
