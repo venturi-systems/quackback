@@ -44,4 +44,19 @@ describe('VenturiSiteFooter', () => {
       'https://github.com/venturi-systems/quackback'
     )
   })
+  it('retains build source access with a concise entry label and the legal row', () => {
+    render(<VenturiSiteFooter sourceLabel="Source code" />)
+
+    const footer = screen.getByRole('contentinfo')
+    expect(within(footer).getByRole('link', { name: /^Source code$/ })).toHaveAttribute(
+      'href',
+      'https://github.com/venturi-systems/quackback'
+    )
+    expect(
+      within(footer).queryByRole('link', { name: 'Source code (AGPL-3.0)' })
+    ).not.toBeInTheDocument()
+    expect(
+      within(footer).getByRole('navigation', { name: 'Legal and sitemap' })
+    ).toBeInTheDocument()
+  })
 })
