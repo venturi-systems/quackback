@@ -13,7 +13,8 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 vi.mock('@/lib/server/functions/public-posts', () => ({ findSimilarPostsFn: vi.fn() }))
 
-import { SimilarPostsSection, similarPostsQuery } from '../similar-posts-section'
+import { SimilarPostsSection } from '../similar-posts-section'
+import { similarPostsQuery } from '@/lib/client/queries/similar-posts'
 
 const TITLE = 'Dark mode support'
 const related = [

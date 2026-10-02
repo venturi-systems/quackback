@@ -79,6 +79,11 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      // Keep every tenant font available without embedding unused font bytes
+      // in the render-blocking global stylesheet. Selected families remain
+      // self-hosted and fetch their existing subsets when the browser uses them.
+      assetsInlineLimit: (filePath) =>
+        /\.(?:woff2?|ttf|otf)$/i.test(filePath) ? false : undefined,
       rolldownOptions: {
         // TanStack Router SSR code imports node builtins (node:stream, node:async_hooks)
         // that end up in the client bundle. Mark node: imports as external since they're

@@ -25,7 +25,7 @@ import { invalidateSettingsCache } from '@/lib/server/domains/settings/settings.
 import { DEFAULT_AUTH_CONFIG, DEFAULT_PORTAL_CONFIG } from '@/lib/server/domains/settings'
 import { assertNotManaged } from '@/lib/server/config-file/managed-guard'
 import { isPathManaged } from '@/lib/server/config-file/managed-paths'
-import { slugify } from '@/lib/shared/utils'
+import { slugify } from '@/lib/shared/utils/slug'
 import { getSetupState, isOnboardingComplete } from '@/lib/shared/db-types'
 import { logger } from '@/lib/server/logger'
 import { acquireTeamRoleLock } from '@/lib/server/domains/principals/team-role-lock'

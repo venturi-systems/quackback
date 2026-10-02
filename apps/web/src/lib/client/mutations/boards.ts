@@ -19,7 +19,7 @@ import type { Board, BoardAccess } from '@/lib/shared/db-types'
 import type { BoardId } from '@quackback/ids'
 import { boardKeys } from '@/lib/client/hooks/use-boards-query'
 import { adminQueries } from '@/lib/client/queries/admin'
-import { slugify } from '@/lib/shared/utils'
+import { slugify } from '@/lib/shared/utils/slug'
 
 // ============================================================================
 // Mutation Hooks

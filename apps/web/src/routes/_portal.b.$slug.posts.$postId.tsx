@@ -1,3 +1,4 @@
+import { similarPostsQuery } from '@/lib/client/queries/similar-posts'
 import { Suspense, useEffect, useState } from 'react'
 import { useIntl } from 'react-intl'
 import { createFileRoute, notFound, useRouteContext } from '@tanstack/react-router'
@@ -33,7 +34,6 @@ import {
 } from '@/lib/client/mutations/portal-comments'
 import { toast } from 'sonner'
 import { PortalMergeBanner } from '@/components/public/post-detail/merge-banner'
-import { similarPostsQuery } from '@/components/public/post-detail/similar-posts-section'
 import { isValidTypeId, type CommentId, type PostId } from '@quackback/ids'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
 import { portalGateHead } from '@/lib/shared/route-head'

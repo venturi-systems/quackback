@@ -24,7 +24,7 @@ import type { SegmentId, PrincipalId } from '@quackback/ids'
 import { createId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ForbiddenError } from '@/lib/shared/errors'
 import { recordAuditEvent, type AuditActor } from '@/lib/server/audit/log'
-import { slugify } from '@/lib/shared/utils/string'
+import { slugify } from '@/lib/shared/utils/slug'
 import type {
   Segment,
   SegmentWithCount,
