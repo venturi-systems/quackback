@@ -16,7 +16,11 @@ function buildCommit(): string | null {
  * pages. Related sites and the AGPL source link, then the full-width legal
  * row in the public website's order and labels.
  */
-export function VenturiSiteFooter() {
+export function VenturiSiteFooter({
+  sourceLabel,
+}: {
+  sourceLabel?: string
+} = {}) {
   const year = new Date().getFullYear()
   return (
     <footer className="venturi-footer" data-testid="venturi-site-footer">
@@ -24,7 +28,7 @@ export function VenturiSiteFooter() {
         <nav className="venturi-footer__related" aria-label="Related Venturi sites">
           <a href={VENTURI_SITE_URL}>Venturi</a>
           <a href={VENTURI_DOCS_URL}>Documentation</a>
-          <a href={sourceCodeUrl(buildCommit())}>Source code (AGPL-3.0)</a>
+          <a href={sourceCodeUrl(buildCommit())}>{sourceLabel ?? 'Source code (AGPL-3.0)'}</a>
         </nav>
         <div className="venturi-footer__legal-row">
           <p className="venturi-footer__copyright">
