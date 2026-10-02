@@ -658,13 +658,9 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Prune Playwright trace artifacts on success
-        if: success()
-        run: rm -rf apps/web/blob-report apps/web/test-results
-
       - name: Upload the Playwright artifacts
         # Keep inline JSON measurements on successful ratchet runs as well.
-        # Reuses this upload and seven-day retention; large traces stay failure-only.
+        # Retain Playwright failure/retry artifacts even when the ratchet passes.
         # No new job/matrix/schedule or additional test execution is introduced.
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -117,6 +117,30 @@ describe('QB-CI-001 consolidated validation contract', () => {
   })
 })
 
+describe('QB-CI-004 Playwright failure evidence', () => {
+  it('retains failure artifacts when the known-failure ratchet passes', () => {
+    const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+    const job = ci.split('\n  e2e_tests:\n', 2)[1]?.split(/\n {2}[a-z0-9_-]+:\n/, 1)[0] ?? ''
+    const ratchet = job.indexOf('name: Check the shard against the known-failure ratchet')
+    const uploadAt = job.indexOf('      - name: Upload the Playwright artifacts\n')
+
+    expect(ratchet).toBeGreaterThan(-1)
+    expect(uploadAt).toBeGreaterThan(ratchet)
+
+    // A successful ratchet can include failed or retried Playwright attempts.
+    // Their reports must survive until the existing upload, regardless of the
+    // job result. This rejects the previous success-only directory cleanup.
+    expect(job.slice(0, uploadAt)).not.toMatch(/\brm\s+[^\n]*(?:blob-report|test-results)/)
+    const upload = job.slice(uploadAt).split(/\n {6}- /, 1)[0]
+    expect(upload).toContain('        if: ${{ !cancelled() }}\n')
+    expect(upload).toMatch(/uses: actions\/upload-artifact@[0-9a-f]{40}\b/)
+    expect(upload).toContain('          retention-days: 7\n')
+    for (const artifact of ['blob-report', 'test-results', 'e2e-results.json', 'e2e-plan.json']) {
+      expect(upload).toContain(`            apps/web/${artifact}\n`)
+    }
+  })
+})
+
 describe('QB-CI-003 offline package lane', () => {
   const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
 
