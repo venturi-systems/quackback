@@ -73,24 +73,19 @@ describe('PortalAccessGate — inline auth form', () => {
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
   })
 
-  it('opts only the unauthenticated gate into the landing footer and branded providers', () => {
+  it('uses compact utilities and branded providers only before authentication', () => {
     const { container, rerender } = render(<PortalAccessGate {...baseProps} />)
     expect(container.querySelector('.portal-gate--entry')).toBeInTheDocument()
     expect(screen.getByTestId('venturi-landing-footer')).toBeInTheDocument()
     expect(screen.queryByTestId('venturi-site-footer')).not.toBeInTheDocument()
     expect(formProps.providerAppearance).toBe('brand')
-    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
-      'href',
-      '/software-notices'
-    )
+    expect(screen.queryByRole('link', { name: 'Software notices' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Source code' })).toBeInTheDocument()
     rerender(<PortalAccessGate {...baseProps} reason="unauthorized" />)
     expect(container.querySelector('.portal-gate--entry')).not.toBeInTheDocument()
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
-      'href',
-      '/software-notices'
-    )
+    expect(screen.getByRole('link', { name: 'Source code (AGPL-3.0)' })).toBeInTheDocument()
   })
 
   it('seeds the form mode from autoOpenSignin', () => {
@@ -114,30 +109,28 @@ describe('PortalAccessGate — content privacy', () => {
 })
 
 describe('PortalAccessGate — explanatory sign-in page', () => {
-  // Owner decision 5 on landing-page#2309: keep sign-in, and make the page
-  // explain what the portal is and who can do what, with the Venturi header
-  // and footer.
+  // REQ-FEEDBACK-AUTH-VIEWPORT: show authentication and optional permissions;
+  // the shared signed-in shell is not part of this change.
   it('is a full public page with the Venturi header, a main landmark and the footer', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    expect(screen.getByRole('link', { name: 'Venturi feedback home' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
     expect(screen.getByRole('main')).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Source and sitemap' })).toBeInTheDocument()
   })
 
-  it('says what the portal is and that anyone who signs in can take part', () => {
+  it('shows access guidance and keeps the permissions disclosure collapsed', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    expect(screen.getByTestId('portal-gate-lead')).toHaveTextContent(
-      'Share product ideas, vote on requests and follow the roadmap.'
-    )
+    expect(screen.queryByTestId('portal-gate-lead')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Share product ideas, vote on requests and follow the roadmap.')
+    ).not.toBeInTheDocument()
     expect(screen.getByTestId('portal-gate-access')).toHaveTextContent(
       'Anyone who signs in can read and take part.'
     )
-    expect(screen.getByRole('heading', { level: 1, name: 'Help shape Acme' })).toBeVisible()
-    // Owner decision 5: the page states who can do what when it loads; the
-    // disclosure only lets a visitor fold it away.
+    expect(screen.getByRole('heading', { level: 1, name: 'Sign in to access Acme' })).toBeVisible()
+    // The optional guide remains accessible without expanding the landing view.
     const disclosure = screen.getByText('Who can do what').closest('details')
-    expect(disclosure).toHaveAttribute('open')
+    expect(disclosure).not.toHaveAttribute('open')
     expect(disclosure?.querySelector('summary')).toHaveTextContent('Who can do what')
     expect(disclosure).toHaveTextContent('Read ideas and the roadmap')
     expect(screen.getByRole('region', { name: 'Sign in' })).toContainElement(

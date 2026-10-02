@@ -685,24 +685,28 @@
   font-size: var(--ds-primitive-font-size-16);
 }
 
-/* Explicit unauthenticated entry variant. Shared and signed-in shells keep
-   their existing typography, footer and provider defaults. The entry keeps
-   the frame's full-viewport column (.public-frame min-height: 100vh, main
-   flex: 1), so on a window taller than the composition the footer closes
-   the viewport instead of leaving an empty band under it. A natural-height
-   entry left 72px of that band at 1728x1000, 152px at 1920x1080 and 372px
-   at 2560x1300 (owner report 2026-09-29); windows shorter than the
-   composition render exactly as before. */
+/* REQ-FEEDBACK-AUTH-VIEWPORT: a compact entry with no marketing content.
+   Content stays in natural flow so zoom, longer translations and an expanded
+   permissions guide remain accessible rather than clipped to the viewport.
+   All overrides are scoped to the unauthenticated gate. */
+.portal-gate--entry {
+  min-block-size: 100svh;
+}
+.portal-gate--entry .public-frame__main {
+  display: grid;
+  align-content: center;
+}
 .portal-gate--entry .public-frame__content {
-  padding-block: 32px;
+  inline-size: 100%;
+  padding-block: 24px;
 }
 .portal-gate--entry .portal-gate__layout {
   grid-template-columns: minmax(0, 1fr);
-  justify-items: center;
-  gap: 24px;
+  max-inline-size: 26rem;
+  margin-inline: auto;
+  gap: 16px;
 }
 .portal-gate--entry .portal-gate__layout > .portal-gate__intro {
-  max-inline-size: 38rem;
   text-align: center;
 }
 .portal-gate--entry .portal-gate__title {
@@ -713,127 +717,49 @@
   margin: 0;
 }
 .portal-gate--entry .portal-gate__layout > .portal-gate__signin {
-  inline-size: 100%;
-  max-inline-size: 26rem;
   border: 0;
   padding: 0;
 }
 .portal-gate--entry .portal-gate__form {
-  max-inline-size: 26rem;
-}
-.portal-gate--entry .portal-gate__form-intro {
-  margin-block-end: 16px;
+  max-inline-size: none;
 }
 .portal-gate--entry .portal-gate__roles {
-  inline-size: 100%;
-  max-inline-size: 26rem;
-  margin-block-start: 0;
+  margin: 0;
+}
+.portal-gate--entry .portal-gate__roles-summary {
+  min-block-size: var(--ds-component-touch-minimum);
+  padding-block: 12px;
 }
 .portal-gate--entry .portal-roles__grid {
   grid-template-columns: minmax(0, 1fr);
 }
-
-/* Marketing footer composition, using the existing public shell's page gutters. */
-.venturi-landing-footer {
-  border-block-start: 1px solid var(--ds-color-border-default);
-  background: var(--ds-color-surface-page);
-  padding-block: 32px 20px;
-}
-.venturi-landing-footer__shell {
-  display: grid;
-  grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.3fr);
-  column-gap: clamp(32px, 5vw, 80px);
-  row-gap: 24px;
-}
-.venturi-landing-footer__brand p {
-  margin-block-start: 8px;
-  color: var(--ds-color-text-secondary);
-  font: var(--ds-typography-body-14);
-  text-wrap: pretty;
-}
-.venturi-landing-footer__nav {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 24px;
-}
-.venturi-landing-footer__nav h2 {
-  color: var(--ds-color-text-secondary);
-  font: var(--ds-typography-body-14);
-  margin: 0;
-}
-.venturi-landing-footer ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.venturi-landing-footer__nav ul {
-  margin-block-start: 8px;
+.venturi-landing-footer nav {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0 24px;
 }
 .venturi-landing-footer a {
   display: inline-flex;
   align-items: center;
-  min-inline-size: 44px;
-  min-block-size: 44px;
-  text-decoration: none;
-}
-.venturi-landing-footer__nav a {
-  color: var(--ds-color-text-strong);
-  font: var(--ds-typography-body-14);
-  font-weight: 500;
-  text-wrap: pretty;
-}
-.venturi-landing-footer__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  grid-column: 1 / -1;
-  gap: 0 24px;
-  border-block-start: 1px solid var(--ds-color-border-default);
-  padding-block-start: 16px;
-}
-.venturi-landing-footer__copyright {
-  margin: 0;
-  color: var(--ds-color-text-legal);
-}
-.venturi-landing-footer__row :is(p, a) {
-  font: var(--ds-typography-body-12);
-  font-weight: 500;
-}
-.venturi-landing-footer__row a {
-  color: var(--ds-color-text-primary);
-}
-.venturi-landing-footer__legal {
-  flex: 1 0 100%;
-  min-inline-size: 0;
-}
-.venturi-landing-footer__legal ul {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 24px;
-}
-.venturi-landing-footer__legal a {
-  overflow-wrap: anywhere;
-  text-wrap: pretty;
-}
-.venturi-landing-footer__row .venturi-landing-footer__notices {
+  min-inline-size: var(--ds-component-touch-minimum);
+  min-block-size: var(--ds-component-touch-minimum);
   color: var(--ds-color-text-secondary);
+  font: var(--ds-typography-body-14);
+  text-decoration: none;
 }
 .venturi-landing-footer a:hover {
   text-decoration: underline;
   text-underline-offset: 0.2em;
 }
-@media (max-width: 48rem) {
-  .venturi-landing-footer__shell {
-    grid-template-columns: minmax(0, 1fr);
+@media (max-height: 700px) {
+  .portal-gate--entry .public-frame__content {
+    padding-block: 8px;
   }
-}
-@media (max-width: 35rem) {
-  .venturi-landing-footer__nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .portal-gate--entry .portal-gate__layout {
+    gap: 8px;
   }
-  .venturi-landing-footer__legal ul {
-    gap: 0 16px;
+  .portal-gate--entry .portal-gate__title {
+    font: var(--ds-typography-heading-24);
   }
 }
