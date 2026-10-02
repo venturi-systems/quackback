@@ -61,3 +61,26 @@ describe('feature pipeline status contract', () => {
     )
   })
 })
+
+describe('native issue state edits', () => {
+  it.each(['closed', 'complete', 'declined', 'withdrawn', 'redundant'])(
+    'honors reopening %s with its stale label',
+    (baseline) => {
+      expect(normalizeIssue(issue('open', ['status:' + baseline]), baseline)).toBe('open')
+    }
+  )
+  it.each(['open', 'under_review', 'planned', 'in_progress', 'deferred'])(
+    'honors closing %s without claiming shipment',
+    (baseline) => {
+      expect(normalizeIssue(issue('closed', ['status:' + baseline]), baseline)).toBe('closed')
+    }
+  )
+  it('gives an explicitly added successor precedence over a simultaneous state edit', () => {
+    expect(normalizeIssue(issue('open', ['status:declined', 'status:withdrawn']), 'declined')).toBe(
+      'withdrawn'
+    )
+    expect(normalizeIssue(issue('closed', ['status:deferred', 'status:planned']), 'deferred')).toBe(
+      'planned'
+    )
+  })
+})

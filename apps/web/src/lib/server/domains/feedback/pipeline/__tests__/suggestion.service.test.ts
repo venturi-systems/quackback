@@ -12,6 +12,16 @@ import type {
   FeedbackSignalId,
 } from '@quackback/ids'
 
+const routing = vi.hoisted(() => ({
+  governed: vi.fn().mockResolvedValue(false),
+  intent: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/server/feature-pipeline/semantic-tags', () => ({
+  isGovernedFeatureBoard: routing.governed,
+  validateSemanticTags: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/server/feature-pipeline/intent', () => ({ recordFeatureIntent: routing.intent }))
+
 // --- Mock tracking ---
 const insertValuesCalls: unknown[][] = []
 const updateSetCalls: unknown[][] = []
@@ -138,6 +148,7 @@ describe('suggestion.service', () => {
     vi.clearAllMocks()
     // clearAllMocks resets implementations, so re-establish the default after.
     mockBoardsFindFirst.mockResolvedValue({ id: 'board_1' })
+    routing.governed.mockResolvedValue(false)
   })
 
   const rawItemId = 'raw_item_1' as RawFeedbackItemId
@@ -340,6 +351,49 @@ describe('suggestion.service', () => {
       expect(insertValuesCalls.length).toBe(0)
       expect(mockSubscribeToPost).not.toHaveBeenCalled()
     })
+  })
+
+  describe('governed suggestion origin review', () => {
+    const suggestion = {
+      id: 'suggestion_1',
+      status: 'pending',
+      suggestionType: 'create_post',
+      suggestedTitle: 'Source request',
+      suggestedBody: 'Original feedback',
+      boardId,
+      rawItem: { principalId: null, sourceType: 'slack' },
+    }
+    it('requires reviewed origin when the source author has no resolved principal', async () => {
+      routing.governed.mockResolvedValue(true)
+      mockSuggestionFindFirst.mockResolvedValueOnce(suggestion)
+      const { acceptCreateSuggestion } = await import('../suggestion.service')
+      await expect(
+        acceptCreateSuggestion('suggestion_1' as FeedbackSuggestionId, adminPrincipalId)
+      ).rejects.toThrow('Review whether')
+      expect(routing.intent).not.toHaveBeenCalled()
+      expect(insertValuesCalls).toHaveLength(0)
+    })
+    it.each(['external', 'internal'] as const)(
+      'preserves explicit staff-reviewed %s origin without guessing from the source channel',
+      async (requestOrigin) => {
+        routing.governed.mockResolvedValue(true)
+        mockSuggestionFindFirst.mockResolvedValueOnce(suggestion)
+        const { acceptCreateSuggestion } = await import('../suggestion.service')
+        await acceptCreateSuggestion('suggestion_1' as FeedbackSuggestionId, adminPrincipalId, {
+          requestOrigin,
+          originEvidence: 'Reviewed original conversation',
+        })
+        expect(routing.intent).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining({
+            declaredOrigin: requestOrigin,
+            originEvidence: 'Reviewed original conversation',
+            callerIsStaff: true,
+          })
+        )
+      }
+    )
   })
 
   describe('dismissSuggestion', () => {

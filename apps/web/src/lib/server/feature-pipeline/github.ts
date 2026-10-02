@@ -1,3 +1,4 @@
+import { reserveGithubRequest, observeGithubBudget } from './rate-budget'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import {
   closedStatus,
@@ -56,11 +57,13 @@ export async function githubRequest<T>(
   repositoryId: string,
   path: string,
   method = 'GET',
-  body?: unknown
+  body?: unknown,
+  reserved = false
 ): Promise<T> {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('Invalid repository')
   for (let attempt = 0; attempt < 2; attempt++) {
     const token = await tokenFor(repositoryId, attempt === 1)
+    if (!reserved || attempt > 0) await reserveGithubRequest()
     const result = await fetch('https://api.github.com/repos/' + repository + path, {
       method,
       headers: {
@@ -72,6 +75,7 @@ export async function githubRequest<T>(
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(15_000),
     })
+    await observeGithubBudget(result)
     if (result.status === 401 && attempt === 0) continue
     if (result.status === 204) return undefined as T
     if (!result.ok) throw new Error('GitHub request failed: ' + result.status)
@@ -107,11 +111,13 @@ export async function ensureLabel(repository: string, repositoryId: string, name
     })
   }
 }
+export class RecoveryReviewRequired extends Error {}
 export async function recoverCreatedIssue(
   repository: string,
   repositoryId: string,
   postId: string,
-  snapshot: RequestSnapshot
+  snapshot: RequestSnapshot,
+  attemptedAt: Date
 ) {
   const expectedBody = buildRequestBody(postId, snapshot)
   const found: RemoteIssue[] = []
@@ -119,7 +125,10 @@ export async function recoverCreatedIssue(
     const issues = await githubRequest<Array<RemoteIssue & { pull_request?: unknown }>>(
       repository,
       repositoryId,
-      '/issues?state=all&per_page=100&page=' + page
+      '/issues?state=all&sort=created&direction=desc&per_page=100&since=' +
+        encodeURIComponent(new Date(attemptedAt.getTime() - 120_000).toISOString()) +
+        '&page=' +
+        page
     )
     found.push(
       ...issues.filter(
@@ -131,10 +140,13 @@ export async function recoverCreatedIssue(
       )
     )
     if (issues.length < 100) break
-    if (page >= 1000) throw new Error('Recovery inventory limit reached; request remains held')
+    if (page >= 5)
+      throw new RecoveryReviewRequired('Recovery exceeded 500 recent issues; staff review required')
   }
   if (found.length > 1)
-    throw new Error('Multiple remote issues carry this immutable request marker')
+    throw new RecoveryReviewRequired(
+      'Multiple remote issues carry this immutable request marker; staff review required'
+    )
   return found[0] ?? null
 }
 export async function setIssueStatus(

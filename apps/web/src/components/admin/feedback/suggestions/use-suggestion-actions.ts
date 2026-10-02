@@ -39,6 +39,8 @@ export function useSuggestionActions({
             boardId?: string
             statusId?: string
             tagIds?: string[]
+            requestOrigin?: 'external' | 'internal'
+            originEvidence?: string
             authorPrincipalId?: string
           }
         | { swapDirection: boolean }

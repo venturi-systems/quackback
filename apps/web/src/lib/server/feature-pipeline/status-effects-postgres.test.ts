@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   url: process.env.FEATURE_PIPELINE_TEST_DATABASE_URL,
   client: null as Sql | null,
 }))
+vi.mock('@/lib/server/config', () => ({ getBaseUrl: () => 'https://feedback.example' }))
 vi.mock('@/lib/server/db', async () => {
   const schema = await import('@quackback/db/schema')
   const { sql } = await import('drizzle-orm')
@@ -23,8 +24,16 @@ vi.mock('@/lib/server/db', async () => {
   state.client = postgres(state.url, { max: 4 })
   return { db: drizzle(state.client, { schema }), sql, ...schema }
 })
+vi.mock('@/lib/server/events/process', () => ({
+  garbageCollectDurableHookJobs: vi.fn().mockResolvedValue({ removed: 0, redacted: 0 }),
+  processEvent: vi.fn().mockResolvedValue(undefined),
+}))
 const { db, sql } = await import('@/lib/server/db')
 const { applyPipelineStatus } = await import('./status-effects')
+const { validateSemanticTags, isGovernedFeatureBoard } = await import('./semantic-tags')
+const { recordFeatureIntent, hasFeatureIntent } = await import('./intent')
+const { reserveGithubRequest, REQUESTS_PER_MINUTE, GithubBudgetError } =
+  await import('./rate-budget')
 
 describe.skipIf(!state.url)('PostgreSQL status atomicity and semantic guards', () => {
   let ids: ReturnType<typeof fixtureIds>
@@ -92,6 +101,7 @@ describe.skipIf(!state.url)('PostgreSQL status atomicity and semantic guards', (
     })
   })
   afterEach(async () => {
+    vi.unstubAllEnvs()
     if (!ids) return
     await db.transaction(async (tx) => {
       await tx.execute(
@@ -261,5 +271,164 @@ describe.skipIf(!state.url)('PostgreSQL status atomicity and semantic guards', (
         )
       })
     ).rejects.toThrow('reviewed transfer')
+  })
+  it('runs real UUID array queries with worker paused, including zero, one, and many selected tags', async () => {
+    vi.stubEnv('FEATURE_PIPELINE_ENABLED', 'false')
+    try {
+      expect(await isGovernedFeatureBoard(ids.board)).toBe(true)
+      await expect(validateSemanticTags(ids.board, [], true)).rejects.toThrow('primary capability')
+      await validateSemanticTags(ids.board, [ids.tag], true)
+      await db.transaction(async (tx) => {
+        await recordFeatureIntent(
+          tx,
+          {
+            id: ids.otherPost,
+            boardId: ids.otherBoard,
+            title: 'No route',
+            content: '',
+            createdAt: new Date(),
+            principalId: ids.principal,
+          },
+          { boardSlug: 'other', tagIds: [], author: 'Recorder', callerIsStaff: true }
+        )
+        await recordFeatureIntent(
+          tx,
+          {
+            id: ids.post,
+            boardId: ids.board,
+            title: 'Exact request',
+            content: 'Full body',
+            createdAt: new Date(),
+            principalId: ids.principal,
+          },
+          { boardSlug: ids.capability, tagIds: [ids.tag], author: 'Recorder', callerIsStaff: true }
+        )
+      })
+      expect(await hasFeatureIntent(ids.post)).toBe(true)
+      expect(await hasFeatureIntent(ids.otherPost)).toBe(false)
+      // Turn the second capability into a contextual tag only, exercising a
+      // multi-element UUID array without selecting two primary routes.
+      await db.execute(
+        sql`DELETE FROM feature_pipeline_capabilities WHERE id=${ids.otherCapability}`
+      )
+      await validateSemanticTags(ids.board, [ids.tag, ids.otherTag], true)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+  it('rejects custom status writes and status-slug changes before synchronization', async () => {
+    await expect(
+      db.transaction(async (tx) => {
+        const custom = toUuid(generateId('status'))
+        await tx.execute(
+          sql`INSERT INTO post_statuses(id,name,slug,color,category) VALUES(${custom}::uuid,'Custom',${ids.capability},'#aaa','active')`
+        )
+        await tx.execute(
+          sql`UPDATE posts SET status_id=${custom}::uuid WHERE id=${toUuid(ids.post)}::uuid`
+        )
+      })
+    ).rejects.toThrow('mapped status')
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute(
+          sql`UPDATE post_statuses SET slug=${ids.capability} WHERE id=${openId}::uuid`
+        )
+      })
+    ).rejects.toThrow('mapped status')
+  })
+  it('freezes source snapshots and the route even when tags change together', async () => {
+    await expect(
+      db.execute(
+        sql`UPDATE feature_pipeline_links SET source_snapshot='{"rewritten":true}'::jsonb WHERE post_id=${toUuid(ids.post)}::uuid`
+      )
+    ).rejects.toMatchObject({
+      cause: { code: '23514', constraint_name: 'feature_pipeline_identity_immutable' },
+    })
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute(
+          sql`UPDATE post_tags SET tag_id=${toUuid(ids.otherTag)}::uuid WHERE post_id=${toUuid(ids.post)}::uuid`
+        )
+        await tx.execute(
+          sql`UPDATE feature_pipeline_links SET capability_id=${ids.otherCapability} WHERE post_id=${toUuid(ids.post)}::uuid`
+        )
+      })
+    ).rejects.toMatchObject({
+      cause: { code: '23514', constraint_name: 'feature_pipeline_identity_immutable' },
+    })
+  })
+  it('rejects identity replacement and delete/reinsert after a creation attempt', async () => {
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.execute(
+          sql`UPDATE feature_pipeline_links SET attempted_at=now(),phase='linked',issue_node_id=${'I_' + ids.nonce},issue_number=1,issue_url='https://github.com/o/r/issues/1' WHERE post_id=${toUuid(ids.post)}::uuid`
+        )
+        await expect(
+          tx.transaction(async (nested) => {
+            await nested.execute(
+              sql`UPDATE feature_pipeline_links SET repository_id='111',issue_node_id='I_replaced' WHERE post_id=${toUuid(ids.post)}::uuid`
+            )
+          })
+        ).rejects.toMatchObject({
+          cause: { code: '23514', constraint_name: 'feature_pipeline_identity_immutable' },
+        })
+        await expect(
+          tx.transaction(async (nested) => {
+            await nested.execute(
+              sql`DELETE FROM feature_pipeline_links WHERE post_id=${toUuid(ids.post)}::uuid`
+            )
+          })
+        ).rejects.toMatchObject({
+          cause: { code: '23514', constraint_name: 'feature_pipeline_identity_immutable' },
+        })
+        throw new Error('rollback identity fixture')
+      })
+    ).rejects.toThrow('rollback identity fixture')
+  })
+  it('enforces the shared request budget under concurrent claims and resets expired windows', async () => {
+    await db.execute(
+      sql`UPDATE feature_pipeline_api_budget SET requests=0,window_started_at=now(),paused_until=NULL WHERE id=1`
+    )
+    const results = await Promise.allSettled(
+      Array.from({ length: REQUESTS_PER_MINUTE + 5 }, () => reserveGithubRequest())
+    )
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(REQUESTS_PER_MINUTE)
+    expect(
+      results
+        .filter((r) => r.status === 'rejected')
+        .every((r) => r.status === 'rejected' && r.reason instanceof GithubBudgetError)
+    ).toBe(true)
+    await db.execute(
+      sql`UPDATE feature_pipeline_api_budget SET window_started_at=now()-interval '2 minutes' WHERE id=1`
+    )
+    await reserveGithubRequest()
+    const rows = await db.execute(sql`SELECT requests FROM feature_pipeline_api_budget WHERE id=1`)
+    expect(rows[0].requests).toBe(1)
+    await db.execute(
+      sql`UPDATE feature_pipeline_api_budget SET paused_until=now()+interval '2 minutes' WHERE id=1`
+    )
+    await expect(reserveGithubRequest()).rejects.toBeInstanceOf(GithubBudgetError)
+  })
+  it('claims only due rows and persists bounded failure backoff in real PostgreSQL', async () => {
+    vi.stubEnv('FEATURE_PIPELINE_ENABLED', 'true')
+    // An invalid local snapshot fails before any network operation. This tests
+    // the actual scheduler and error-path SQL, not a string-shaped SQL mock.
+    await db.execute(
+      sql`UPDATE feature_pipeline_links SET phase='pending',next_check_at=now() WHERE post_id=${toUuid(ids.post)}::uuid`
+    )
+    const { runFeaturePipeline } = await import('./worker')
+    await runFeaturePipeline()
+    const rows = await db.execute(
+      sql`SELECT last_error,consecutive_failures,lease_until,next_check_at FROM feature_pipeline_links WHERE post_id=${toUuid(ids.post)}::uuid`
+    )
+    expect(rows[0].last_error).toBe('Request snapshot integrity mismatch')
+    expect(rows[0].consecutive_failures).toBe(1)
+    expect(rows[0].lease_until).toBeNull()
+    expect(new Date(String(rows[0].next_check_at)).getTime()).toBeGreaterThan(Date.now() + 50000)
+    await runFeaturePipeline()
+    const again = await db.execute(
+      sql`SELECT consecutive_failures FROM feature_pipeline_links WHERE post_id=${toUuid(ids.post)}::uuid`
+    )
+    expect(again[0].consecutive_failures).toBe(1)
   })
 })

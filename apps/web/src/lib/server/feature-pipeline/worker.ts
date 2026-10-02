@@ -1,4 +1,5 @@
 import { db, sql, type Transaction } from '@/lib/server/db'
+import { GithubBudgetError, reserveGithubRequest } from './rate-budget'
 import { fromUuid } from '@quackback/ids'
 import { logger } from '@/lib/server/logger'
 import {
@@ -18,6 +19,7 @@ import {
   ensureLabel,
   recoverCreatedIssue,
   setIssueStatus,
+  RecoveryReviewRequired,
 } from './github'
 
 import { applyPipelineStatus, dispatchPendingPipelineStatusEvents } from './status-effects'
@@ -36,6 +38,7 @@ interface Link {
   baseline_github: string | null
   source_sha256: string
   attempted_at: Date | null
+  recovery_attempts: number
   portal_status: string
   moderation_state: string
   deleted_at: Date | null
@@ -84,6 +87,9 @@ async function createOrRecover(postId: string) {
   if (!candidate.attempted_at)
     await ensureLabel(candidate.repository, candidate.repository_id, candidate.classification)
 
+  // Reserve the non-idempotent request before marking an attempt. Budget
+  // exhaustion is a known pre-POST failure, not an uncertain creation.
+  if (!candidate.attempted_at) await reserveGithubRequest()
   const claim = await db.transaction(async (tx) => {
     const link = await readLink(tx, postId)
     if (
@@ -104,19 +110,30 @@ async function createOrRecover(postId: string) {
   const { link } = claim
   if (snapshotHash(link.source_snapshot) !== link.source_sha256)
     throw new Error('Request snapshot integrity mismatch')
-  await verifyRepository(link.repository, link.repository_id)
   const id = fromUuid('post', postId)
   if (!claim.create) {
+    if (link.recovery_attempts >= 3)
+      throw new RecoveryReviewRequired(
+        'Creation remains uncertain after three scans; staff review required'
+      )
     const recovered = await recoverCreatedIssue(
       link.repository,
       link.repository_id,
       id,
-      link.source_snapshot
+      link.source_snapshot,
+      new Date(link.attempted_at!)
+    )
+    await db.execute(
+      sql`UPDATE feature_pipeline_links SET recovery_attempts=recovery_attempts+1 WHERE post_id=${postId}::uuid`
     )
     if (recovered) await connectIssue(postId, recovered)
+    else if (link.recovery_attempts >= 2)
+      throw new RecoveryReviewRequired(
+        'Creation remains uncertain after three scans; staff review required'
+      )
     else
       throw new Error(
-        'Creation outcome uncertain; no matching issue found. Staff review required before another POST.'
+        'Creation outcome uncertain; no matching issue found. A bounded recovery scan will retry; no new POST is permitted.'
       )
     return
   }
@@ -129,7 +146,8 @@ async function createOrRecover(postId: string) {
       title: link.source_snapshot.title,
       body: buildRequestBody(id, link.source_snapshot),
       labels: [link.classification],
-    }
+    },
+    true
   )
   if (!issue.node_id || !issue.number)
     throw new Error('Incomplete GitHub creation response; recover by marker')
@@ -191,7 +209,8 @@ async function reconcileLink(postId: string) {
     const target = await tx.execute(sql`SELECT id FROM post_statuses
       WHERE slug=${decision.status} AND deleted_at IS NULL`)
     if (!target[0]) throw new Error('Required portal status is not configured')
-    if (!remoteMatches(issue, decision.status)) {
+    const needsRemoteWrite = !remoteMatches(issue, decision.status)
+    if (needsRemoteWrite) {
       await audit(db, postId, 'status_sync_intent', {
         portal: link.portal_status,
         github: githubStatus,
@@ -200,7 +219,9 @@ async function reconcileLink(postId: string) {
       await setIssueStatus(link.repository, link.repository_id, issue, decision.status)
     }
     // Verify actual remote effects before acknowledging either side.
-    const verified = await githubRequest<RemoteIssue>(link.repository, link.repository_id, path)
+    const verified = needsRemoteWrite
+      ? await githubRequest<RemoteIssue>(link.repository, link.repository_id, path)
+      : issue
     if (verified.node_id !== link.issue_node_id || !remoteMatches(verified, decision.status)) {
       throw new Error('GitHub status did not converge; retry')
     }
@@ -225,19 +246,24 @@ async function reconcileLink(postId: string) {
     }
     await tx.execute(sql`UPDATE feature_pipeline_links SET baseline_portal=${decision.status},
       baseline_github=${decision.status},pending_status=NULL,last_error=NULL,
-      checked_at=now(),updated_at=now() WHERE post_id=${postId}::uuid`)
+      checked_at=now(),next_check_at=now()+interval '10 minutes',lease_until=NULL,
+      consecutive_failures=0,updated_at=now() WHERE post_id=${postId}::uuid`)
   })
 }
 let running = false
 export async function runFeaturePipeline() {
-  if (running) return
+  if (running || process.env.FEATURE_PIPELINE_ENABLED !== 'true') return
   running = true
   try {
-    const links = await db.execute(sql`SELECT l.post_id,l.phase FROM feature_pipeline_links l
+    const links = await db.execute(sql`WITH due AS (
+      SELECT l.post_id FROM feature_pipeline_links l
       JOIN posts p ON p.id=l.post_id
       JOIN feature_pipeline_boards b ON b.board_id=p.board_id AND b.enabled
       WHERE l.phase<>'held' AND p.deleted_at IS NULL AND p.moderation_state='published'
-      ORDER BY l.checked_at NULLS FIRST,l.created_at LIMIT 100`)
+        AND l.next_check_at<=now() AND (l.lease_until IS NULL OR l.lease_until<=now())
+      ORDER BY l.next_check_at,l.created_at LIMIT 25 FOR UPDATE OF l SKIP LOCKED)
+      UPDATE feature_pipeline_links l SET lease_until=now()+interval '5 minutes'
+      FROM due WHERE l.post_id=due.post_id RETURNING l.post_id,l.phase`)
     let cursor = 0
     await Promise.all(
       Array.from({ length: 4 }, async () => {
@@ -250,14 +276,23 @@ export async function runFeaturePipeline() {
           } catch (error) {
             const reason = error instanceof Error ? error.message : 'Feature synchronization failed'
             // Durable, queryable errors. No webhook acknowledges a failed mutation.
+            const held = error instanceof RecoveryReviewRequired
+            const retryAt = error instanceof GithubBudgetError ? error.retryAt.toISOString() : null
             await db.execute(sql`UPDATE feature_pipeline_links SET last_error=${reason},
-          checked_at=now(),updated_at=now() WHERE post_id=${postId}::uuid`)
+              phase=CASE WHEN ${held} THEN 'held' ELSE phase END,
+              checked_at=now(),lease_until=NULL,consecutive_failures=consecutive_failures+1,
+              next_check_at=greatest(now()+make_interval(secs => least(3600,60*power(2,least(consecutive_failures,6)))::double precision),
+                COALESCE(${retryAt}::timestamptz,now())),updated_at=now()
+              WHERE post_id=${postId}::uuid`)
+            if (held) await audit(db, postId, 'synchronization_held', { reason })
             log.error({ post_id: postId, reason }, 'feature synchronization pending')
           }
         }
       })
     )
     await dispatchPendingPipelineStatusEvents()
+    const { garbageCollectDurableHookJobs } = await import('@/lib/server/events/process')
+    await garbageCollectDurableHookJobs()
   } finally {
     running = false
   }

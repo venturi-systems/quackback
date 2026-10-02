@@ -57,6 +57,8 @@ function CreateFromSuggestionContent({
   onCreated: () => void
 }) {
   const [capabilityId, setCapabilityId] = useState<TagId | undefined>()
+  const [requestOrigin, setRequestOrigin] = useState<'external' | 'internal' | ''>('')
+  const [originEvidence, setOriginEvidence] = useState('')
   const [title, setTitle] = useState(suggestion.suggestedTitle ?? '')
   const [body, setBody] = useState(suggestion.suggestedBody ?? '')
   const [boardId, setBoardId] = useState(suggestion.board?.id ?? '')
@@ -131,8 +133,20 @@ function CreateFromSuggestionContent({
       statusId: statusId || undefined,
       authorPrincipalId: authorPrincipalId || undefined,
       tagIds: capabilityId ? [capabilityId] : [],
+      requestOrigin: requestOrigin || undefined,
+      originEvidence: originEvidence || undefined,
     })
-  }, [title, body, boardId, statusId, authorPrincipalId, capabilityId, accept])
+  }, [
+    title,
+    body,
+    boardId,
+    statusId,
+    authorPrincipalId,
+    capabilityId,
+    requestOrigin,
+    originEvidence,
+    accept,
+  ])
 
   const handleKeyDown = useKeyboardSubmit(handleSubmit, onClose)
 
@@ -197,6 +211,37 @@ function CreateFromSuggestionContent({
             />
 
             <CapabilitySelector boardId={boardId} value={capabilityId} onChange={setCapabilityId} />
+
+            <div className="space-y-2">
+              <label htmlFor="suggestion-origin" className="text-sm font-medium">
+                Request origin
+              </label>
+              <Select
+                value={requestOrigin}
+                onValueChange={(value) => setRequestOrigin(value as 'external' | 'internal')}
+              >
+                <SelectTrigger id="suggestion-origin">
+                  <SelectValue placeholder="Review the source of this request" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="external">
+                    Requested by a customer or external party
+                  </SelectItem>
+                  <SelectItem value="internal">Internal proposal</SelectItem>
+                </SelectContent>
+              </Select>
+              <input
+                aria-label="Request source evidence"
+                value={originEvidence}
+                onChange={(e) => setOriginEvidence(e.target.value)}
+                placeholder="Requester or source reference"
+                className="w-full rounded border bg-transparent p-2 text-sm"
+              />
+              <p className="text-muted-foreground text-xs">
+                Review the original feedback. Its source channel does not establish who requested
+                it.
+              </p>
+            </div>
 
             {/* Body textarea */}
             <textarea

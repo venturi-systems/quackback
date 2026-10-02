@@ -9,8 +9,8 @@ export const getFeaturePipelineStatusFn = createServerFn({ method: 'GET' })
   .validator(z.object({ postId: postIdSchema }))
   .handler(async ({ data }) => {
     await requireAuth({ roles: ['admin', 'member'] })
-    if (process.env.FEATURE_PIPELINE_ENABLED !== 'true') return null
-    const rows = await db.execute(sql`SELECT phase,issue_url,last_error,checked_at,created_at,
+    const rows =
+      await db.execute(sql`SELECT phase,issue_url,last_error,checked_at,created_at,next_check_at,lease_until,
       (SELECT count(*)::int FROM feature_pipeline_status_outbox o
         WHERE o.post_id=l.post_id AND o.delivered_at IS NULL) AS pending_events
       FROM feature_pipeline_links l WHERE post_id=${toUuid(data.postId)}::uuid`)
@@ -25,6 +25,8 @@ export const getFeaturePipelineStatusFn = createServerFn({ method: 'GET' })
             checkedAt: null,
             delayed: false,
             pendingEvents: 0,
+            nextCheckAt: null,
+            workerPaused: false,
           }
         : null
     }
@@ -35,7 +37,15 @@ export const getFeaturePipelineStatusFn = createServerFn({ method: 'GET' })
       message: row.last_error ? String(row.last_error) : null,
       issueUrl: row.issue_url ? String(row.issue_url) : null,
       checkedAt: checked?.toISOString() ?? null,
-      delayed: Date.now() - (checked ?? new Date(String(row.created_at))).getTime() > 300_000,
+      delayed:
+        Date.now() >
+        Math.max(
+          new Date(String(row.next_check_at)).getTime(),
+          row.lease_until ? new Date(String(row.lease_until)).getTime() : 0
+        ) +
+          60_000,
+      nextCheckAt: new Date(String(row.next_check_at)).toISOString(),
+      workerPaused: process.env.FEATURE_PIPELINE_ENABLED !== 'true',
       pendingEvents: Number(row.pending_events),
     }
   })
@@ -43,10 +53,8 @@ export const retryFeaturePipelineFn = createServerFn({ method: 'POST' })
   .validator(z.object({ postId: postIdSchema }))
   .handler(async ({ data }) => {
     await requireAuth({ roles: ['admin', 'member'] })
-    if (process.env.FEATURE_PIPELINE_ENABLED !== 'true')
-      throw new Error('Feature routing is not enabled')
     // Retry observation/reconciliation only. Never erase attempted_at or repeat an uncertain POST.
-    await db.execute(sql`UPDATE feature_pipeline_links SET checked_at=NULL
+    await db.execute(sql`UPDATE feature_pipeline_links SET checked_at=NULL,next_check_at=now()
       WHERE post_id=${toUuid(data.postId)}::uuid AND phase<>'held'`)
     return { queued: true }
   })

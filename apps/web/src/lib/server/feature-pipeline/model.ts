@@ -48,17 +48,16 @@ export function normalizeIssue(issue: RemoteIssue, baseline?: string | null): Pi
   if (successors.length > 1) throw new Error('Multiple new status designations require review')
   const selected = successors[0] ?? (labels.length === 1 ? labels[0] : undefined)
   if (selected) {
-    if (
-      selected === baseline &&
-      issue.state === 'closed' &&
-      ['open', 'under_review', 'planned', 'in_progress'].includes(selected)
-    ) {
+    if (selected === baseline && issue.state === 'closed' && !closedStatus(selected)) {
       return 'closed'
     }
+    if (selected === baseline && issue.state === 'open' && closedStatus(selected)) return 'open'
     return selected
   }
-  if (baseline && ['declined', 'withdrawn', 'deferred', 'redundant'].includes(baseline)) {
-    return baseline as PipelineStatus
+  if (baseline && isPipelineStatus(baseline)) {
+    const expectedState = closedStatus(baseline) ? 'closed' : 'open'
+    if (issue.state !== expectedState) return issue.state === 'closed' ? 'closed' : 'open'
+    return baseline
   }
   // A generic close never constitutes evidence of shipment.
   return issue.state === 'closed' ? 'closed' : 'open'

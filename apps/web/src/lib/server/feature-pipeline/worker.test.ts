@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { snapshotHash } from './model'
 
 const h = vi.hoisted(() => ({
@@ -17,9 +17,11 @@ vi.mock('@/lib/server/db', () => {
   type Query = { text: string; values: unknown[] }
   const execute = async (query: Query) => {
     const text = query.text
-    if (text.includes('SELECT l.post_id,l.phase'))
-      return [{ post_id: h.row.post_id, phase: h.row.phase }]
+    if (text.includes('WITH due AS')) return [{ post_id: h.row.post_id, phase: h.row.phase }]
     if (text.includes('SELECT l.*,s.slug')) return [{ ...h.row }]
+    if (text.includes('SET recovery_attempts=recovery_attempts+1'))
+      h.row.recovery_attempts = Number(h.row.recovery_attempts) + 1
+    if (text.includes('phase=CASE WHEN') && query.values[1]) h.row.phase = 'held'
     if (text.includes("SET phase='creating'")) {
       h.row.phase = 'creating'
       h.row.attempted_at = new Date()
@@ -54,7 +56,15 @@ vi.mock('@/lib/server/db', () => {
     sql: (parts: TemplateStringsArray, ...values: unknown[]) => ({ text: parts.join('?'), values }),
   }
 })
+vi.mock('@/lib/server/events/process', () => ({
+  garbageCollectDurableHookJobs: vi.fn().mockResolvedValue({ removed: 0, redacted: 0 }),
+}))
+vi.mock('./rate-budget', async (original) => ({
+  ...(await original<typeof import('./rate-budget')>()),
+  reserveGithubRequest: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('./github', () => ({
+  RecoveryReviewRequired: class extends Error {},
   verifyRepository: vi.fn().mockResolvedValue(undefined),
   ensureLabel: vi.fn().mockResolvedValue(undefined),
   recoverCreatedIssue: vi.fn(async () => (h.posts ? h.issue : null)),
@@ -74,7 +84,9 @@ vi.mock('./github', () => ({
 }))
 
 describe('durable issue creation under partial failure', () => {
+  afterEach(() => vi.unstubAllEnvs())
   beforeEach(() => {
+    vi.stubEnv('FEATURE_PIPELINE_ENABLED', 'true')
     h.posts = 0
     h.failed = false
     h.failure = ''
@@ -95,6 +107,7 @@ describe('durable issue creation under partial failure', () => {
       issue_node_id: null,
       issue_number: null,
       attempted_at: null,
+      recovery_attempts: 0,
       source_snapshot: snapshot,
       source_sha256: snapshotHash(snapshot),
       classification: 'feature request',
@@ -131,6 +144,29 @@ describe('durable issue creation under partial failure', () => {
       expect(h.posts).toBe(1)
     }
   )
+  it('holds uncertain creation after three completed scans without another POST', async () => {
+    h.row.attempted_at = new Date()
+    h.row.phase = 'creating'
+    const { runFeaturePipeline } = await import('./worker')
+    await runFeaturePipeline()
+    await runFeaturePipeline()
+    await runFeaturePipeline()
+    expect(h.posts).toBe(0)
+    expect(h.row.recovery_attempts).toBe(3)
+    expect(h.row.phase).toBe('held')
+  })
+  it('leaves known pre-POST budget failure eligible for a first creation', async () => {
+    const { reserveGithubRequest, GithubBudgetError } = await import('./rate-budget')
+    vi.mocked(reserveGithubRequest).mockRejectedValueOnce(
+      new GithubBudgetError(new Date(Date.now() + 60000))
+    )
+    const { runFeaturePipeline } = await import('./worker')
+    await runFeaturePipeline()
+    expect(h.row.attempted_at).toBeNull()
+    expect(h.posts).toBe(0)
+    await runFeaturePipeline()
+    expect(h.posts).toBe(1)
+  })
   it('does not create GitHub issues for held moderation', async () => {
     h.row.moderation_state = 'pending'
     const { runFeaturePipeline } = await import('./worker')

@@ -9,7 +9,6 @@ export interface CapabilityOption {
 type Executor = typeof db | Transaction
 
 export async function isGovernedFeatureBoard(boardId: BoardId, executor: Executor = db) {
-  if (process.env.FEATURE_PIPELINE_ENABLED !== 'true') return false
   const rows = await executor.execute(sql`SELECT enabled FROM feature_pipeline_boards
     WHERE board_id=${toUuid(boardId)}::uuid AND enabled=true`)
   return rows.length > 0
@@ -37,7 +36,10 @@ export async function validateSemanticTags(boardId: BoardId, tagIds: TagId[], st
   }
   const ids = tagIds.map(toUuid)
   const rows = await db.execute(sql`SELECT c.tag_id FROM feature_pipeline_capabilities c
-    WHERE c.tag_id = ANY(${ids}::uuid[]) AND (NOT c.enabled OR
+    WHERE c.tag_id = ANY(ARRAY[${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `
+    )}]::uuid[]) AND (NOT c.enabled OR
       (c.visibility='staff' AND NOT ${staff}))`)
   if (rows.length) {
     throw new ValidationError(

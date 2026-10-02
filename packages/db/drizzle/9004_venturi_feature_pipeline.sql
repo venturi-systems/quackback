@@ -66,6 +66,12 @@ BEGIN
     JOIN feature_pipeline_boards b ON b.board_id=p.board_id
     WHERE p.id=target_post AND p.deleted_at IS NULL;
   IF NOT COALESCE(enabled_board,false) THEN RETURN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM posts p JOIN post_statuses s ON s.id=p.status_id
+    WHERE p.id=target_post AND s.deleted_at IS NULL AND s.slug IN
+      ('open','under_review','planned','in_progress','complete','closed','declined','withdrawn','deferred','redundant')) THEN
+    RAISE EXCEPTION 'Choose a mapped status for this governed request'
+      USING ERRCODE='23514', CONSTRAINT='feature_pipeline_status_required';
+  END IF;
   SELECT count(*), min(c.id) INTO tag_count, selected_capability
     FROM post_tags pt JOIN feature_pipeline_capabilities c ON c.tag_id=pt.tag_id
     JOIN tags t ON t.id=pt.tag_id
@@ -200,3 +206,72 @@ DROP TRIGGER IF EXISTS feature_pipeline_link_guard ON feature_pipeline_links;
 CREATE CONSTRAINT TRIGGER feature_pipeline_link_guard
 AFTER UPDATE OR DELETE ON feature_pipeline_links DEFERRABLE INITIALLY DEFERRED
 FOR EACH ROW EXECUTE FUNCTION enforce_feature_pipeline_link_mutation();
+
+--> statement-breakpoint
+-- Route/snapshot fields are immutable from intent capture. Once a POST may have
+-- occurred, deleting the identity would allow a replacement intent to duplicate it.
+CREATE OR REPLACE FUNCTION freeze_feature_pipeline_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='DELETE' THEN
+    IF OLD.attempted_at IS NOT NULL OR OLD.issue_node_id IS NOT NULL OR OLD.phase='linked' THEN
+      RAISE EXCEPTION 'Attempted or linked request identities cannot be deleted'
+        USING ERRCODE='23514', CONSTRAINT='feature_pipeline_identity_immutable';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF ROW(NEW.post_id,NEW.capability_id,NEW.taxonomy_version,NEW.repository,NEW.repository_id,
+         NEW.classification,NEW.source_snapshot,NEW.source_sha256,NEW.created_at)
+    IS DISTINCT FROM
+     ROW(OLD.post_id,OLD.capability_id,OLD.taxonomy_version,OLD.repository,OLD.repository_id,
+         OLD.classification,OLD.source_snapshot,OLD.source_sha256,OLD.created_at)
+    OR (OLD.attempted_at IS NOT NULL AND NEW.attempted_at IS DISTINCT FROM OLD.attempted_at)
+    OR (OLD.issue_node_id IS NOT NULL AND
+      ROW(NEW.issue_node_id,NEW.issue_number,NEW.issue_url)
+        IS DISTINCT FROM ROW(OLD.issue_node_id,OLD.issue_number,OLD.issue_url)) THEN
+    RAISE EXCEPTION 'Recorded route, source snapshot, and linked issue identity are immutable'
+      USING ERRCODE='23514', CONSTRAINT='feature_pipeline_identity_immutable';
+  END IF;
+  IF NEW.phase='linked' AND (NEW.issue_node_id IS NULL OR NEW.issue_number IS NULL OR NEW.issue_url IS NULL) THEN
+    RAISE EXCEPTION 'A linked request requires a complete immutable issue identity';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS feature_pipeline_identity_guard ON feature_pipeline_links;
+--> statement-breakpoint
+CREATE TRIGGER feature_pipeline_identity_guard BEFORE UPDATE OR DELETE ON feature_pipeline_links
+FOR EACH ROW EXECUTE FUNCTION freeze_feature_pipeline_identity();
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION enforce_feature_pipeline_status_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE target_post uuid;
+BEGIN
+  FOR target_post IN SELECT id FROM posts WHERE status_id=OLD.id LOOP
+    PERFORM check_feature_pipeline_post(target_post);
+  END LOOP;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS feature_pipeline_status_guard ON post_statuses;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER feature_pipeline_status_guard
+AFTER UPDATE ON post_statuses DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION enforce_feature_pipeline_status_mutation();
+--> statement-breakpoint
+ALTER TABLE feature_pipeline_links ADD COLUMN IF NOT EXISTS next_check_at timestamptz NOT NULL DEFAULT now();
+--> statement-breakpoint
+ALTER TABLE feature_pipeline_links ADD COLUMN IF NOT EXISTS lease_until timestamptz;
+--> statement-breakpoint
+ALTER TABLE feature_pipeline_links ADD COLUMN IF NOT EXISTS consecutive_failures integer NOT NULL DEFAULT 0;
+--> statement-breakpoint
+ALTER TABLE feature_pipeline_links ADD COLUMN IF NOT EXISTS recovery_attempts integer NOT NULL DEFAULT 0;
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS feature_pipeline_links_due_idx ON feature_pipeline_links(next_check_at) WHERE phase<>'held';
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS feature_pipeline_api_budget (
+  id integer PRIMARY KEY CHECK (id=1),
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  requests integer NOT NULL DEFAULT 0,
+  paused_until timestamptz
+);
+--> statement-breakpoint
+INSERT INTO feature_pipeline_api_budget(id) VALUES(1) ON CONFLICT DO NOTHING;

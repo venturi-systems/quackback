@@ -3,7 +3,7 @@ import type { HookTarget } from './hook-types'
 import type { EventData } from './types'
 
 /** Stable destination identity excludes expiring credentials/unsubscribe URLs. */
-function destination(hook: HookTarget): string {
+export function durableDestination(hook: HookTarget): string {
   const target = hook.target as Record<string, unknown>
   if (hook.type === 'email' && typeof target.email === 'string') return target.email
   if (
@@ -19,10 +19,8 @@ function destination(hook: HookTarget): string {
   throw new Error('Durable event target has no stable destination identity')
 }
 
-export function durableHookJobs(event: EventData, targets: HookTarget[]) {
-  // Native notifications batch recipients. Split only this opt-in path so
-  // changing subscriber order/membership cannot alter an existing job identity.
-  const recipients = targets.flatMap((hook) => {
+export function durableTargets(targets: HookTarget[]): HookTarget[] {
+  return targets.flatMap((hook) => {
     const target = hook.target as Record<string, unknown>
     if (hook.type !== 'notification') return [hook]
     if (!Array.isArray(target.principalIds)) throw new Error('Invalid notification recipients')
@@ -31,19 +29,28 @@ export function durableHookJobs(event: EventData, targets: HookTarget[]) {
       target: { ...target, principalIds: [id] },
     }))
   })
-  return recipients.map((hook) => ({
+}
+export function durableHookJobs(event: EventData, targets: HookTarget[]) {
+  return durableTargets(targets).map((hook) => ({
     name: `${event.type}:${hook.type}`,
-    data: { hookType: hook.type, event, target: hook.target, config: hook.config },
+    // Never persist decrypted credentials or unsubscribe tokens. Resolve the
+    // still-authorized destination and its current credentials at delivery.
+    data: {
+      hookType: hook.type,
+      event,
+      target: {},
+      config: hook.type === 'webhook' ? { webhookId: hook.config.webhookId } : {},
+      durableDestination: durableDestination(hook),
+    },
     opts: {
       jobId:
         'durable-' +
         event.id +
         '-' +
         createHash('sha256')
-          .update(hook.type + '\u0000' + destination(hook))
+          .update(hook.type + '\u0000' + durableDestination(hook))
           .digest('hex'),
-      // Admission acknowledgments may be retried after arbitrarily long
-      // outages. Retain these IDs until an explicit acknowledged-event GC.
+      // GC removes terminal jobs only after durable outbox acknowledgment.
       removeOnComplete: false,
       removeOnFail: false,
     },

@@ -162,7 +162,7 @@ export async function dispatchPendingPipelineStatusEvents(limit = 25) {
         return 'failed'
       }
       await tx.execute(sql`UPDATE feature_pipeline_status_outbox
-        SET delivered_at=now(),attempts=attempts+1,last_error=NULL
+        SET delivered_at=now(),payload='{}'::jsonb,attempts=attempts+1,last_error=NULL
         WHERE event_id=${candidate.event_id}::uuid`)
       return 'delivered'
     })

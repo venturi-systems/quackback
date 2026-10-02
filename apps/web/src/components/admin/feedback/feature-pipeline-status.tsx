@@ -38,13 +38,19 @@ export function FeaturePipelineStatus({ postId }: { postId: PostId }) {
         </a>
       )}
       {current.message && <p role="status">{current.message}</p>}
-      {current.delayed && (
-        <p role="status">Synchronization has not been verified within five minutes.</p>
+      {current.workerPaused && (
+        <p role="status">Synchronization is paused. Routing intents remain queued.</p>
+      )}
+      {current.delayed && !current.workerPaused && (
+        <p role="status">Synchronization is past its scheduled check time.</p>
       )}
       {current.pendingEvents > 0 && (
         <p>{current.pendingEvents} status notification records await dispatch.</p>
       )}
       {current.checkedAt && <p>Last checked: {new Date(current.checkedAt).toLocaleString()}</p>}
+      {current.nextCheckAt && (
+        <p>Next scheduled check: {new Date(current.nextCheckAt).toLocaleString()}</p>
+      )}
       {current.phase !== 'historical' && (
         <Button
           type="button"

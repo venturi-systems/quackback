@@ -76,10 +76,17 @@ export const featurePipelineLinks = pgTable(
     lastError: text('last_error'),
     attemptedAt: timestamp('attempted_at', { withTimezone: true }),
     checkedAt: timestamp('checked_at', { withTimezone: true }),
+    nextCheckAt: timestamp('next_check_at', { withTimezone: true }).notNull().defaultNow(),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    recoveryAttempts: integer('recovery_attempts').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index('feature_pipeline_links_due_idx')
+      .on(t.nextCheckAt)
+      .where(sql`${t.phase}<>'held'`),
     unique('feature_pipeline_links_repository_id_issue_number_key').on(
       t.repositoryId,
       t.issueNumber
@@ -127,3 +134,14 @@ export const featurePipelineLegacyPosts = pgTable('feature_pipeline_legacy_posts
   reason: text('reason').notNull(),
   recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const featurePipelineApiBudget = pgTable(
+  'feature_pipeline_api_budget',
+  {
+    id: integer('id').primaryKey(),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(),
+    requests: integer('requests').notNull().default(0),
+    pausedUntil: timestamp('paused_until', { withTimezone: true }),
+  },
+  (t) => [check('feature_pipeline_api_budget_id_check', sql`${t.id}=1`)]
+)

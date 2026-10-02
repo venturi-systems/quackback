@@ -26,6 +26,12 @@ describe('durable event queue identity', () => {
     expect(make('old').opts.jobId).toBe(make('new').opts.jobId)
     expect(make('old').opts).toMatchObject({ removeOnComplete: false, removeOnFail: false })
     expect(make('old').opts.jobId).not.toContain('customer@example.com')
+    expect(JSON.stringify(make('sensitive-token'))).not.toContain('sensitive-token')
+    expect(make('old').data).toMatchObject({
+      target: {},
+      config: {},
+      durableDestination: 'customer@example.com',
+    })
   })
   it('deduplicates each notification recipient independently of batch order and membership', () => {
     const jobs = (ids: string[]) =>

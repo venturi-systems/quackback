@@ -204,6 +204,7 @@ function WidgetHomeForm({
   const intl = useIntl()
   const {
     ensureSession,
+    sessionVersion,
     ensureSessionThen,
     isIdentified,
     hmacRequired,
@@ -664,7 +665,7 @@ function WidgetHomeForm({
                   >
                     <CapabilitySelector
                       getAuthHeaders={getWidgetAuthHeaders}
-                      refreshKey={isIdentified ? 'identified' : 'unidentified'}
+                      refreshKey={String(sessionVersion)}
                       boardId={selectedBoardId ?? ''}
                       value={capabilityId}
                       onChange={setCapabilityId}

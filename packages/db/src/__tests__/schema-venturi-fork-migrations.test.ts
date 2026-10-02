@@ -121,7 +121,7 @@ describe('fork migration journal', () => {
         .filter(Boolean)
       expect(statements.length, e.tag).toBeGreaterThan(0)
       for (const statement of statements) {
-        if (/^ALTER TABLE "\w+" ADD COLUMN /i.test(statement)) {
+        if (/^ALTER TABLE "?\w+"? ADD COLUMN /i.test(statement)) {
           expect(statement, e.tag).toMatch(/ADD COLUMN IF NOT EXISTS /i)
         } else if (/^WITH .* UPDATE "api_keys" /i.test(statement)) {
           // 9003's backfill: it only reads keys it has not bounded, and marks
@@ -137,11 +137,20 @@ describe('fork migration journal', () => {
           // Schema objects are created once; function definitions replace the same names.
         } else if (
           e.tag === '9004_venturi_feature_pipeline' &&
-          /^CREATE CONSTRAINT TRIGGER /i.test(statement)
+          /^CREATE (?:CONSTRAINT )?TRIGGER /i.test(statement)
         ) {
-          const match = statement.match(/^CREATE CONSTRAINT TRIGGER (\w+) .* ON (\w+) DEFERRABLE/)
+          const match = statement.match(
+            /^CREATE (?:CONSTRAINT )?TRIGGER (\w+) .* ON (\w+) (?:DEFERRABLE|FOR)/
+          )
           expect(match).not.toBeNull()
           expect(statements).toContain(`DROP TRIGGER IF EXISTS ${match![1]} ON ${match![2]};`)
+        } else if (
+          e.tag === '9004_venturi_feature_pipeline' &&
+          statement.startsWith('INSERT INTO feature_pipeline_api_budget')
+        ) {
+          expect(statement).toBe(
+            'INSERT INTO feature_pipeline_api_budget(id) VALUES(1) ON CONFLICT DO NOTHING;'
+          )
         } else {
           throw new Error(`${e.tag}: classify this statement's re-run behavior: ${statement}`)
         }
@@ -200,7 +209,7 @@ describe('upstream migrations taken after the fork migrations', () => {
         .filter(Boolean)
       expect(statements.length, tag).toBeGreaterThan(0)
       for (const statement of statements) {
-        if (/^ALTER TABLE "\w+" ADD COLUMN /i.test(statement)) {
+        if (/^ALTER TABLE "?\w+"? ADD COLUMN /i.test(statement)) {
           expect(statement, tag).toMatch(/ADD COLUMN IF NOT EXISTS /i)
         } else if (/^ALTER TABLE "\w+" ALTER COLUMN "\w+" (SET|DROP) DEFAULT\b/i.test(statement)) {
           // Setting or dropping a default is idempotent.
