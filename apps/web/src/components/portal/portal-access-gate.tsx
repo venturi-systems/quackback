@@ -32,7 +32,7 @@ import { isSafeCallbackUrl } from '@/lib/shared/routing'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
-import { VenturiLandingFooter } from '@/components/public/shell/venturi-landing-footer'
+import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer'
 import { PortalRolesExplainer } from '@/components/portal/portal-roles-explainer'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
@@ -282,7 +282,6 @@ function GateCard({
           <PortalRolesExplainer visibility={visibility} labelledBy="portal-gate-roles-title" />
         </details>
       )}
-      <VenturiLandingFooter />
     </div>
   )
 }
@@ -322,7 +321,9 @@ export function PortalAccessGate({
       {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
       <PublicPageFrame
         className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
-        footer={reason === 'unauthenticated' ? <></> : undefined}
+        footer={
+          reason === 'unauthenticated' ? <VenturiSiteFooter sourceLabel="Source code" /> : undefined
+        }
       >
         <GateCard
           reason={reason}

@@ -73,14 +73,18 @@ describe('PortalAccessGate — inline auth form', () => {
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
   })
 
-  it('uses compact utilities and branded providers only before authentication', () => {
+  it('uses the standard Venturi footer and branded providers before authentication', () => {
     const { container, rerender } = render(<PortalAccessGate {...baseProps} />)
     expect(container.querySelector('.portal-gate--entry')).toBeInTheDocument()
-    expect(screen.getByTestId('venturi-landing-footer')).toBeInTheDocument()
-    expect(screen.queryByTestId('venturi-site-footer')).not.toBeInTheDocument()
+    expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
+    expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(formProps.providerAppearance).toBe('brand')
     expect(screen.queryByRole('link', { name: 'Software notices' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Source code' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Source code$/ })).toHaveAttribute(
+      'href',
+      'https://github.com/venturi-systems/quackback'
+    )
+    expect(screen.queryByRole('link', { name: 'Source code (AGPL-3.0)' })).not.toBeInTheDocument()
     rerender(<PortalAccessGate {...baseProps} reason="unauthorized" />)
     expect(container.querySelector('.portal-gate--entry')).not.toBeInTheDocument()
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
@@ -115,7 +119,7 @@ describe('PortalAccessGate — explanatory sign-in page', () => {
     render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
     expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
     expect(screen.getByRole('main')).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'Source and sitemap' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
   })
 
   it('shows access guidance and keeps the permissions disclosure collapsed', () => {
