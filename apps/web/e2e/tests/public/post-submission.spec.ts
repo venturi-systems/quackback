@@ -406,7 +406,8 @@ test.describe('Board Selector', () => {
       await expect.poll(() => heldScripts).toBeGreaterThan(0)
     } finally {
       releaseScripts()
-      await globalPage.unroute('**/*', holdScripts)
+      // Drain pending handlers before removing this page's only route.
+      await globalPage.unrouteAll({ behavior: 'wait' })
     }
 
     // One user click must expand the hydrated composer without retrying focus.
