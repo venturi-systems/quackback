@@ -97,7 +97,7 @@ export function FeedbackSidebar({
           </nav>
         </div>
 
-        {/* Venturi feedback link */}
+        {/* Separate company destination, named for where it leads. */}
         <div className="flex justify-center mt-3">
           <a
             href={`https://venturi.systems/?utm_campaign=${encodeURIComponent(workspaceSlug || 'feedback')}&utm_content=feedback-board&utm_medium=referral&utm_source=feedback-portal`}
@@ -106,8 +106,8 @@ export function FeedbackSidebar({
             <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary " />
             <span>
               <FormattedMessage
-                id="portal.feedback.sidebar.poweredBy"
-                defaultMessage="{brand} feedback"
+                id="portal.feedback.sidebar.aboutVenturi"
+                defaultMessage="About {brand}"
                 values={{
                   brand: <span className="font-semibold">Venturi</span>,
                 }}

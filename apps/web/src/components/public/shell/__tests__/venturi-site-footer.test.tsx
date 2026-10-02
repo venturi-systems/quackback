@@ -5,7 +5,7 @@ import { VenturiSiteFooter } from '../venturi-site-footer'
 
 // The footer mirrors the public website's contract (landing-page
 // src/content/site.ts legalLinks): the same five legal links, in the same
-// order, with the same labels, after the related sites and the AGPL link.
+// order, with the same labels, after the related sites and software notices.
 describe('VenturiSiteFooter', () => {
   it('ends with the legal row in the public website order and labels', () => {
     render(<VenturiSiteFooter />)
@@ -21,7 +21,7 @@ describe('VenturiSiteFooter', () => {
     ])
   })
 
-  it('names the copyright holder and links the related sites and the source', () => {
+  it('names the copyright holder and links the related sites and public notices', () => {
     render(<VenturiSiteFooter />)
 
     const footer = screen.getByRole('contentinfo')
@@ -37,26 +37,17 @@ describe('VenturiSiteFooter', () => {
       'href',
       'https://docs.venturi.systems/'
     )
-    // Tests do not define the build commit, so the AGPL link names the
-    // repository rather than a commit.
-    expect(within(related).getByRole('link', { name: 'Source code (AGPL-3.0)' })).toHaveAttribute(
+    expect(within(related).getByRole('link', { name: 'Software notices' })).toHaveAttribute(
       'href',
-      'https://github.com/venturi-systems/quackback'
+      '/software-notices'
     )
   })
-  it('retains build source access with a concise entry label and the legal row', () => {
-    render(<VenturiSiteFooter sourceLabel="Source code" />)
-
-    const footer = screen.getByRole('contentinfo')
-    expect(within(footer).getByRole('link', { name: /^Source code$/ })).toHaveAttribute(
+  it('keeps source licensing details on the public notices page', () => {
+    render(<VenturiSiteFooter />)
+    expect(screen.queryByRole('link', { name: /Source code/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
       'href',
-      'https://github.com/venturi-systems/quackback'
+      '/software-notices'
     )
-    expect(
-      within(footer).queryByRole('link', { name: 'Source code (AGPL-3.0)' })
-    ).not.toBeInTheDocument()
-    expect(
-      within(footer).getByRole('navigation', { name: 'Legal and sitemap' })
-    ).toBeInTheDocument()
   })
 })

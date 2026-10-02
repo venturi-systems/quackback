@@ -238,7 +238,7 @@ function AccessiblePublicPortalPage({
     <div className="portal-shell py-6">
       <section className="portal-introduction" aria-labelledby="feedback-title">
         <h1 id="feedback-title">
-          <FormattedMessage id="portal.header.nav.feedback" defaultMessage="Feedback" />
+          <FormattedMessage id="portal.feedback.pageTitle" defaultMessage="Product ideas" />
         </h1>
         <p>
           <FormattedMessage

@@ -3,24 +3,14 @@ import {
   VENTURI_DOCS_URL,
   VENTURI_LEGAL_LINKS,
   VENTURI_SITE_URL,
-  sourceCodeUrl,
 } from '@/lib/shared/venturi-identity'
-
-/** Build-time commit, when the bundler defines one (tests do not). */
-function buildCommit(): string | null {
-  return typeof __GIT_COMMIT__ === 'string' ? __GIT_COMMIT__ : null
-}
 
 /**
  * Public footer shared by the portal, the sign-in page, and the 404 and error
- * pages. Related sites and the AGPL source link, then the full-width legal
+ * pages. Related sites and public software notices, then the full-width legal
  * row in the public website's order and labels.
  */
-export function VenturiSiteFooter({
-  sourceLabel,
-}: {
-  sourceLabel?: string
-} = {}) {
+export function VenturiSiteFooter() {
   const year = new Date().getFullYear()
   return (
     <footer className="venturi-footer" data-testid="venturi-site-footer">
@@ -28,7 +18,7 @@ export function VenturiSiteFooter({
         <nav className="venturi-footer__related" aria-label="Related Venturi sites">
           <a href={VENTURI_SITE_URL}>Venturi</a>
           <a href={VENTURI_DOCS_URL}>Documentation</a>
-          <a href={sourceCodeUrl(buildCommit())}>{sourceLabel ?? 'Source code (AGPL-3.0)'}</a>
+          <a href="/software-notices">Software notices</a>
         </nav>
         <div className="venturi-footer__legal-row">
           <p className="venturi-footer__copyright">

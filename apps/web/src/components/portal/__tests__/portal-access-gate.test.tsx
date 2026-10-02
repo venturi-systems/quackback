@@ -79,17 +79,20 @@ describe('PortalAccessGate — inline auth form', () => {
     expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(formProps.providerAppearance).toBe('brand')
-    expect(screen.queryByRole('link', { name: 'Software notices' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /^Source code$/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Software notices' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
       'href',
-      'https://github.com/venturi-systems/quackback'
+      '/software-notices'
     )
     expect(screen.queryByRole('link', { name: 'Source code (AGPL-3.0)' })).not.toBeInTheDocument()
     rerender(<PortalAccessGate {...baseProps} reason="unauthorized" />)
     expect(container.querySelector('.portal-gate--entry')).not.toBeInTheDocument()
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Source code (AGPL-3.0)' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+      'href',
+      '/software-notices'
+    )
   })
 
   it('seeds the form mode from autoOpenSignin', () => {
