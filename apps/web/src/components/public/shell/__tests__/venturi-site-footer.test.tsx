@@ -48,7 +48,7 @@ describe('VenturiSiteFooter', () => {
     render(<VenturiSiteFooter sourceLabel="Source code" />)
 
     const footer = screen.getByRole('contentinfo')
-    expect(within(footer).getByRole('link', { name: 'Source code', exact: true })).toHaveAttribute(
+    expect(within(footer).getByRole('link', { name: /^Source code$/ })).toHaveAttribute(
       'href',
       'https://github.com/venturi-systems/quackback'
     )

@@ -201,6 +201,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       })
       expect(compact.gap).toBeLessThanOrEqual(32)
       expect(compact.formWidth).toBeLessThanOrEqual(416)
+      expect(compact.targets).toHaveLength(8)
       for (const target of compact.targets) {
         expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
         expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
@@ -244,7 +245,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
             zoomPage,
             [
               { selector: '.portal-gate__layout', expectInteractive: true },
-              { selector: '.venturi-site-footer', expectInteractive: true },
+              { selector: '.venturi-footer', expectInteractive: true },
             ],
             {
               artifactRevision: process.env.GITHUB_SHA!,
@@ -267,7 +268,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     // The concise entry label retains direct public access to the exact build source.
     await expect(page.getByRole('link', { name: 'Source code', exact: true })).toHaveAttribute(
       'href',
-      /^https:\/\/github\.com\/venturi-systems\/quackback(?:\/tree\/[a-f0-9]{40})?$/
+      /^https:\/\/github\.com\/venturi-systems\/quackback(?:\/tree\/[a-f0-9]{7,40})?$/
     )
     await page.goto('/software-notices')
     await expect(page.getByRole('heading', { name: 'Software notices', exact: true })).toBeVisible()

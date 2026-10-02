@@ -80,7 +80,7 @@ describe('PortalAccessGate — inline auth form', () => {
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(formProps.providerAppearance).toBe('brand')
     expect(screen.queryByRole('link', { name: 'Software notices' })).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Source code', exact: true })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^Source code$/ })).toHaveAttribute(
       'href',
       'https://github.com/venturi-systems/quackback'
     )
