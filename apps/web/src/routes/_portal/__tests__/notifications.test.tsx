@@ -22,7 +22,7 @@ vi.mock('@/components/auth/auth-popover-context', () => ({
 vi.mock('@/lib/client/hooks/use-notifications-queries', () => ({
   useNotifications: () => notifications(),
 }))
-vi.mock('@/lib/client/mutations', () => ({
+vi.mock('@/lib/client/mutations/notifications', () => ({
   useMarkNotificationAsRead: () => ({ mutate: markRead, isPending: false }),
   useMarkAllNotificationsAsRead: () => ({ mutate: markAllRead, isPending: false }),
 }))

@@ -2,7 +2,7 @@ import type { BoardId } from '@quackback/ids'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
-import { Link, useRouter, useRouteContext } from '@tanstack/react-router'
+import { Link, useRouter, useRouteContext, useHydrated } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PencilIcon } from '@heroicons/react/24/solid'
@@ -83,6 +83,7 @@ function FeedbackComposer({
   onPostCreated,
 }: FeedbackHeaderProps) {
   const intl = useIntl()
+  const hydrated = useHydrated()
   const router = useRouter()
   const { session } = useRouteContext({ from: '__root__' })
   const [expanded, setExpanded] = useState(false)
@@ -409,6 +410,7 @@ function FeedbackComposer({
         <motion.input
           ref={titleInputRef}
           id="feedback-title-input"
+          disabled={!hydrated}
           aria-invalid={!!error}
           aria-describedby={error ? 'feedback-submit-error' : undefined}
           type="text"

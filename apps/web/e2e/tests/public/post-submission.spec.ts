@@ -1,4 +1,4 @@
-import { test, expect, Page, BrowserContext, type TestInfo } from '@playwright/test'
+import { test, expect, Page, BrowserContext, type TestInfo, type Route } from '@playwright/test'
 import { getOtpCode } from '../../utils/db-helpers'
 import { flushMagicLinkRateLimit } from '../../utils/access-helpers'
 
@@ -383,28 +383,38 @@ test.describe('Board Selector', () => {
   })
 
   test('board selector defaults to filtered board when filter is active', async () => {
-    // Navigate with a board filter (using 'features' board which exists in database)
-    await globalPage.goto('/?board=features')
-
-    // Wait for posts to load first (indicates page is ready)
-    const postCards = globalPage.locator('a[href*="/posts/"]:has(h3)')
-    await expect(postCards.first()).toBeVisible({ timeout: 15000 })
-
-    // Open the form after the filtered feed has hydrated. The trigger and the
-    // title input share a placeholder, so poll the editor's visible state and
-    // retry only while the first click is still waiting for React handlers.
+    // Hold this navigation's scripts to expose the server-rendered readiness state.
+    // The composer must not accept focus before its expansion handler is attached.
+    let releaseScripts!: () => void
+    let heldScripts = 0
+    const scriptsReady = new Promise<void>((resolve) => {
+      releaseScripts = resolve
+    })
+    const holdScripts = async (route: Route) => {
+      if (route.request().resourceType() === 'script') {
+        heldScripts += 1
+        await scriptsReady
+      }
+      await route.continue()
+    }
     const createPostInput = globalPage.getByPlaceholder("What's your idea?")
-    await expect(createPostInput).toBeVisible({ timeout: 10000 })
-    const editor = globalPage.locator('.tiptap')
-    await expect.poll(
-      async () => {
-        if (!(await editor.isVisible())) {
-          await createPostInput.click()
-        }
-        return editor.isVisible()
-      },
-      { timeout: 10000 }
-    ).toBe(true)
+    await globalPage.route('**/*', holdScripts)
+    try {
+      await globalPage.goto('/?board=features', { waitUntil: 'commit' })
+      await expect(createPostInput).toBeVisible({ timeout: 15000 })
+      await expect(createPostInput).toBeDisabled()
+      await expect.poll(() => heldScripts).toBeGreaterThan(0)
+    } finally {
+      releaseScripts()
+      await globalPage.unroute('**/*', holdScripts)
+    }
+
+    // One user click must expand the hydrated composer without retrying focus.
+    await expect(createPostInput).toBeEnabled({ timeout: 10000 })
+    await createPostInput.click()
+    await expect(globalPage.locator('.tiptap')).toBeVisible({ timeout: 10000 })
+    await createPostInput.fill('Preserve this draft')
+    await expect(createPostInput).toHaveValue('Preserve this draft')
 
     // Board selector should show the filtered board (Feature Requests)
     const boardSelector = globalPage.locator('[role="combobox"]')
@@ -690,7 +700,10 @@ async function startListFromSlashMenu(
         matchingButtons: buttons.map((b) => b.outerHTML.slice(0, 300)),
       }
     }, itemName.source)
-    await testInfo.attach(label, { body: JSON.stringify(state, null, 2), contentType: 'application/json' })
+    await testInfo.attach(label, {
+      body: JSON.stringify(state, null, 2),
+      contentType: 'application/json',
+    })
   }
   // Browser-side errors thrown by the item's command chain surface here, not
   // in the test's own assertions.
