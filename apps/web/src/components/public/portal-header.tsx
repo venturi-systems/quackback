@@ -414,6 +414,7 @@ export function PortalHeader({
           variant="ghost"
           shape="default"
           className="min-h-11 w-full justify-between sm:hidden"
+          disabled={!mounted}
           aria-expanded={mobileNavOpen}
           aria-controls="portal-mobile-navigation"
           onClick={() => setMobileNavOpen((open) => !open)}

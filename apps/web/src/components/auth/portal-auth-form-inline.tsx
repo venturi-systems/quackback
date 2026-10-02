@@ -31,6 +31,7 @@ import { authClient } from '@/lib/client/auth-client'
 import { isTeamCallback } from '@/lib/shared/routing'
 import { lookupAuthMethodsFn, type LookupAuthMethodsResult } from '@/lib/server/functions/auth'
 import { OtpCodeStep } from './otp-code-step'
+import { PublicSignInReadiness } from './public-sign-in-readiness'
 import { useEmailSignin } from './use-email-signin'
 import { TwoFactorEnrollSteps } from './two-factor-enroll-steps'
 import { TwoFactorChallengeStep } from './two-factor-challenge-step'
@@ -695,7 +696,7 @@ export function PortalAuthFormInline({
   // Stage 1 — email entry
   // ============================================================
   if (view.stage === 'email') {
-    return (
+    const form = (
       <div className="space-y-6">
         {/* OAuth tile failures (initiateOAuth) set `error` too, so surface it
             above both paths — not only inside the email form, which is hidden in
@@ -838,6 +839,13 @@ export function PortalAuthFormInline({
           </p>
         )}
       </div>
+    )
+    // Only the public entry opts into this SSR recovery boundary. Dialogs and
+    // authenticated surfaces retain their current composition.
+    return providerAppearance === 'brand' ? (
+      <PublicSignInReadiness>{form}</PublicSignInReadiness>
+    ) : (
+      form
     )
   }
 

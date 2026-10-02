@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from '@tanstack/react-router'
+import { createFileRoute, Link, useRouteContext } from '@tanstack/react-router'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { BellIcon, InboxIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { EmptyState } from '@/components/shared/empty-state'
@@ -11,6 +11,7 @@ import {
   type SerializedNotification,
 } from '@/lib/client/hooks/use-notifications-queries'
 import { useMarkNotificationAsRead, useMarkAllNotificationsAsRead } from '@/lib/client/mutations'
+import { useAuthPopoverSafe } from '@/components/auth/auth-popover-context'
 import { getNotificationTypeConfig } from '@/components/notifications/notification-type-config'
 
 export const Route = createFileRoute('/_portal/notifications')({
@@ -42,7 +43,48 @@ function groupNotificationsByDate(notifications: SerializedNotification[]) {
   return groups
 }
 
-function NotificationsPage() {
+export function NotificationsPage() {
+  const intl = useIntl()
+  const { session } = useRouteContext({ from: '__root__' })
+  const authPopover = useAuthPopoverSafe()
+  const user = session?.user
+
+  // Personal notification queries and subscriptions have no useful anonymous state.
+  // Keep the authenticated view intact and mount it only for a signed-in principal.
+  if (!user || user.principalType === 'anonymous') {
+    return (
+      <div className="portal-page py-8">
+        <EmptyState
+          icon={BellIcon}
+          headingAs="h1"
+          title={intl.formatMessage({
+            id: 'portal.notifications.signIn.title',
+            defaultMessage: 'Sign in to view your notifications',
+          })}
+          description={intl.formatMessage({
+            id: 'portal.notifications.signIn.body',
+            defaultMessage: 'Your notifications are tied to your account.',
+          })}
+          action={
+            authPopover ? (
+              <Button
+                onClick={() =>
+                  authPopover.openAuthPopover({ mode: 'login', callbackUrl: '/notifications' })
+                }
+              >
+                <FormattedMessage id="portal.notifications.signIn.cta" defaultMessage="Log in" />
+              </Button>
+            ) : undefined
+          }
+        />
+      </div>
+    )
+  }
+
+  return <AuthenticatedNotificationsPage />
+}
+
+function AuthenticatedNotificationsPage() {
   const intl = useIntl()
   const { data, isLoading } = useNotifications({ limit: 50 })
   const markAsRead = useMarkNotificationAsRead()
