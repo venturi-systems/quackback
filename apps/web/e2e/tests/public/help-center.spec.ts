@@ -32,14 +32,20 @@ test.describe('Public Help Center', () => {
     // Either the hero heading is shown or the page redirected to 404 (flag off).
     // When the flag is enabled, the landing page renders a prominent h1.
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return // help center disabled in seed
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'help center disabled in seed')
+      return
+    }
 
     await expect(heading).toBeVisible()
   })
 
   test('shows the search bar on the landing page', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     // Hero search renders an <input type="search"> with placeholder "Search articles..."
     const searchInput = page.getByPlaceholder('Search articles...')
@@ -48,7 +54,10 @@ test.describe('Public Help Center', () => {
 
   test('shows categories list when categories exist in seed data', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     // Category cards link to /hc/categories/<slug>
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
@@ -63,10 +72,16 @@ test.describe('Public Help Center', () => {
 
   test('each category card shows name and article count', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     const firstCard = categoryCards.first()
 
@@ -81,10 +96,16 @@ test.describe('Public Help Center', () => {
 
   test('each category card shows description when present', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     // At least verify cards are rendered; descriptions are optional per category
     await expect(categoryCards.first()).toBeVisible()
@@ -96,10 +117,16 @@ test.describe('Public Help Center', () => {
 
   test('can navigate into a category', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -109,10 +136,16 @@ test.describe('Public Help Center', () => {
 
   test('category page shows category name as heading', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     // Capture category name from the card before navigating
     const categoryNameText = await categoryCards.first().locator('h3').textContent()
@@ -129,10 +162,16 @@ test.describe('Public Help Center', () => {
 
   test('category page shows articles list', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -154,17 +193,26 @@ test.describe('Public Help Center', () => {
 
   test('can navigate into an article', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     // Navigate to a category first
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -174,16 +222,25 @@ test.describe('Public Help Center', () => {
 
   test('article page shows title', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -194,16 +251,25 @@ test.describe('Public Help Center', () => {
 
   test('article page shows content area', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -215,16 +281,25 @@ test.describe('Public Help Center', () => {
 
   test('article page shows "Was this helpful?" feedback widget', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -236,16 +311,25 @@ test.describe('Public Help Center', () => {
 
   test('article page shows table of contents when headings exist', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -259,16 +343,25 @@ test.describe('Public Help Center', () => {
 
   test('article page shows author and last-updated metadata when present', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -292,10 +385,16 @@ test.describe('Public Help Center', () => {
 
   test('breadcrumb navigation works on category page', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -315,16 +414,25 @@ test.describe('Public Help Center', () => {
 
   test('breadcrumb navigation works on article page', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -345,10 +453,16 @@ test.describe('Public Help Center', () => {
 
   test('"All categories" back link on category page navigates to /hc', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -369,10 +483,16 @@ test.describe('Public Help Center', () => {
 
   test('search input is present and accepts text', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     await searchInput.fill('getting started')
     await expect(searchInput).toHaveValue('getting started')
@@ -380,10 +500,16 @@ test.describe('Public Help Center', () => {
 
   test('typing in search shows results dropdown when articles match', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     // Type a broad term; results depend on seed data
     await searchInput.fill('a')
@@ -408,13 +534,22 @@ test.describe('Public Help Center', () => {
 
   test('old /$categorySlug URL redirects to /hc/categories/$categorySlug', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     const firstHref = await categoryCards.first().getAttribute('href')
-    if (!firstHref) return
+    if (!firstHref) {
+      test.skip(true, 'no first href')
+      return
+    }
 
     // Extract slug from /hc/categories/<slug>
     const slug = firstHref.replace('/hc/categories/', '').replace(/\/$/, '')
@@ -434,16 +569,25 @@ test.describe('Public Help Center', () => {
     page,
   }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) < 2) return // need at least 2 articles for prev/next
+    if ((await articleLinks.count()) < 2) {
+      test.skip(true, 'need at least 2 articles for prev/next')
+      return
+    }
 
     // Navigate to the second article so there's a "Previous" link
     await articleLinks.nth(1).click()
@@ -469,10 +613,16 @@ test.describe('Help Center - Search Accuracy', () => {
 
   test('search results all contain the query term in title or category name', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     // Use a short, common term likely to return results from any seed
     const query = 'a'
@@ -483,11 +633,17 @@ test.describe('Help Center - Search Accuracy', () => {
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
-    if ((await resultsDropdown.count()) === 0) return // no results — nothing to verify
+    if ((await resultsDropdown.count()) === 0) {
+      test.skip(true, 'no results — nothing to verify')
+      return
+    }
 
     const resultButtons = resultsDropdown.first().locator('button[type="button"]')
     const count = await resultButtons.count()
-    if (count === 0) return
+    if (count === 0) {
+      test.skip(true, 'count is 0')
+      return
+    }
 
     // Every visible result title or category name must include the query (case-insensitive)
     for (let i = 0; i < count; i++) {
@@ -510,10 +666,16 @@ test.describe('Help Center - Search Accuracy', () => {
 
   test('searching a non-existent term shows empty state with helpful message', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     // A nonsense string guaranteed not to match any article
     await searchInput.fill('zzzznonexistentterm9999')
@@ -534,10 +696,16 @@ test.describe('Help Center - Search Accuracy', () => {
 
   test('clearing search hides the results dropdown', async ({ page }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     // Type to get results
     await searchInput.fill('a')
@@ -564,10 +732,16 @@ test.describe('Help Center - Search Accuracy', () => {
     page,
   }) => {
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     // Search uppercase first to discover an existing title
     await searchInput.fill('A')
@@ -576,10 +750,16 @@ test.describe('Help Center - Search Accuracy', () => {
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
-    if ((await resultsDropdown.count()) === 0) return
+    if ((await resultsDropdown.count()) === 0) {
+      test.skip(true, 'no results dropdown on the page')
+      return
+    }
 
     const countUpper = await resultsDropdown.first().locator('button[type="button"]').count()
-    if (countUpper === 0) return
+    if (countUpper === 0) {
+      test.skip(true, 'count upper is 0')
+      return
+    }
 
     // Now search with lowercase — should return at least as many results
     await searchInput.fill('a')
@@ -624,16 +804,25 @@ test.describe('Help Center - Article Content Verification', () => {
     await page.waitForLoadState('networkidle')
 
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     // Capture the title text from the category listing row before navigating
     const listingTitle = await articleLinks
@@ -653,7 +842,10 @@ test.describe('Help Center - Article Content Verification', () => {
 
   test('article prose content is non-empty', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     const prose = page.locator('.prose')
     await expect(prose).toBeVisible()
@@ -665,12 +857,15 @@ test.describe('Help Center - Article Content Verification', () => {
 
   test('article page has paragraph text or list items beyond the heading', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     // Any <p>, <li>, or <ul> inside the prose area means the article has body content
     const bodyContent = page.locator('.prose p, .prose li, .prose ul, .prose ol').first()
     if ((await bodyContent.count()) === 0) {
-      // Article has content but not as standard block elements — skip gracefully
+      test.skip(true, 'Article has content but not as standard block elements')
       return
     }
     await expect(bodyContent).toBeVisible()
@@ -678,14 +873,20 @@ test.describe('Help Center - Article Content Verification', () => {
 
   test('h2/h3 headings in the article appear in the Table of Contents', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     // TOC is only rendered on xl viewports; use a wide viewport for this test
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.waitForLoadState('networkidle')
 
     const tocLabel = page.getByText('On this page')
-    if ((await tocLabel.count()) === 0) return // no headings in this article — skip
+    if ((await tocLabel.count()) === 0) {
+      test.skip(true, 'no headings in this article')
+      return
+    }
 
     await expect(tocLabel).toBeVisible()
 
@@ -711,20 +912,32 @@ test.describe('Help Center - Article Content Verification', () => {
 
   test('clicking a ToC link updates the URL hash to the heading id', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.waitForLoadState('networkidle')
 
     const tocLabel = page.getByText('On this page')
-    if ((await tocLabel.count()) === 0) return
+    if ((await tocLabel.count()) === 0) {
+      test.skip(true, 'no toc label on the page')
+      return
+    }
 
     const tocLinks = page.locator('aside nav a[href^="#"]')
-    if ((await tocLinks.count()) === 0) return
+    if ((await tocLinks.count()) === 0) {
+      test.skip(true, 'no toc links on the page')
+      return
+    }
 
     const firstLink = tocLinks.first()
     const expectedHash = await firstLink.getAttribute('href') // e.g. "#my-heading"
-    if (!expectedHash) return
+    if (!expectedHash) {
+      test.skip(true, 'no expected hash')
+      return
+    }
 
     // The TOC onClick does e.preventDefault() and scrolls via JS —
     // it also calls setActiveId. The URL hash only changes when the component
@@ -770,7 +983,10 @@ test.describe('Help Center - Article Feedback Widget', () => {
     page,
   }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     await expect(page.getByText('Was this helpful?')).toBeVisible()
 
@@ -783,10 +999,16 @@ test.describe('Help Center - Article Feedback Widget', () => {
 
   test('clicking thumbs-up shows a confirmation message', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     const yesBtn = page.getByRole('button', { name: /yes/i })
-    if ((await yesBtn.count()) === 0) return
+    if ((await yesBtn.count()) === 0) {
+      test.skip(true, 'no yes button on the page')
+      return
+    }
 
     await yesBtn.click()
 
@@ -796,10 +1018,16 @@ test.describe('Help Center - Article Feedback Widget', () => {
 
   test('clicking thumbs-down shows a confirmation message', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     const noBtn = page.getByRole('button', { name: /no/i })
-    if ((await noBtn.count()) === 0) return
+    if ((await noBtn.count()) === 0) {
+      test.skip(true, 'no no button on the page')
+      return
+    }
 
     await noBtn.click()
 
@@ -811,10 +1039,16 @@ test.describe('Help Center - Article Feedback Widget', () => {
 
   test('after voting helpful the thumbs-up button shows selected styling', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     const yesBtn = page.getByRole('button', { name: /yes/i })
-    if ((await yesBtn.count()) === 0) return
+    if ((await yesBtn.count()) === 0) {
+      test.skip(true, 'no yes button on the page')
+      return
+    }
 
     await yesBtn.click()
     // Wait for state to settle
@@ -828,10 +1062,16 @@ test.describe('Help Center - Article Feedback Widget', () => {
 
   test('clicking the same vote button twice does not change state back', async ({ page }) => {
     const ok = await navigateToFirstArticle(page)
-    if (!ok) return
+    if (!ok) {
+      test.skip(true, 'navigateToFirstArticle() found nothing to test')
+      return
+    }
 
     const yesBtn = page.getByRole('button', { name: /yes/i })
-    if ((await yesBtn.count()) === 0) return
+    if ((await yesBtn.count()) === 0) {
+      test.skip(true, 'no yes button on the page')
+      return
+    }
 
     // First click — registers vote
     await yesBtn.click()
@@ -857,10 +1097,16 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     const categoryName = await categoryCards.first().locator('h3').textContent()
 
@@ -888,10 +1134,16 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     const categoryName = await categoryCards.first().locator('h3').textContent()
 
@@ -899,7 +1151,10 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -925,17 +1180,26 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' })
     const helpCenterLink = breadcrumb.getByRole('link', { name: /Help Center/i })
-    if ((await helpCenterLink.count()) === 0) return
+    if ((await helpCenterLink.count()) === 0) {
+      test.skip(true, 'no help center link on the page')
+      return
+    }
 
     await helpCenterLink.click()
     await page.waitForLoadState('networkidle')
@@ -950,10 +1214,16 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return
+    if ((await heading.count()) === 0) {
+      test.skip(true, 'no heading on the page')
+      return
+    }
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return
+    if ((await categoryCards.count()) === 0) {
+      test.skip(true, 'no category cards on the page')
+      return
+    }
 
     const categoryHref = await categoryCards.first().getAttribute('href')
     const categoryName = await categoryCards.first().locator('h3').textContent()
@@ -962,7 +1232,10 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return
+    if ((await articleLinks.count()) === 0) {
+      test.skip(true, 'no article links on the page')
+      return
+    }
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -970,7 +1243,10 @@ test.describe('Help Center - Navigation Accuracy', () => {
     const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' })
     if (categoryName) {
       const categoryLink = breadcrumb.getByRole('link', { name: categoryName.trim() })
-      if ((await categoryLink.count()) === 0) return
+      if ((await categoryLink.count()) === 0) {
+        test.skip(true, 'no category link on the page')
+        return
+      }
 
       await categoryLink.first().click()
       await page.waitForLoadState('networkidle')

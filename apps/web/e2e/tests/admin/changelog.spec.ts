@@ -97,7 +97,10 @@ test.describe('Changelog create entry', () => {
 
   test('can open create dialog via "New Entry" button', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     await expect(dialog).toBeVisible()
     await page.keyboard.press('Escape')
@@ -105,7 +108,10 @@ test.describe('Changelog create entry', () => {
 
   test('create dialog has title input and rich text editor', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     await expect(dialog.getByPlaceholder("What's new?")).toBeVisible()
     await expect(dialog.locator('.ProseMirror[contenteditable="true"]')).toBeVisible()
@@ -117,7 +123,10 @@ test.describe('Changelog create entry', () => {
     page,
   }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     // The status select in the metadata sidebar is visible on desktop
     const statusSelect = dialog.locator('button[role="combobox"]').first()
@@ -133,7 +142,10 @@ test.describe('Changelog create entry', () => {
 
   test('can create a new changelog entry with title and content', async ({ page }) => {
     const title = await createEntry(page)
-    if (!title) return
+    if (!title) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
     // Entry should appear in the list
@@ -142,7 +154,10 @@ test.describe('Changelog create entry', () => {
 
   test('can create entry using Cmd+Enter keyboard shortcut', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     const title = `Keyboard Entry ${Date.now()}`
     await dialog.getByPlaceholder("What's new?").fill(title)
@@ -162,7 +177,10 @@ test.describe('Changelog create entry', () => {
 
   test('shows validation error when submitting without a title', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     // Leave title empty and attempt to submit
     await dialog.getByRole('button', { name: /save draft/i }).click()
@@ -177,7 +195,10 @@ test.describe('Changelog create entry', () => {
 
   test('dialog closes after successful creation', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     await dialog.getByPlaceholder("What's new?").fill(`Close Test ${Date.now()}`)
 
@@ -196,7 +217,10 @@ test.describe('Changelog create entry', () => {
 
   test('dialog can be dismissed with Escape', async ({ page }) => {
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden({ timeout: 5000 })
@@ -255,7 +279,10 @@ test.describe('Changelog edit entry', () => {
   test('can update an entry title and save', async ({ page }) => {
     // Create a fresh entry so we have something deterministic to edit
     const originalTitle = await createEntry(page)
-    if (!originalTitle) return
+    if (!originalTitle) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -323,7 +350,10 @@ test.describe('Changelog publish and unpublish', () => {
   test('can publish a draft entry via status select in edit modal', async ({ page }) => {
     // Create a fresh draft entry
     const title = await createEntry(page)
-    if (!title) return
+    if (!title) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -418,7 +448,10 @@ test.describe('Changelog delete entry', () => {
   test('delete option in dropdown opens confirmation dialog', async ({ page }) => {
     // Create an entry to delete so we always have one
     const title = await createEntry(page)
-    if (!title) return
+    if (!title) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -450,7 +483,10 @@ test.describe('Changelog delete entry', () => {
 
   test('can cancel deletion from confirmation dialog', async ({ page }) => {
     const title = await createEntry(page)
-    if (!title) return
+    if (!title) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -484,7 +520,10 @@ test.describe('Changelog delete entry', () => {
 
   test('can confirm deletion and entry disappears from list', async ({ page }) => {
     const title = await createEntry(page)
-    if (!title) return
+    if (!title) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -628,7 +667,10 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
 
     // Create as draft only
     const created = await createEntry(page, title)
-    if (!created) return
+    if (!created) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -650,7 +692,10 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     const title = `Publish Pipeline Test ${Date.now()}`
 
     const published = await createAndPublishEntry(page, title)
-    if (!published) return
+    if (!published) {
+      test.skip(true, 'createAndPublishEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -669,7 +714,10 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
     const title = `Display Date Test ${Date.now()}`
 
     const published = await createAndPublishEntry(page, title)
-    if (!published) return
+    if (!published) {
+      test.skip(true, 'createAndPublishEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -717,7 +765,10 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
 
     // Open create dialog, fill title and content, then publish
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     await dialog.getByPlaceholder("What's new?").fill(title)
 
@@ -762,7 +813,10 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
 
     // Publish the entry first
     const published = await createAndPublishEntry(page, title)
-    if (!published) return
+    if (!published) {
+      test.skip(true, 'createAndPublishEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -792,7 +846,10 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
 
     // Open create dialog
     const dialog = await openCreateDialog(page)
-    if (!dialog) return
+    if (!dialog) {
+      test.skip(true, 'openCreateDialog() found nothing to test')
+      return
+    }
 
     await dialog.getByPlaceholder("What's new?").fill(title)
 
@@ -856,12 +913,18 @@ test.describe('Changelog search and filter', () => {
 
   test('typing in search input filters the list', async ({ page }) => {
     const searchInput = page.locator('[data-search-input]').or(page.getByPlaceholder(/search/i))
-    if ((await searchInput.count()) === 0) return
+    if ((await searchInput.count()) === 0) {
+      test.skip(true, 'no search input on the page')
+      return
+    }
 
     // Create an entry with a unique searchable title
     const unique = `SearchTarget${Date.now()}`
     const title = await createEntry(page, unique)
-    if (!title) return
+    if (!title) {
+      test.skip(true, 'createEntry() found nothing to test')
+      return
+    }
 
     await page.waitForLoadState('networkidle')
 
@@ -883,7 +946,10 @@ test.describe('Changelog search and filter', () => {
 
   test('status filter: clicking Draft shows only draft entries', async ({ page }) => {
     const draftFilter = page.getByRole('option', { name: 'Draft' })
-    if ((await draftFilter.count()) === 0) return
+    if ((await draftFilter.count()) === 0) {
+      test.skip(true, 'no draft filter on the page')
+      return
+    }
 
     await draftFilter.click()
     await page.waitForLoadState('networkidle')
@@ -905,7 +971,10 @@ test.describe('Changelog search and filter', () => {
 
   test('status filter: clicking All resets the filter', async ({ page }) => {
     const draftFilter = page.getByRole('option', { name: 'Draft' })
-    if ((await draftFilter.count()) === 0) return
+    if ((await draftFilter.count()) === 0) {
+      test.skip(true, 'no draft filter on the page')
+      return
+    }
 
     await draftFilter.click()
     await page.waitForLoadState('networkidle')

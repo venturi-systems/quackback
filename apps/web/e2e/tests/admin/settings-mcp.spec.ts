@@ -77,7 +77,10 @@ test.describe('Admin MCP Settings', () => {
       has: page.locator('code').filter({ hasText: /\/api\/mcp/ }),
     })
 
-    if ((await endpointButton.count()) === 0) return
+    if ((await endpointButton.count()) === 0) {
+      test.skip(true, 'no endpoint button on the page')
+      return
+    }
 
     await expect(endpointButton.first()).toBeVisible({ timeout: 10000 })
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
