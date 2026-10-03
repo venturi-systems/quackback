@@ -46,9 +46,10 @@
       "github-token:ghcr-publisher",
       "github-oidc:npm-trusted-publisher",
       "github-token:release-asset-uploader",
-      "github-token:actions-cache-eviction"
+      "github-token:actions-cache-eviction",
+      "github-oidc:feedback-image-publisher"
     ],
-    "aws_oidc_roles": []
+    "aws_oidc_roles": ["venturi-feedback-image-publisher (reviewed role_arn dispatch input)"]
   },
   "environments": ["npm", "github-release", "ghcr"],
   "schedules": [
@@ -73,7 +74,7 @@
   ],
   "deployment": {
     "owner": "repository release workflows",
-    "method": "tagged npm package, signed multi-architecture GHCR image, and release asset",
+    "method": "tagged npm package, signed multi-architecture GHCR image, and release asset, and a manual verified-digest ECR mirror",
     "rollback": "re-publish an exact prior source SHA under an explicit immutable version"
   },
   "release": {
