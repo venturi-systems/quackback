@@ -540,6 +540,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Record the actual tested checkout
+        id: tested_checkout
         env:
           SHARD: ${{ matrix.shard }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -669,25 +670,36 @@ jobs:
         run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json
 
       - name: Verify the tested checkout is unchanged
+        # Preserve post-test evidence even when the ratchet rejects a new failure.
+        if: ${{ always() && steps.tested_checkout.outcome == 'success' }}
         run: |
           python3 - <<'PYTHON'
           import json, os, subprocess
           from pathlib import Path
           target = Path(os.environ['RUNNER_TEMP']) / 'e2e-evidence' / 'tested-tree.json'
           evidence = json.loads(target.read_text())
+          after = dict(evidence)
           for field, ref in [('commit', 'HEAD'), ('tree', 'HEAD^{tree}')]:
-              actual = subprocess.check_output(['git', 'rev-parse', ref], text=True).strip()
-              if actual != evidence[field]:
-                  raise SystemExit('Tested checkout changed after evidence capture')
-          subprocess.run(['git', 'diff', '--exit-code', 'HEAD', '--'], check=True)
+              after[field] = subprocess.check_output(['git', 'rev-parse', ref], text=True).strip()
+          diff = subprocess.run(['git', 'diff', '--exit-code', 'HEAD', '--'], capture_output=True)
+          after['tracked_diff_exit'] = diff.returncode
+          after['unchanged'] = diff.returncode == 0 and all(
+              after[field] == evidence[field] for field in ['commit', 'tree']
+          )
+          target.with_name('tested-tree-after.json').write_text(json.dumps(after) + '\n')
+          if not after['unchanged']:
+              raise SystemExit('Tested checkout changed or could not be verified after evidence capture')
           PYTHON
 
       - name: Upload tested checkout evidence
-        if: github.event_name == 'pull_request'
+        # Failure archives are diagnostic only: queue reuse still requires every
+        # shard, ratchet and checkout verification step to have succeeded.
+        # No new job or test execution; one small post-checkout JSON per shard.
+        if: ${{ always() && github.event_name == 'pull_request' && steps.tested_checkout.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-tested-tree-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
-          path: ${{ runner.temp }}/e2e-evidence/tested-tree.json
+          path: ${{ runner.temp }}/e2e-evidence/tested-tree*.json
           retention-days: 7
           if-no-files-found: error
 

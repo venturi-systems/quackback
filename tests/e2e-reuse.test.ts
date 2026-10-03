@@ -199,10 +199,12 @@ describe('merge queue reuse checks the checkout that actually ran', () => {
     'Run the Playwright suite',
     'Check the shard against the known-failure ratchet',
     'Verify the tested checkout is unchanged',
-  ])('rejects skipped %s', async (name) => {
-    const f = fixture()
-    f.jobs[0].steps.find((step) => step.name === name)!.conclusion = 'skipped'
-    expect((await probe(f)).reuse).toBe('false')
+  ])('rejects skipped or failed %s even with retained receipts', async (name) => {
+    for (const conclusion of ['skipped', 'failure']) {
+      const f = fixture()
+      f.jobs[0].steps.find((step) => step.name === name)!.conclusion = conclusion
+      expect((await probe(f)).reuse).toBe('false')
+    }
   })
   it('rejects a setup-only successful shard', async () => {
     const f = fixture()
@@ -229,14 +231,14 @@ describe('merge queue reuse checks the checkout that actually ran', () => {
           tree: testedTree,
         })
       )
-      const check = (commit: string, tree: string, dirty = false) => {
+      const check = (commit: string, tree: string, diffExit = 0) => {
         writeFileSync(
           join(dir, 'git'),
           `#!/bin/sh
 case "$2" in
 HEAD) echo '${commit}' ;;
 'HEAD^{tree}') echo '${tree}' ;;
---exit-code) exit ${dirty ? 1 : 0} ;;
+--exit-code) exit ${diffExit} ;;
 *) exit 2 ;;
 esac
 `,
@@ -247,15 +249,31 @@ esac
           env: { ...process.env, RUNNER_TEMP: dir, PATH: dir + ':' + process.env.PATH },
         })
       }
-      expect(check(testedMerge, testedTree).status).toBe(0)
-      expect(check(prHead, testedTree).status).not.toBe(0)
-      expect(check(testedMerge, otherTree).status).not.toBe(0)
-      expect(check(testedMerge, testedTree, true).status).not.toBe(0)
+      const before = readFileSync(join(dir, 'e2e-evidence/tested-tree.json'), 'utf8')
+      for (const [commit, tree, diffExit, unchanged] of [
+        [testedMerge, testedTree, 0, true],
+        [prHead, testedTree, 0, false],
+        [testedMerge, otherTree, 0, false],
+        [testedMerge, testedTree, 1, false],
+        [testedMerge, testedTree, 128, false],
+      ] as const) {
+        const result = check(commit, tree, diffExit)
+        expect(result.status, result.stderr).toBe(unchanged ? 0 : 1)
+        expect(
+          JSON.parse(readFileSync(join(dir, 'e2e-evidence/tested-tree-after.json'), 'utf8'))
+        ).toEqual({
+          commit,
+          tree,
+          tracked_diff_exit: diffExit,
+          unchanged,
+        })
+        expect(readFileSync(join(dir, 'e2e-evidence/tested-tree.json'), 'utf8')).toBe(before)
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
-  it('records the checkout before tests and uploads only after the ratchet passes', () => {
+  it('retains before and after checkout evidence after a failed ratchet', () => {
     const e2e = workflow.split('\n  e2e_tests:')[1].split('\n  portability_gate:')[0]
     expect(e2e.indexOf('name: Record the actual tested checkout')).toBeLessThan(
       e2e.indexOf('bun install')
@@ -264,6 +282,21 @@ esac
       e2e.indexOf('name: Check the shard against the known-failure ratchet')
     )
     expect(e2e).toContain("['git', 'rev-parse', 'HEAD^{tree}']")
-    expect(e2e).toContain("if: github.event_name == 'pull_request'")
+    const record = e2e
+      .split('      - name: Record the actual tested checkout')[1]
+      .split('      - uses:')[0]
+    const verify = e2e
+      .split('      - name: Verify the tested checkout is unchanged')[1]
+      .split('      - name: Upload tested checkout evidence')[0]
+    const upload = e2e
+      .split('      - name: Upload tested checkout evidence')[1]
+      .split('      - name: Upload the Playwright artifacts')[0]
+    expect(record).toContain('id: tested_checkout')
+    expect(verify).toContain("if: ${{ always() && steps.tested_checkout.outcome == 'success' }}")
+    expect(upload).toContain(
+      "if: ${{ always() && github.event_name == 'pull_request' && steps.tested_checkout.outcome == 'success' }}"
+    )
+    expect(upload).toContain('path: ${{ runner.temp }}/e2e-evidence/tested-tree*.json')
+    expect(upload).toContain('if-no-files-found: error')
   })
 })
