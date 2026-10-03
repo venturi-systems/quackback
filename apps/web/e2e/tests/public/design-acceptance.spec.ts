@@ -32,7 +32,12 @@ const WIDTHS = [320, 390, 639, 640, 641, 767, 768, 769, 1023, 1024, 1025, 1440, 
 const ROUTES = ['feed', 'post', 'roadmap', 'changelog'] as const
 type Route = (typeof ROUTES)[number]
 
-test.use({ storageState: 'e2e/.auth/admin.json', locale: 'en-US' })
+// Preserve first-attempt failures and successful retry comparisons for this suite.
+test.use({
+  storageState: 'e2e/.auth/admin.json',
+  locale: 'en-US',
+  trace: 'retain-on-failure-and-retries',
+})
 test.beforeEach(async ({ baseURL }) => {
   // This guard must precede any fixture helper, navigation or DOM interaction in this file.
   await assertDesignFixtureEnvironment(baseURL)

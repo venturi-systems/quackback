@@ -479,11 +479,21 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # One capture service per existing shard, with no extra matrix legs.
+      # Pull/startup time and temporary mailbox storage are not yet measured.
+      mailpit:
+        image: axllent/mailpit@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
+        ports:
+          - '127.0.0.1:1025:1025'
     env:
       SECRET_KEY: test-secret-for-ci-only-must-be-at-least-32-characters
       REDIS_URL: redis://localhost:6379
       TRUSTED_ORIGINS: http://acme.localhost:3000
       VENTURI_TEAM_EMAIL_DOMAINS: example.com,acme.example
+      EMAIL_SMTP_HOST: 127.0.0.1
+      EMAIL_SMTP_PORT: '1025'
+      EMAIL_SMTP_SECURE: 'false'
+      EMAIL_FROM: 'Avery Stone <avery.stone@acme.example>'
       # Duration-balanced shard boundaries.
       #
       # `--shard=i/8` splits by test COUNT, not duration: filterForShard sums
@@ -576,6 +586,10 @@ jobs:
           SECRET_KEY=$SECRET_KEY
           REDIS_URL=$REDIS_URL
           VENTURI_TEAM_EMAIL_DOMAINS=example.com,acme.example
+          EMAIL_SMTP_HOST=$EMAIL_SMTP_HOST
+          EMAIL_SMTP_PORT=$EMAIL_SMTP_PORT
+          EMAIL_SMTP_SECURE=$EMAIL_SMTP_SECURE
+          EMAIL_FROM=$EMAIL_FROM
           EOF
 
       # Reuses the existing eight jobs and their disposable service lifecycle.
@@ -585,9 +599,13 @@ jobs:
         env:
           DESIGN_FIXTURE_POSTGRES_ID: ${{ job.services.postgres.id }}
           DESIGN_FIXTURE_REDIS_ID: ${{ job.services.redis.id }}
+          DESIGN_FIXTURE_MAILPIT_ID: ${{ job.services.mailpit.id }}
+          DESIGN_FIXTURE_MAILPIT_IMAGE: axllent/mailpit@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
+          DESIGN_FIXTURE_MAILPIT_NETWORK: ${{ job.services.mailpit.network }}
         run: |
           bun e2e/utils/design-fixture-guard.ts --preflight
           printf 'DESIGN_FIXTURE_POSTGRES_ID=%s\nDESIGN_FIXTURE_REDIS_ID=%s\n' "$DESIGN_FIXTURE_POSTGRES_ID" "$DESIGN_FIXTURE_REDIS_ID" >> "$GITHUB_ENV"
+          printf 'DESIGN_FIXTURE_MAILPIT_ID=%s\nDESIGN_FIXTURE_MAILPIT_IMAGE=%s\nDESIGN_FIXTURE_MAILPIT_NETWORK=%s\n' "$DESIGN_FIXTURE_MAILPIT_ID" "$DESIGN_FIXTURE_MAILPIT_IMAGE" "$DESIGN_FIXTURE_MAILPIT_NETWORK" >> "$GITHUB_ENV"
 
       - run: bun run --filter @quackback/widget build
 
@@ -606,6 +624,12 @@ jobs:
       # Match the validated packages/db dotenv working directory.
       - run: bun run --cwd packages/db db:seed
         timeout-minutes: 5
+
+      - name: Enable isolated authentication acceptance settings
+        id: auth_fixture
+        working-directory: apps/web
+        timeout-minutes: 5
+        run: bun e2e/scripts/set-auth-acceptance-fixture.ts enable
 
       - name: Install the Playwright browser
         working-directory: apps/web
@@ -630,6 +654,12 @@ jobs:
         # web server that never came up, a failure not on the list, a listed
         # test that started passing -- is checked explicitly there, fail-closed.
         run: bun run test:e2e -- --shard=${{ matrix.shard }}/8 || true
+
+      - name: Restore isolated authentication acceptance settings
+        if: ${{ always() && (steps.auth_fixture.outcome == 'success' || steps.auth_fixture.outcome == 'failure' || steps.auth_fixture.outcome == 'cancelled') }}
+        working-directory: apps/web
+        timeout-minutes: 5
+        run: bun e2e/scripts/set-auth-acceptance-fixture.ts restore
 
       - name: Check the shard against the known-failure ratchet
         working-directory: apps/web
