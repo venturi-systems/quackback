@@ -239,7 +239,10 @@ test.describe('Post detail page', () => {
 
   test('og:title meta tag contains the post title', async ({ page }) => {
     const h1Text = (await page.locator('h1').textContent())?.trim() ?? ''
-    if (h1Text.length === 0) return
+    if (h1Text.length === 0) {
+      test.skip(true, 'condition holds: h1Text.length === 0')
+      return
+    }
 
     const ogTitle = await page.locator('meta[property="og:title"]').getAttribute('content')
     if (ogTitle) {

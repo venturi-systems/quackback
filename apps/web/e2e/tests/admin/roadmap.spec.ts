@@ -462,7 +462,10 @@ test.describe('Admin Roadmap - Kanban Accuracy', () => {
 
   test('card count in each column matches the header badge count', async ({ page }) => {
     const noRoadmapMsg = page.getByText('No roadmap selected')
-    if ((await noRoadmapMsg.count()) > 0) return
+    if ((await noRoadmapMsg.count()) > 0) {
+      test.skip(true, 'no roadmap msg present on the page')
+      return
+    }
 
     // Each column is a min-w-[280px] flex child; wait for columns to render
     const columns = page.locator('main [class*="min-w-\\[280px\\]"]')
@@ -500,13 +503,19 @@ test.describe('Admin Roadmap - Kanban Accuracy', () => {
 
   test('each card in a column shows a non-empty board name', async ({ page }) => {
     const noRoadmapMsg = page.getByText('No roadmap selected')
-    if ((await noRoadmapMsg.count()) > 0) return
+    if ((await noRoadmapMsg.count()) > 0) {
+      test.skip(true, 'no roadmap msg present on the page')
+      return
+    }
 
     const cards = page.locator('main [class*="bg-card"][class*="rounded-lg"]')
     await page.waitForLoadState('networkidle')
 
     const cardCount = await cards.count()
-    if (cardCount === 0) return
+    if (cardCount === 0) {
+      test.skip(true, 'card count is 0')
+      return
+    }
 
     // Check up to the first 10 cards to keep test fast
     const limit = Math.min(cardCount, 10)
@@ -521,13 +530,19 @@ test.describe('Admin Roadmap - Kanban Accuracy', () => {
 
   test('each card shows a numeric vote count', async ({ page }) => {
     const noRoadmapMsg = page.getByText('No roadmap selected')
-    if ((await noRoadmapMsg.count()) > 0) return
+    if ((await noRoadmapMsg.count()) > 0) {
+      test.skip(true, 'no roadmap msg present on the page')
+      return
+    }
 
     const cards = page.locator('main [class*="bg-card"][class*="rounded-lg"]')
     await page.waitForLoadState('networkidle')
 
     const cardCount = await cards.count()
-    if (cardCount === 0) return
+    if (cardCount === 0) {
+      test.skip(true, 'card count is 0')
+      return
+    }
 
     const limit = Math.min(cardCount, 10)
     for (let i = 0; i < limit; i++) {
@@ -541,12 +556,18 @@ test.describe('Admin Roadmap - Kanban Accuracy', () => {
 
   test('clicking a card opens detail modal with matching title', async ({ page }) => {
     const noRoadmapMsg = page.getByText('No roadmap selected')
-    if ((await noRoadmapMsg.count()) > 0) return
+    if ((await noRoadmapMsg.count()) > 0) {
+      test.skip(true, 'no roadmap msg present on the page')
+      return
+    }
 
     const cards = page.locator('main [class*="bg-card"][class*="rounded-lg"]')
     await page.waitForLoadState('networkidle')
 
-    if ((await cards.count()) === 0) return
+    if ((await cards.count()) === 0) {
+      test.skip(true, 'no cards on the page')
+      return
+    }
 
     const firstCard = cards.first()
 
@@ -666,7 +687,10 @@ test.describe('Admin Roadmap - Public Roadmap Column Accuracy', () => {
     // Public roadmap only shows statuses with showOnRoadmap=true.
     // Default seed statuses: Planned, In Progress, Complete.
     const noRoadmapsMsg = page.getByText('No roadmaps available')
-    if ((await noRoadmapsMsg.count()) > 0) return
+    if ((await noRoadmapsMsg.count()) > 0) {
+      test.skip(true, 'no roadmaps msg present on the page')
+      return
+    }
 
     // Column titles are rendered in CardTitle elements (data-slot="card-title" in shadcn v4)
     const columnTitles = page.locator('[data-slot="card-title"]').filter({
@@ -688,7 +712,10 @@ test.describe('Admin Roadmap - Public Roadmap Column Accuracy', () => {
 
   test('card count in each public column matches the column header badge', async ({ page }) => {
     const noRoadmapsMsg = page.getByText('No roadmaps available')
-    if ((await noRoadmapsMsg.count()) > 0) return
+    if ((await noRoadmapsMsg.count()) > 0) {
+      test.skip(true, 'no roadmaps msg present on the page')
+      return
+    }
 
     // Public columns are shadcn Cards whose header carries the status title and
     // a count Badge (public/roadmap-column.tsx). The old selector pinned a
@@ -731,13 +758,19 @@ test.describe('Admin Roadmap - Public Roadmap Column Accuracy', () => {
 
   test('vote counts on public roadmap cards are numeric', async ({ page }) => {
     const noRoadmapsMsg = page.getByText('No roadmaps available')
-    if ((await noRoadmapsMsg.count()) > 0) return
+    if ((await noRoadmapsMsg.count()) > 0) {
+      test.skip(true, 'no roadmaps msg present on the page')
+      return
+    }
 
     const cards = page.locator('.roadmap-card')
     await page.waitForLoadState('networkidle')
 
     const cardCount = await cards.count()
-    if (cardCount === 0) return
+    if (cardCount === 0) {
+      test.skip(true, 'card count is 0')
+      return
+    }
 
     const limit = Math.min(cardCount, 10)
     for (let i = 0; i < limit; i++) {

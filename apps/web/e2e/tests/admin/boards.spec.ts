@@ -585,7 +585,10 @@ test.describe('Board Settings Tabs', () => {
   test('clicking Access tab switches to Access Control view', async ({ page }) => {
     const nav = page.locator('nav')
     const accessButton = nav.getByRole('button', { name: 'Access' })
-    if ((await accessButton.count()) === 0) return
+    if ((await accessButton.count()) === 0) {
+      test.skip(true, 'no access button on the page')
+      return
+    }
 
     await accessButton.click()
     await expect(page.getByText('Access Control')).toBeVisible({ timeout: 5000 })
@@ -596,7 +599,10 @@ test.describe('Board Settings Tabs', () => {
   test('clicking Import Data tab switches to import view', async ({ page }) => {
     const nav = page.locator('nav')
     const importButton = nav.getByRole('button', { name: 'Import Data' })
-    if ((await importButton.count()) === 0) return
+    if ((await importButton.count()) === 0) {
+      test.skip(true, 'no import button on the page')
+      return
+    }
 
     await importButton.click()
     await expect(page.getByText('Import Data')).toBeVisible({ timeout: 5000 })
@@ -608,7 +614,10 @@ test.describe('Board Settings Tabs', () => {
   }) => {
     const nav = page.locator('nav')
     const exportButton = nav.getByRole('button', { name: 'Export Data' })
-    if ((await exportButton.count()) === 0) return
+    if ((await exportButton.count()) === 0) {
+      test.skip(true, 'no export button on the page')
+      return
+    }
 
     await exportButton.click()
     await expect(page.getByText('Export Data')).toBeVisible({ timeout: 5000 })
@@ -619,7 +628,10 @@ test.describe('Board Settings Tabs', () => {
   test('navigating between tabs with keyboard (Tab key reaches nav buttons)', async ({ page }) => {
     const nav = page.locator('nav')
     const generalButton = nav.getByRole('button', { name: 'General' })
-    if ((await generalButton.count()) === 0) return
+    if ((await generalButton.count()) === 0) {
+      test.skip(true, 'no general button on the page')
+      return
+    }
 
     // Focus the General button and navigate via keyboard to Access
     await generalButton.focus()
@@ -633,7 +645,10 @@ test.describe('Board Settings Tabs', () => {
   test('General tab is active by default (highlighted)', async ({ page }) => {
     const nav = page.locator('nav')
     const generalButton = nav.getByRole('button', { name: 'General' })
-    if ((await generalButton.count()) === 0) return
+    if ((await generalButton.count()) === 0) {
+      test.skip(true, 'no general button on the page')
+      return
+    }
 
     // The active nav button is the only one with `font-medium` (inactive buttons
     // carry `hover:bg-muted/...`, so a bg-* match wouldn't discriminate).
@@ -644,7 +659,10 @@ test.describe('Board Settings Tabs', () => {
   test('active tab button is visually distinct after switching', async ({ page }) => {
     const nav = page.locator('nav')
     const accessButton = nav.getByRole('button', { name: 'Access' })
-    if ((await accessButton.count()) === 0) return
+    if ((await accessButton.count()) === 0) {
+      test.skip(true, 'no access button on the page')
+      return
+    }
 
     await accessButton.click()
     await page.waitForLoadState('networkidle')
@@ -685,7 +703,10 @@ test.describe('Board Slug', () => {
 
   test('board name field is pre-populated with the current board name', async ({ page }) => {
     const boardNameInput = page.getByRole('textbox', { name: 'Board name', exact: true })
-    if ((await boardNameInput.count()) === 0) return
+    if ((await boardNameInput.count()) === 0) {
+      test.skip(true, 'no board name input on the page')
+      return
+    }
 
     // Should not be empty
     const currentName = await boardNameInput.inputValue()
