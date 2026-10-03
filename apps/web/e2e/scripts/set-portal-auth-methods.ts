@@ -32,7 +32,8 @@
  * temporary enable or `disable` invocation and the `restore` in the test's `finally`. It is
  * created exclusively (`wx`): a Playwright retry that re-runs `disable` after
  * a crash keeps the ORIGINAL pre-change value rather than snapshotting the
- * already-modified one. `restore` consumes and deletes it, so a stale snapshot
+ * already-modified one. `restore` reads both stored columns back before consuming
+ * the snapshot and keeps it on read failure or mismatch. A stale snapshot
  * left by a crashed run is repaired by the next `restore` instead of
  * persisting. `restore` with no snapshot is a no-op: no temporary change was recorded.
  *
@@ -106,6 +107,7 @@ try {
   `
   if (rows.length === 0) throw new Error('No settings row found')
   const id = rows[0].id
+  let restorationReadback: 'matched' | 'no-snapshot' | undefined
 
   if (arg === 'disable' || arg === 'enable-magic-link-temporarily') {
     // Snapshot the LIVE columns before touching them. `wx` fails when a
@@ -188,7 +190,25 @@ try {
                auth_config_version = auth_config_version + 1
          WHERE id = ${id}
       `
+      // Verify the database stored the exact text/NULL values before discarding
+      // the recovery snapshot. A successful UPDATE alone does not prove that.
+      const restored = await sql`
+        SELECT auth_config, portal_config FROM settings WHERE id = ${id}
+      `.catch(() => {
+        // Driver errors can contain configuration values; report only the outcome.
+        throw new Error('Portal auth restoration readback failed; snapshot retained')
+      })
+      if (
+        restored.length !== 1 ||
+        restored[0].auth_config !== snapshot.authConfig ||
+        restored[0].portal_config !== snapshot.portalConfig
+      ) {
+        throw new Error('Portal auth restoration readback mismatch; snapshot retained')
+      }
       rmSync(SNAPSHOT_PATH, { force: true })
+      restorationReadback = 'matched'
+    } else {
+      restorationReadback = 'no-snapshot'
     }
     // No snapshot means no temporary change was recorded (or a previous
     // `restore` already consumed it). Restoring defaults here would be the bug
@@ -203,11 +223,8 @@ try {
   // primitive invalidateSettingsCache() uses.
   await cacheDel(CACHE_KEYS.TENANT_SETTINGS)
 
-  // Echo only the action. The resulting oauth flags are deterministic per
-  // action, callers ignore this output, and logging the oauth object trips
-  // clear-text-logging analysis on the `oauth` property name even though
-  // these are just boolean enable flags, not secrets.
-  console.log(JSON.stringify({ action: arg }))
+  // Report only the action and restoration outcome, never stored configuration.
+  console.log(JSON.stringify({ action: arg, restorationReadback }))
   await sql.end()
   await getRedis().quit()
 } catch (err) {

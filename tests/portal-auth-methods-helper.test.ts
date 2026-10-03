@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const fixture = vi.hoisted(() => {
   type Row = { id: string; auth_config: string | null; portal_config: string | null }
   type Fault = 'snapshot-write' | 'update-before' | 'update-after' | 'cache' | undefined
+  type ReadbackFault = 'auth-mismatch' | 'portal-mismatch' | 'missing-row' | 'read-failure'
   const state = {
     row: { id: 'settings-owned', auth_config: null, portal_config: null } as Row,
     snapshot: null as string | null,
     fault: undefined as Fault,
+    readbackFault: undefined as ReadbackFault | undefined,
     calls: [] as string[],
   }
   function fail(stage: Fault) {
@@ -26,6 +28,23 @@ const fixture = vi.hoisted(() => {
       if (statement.startsWith('SELECT id, auth_config, portal_config FROM settings')) {
         state.calls.push('select')
         return [{ ...state.row }]
+      }
+      if (statement === 'SELECT auth_config, portal_config FROM settings WHERE id = ?') {
+        state.calls.push('restore-readback')
+        if (values[0] !== state.row.id) throw new Error('Unexpected readback settings row')
+        const fault = state.readbackFault
+        state.readbackFault = undefined
+        if (fault === 'read-failure') {
+          throw new Error('private-driver-detail: ' + JSON.stringify(state.row))
+        }
+        if (fault === 'missing-row') return []
+        const restored = { ...state.row }
+        if (fault === 'auth-mismatch' || fault === 'portal-mismatch') {
+          const column = fault === 'auth-mismatch' ? 'auth_config' : 'portal_config'
+          // Equivalent JSON text still differs from the snapshot; NULL is not ''.
+          restored[column] = restored[column] === null ? '' : restored[column] + '\n'
+        }
+        return [restored]
       }
       if (!statement.startsWith('UPDATE settings SET auth_config = ?')) {
         throw new Error('Unexpected fixture query: ' + statement)
@@ -111,6 +130,7 @@ beforeEach(() => {
   }
   fixture.state.snapshot = null
   fixture.state.fault = undefined
+  fixture.state.readbackFault = undefined
   fixture.state.calls = []
   vi.stubEnv('DATABASE_URL', 'postgres://localhost:5432/quackback_test')
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -178,6 +198,15 @@ describe('portal auth helper temporary magic-link restoration', () => {
       portalConfig: initial.portalConfig,
     })
     expect(fixture.state.snapshot).toBeNull()
+    expect(fixture.state.calls.slice(-4)).toEqual([
+      'update',
+      'restore-readback',
+      'snapshot-remove',
+      'cache',
+    ])
+    expect(console.log).toHaveBeenLastCalledWith(
+      JSON.stringify({ action: 'restore', restorationReadback: 'matched' })
+    )
     expect(fixture.cacheDel).toHaveBeenCalledTimes(2)
     expect(fixture.sql.end).toHaveBeenCalledTimes(2)
     expect(fixture.quit).toHaveBeenCalledTimes(2)
@@ -217,6 +246,10 @@ describe('portal auth helper temporary magic-link restoration', () => {
     await run('restore')
     expect(fixture.state.row.auth_config).toBe(enabled)
     expect(fixture.state.calls.filter((call) => call === 'update')).toHaveLength(updates)
+    expect(fixture.state.calls).not.toContain('restore-readback')
+    expect(console.log).toHaveBeenLastCalledWith(
+      JSON.stringify({ action: 'restore', restorationReadback: 'no-snapshot' })
+    )
   })
 
   it('does not replace an existing snapshot during permanent setup', async () => {
@@ -264,6 +297,84 @@ describe('portal auth helper temporary magic-link restoration', () => {
       expect(fixture.state.snapshot).toBeNull()
     }
   )
+
+  it.each([
+    { fault: 'auth-mismatch', columns: 'configured', ...original },
+    { fault: 'portal-mismatch', columns: 'configured', ...original },
+    { fault: 'auth-mismatch', columns: 'NULL', authConfig: null, portalConfig: null },
+    { fault: 'portal-mismatch', columns: 'NULL', authConfig: null, portalConfig: null },
+  ] as const)(
+    'retains the snapshot on $fault for $columns columns and allows retry',
+    async (initial) => {
+      fixture.state.row.auth_config = initial.authConfig
+      fixture.state.row.portal_config = initial.portalConfig
+      await run('enable-magic-link-temporarily')
+      const snapshot = fixture.state.snapshot
+      fixture.state.readbackFault = initial.fault
+
+      await expect(run('restore')).rejects.toThrow(
+        'Portal auth restoration readback mismatch; snapshot retained'
+      )
+      expect(fixture.state.snapshot).toBe(snapshot)
+      expect(fixture.state.calls).not.toContain('snapshot-remove')
+      expect(fixture.cacheDel).toHaveBeenCalledTimes(1)
+      expect(console.log).toHaveBeenCalledTimes(1)
+      expect(console.error).toHaveBeenLastCalledWith(
+        'Portal auth restoration readback mismatch; snapshot retained'
+      )
+
+      await run('restore')
+      expect(fixture.state.row.auth_config).toBe(initial.authConfig)
+      expect(fixture.state.row.portal_config).toBe(initial.portalConfig)
+      expect(fixture.state.snapshot).toBeNull()
+      expect(console.log).toHaveBeenLastCalledWith(
+        JSON.stringify({ action: 'restore', restorationReadback: 'matched' })
+      )
+    }
+  )
+
+  it('retains the snapshot when the restored row is missing and allows retry', async () => {
+    await run('enable-magic-link-temporarily')
+    const snapshot = fixture.state.snapshot
+    fixture.state.readbackFault = 'missing-row'
+    await expect(run('restore')).rejects.toThrow(
+      'Portal auth restoration readback mismatch; snapshot retained'
+    )
+    expect(fixture.state.snapshot).toBe(snapshot)
+    expect(fixture.state.calls).not.toContain('snapshot-remove')
+    expect(fixture.cacheDel).toHaveBeenCalledTimes(1)
+    expect(console.log).toHaveBeenCalledTimes(1)
+    await run('restore')
+    expectOriginal()
+    expect(fixture.state.snapshot).toBeNull()
+  })
+
+  it('retains the snapshot on readback failure without logging driver configuration', async () => {
+    await run('enable-magic-link-temporarily')
+    const snapshot = fixture.state.snapshot
+    fixture.state.readbackFault = 'read-failure'
+    await expect(run('restore')).rejects.toThrow(
+      'Portal auth restoration readback failed; snapshot retained'
+    )
+    expect(fixture.state.snapshot).toBe(snapshot)
+    expect(fixture.state.calls).not.toContain('snapshot-remove')
+    expect(fixture.cacheDel).toHaveBeenCalledTimes(1)
+    expect(console.log).toHaveBeenCalledTimes(1)
+    expect(console.error).toHaveBeenCalledWith(
+      'Portal auth restoration readback failed; snapshot retained'
+    )
+    const output = JSON.stringify([
+      ...vi.mocked(console.log).mock.calls,
+      ...vi.mocked(console.error).mock.calls,
+    ])
+    expect(output).not.toContain('private-driver-detail')
+    expect(output).not.toContain('Acme feedback')
+    expect(output).not.toContain('auth_config')
+    expect(output).not.toContain('portal_config')
+    await run('restore')
+    expectOriginal()
+    expect(fixture.state.snapshot).toBeNull()
+  })
 
   it('retries cache invalidation after the settings were already restored', async () => {
     await run('enable-magic-link-temporarily')
