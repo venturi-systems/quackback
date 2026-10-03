@@ -141,6 +141,110 @@ describe('QB-CI-004 Playwright failure evidence', () => {
   })
 })
 
+describe('QB-CI-005 isolated authentication acceptance fixture', () => {
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+  const job = ci.split('\n  e2e_tests:\n', 2)[1]?.split(/\n {2}[a-z0-9_-]+:\n/, 1)[0] ?? ''
+  const pin =
+    'axllent/mailpit@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d'
+
+  function step(name: string): string {
+    const found = job.split(/\n {6}- /).find((part) => part.startsWith(`name: ${name}\n`))
+    expect(found, `missing fixture lifecycle step: ${name}`).toBeDefined()
+    return found ?? ''
+  }
+
+  it('pins a capture-only service with only the loopback SMTP port published', () => {
+    const service = job.split('\n      mailpit:\n', 2)[1]?.split(/\n {4}\S|\n {6}\S/, 1)[0] ?? ''
+    expect(service.match(/^ {8}image: (\S+)$/m)?.[1]).toBe(pin)
+    const ports = service.match(/^ {10}- .+$/gm) ?? []
+    expect(ports).toHaveLength(1)
+    expect(ports[0]).toMatch(/^ {10}- ['"]?127\.0\.0\.1:1025:1025['"]?$/)
+    expect(service).not.toMatch(/^ {8}(?:env|options|volumes|credentials|command|entrypoint):/m)
+  })
+
+  it('checks the trusted service tuple and all loaders before database setup', () => {
+    const env = job.split('\n    env:\n', 2)[1]?.split('\n    steps:\n', 1)[0] ?? ''
+    const email = Object.fromEntries(
+      [...env.matchAll(/^ {6}(EMAIL_[A-Z_]+): (.+)$/gm)].map(([, key, value]) => [
+        key,
+        value.replace(/^(['"])(.*)\1$/, '$2'),
+      ])
+    )
+    expect(email).toEqual({
+      EMAIL_SMTP_HOST: '127.0.0.1',
+      EMAIL_SMTP_PORT: '1025',
+      EMAIL_SMTP_SECURE: 'false',
+      EMAIL_FROM: 'Avery Stone <avery.stone@acme.example>',
+    })
+    const dotenv = step('Write the .env the dev server and the e2e helpers read')
+    for (const key of Object.keys(email)) expect(dotenv).toContain(`${key}=$${key}\n`)
+
+    const preflight = step('Validate isolated services and all fixture environment loaders')
+    expect(preflight).toContain('DESIGN_FIXTURE_MAILPIT_ID: ${{ job.services.mailpit.id }}')
+    expect(preflight).toContain(
+      'DESIGN_FIXTURE_MAILPIT_NETWORK: ${{ job.services.mailpit.network }}'
+    )
+    expect(preflight).toContain(`DESIGN_FIXTURE_MAILPIT_IMAGE: ${pin}`)
+    const checkedAt = preflight.indexOf('bun e2e/utils/design-fixture-guard.ts --preflight')
+    expect(checkedAt).toBeGreaterThan(-1)
+    expect(preflight.indexOf("printf 'DESIGN_FIXTURE_MAILPIT_ID=")).toBeGreaterThan(checkedAt)
+    for (const key of ['ID', 'IMAGE', 'NETWORK']) {
+      expect(preflight).toContain(`"$DESIGN_FIXTURE_MAILPIT_${key}"`)
+    }
+    for (const command of ['bun run db:migrate', 'bun run --cwd packages/db db:seed']) {
+      expect(job.indexOf(preflight)).toBeLessThan(job.indexOf(command))
+    }
+  })
+
+  it('leaves authentication fixture ownership to the workflow', () => {
+    const root = join(process.cwd(), 'apps/web/e2e')
+    const implementation = join(root, 'scripts/set-auth-acceptance-fixture.ts')
+    function sources(dir: string): string[] {
+      return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) return sources(path)
+        return entry.isFile() && /\.[cm]?tsx?$/.test(entry.name) ? [path] : []
+      })
+    }
+    const competingOwners = sources(root)
+      .filter((path) => path !== implementation)
+      .filter((path) =>
+        /set-auth-acceptance-fixture|\b(?:setAuthAcceptanceFixture|runAuthAcceptanceFixture)\b/.test(
+          readFileSync(path, 'utf8')
+        )
+      )
+      .map((path) => relative(root, path))
+      .sort()
+    expect(competingOwners).toEqual([])
+    const commands = [
+      ...ci.matchAll(
+        /^[ \t]+run: bun e2e\/scripts\/set-auth-acceptance-fixture\.ts (enable|restore)[ \t]*$/gm
+      ),
+    ].map((match) => match[1])
+    expect(commands).toEqual(['enable', 'restore'])
+  })
+
+  it('restores captured settings after success, failure or cancellation of a started fixture', () => {
+    const enable = step('Enable isolated authentication acceptance settings')
+    const restore = step('Restore isolated authentication acceptance settings')
+    expect(enable).toContain('        id: auth_fixture\n')
+    expect(enable).toContain('run: bun e2e/scripts/set-auth-acceptance-fixture.ts enable')
+    expect(restore).toContain(
+      "if: ${{ always() && (steps.auth_fixture.outcome == 'success' || steps.auth_fixture.outcome == 'failure' || steps.auth_fixture.outcome == 'cancelled') }}"
+    )
+    expect(restore).toContain('run: bun e2e/scripts/set-auth-acceptance-fixture.ts restore')
+    for (const part of [enable, restore]) {
+      expect(part).toContain('        working-directory: apps/web\n')
+      expect(part).toContain('        timeout-minutes: 5\n')
+      expect(part).not.toMatch(/continue-on-error|\|\| true/)
+    }
+    expect(job.indexOf(enable)).toBeGreaterThan(job.indexOf('bun run --cwd packages/db db:seed'))
+    expect(job.indexOf(enable)).toBeLessThan(job.indexOf('name: Collect the expected tests'))
+    expect(job.indexOf(restore)).toBeGreaterThan(job.indexOf('name: Run the Playwright suite'))
+    expect(job.indexOf(restore)).toBeLessThan(job.indexOf('name: Check the shard'))
+  })
+})
+
 describe('QB-CI-003 offline package lane', () => {
   const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
 

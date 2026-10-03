@@ -1,22 +1,76 @@
-import { test, expect } from '@playwright/test'
+import { createHash } from 'node:crypto'
+import { test, expect, type Page, type TestInfo } from '@playwright/test'
+import { getOtpCode } from '../../utils/db-helpers'
 import { closeDialog } from '../../utils/helpers'
 
 /**
- * Public portal auth tests — no prior authentication.
+ * Public portal auth tests with no prior authentication.
  *
- * The portal exposes auth via a Dialog triggered from the header.
- * Login mode: title "Welcome back", description "Sign in to your account..."
- * Signup mode: title "Create an account", description "Sign up to vote..."
- *
- * The default auth step depends on whether password auth is enabled:
- *   - password enabled  → "credentials" step (email + password fields)
- *   - password disabled → "email" step (email field + "Continue with email" button)
+ * The dialog starts with email entry, then selects the configured password or
+ * email-link method. Email-link sends provide both a link and a six-digit code.
+ * These tests exercise real endpoints in the suite's disposable environment;
+ * the existing database helper reads only the code created by the current case.
  */
+
+// Keep each case and retry independent without changing the product's rate limits.
+function authTestEmail(testInfo: TestInfo): string {
+  const suffix = createHash('sha256')
+    .update([testInfo.testId, testInfo.retry, testInfo.repeatEachIndex].join(':'))
+    .digest('hex')
+    .slice(0, 16)
+  return 'alex.morgan+' + suffix + '@acme.example'
+}
+
+async function enterEmail(page: Page, email: string): Promise<void> {
+  const dialog = page.getByRole('dialog')
+  const emailInput = dialog.locator('#inline-email')
+  await expect(emailInput).toBeVisible()
+  await emailInput.fill(email)
+  await dialog.getByRole('button', { name: /^Continue\s*→$/ }).click()
+
+  const selectedEmail = dialog.locator('#inline-email-locked')
+  await expect(selectedEmail).toBeVisible()
+  await expect(selectedEmail).toHaveValue(email)
+  await expect(selectedEmail).toHaveAttribute('readonly', '')
+}
+
+async function requestEmailCode(page: Page, email: string): Promise<void> {
+  await enterEmail(page, email)
+  const dialog = page.getByRole('dialog')
+  // The password-enabled fixture starts on credentials; an email-only fixture
+  // starts directly on the email-link method after the same email-entry step.
+  if ((await dialog.locator('#inline-password').count()) > 0) {
+    await dialog
+      .getByRole('button', { name: 'Email me a sign-in link instead', exact: true })
+      .click()
+  }
+
+  const sendButton = dialog.getByRole('button', { name: 'Continue with email', exact: true })
+  await expect(sendButton).toBeVisible()
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (res) =>
+        new URL(res.url()).pathname === '/api/auth/portal-signin' &&
+        res.request().method() === 'POST',
+      { timeout: 15000 }
+    ),
+    sendButton.click(),
+  ])
+  expect(response.status()).toBe(200)
+  expect(response.request().postDataJSON()).toMatchObject({ email })
+  expect(await response.json()).toEqual({ ok: true })
+  await expect(dialog.getByLabel('Verification code', { exact: true })).toBeVisible({
+    timeout: 10000,
+  })
+}
 
 test.describe('Portal Auth Dialog', () => {
   // One at a time and in order, without skipping the rest after a failure:
   // serial mode left the 16 tests after a known failure unrun on every CI run.
   test.describe.configure({ mode: 'default' })
+
+  // CI owns authentication settings until the entire shard has finished.
+  // Suite teardown must not consume the job's recovery snapshot.
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -24,7 +78,7 @@ test.describe('Portal Auth Dialog', () => {
   })
 
   test.afterEach(async ({ page }) => {
-    // Close any open dialog so state doesn't bleed into the next serial test.
+    // Close any open dialog so state doesn't bleed into the next test.
     if ((await page.getByRole('dialog').count()) > 0) {
       await closeDialog(page).catch(() => {})
     }
@@ -103,25 +157,22 @@ test.describe('Portal Auth Dialog', () => {
     await expect(page.getByText(/sign up to vote and comment on feedback/i)).toBeVisible()
   })
 
-  test('signup dialog shows name field when password auth is enabled', async ({ page }) => {
+  test('signup dialog shows name field when password auth is enabled', async ({
+    page,
+  }, testInfo) => {
     await page.getByRole('button', { name: /sign up/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    // Name input is only present in the credentials (password) step during signup
-    const nameInput = page.locator('#inline-name')
-    if ((await nameInput.count()) > 0) {
-      await expect(nameInput).toBeVisible()
-    }
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await enterEmail(page, authTestEmail(testInfo))
+    await expect(dialog.locator('#inline-password')).toBeVisible()
+    await expect(dialog.locator('#inline-name')).toBeVisible()
   })
 
   test('signup dialog has a Sign in switch link for existing users', async ({ page }) => {
     await page.getByRole('button', { name: /sign up/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    const signInLink = page.getByRole('dialog').getByRole('button', { name: /sign in/i })
-    if ((await signInLink.count()) > 0) {
-      await expect(signInLink.first()).toBeVisible()
-    }
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await expect(dialog.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible()
   })
 
   // ---------------------------------------------------------------------------
@@ -130,250 +181,117 @@ test.describe('Portal Auth Dialog', () => {
 
   test('submitting email on the OTP step advances to the code verification step', async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    // Navigate to the email-OTP step if we're on the password step first
-    const useEmailCodeLink = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /use email code instead/i })
-    if ((await useEmailCodeLink.count()) > 0) {
-      await useEmailCodeLink.click()
-    }
-
-    // Skip if the email OTP step is not available (email OTP may be disabled).
-    // Wait briefly for the transition after clicking "use email code instead".
-    const continueWithEmailBtn = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /continue with email/i })
-    try {
-      await expect(continueWithEmailBtn).toBeVisible({ timeout: 2000 })
-    } catch {
-      test.skip()
-      return
-    }
-
-    // Fill email and submit
-    const emailInput = page.locator('input[type="email"]').first()
-    await expect(emailInput).toBeVisible({ timeout: 5000 })
-    await emailInput.fill('test@example.com')
-
-    const [otpResponse] = await Promise.all([
-      page.waitForResponse(
-        (resp) => resp.url().includes('/api/auth/email-otp/send-verification-otp'),
-        { timeout: 15000 }
-      ),
-      continueWithEmailBtn.click(),
-    ])
-
-    expect(otpResponse.ok()).toBeTruthy()
-
-    // Code verification step is now visible
-    await expect(page.getByText(/we sent a 6-digit code to/i)).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText('test@example.com')).toBeVisible()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    const email = authTestEmail(testInfo)
+    await requestEmailCode(page, email)
+    await expect(dialog.getByText(/we sent a 6-digit code to/i)).toBeVisible()
+    await expect(dialog.getByText(email, { exact: true })).toBeVisible()
   })
 
-  test('code verification step shows the OTP input', async ({ page }) => {
+  test('code verification step shows the OTP input', async ({ page }, testInfo) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    const useEmailCodeLink = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /use email code instead/i })
-    if ((await useEmailCodeLink.count()) > 0) {
-      await useEmailCodeLink.click()
-    }
-
-    const continueWithEmailBtn = page.getByRole('button', { name: /continue with email/i })
-    if ((await continueWithEmailBtn.count()) === 0) {
-      test.skip()
-      return
-    }
-
-    const emailInput = page.locator('input[type="email"]').first()
-    await emailInput.fill('test@example.com')
-
-    await Promise.all([
-      page.waitForResponse((resp) =>
-        resp.url().includes('/api/auth/email-otp/send-verification-otp')
-      ),
-      continueWithEmailBtn.click(),
-    ])
-
-    const codeInput = page.locator('#inline-code')
-    await expect(codeInput).toBeVisible({ timeout: 10000 })
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await requestEmailCode(page, authTestEmail(testInfo))
+    const codeInput = dialog.getByLabel('Verification code', { exact: true })
+    await expect(codeInput).toBeVisible()
     await expect(codeInput).toHaveAttribute('maxlength', '6')
   })
 
-  test('verify button is disabled until 6 digits are entered', async ({ page }) => {
+  test('incomplete codes keep Verify disabled and the sixth digit signs in automatically', async ({
+    page,
+  }, testInfo) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    const useEmailCodeLink = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /use email code instead/i })
-    if ((await useEmailCodeLink.count()) > 0) {
-      await useEmailCodeLink.click()
-    }
-
-    const continueWithEmailBtn = page.getByRole('button', { name: /continue with email/i })
-    if ((await continueWithEmailBtn.count()) === 0) {
-      test.skip()
-      return
-    }
-
-    const emailInput = page.locator('input[type="email"]').first()
-    await emailInput.fill('test@example.com')
-
-    await Promise.all([
-      page.waitForResponse((resp) =>
-        resp.url().includes('/api/auth/email-otp/send-verification-otp')
-      ),
-      continueWithEmailBtn.click(),
-    ])
-
-    const codeInput = page.locator('#inline-code')
-    await expect(codeInput).toBeVisible({ timeout: 10000 })
-
-    const verifyButton = page.getByRole('button', { name: /verify code/i })
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    const email = authTestEmail(testInfo)
+    await requestEmailCode(page, email)
+    const codeInput = dialog.getByLabel('Verification code', { exact: true })
+    const verifyButton = dialog.getByRole('button', { name: 'Verify code', exact: true })
     await expect(verifyButton).toBeDisabled()
-
     await codeInput.fill('123')
     await expect(verifyButton).toBeDisabled()
 
-    await codeInput.fill('123456')
-    await expect(verifyButton).toBeEnabled()
+    // Read the real code minted above from this run's isolated database.
+    const code = getOtpCode(email)
+    expect(code).toMatch(/^\d{6}$/)
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          new URL(res.url()).pathname === '/api/auth/sign-in/email-otp' &&
+          res.request().method() === 'POST',
+        { timeout: 15000 }
+      ),
+      codeInput.fill(code),
+    ])
+    expect(response.request().postDataJSON()).toMatchObject({ email, otp: code })
+    expect(response.status()).toBe(200)
+    const result = await response.json()
+    expect(result.user?.email).toBe(email)
+    await expect(dialog).not.toBeVisible({ timeout: 10000 })
+    const sessionResponse = await page.request.get('/api/auth/get-session')
+    expect(sessionResponse.status()).toBe(200)
+    expect((await sessionResponse.json())?.user?.email).toBe(email)
   })
 
-  test('can go back from code step to email step', async ({ page }) => {
+  test('can return from the code step to the selected email and sign-in methods', async ({
+    page,
+  }, testInfo) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    const useEmailCodeLink = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /use email code instead/i })
-    if ((await useEmailCodeLink.count()) > 0) {
-      await useEmailCodeLink.click()
-    }
-
-    const continueWithEmailBtn = page.getByRole('button', { name: /continue with email/i })
-    if ((await continueWithEmailBtn.count()) === 0) {
-      test.skip()
-      return
-    }
-
-    const emailInput = page.locator('input[type="email"]').first()
-    await emailInput.fill('test@example.com')
-
-    await Promise.all([
-      page.waitForResponse((resp) =>
-        resp.url().includes('/api/auth/email-otp/send-verification-otp')
-      ),
-      continueWithEmailBtn.click(),
-    ])
-
-    await expect(page.locator('#inline-code')).toBeVisible({ timeout: 10000 })
-
-    // Click the Back button inside the dialog
-    const backButton = page.getByRole('dialog').getByRole('button', { name: /back/i })
-    await expect(backButton).toBeVisible()
-    await backButton.click()
-
-    // Should return to the email (or credentials) step
-    await expect(page.locator('input[type="email"]').first()).toBeVisible()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    const email = authTestEmail(testInfo)
+    await requestEmailCode(page, email)
+    await dialog.getByRole('button', { name: 'Use a different email', exact: true }).click()
+    await expect(dialog.getByLabel('Verification code', { exact: true })).toHaveCount(0)
+    await expect(dialog.locator('#inline-email-locked')).toBeVisible()
+    await expect(dialog.locator('#inline-email-locked')).toHaveValue(email)
   })
 
-  test('resend cooldown button appears after sending code', async ({ page }) => {
+  test('resend cooldown button appears after sending code', async ({ page }, testInfo) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    const useEmailCodeLink = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /use email code instead/i })
-    if ((await useEmailCodeLink.count()) > 0) {
-      await useEmailCodeLink.click()
-    }
-
-    const continueWithEmailBtn = page.getByRole('button', { name: /continue with email/i })
-    if ((await continueWithEmailBtn.count()) === 0) {
-      test.skip()
-      return
-    }
-
-    const emailInput = page.locator('input[type="email"]').first()
-    await emailInput.fill('test@example.com')
-
-    await Promise.all([
-      page.waitForResponse((resp) =>
-        resp.url().includes('/api/auth/email-otp/send-verification-otp')
-      ),
-      continueWithEmailBtn.click(),
-    ])
-
-    await expect(page.locator('#inline-code')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByText(/resend code in \d+s/i)).toBeVisible()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await requestEmailCode(page, authTestEmail(testInfo))
+    const resendButton = dialog.getByRole('button', { name: /^Resend in \d+s$/ })
+    await expect(resendButton).toBeVisible()
+    await expect(resendButton).toBeDisabled()
   })
 
   // ---------------------------------------------------------------------------
   // Validation errors
   // ---------------------------------------------------------------------------
 
-  test('submitting an empty email on the OTP step shows a validation error', async ({ page }) => {
-    await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    // Navigate to OTP email step
-    const useEmailCodeLink = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /use email code instead/i })
-    if ((await useEmailCodeLink.count()) > 0) {
-      await useEmailCodeLink.click()
-    }
-
-    // Skip if the email OTP step is not available (email OTP may be disabled).
-    // Wait briefly for the transition after clicking "use email code instead".
-    const continueWithEmailBtn = page
-      .getByRole('dialog')
-      .getByRole('button', { name: /continue with email/i })
-    try {
-      await expect(continueWithEmailBtn).toBeVisible({ timeout: 2000 })
-    } catch {
-      test.skip()
-      return
-    }
-
-    // Clear the email field and try to submit
-    const emailInput = page.locator('input[type="email"]').first()
-    await expect(emailInput).toBeVisible({ timeout: 5000 })
-    await emailInput.fill('')
-
-    await continueWithEmailBtn.click()
-
-    // Expect an inline error message
-    await expect(page.getByText(/email is required/i)).toBeVisible({ timeout: 5000 })
-  })
-
-  test('submitting empty email on the password/credentials step shows validation error', async ({
+  test('an empty email keeps Continue disabled before choosing a sign-in method', async ({
     page,
   }) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    // Only applicable when the credentials (password) step is shown
-    const passwordInput = page.locator('#inline-password')
-    if ((await passwordInput.count()) === 0) {
-      // Password auth not enabled — skip
-      return
-    }
-
-    // Leave email blank and click sign in
-    const emailInput = page.locator('#inline-email')
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    const emailInput = dialog.locator('#inline-email')
+    await expect(emailInput).toBeVisible()
     await emailInput.fill('')
+    await expect(dialog.getByRole('button', { name: /^Continue\s*→$/ })).toBeDisabled()
+    await expect(dialog.locator('#inline-email-locked')).toHaveCount(0)
+  })
 
-    await page.getByRole('button', { name: /^sign in$/i }).click()
-
-    await expect(page.getByText(/email is required/i)).toBeVisible({ timeout: 5000 })
+  test('credentials lock the selected email and changing it returns to email validation', async ({
+    page,
+  }, testInfo) => {
+    await page.getByRole('button', { name: /log in/i }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await enterEmail(page, authTestEmail(testInfo))
+    await expect(dialog.locator('#inline-password')).toBeVisible()
+    await expect(dialog.locator('#inline-email-locked')).not.toBeEditable()
+    await dialog.getByRole('button', { name: 'Use a different email', exact: true }).click()
+    const emailInput = dialog.locator('#inline-email')
+    await expect(emailInput).toBeEditable()
+    await emailInput.fill('')
+    await expect(dialog.getByRole('button', { name: /^Continue\s*→$/ })).toBeDisabled()
   })
 
   // ---------------------------------------------------------------------------
@@ -391,14 +309,10 @@ test.describe('Portal Auth Dialog', () => {
 
   test('clicking the X button closes the auth dialog', async ({ page }) => {
     await page.getByRole('button', { name: /log in/i }).click()
-    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 })
-
-    // shadcn Dialog renders a close button with aria-label "Close"
-    const closeButton = page.getByRole('dialog').getByRole('button', { name: /close/i })
-    if ((await closeButton.count()) > 0) {
-      await closeButton.click()
-      await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 5000 })
-    }
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(dialog).not.toBeVisible({ timeout: 5000 })
   })
 
   // ---------------------------------------------------------------------------
@@ -424,17 +338,12 @@ test.describe('Portal Auth Dialog', () => {
 
   test('switching from signup to login changes the dialog title', async ({ page }) => {
     await page.getByRole('button', { name: /sign up/i }).click()
-    await expect(page.getByRole('heading', { name: /create an account/i })).toBeVisible({
-      timeout: 5000,
-    })
-
-    // Click the "Sign in" mode-switch link inside the dialog
-    const signInModeLink = page.getByRole('dialog').getByRole('button', { name: /sign in/i })
-    if ((await signInModeLink.count()) > 0) {
-      await signInModeLink.first().click()
-      await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible({
-        timeout: 5000,
-      })
-    }
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible({ timeout: 5000 })
+    await expect(
+      dialog.getByRole('heading', { name: 'Create an account', exact: true })
+    ).toBeVisible()
+    await dialog.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await expect(dialog.getByRole('heading', { name: 'Welcome back', exact: true })).toBeVisible()
   })
 })
