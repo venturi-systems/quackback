@@ -165,11 +165,13 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
     const publicGate = document.createElement('div')
     publicGate.innerHTML = serverMarkup('brand')
     expect(publicGate.querySelector('button')).toBeDisabled()
-    expect(publicGate.querySelector('[role="status"]')).toHaveTextContent('enable JavaScript')
+    expect(
+      publicGate.querySelector('[data-public-sign-in-help] summary [aria-hidden="false"]')
+    ).toHaveTextContent('Sign-in needs JavaScript')
     const dialog = document.createElement('div')
     dialog.innerHTML = serverMarkup('default')
     expect(dialog.querySelector('fieldset')).toBeNull()
-    expect(dialog.querySelector('[role="status"]')).toBeNull()
+    expect(dialog.querySelector('[data-public-sign-in-help]')).toBeNull()
   })
 
   it('shows a no-methods message when neither email methods nor OAuth are configured', () => {

@@ -822,6 +822,10 @@ jobs:
     env:
       SECRET_KEY: test-secret-for-ci-only-must-be-at-least-32-characters
       REDIS_URL: redis://localhost:6379
+      TRUSTED_ORIGINS: http://acme.localhost:3000
+      VENTURI_TEAM_EMAIL_DOMAINS: example.com,acme.example
+      DESIGN_FIXTURE_POSTGRES_ID: ${{ job.services.postgres.id }}
+      DESIGN_FIXTURE_REDIS_ID: ${{ job.services.redis.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -865,7 +869,7 @@ jobs:
           PORT=3000
           SECRET_KEY=$SECRET_KEY
           REDIS_URL=$REDIS_URL
-          VENTURI_TEAM_EMAIL_DOMAINS=example.com
+          VENTURI_TEAM_EMAIL_DOMAINS=$VENTURI_TEAM_EMAIL_DOMAINS
           EOF
 
       # The app under test is the production image itself, built from this
@@ -914,7 +918,10 @@ jobs:
           docker logs quackback-render 2>&1 | tail -100
           exit 1
 
-      - name: Sign in the fixture identities and walk each route with the keyboard
+      # FB-R21 reuses this image and browser for eight serial readiness cases.
+      # No new job, matrix leg, or schedule; expected added runtime is under one
+      # runner-minute and replaces the ad hoc readiness geometry check.
+      - name: Sign in fixture identities, walk routes, and check public readiness
         working-directory: apps/web
         run: bun run test:render
 
