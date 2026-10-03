@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+import subprocess
 import unittest
 
 SPEC = importlib.util.spec_from_file_location("mirror_image", Path(__file__).with_name("mirror_image.py"))
@@ -41,6 +42,7 @@ class Registry:
         self.calls = []
         self.tag_digest = None
         self.copy_exit = 0
+        self.copy_timeout = False
         self.copy_commits = True
         self.mutable = False
         self.wrong_account = False
@@ -89,6 +91,8 @@ class Registry:
             result.returncode = self.copy_exit
             if self.copy_commits:
                 self.tag_digest = self.plan["source_digest"]
+            if self.copy_timeout:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
         elif args[:2] != ["skopeo", "login"]:
             raise AssertionError(args)
         return result
@@ -206,6 +210,26 @@ class MirrorBoundaryTests(unittest.TestCase):
                 else:
                     with self.assertRaises(ValueError):
                         mirror.publish(registry.plan, directory, "private-auth.json", registry)
+
+    def test_copy_timeout_is_recovered_only_after_verified_destination_readback(self):
+        for committed in [True, False]:
+            registry = Registry()
+            registry.copy_timeout, registry.copy_commits = True, committed
+            with tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                mirror.verify(registry.plan, directory, registry)
+                if committed:
+                    evidence = mirror.publish(registry.plan, directory, "private-auth.json", registry)
+                    self.assertTrue(evidence["mirrored"])
+                    self.assertTrue(evidence["copy_response_recovered"])
+                    reads = [args[-1] for args, _ in registry.calls if args[:2] == ["skopeo", "inspect"]
+                             and args[-1].startswith("docker://" + registry.plan["destination"] + "@")]
+                    self.assertEqual(len(reads), 3)  # Exact index and both architecture configs.
+                else:
+                    with self.assertRaisesRegex(ValueError, "exact verified index"):
+                        mirror.publish(registry.plan, directory, "private-auth.json", registry)
+                    self.assertFalse(json.loads((directory / "mirror-evidence.json").read_text())["mirrored"])
+                self.assertEqual(len(registry.copied()), 1)
 
     def test_changed_plan_and_dry_run_never_copy(self):
         for change in [{"publish": "false"}, {"source_sha": "c" * 40}]:

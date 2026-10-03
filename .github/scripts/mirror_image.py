@@ -154,13 +154,18 @@ def publish(plan: dict[str, str], directory: Path, authfile: str, runner=run) ->
     password = runner(["aws", "--region", plan["aws_region"], "ecr", "get-login-password", "--no-cli-pager"]).stdout
     runner(["skopeo", "login", "--authfile", authfile, "--username", "AWS", "--password-stdin", plan["registry"]], data=password)
     if previous is None:
-        copied = runner(["skopeo", "copy", "--all", "--preserve-digests", "--retry-times", "2",
-                         "--authfile", authfile, "docker://" + SOURCE + "@" + plan["source_digest"],
-                         "docker://" + plan["destination"] + ":" + plan["image_tag"]], check=False, timeout=600)
+        try:
+            copied = runner(["skopeo", "copy", "--all", "--preserve-digests", "--retry-times", "2",
+                             "--authfile", authfile, "docker://" + SOURCE + "@" + plan["source_digest"],
+                             "docker://" + plan["destination"] + ":" + plan["image_tag"]], check=False, timeout=600)
+            uncertain_response = copied.returncode != 0
+        except subprocess.TimeoutExpired:
+            # The subprocess is stopped, but the registry may have committed its tag.
+            uncertain_response = True
         # A lost response after the immutable tag was committed is recoverable by readback.
         observed = existing_digest(plan, runner)
         require(observed == plan["source_digest"], "Mirror did not produce the exact verified index")
-        if copied.returncode:
+        if uncertain_response:
             evidence["copy_response_recovered"] = True
     else:
         evidence["already_present"] = True
