@@ -4,7 +4,7 @@
  * columns are JSON *text*, so we read → patch → write. There is a single
  * workspace settings row.
  *
- * ALL THREE ACTIONS OPERATE ON `settings.auth_config`, because that is the one
+ * ALL ACTIONS OPERATE ON `settings.auth_config`, because that is the one
  * map every sign-in surface reads:
  *
  *  - `isAuthMethodAllowed` (src/lib/server/auth/auth-restrictions.ts) resolves
@@ -29,12 +29,12 @@
  * off and break every later `loginViaMagicLink` in the run.
  *
  * The snapshot is a file, so it survives the process boundary between one
- * `disable` invocation and the `restore` in the test's `finally`. It is
+ * temporary enable or `disable` invocation and the `restore` in the test's `finally`. It is
  * created exclusively (`wx`): a Playwright retry that re-runs `disable` after
- * a crash keeps the ORIGINAL pre-disable value rather than snapshotting the
- * already-disabled one. `restore` consumes and deletes it, so a stale snapshot
+ * a crash keeps the ORIGINAL pre-change value rather than snapshotting the
+ * already-modified one. `restore` consumes and deletes it, so a stale snapshot
  * left by a crashed run is repaired by the next `restore` instead of
- * persisting. `restore` with no snapshot is a no-op: nothing was disabled.
+ * persisting. `restore` with no snapshot is a no-op: no temporary change was recorded.
  *
  * When disabling: every stored oauth key plus the core methods (password,
  * magicLink) is set to false — no sign-in method is presented to public users.
@@ -47,8 +47,10 @@
  * (`value === true`) and DEFAULT_AUTH_CONFIG ships it off, so the e2e suite has
  * to turn it on for itself rather than the product turning it on for everyone.
  * Idempotent, and every other stored auth setting is preserved.
+ * `enable-magic-link` is permanent fixture setup; `enable-magic-link-temporarily`
+ * takes the same snapshot as `disable` and must be paired with `restore`.
  *
- * Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link>
+ * Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily>
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -57,7 +59,7 @@ import postgres from 'postgres'
 import { DEFAULT_AUTH_CONFIG } from '@/lib/server/domains/settings/settings.types'
 import { cacheDel, getRedis, CACHE_KEYS } from '@/lib/server/redis'
 
-/** Where `disable` parks the pre-disable columns for `restore` to put back. */
+/** Where temporary actions park the original columns for `restore` to put back. */
 const SNAPSHOT_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../.auth/portal-auth-snapshot.json'
@@ -69,8 +71,15 @@ interface AuthSnapshot {
 }
 
 const arg = (process.argv[2] || '').toLowerCase()
-if (arg !== 'disable' && arg !== 'restore' && arg !== 'enable-magic-link') {
-  console.error('Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link>')
+if (
+  arg !== 'disable' &&
+  arg !== 'restore' &&
+  arg !== 'enable-magic-link' &&
+  arg !== 'enable-magic-link-temporarily'
+) {
+  console.error(
+    'Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily>'
+  )
   process.exit(1)
 }
 
@@ -98,7 +107,25 @@ try {
   if (rows.length === 0) throw new Error('No settings row found')
   const id = rows[0].id
 
-  if (arg === 'enable-magic-link') {
+  if (arg === 'disable' || arg === 'enable-magic-link-temporarily') {
+    // Snapshot the LIVE columns before touching them. `wx` fails when a
+    // snapshot already exists, and that is the point: on a Playwright retry the
+    // first attempt's snapshot holds the true pre-change value, and this
+    // attempt's would hold the already-modified one.
+    const snapshot: AuthSnapshot = {
+      authConfig: (rows[0].auth_config as string | null) ?? null,
+      portalConfig: (rows[0].portal_config as string | null) ?? null,
+    }
+    try {
+      mkdirSync(dirname(SNAPSHOT_PATH), { recursive: true })
+      writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), { flag: 'wx', mode: 0o600 })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      // Keep the earlier, truer snapshot.
+    }
+  }
+
+  if (arg === 'enable-magic-link' || arg === 'enable-magic-link-temporarily') {
     // A NULL auth_config means the runtime is reading DEFAULT_AUTH_CONFIG
     // (parseJsonConfig falls back to it), so materialize those defaults before
     // patching — otherwise this write would silently drop the default-on
@@ -113,22 +140,6 @@ try {
           auth_config_version = auth_config_version + 1
       WHERE id = ${id}`
   } else if (arg === 'disable') {
-    // Snapshot the LIVE columns before touching them. `wx` fails when a
-    // snapshot already exists, and that is the point: on a Playwright retry the
-    // first attempt's snapshot holds the true pre-disable value, and this
-    // attempt's would hold the already-disabled one.
-    const snapshot: AuthSnapshot = {
-      authConfig: (rows[0].auth_config as string | null) ?? null,
-      portalConfig: (rows[0].portal_config as string | null) ?? null,
-    }
-    try {
-      mkdirSync(dirname(SNAPSHOT_PATH), { recursive: true })
-      writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), { flag: 'wx' })
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      // Keep the earlier, truer snapshot.
-    }
-
     // Turn off every oauth method currently stored plus the core keys, in the
     // map the sign-in gate and the dialog both read. Iterating existing keys
     // handles dynamic OAuth providers (custom-oidc, etc.) configured without
@@ -161,7 +172,7 @@ try {
        WHERE id = ${id}
     `
   } else {
-    // restore: put back exactly what `disable` saw, including a NULL column.
+    // Restore the exact columns from before the temporary change, including NULL.
     let snapshot: AuthSnapshot | null = null
     try {
       snapshot = JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf-8')) as AuthSnapshot
@@ -179,7 +190,7 @@ try {
       `
       rmSync(SNAPSHOT_PATH, { force: true })
     }
-    // No snapshot means nothing was disabled in this run (or a previous
+    // No snapshot means no temporary change was recorded (or a previous
     // `restore` already consumed it). Restoring defaults here would be the bug
     // described in the header comment, so do nothing.
   }

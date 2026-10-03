@@ -86,14 +86,18 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
 
 /**
  * Flip sign-in methods and drop the tenant-settings cache (the script does
- * both). All three actions write `settings.auth_config.oauth`, the one map the
+ * both). All actions write `settings.auth_config.oauth`, the one map the
  * request-time gate (`isAuthMethodAllowed`) and the sign-in dialog both read.
  *
  * `disable` is used by tests that need the team break-glass form to be the only
  * way in; always pair it with `setPortalAuthMethods('restore')` in a `finally`
  * block so subsequent tests/dev are not left with a broken portal.
  *
- * `restore` puts back the exact snapshot `disable` took — NOT the shipped
+ * `enable-magic-link-temporarily` also snapshots the original settings; pair it
+ * with `restore` after creating a temporary session. Permanent setup uses
+ * `enableMagicLinkSignIn` instead.
+ *
+ * `restore` puts back the exact snapshot the temporary action took — NOT the shipped
  * defaults. DEFAULT_AUTH_CONFIG.oauth carries no `magicLink` key and
  * `isSignInMethodEnabled` reads a missing key as off, so a reset-to-defaults
  * would silently switch magic link back off and break every later
@@ -101,7 +105,9 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
  * it safe to call defensively at the start of a suite to clear a snapshot a
  * crashed run left behind.
  */
-export function setPortalAuthMethods(action: 'disable' | 'restore' | 'enable-magic-link'): void {
+export function setPortalAuthMethods(
+  action: 'disable' | 'restore' | 'enable-magic-link' | 'enable-magic-link-temporarily'
+): void {
   runScript('../scripts/set-portal-auth-methods.ts', [action])
 }
 
@@ -114,7 +120,8 @@ export function setPortalAuthMethods(action: 'disable' | 'restore' | 'enable-mag
  * ships it off, and `bun run db:seed` leaves `settings.auth_config` NULL. So
  * the test infrastructure enables it for itself; the shipped default stays off.
  *
- * Idempotent — safe on every setup path and on every retry.
+ * Permanent and idempotent — safe on every setup path and on every retry.
+ * This action does not create or replace a temporary settings snapshot.
  */
 export function enableMagicLinkSignIn(): void {
   setPortalAuthMethods('enable-magic-link')
