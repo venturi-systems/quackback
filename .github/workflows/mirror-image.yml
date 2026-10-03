@@ -1,0 +1,122 @@
+name: Mirror signed image to ECR
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full source commit SHA reachable from protected main.
+        required: true
+        type: string
+      digest:
+        description: Signed GHCR image index digest (sha256 plus 64 lowercase hex characters).
+        required: true
+        type: string
+      role_arn:
+        description: Reviewed AWS role ARN ending in role/venturi-feedback-image-publisher.
+        required: true
+        type: string
+      aws_region:
+        description: Reviewed commercial AWS region of the existing ECR repository.
+        required: true
+        type: string
+      publish:
+        description: Copy the verified index to ECR. False verifies the source only.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feedback-image-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.repository == 'venturi-systems/quackback' && github.ref == 'refs/heads/main'
+    # Registry credentials and AWS OIDC stay on a fresh hosted runner, following
+    # the existing privileged container publication boundary.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      INPUT_SHA: ${{ inputs.sha }}
+      INPUT_DIGEST: ${{ inputs.digest }}
+      INPUT_ROLE_ARN: ${{ inputs.role_arn }}
+      INPUT_AWS_REGION: ${{ inputs.aws_region }}
+      INPUT_PUBLISH: ${{ inputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set ephemeral credential and evidence paths
+        run: |
+          printf 'DOCKER_CONFIG=%s/quackback-mirror-auth\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'REGISTRY_AUTH_FILE=%s/quackback-mirror-auth/config.json\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'MIRROR_EVIDENCE_DIR=%s/quackback-mirror-evidence\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+
+      - name: Validate the dispatch and immutable source
+        id: guard
+        run: python3 .github/scripts/mirror_image.py guard
+
+      - name: Install the registry copy client
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends skopeo
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Authenticate to the existing GHCR package
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$DOCKER_CONFIG"
+          umask 077
+          printf '%s' "$GHCR_TOKEN" |
+            skopeo login --authfile "$REGISTRY_AUTH_FILE" --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+
+      - name: Verify the signature, index, and per-architecture source provenance
+        run: python3 .github/scripts/mirror_image.py verify
+
+      - name: Obtain the repository-scoped ECR role through GitHub OIDC
+        if: inputs.publish
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ inputs.role_arn }}
+          aws-region: ${{ inputs.aws_region }}
+          audience: sts.amazonaws.com
+          allowed-account-ids: ${{ steps.guard.outputs.account_id }}
+          role-session-name: feedback-image-${{ github.run_id }}
+          role-duration-seconds: 900
+          action-timeout-s: 120
+          retry-max-attempts: 3
+          unset-current-credentials: true
+          use-existing-credentials: false
+          translate-env-variables: false
+          output-credentials: false
+
+      - name: Copy the unchanged complete index and verify ECR readback
+        if: inputs.publish
+        run: python3 .github/scripts/mirror_image.py publish
+
+      - name: Remove ephemeral registry credentials
+        if: always()
+        run: rm -f -- "$REGISTRY_AUTH_FILE"
+
+      - name: Retain the digest and signature evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-image-mirror-evidence
+          path: ${{ runner.temp }}/quackback-mirror-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30

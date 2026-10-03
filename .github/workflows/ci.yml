@@ -65,6 +65,9 @@ jobs:
           --repository "$GITHUB_REPOSITORY"
           --root /github/workspace
 
+      - name: Check signed image mirror boundaries
+        run: python3 -m unittest discover -s .github/scripts -p 'test_mirror_image.py'
+
       - name: Check fork portability contract
         run: |
           set -euo pipefail
