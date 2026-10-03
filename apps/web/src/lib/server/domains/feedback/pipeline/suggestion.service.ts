@@ -1,3 +1,8 @@
+import {
+  isGovernedFeatureBoard,
+  validateSemanticTags,
+} from '@/lib/server/feature-pipeline/semantic-tags'
+import { recordFeatureIntent } from '@/lib/server/feature-pipeline/intent'
 /**
  * Suggestion service — create, accept, dismiss feedback suggestions.
  *
@@ -13,6 +18,7 @@ import {
   boards,
   feedbackSuggestions,
   posts,
+  postTags,
   votes,
   sql,
 } from '@/lib/server/db'
@@ -31,6 +37,7 @@ import type {
   RawFeedbackItemId,
   FeedbackSignalId,
   StatusId,
+  TagId,
 } from '@quackback/ids'
 
 type SimilarPostEntry = { postId: string; title: string; similarity: number; voteCount: number }
@@ -115,6 +122,9 @@ export async function acceptCreateSuggestion(
     boardId?: string
     statusId?: string
     authorPrincipalId?: string
+    tagIds?: string[]
+    requestOrigin?: 'external' | 'internal'
+    originEvidence?: string
   }
 ): Promise<{ success: boolean; resultPostId: PostId }> {
   const suggestion = await db.query.feedbackSuggestions.findFirst({
@@ -152,7 +162,7 @@ export async function acceptCreateSuggestion(
   // this read and the insert. Mirrors the createPost pattern (f63a4eac, c1c6d020).
   const board = await db.query.boards.findFirst({
     where: and(eq(boards.id, boardId), isNull(boards.deletedAt)),
-    columns: { id: true },
+    columns: { id: true, slug: true },
   })
   if (!board) {
     throw new NotFoundError('BOARD_NOT_FOUND', `Board with ID ${boardId} not found`)
@@ -172,6 +182,19 @@ export async function acceptCreateSuggestion(
 
   // Use explicit statusId override or fall back to default
   const statusId = (edits?.statusId ?? defaultStatus?.id) as StatusId | undefined
+
+  const tagIds = (edits?.tagIds ?? []) as TagId[]
+  await validateSemanticTags(boardId, tagIds, true)
+  if (
+    !suggestion.rawItem?.principalId &&
+    (await isGovernedFeatureBoard(boardId)) &&
+    !edits?.requestOrigin
+  ) {
+    throw new ValidationError(
+      'VALIDATION_ERROR',
+      'Review whether this unattributed feedback was requested externally or proposed internally'
+    )
+  }
 
   // Lock the board row inside a transaction and re-check deletedAt before insert.
   // An admin could soft-delete the board between the precheck above and the
@@ -197,7 +220,24 @@ export async function acceptCreateSuggestion(
         statusId,
         voteCount: 1,
       })
-      .returning({ id: posts.id })
+      .returning()
+    if (tagIds.length)
+      await tx
+        .insert(postTags)
+        .values([...new Set(tagIds)].map((tagId) => ({ postId: inserted.id, tagId })))
+    await recordFeatureIntent(tx, inserted, {
+      boardSlug: board.slug,
+      tagIds,
+      callerIsStaff: true,
+      author: 'Feedback contributor',
+      declaredOrigin: edits?.requestOrigin,
+      originEvidence:
+        edits?.originEvidence?.trim() ||
+        'Staff-reviewed feedback suggestion ' +
+          suggestionId +
+          '; source: ' +
+          (suggestion.rawItem?.sourceType ?? 'unknown'),
+    })
     return inserted
   })
 

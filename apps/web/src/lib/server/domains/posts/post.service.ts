@@ -16,6 +16,9 @@
  * - post.permissions.ts - User edit/delete permissions
  */
 
+import { recordFeatureIntent } from '@/lib/server/feature-pipeline/intent'
+import { validateSemanticTags } from '@/lib/server/feature-pipeline/semantic-tags'
+import { isTeamMember } from '@/lib/shared/roles'
 import { recordPostStatusAudit } from './post.status-audit'
 import {
   db,
@@ -177,6 +180,12 @@ export async function createPost(
     }
   }
 
+  await validateSemanticTags(
+    input.boardId,
+    input.tagIds ?? [],
+    isTeamMember(author.actor?.role ?? null)
+  )
+
   // Create post, add tags, and auto-upvote in a single transaction
   const parsedContentJson = input.contentJson ?? markdownToTiptapJson(content)
   const contentJson = await rehostExternalImages(parsedContentJson, {
@@ -235,6 +244,15 @@ export async function createPost(
     if (input.tagIds && input.tagIds.length > 0) {
       await tx.insert(postTags).values(input.tagIds.map((tagId) => ({ postId: newPost.id, tagId })))
     }
+
+    await recordFeatureIntent(tx, newPost, {
+      boardSlug: board.slug,
+      tagIds: input.tagIds ?? [],
+      author: author.displayName ?? author.name ?? 'Feedback contributor',
+      callerIsStaff: isTeamMember(author.actor?.role ?? null),
+      declaredOrigin: input.requestOrigin,
+      originEvidence: input.requestOriginEvidence,
+    })
 
     // Auto-upvote by the author
     await tx.insert(votes).values({
@@ -397,17 +415,24 @@ export async function updatePost(
   if (input.statusId !== undefined) updateData.statusId = input.statusId
   if (input.ownerPrincipalId !== undefined) updateData.ownerPrincipalId = input.ownerPrincipalId
 
-  // Update the post only if there's data to update
-  let updatedPost: Post
-  if (Object.keys(updateData).length > 0) {
-    const [result] = await db.update(posts).set(updateData).where(eq(posts.id, id)).returning()
-    if (!result) {
-      throw new NotFoundError('POST_NOT_FOUND', `Post with ID ${id} not found`)
+  // Replace tags and content atomically; deferred semantic guards see the final set.
+  const updatedPost = await db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(posts).where(eq(posts.id, id)).for('update')
+    if (!locked) throw new NotFoundError('POST_NOT_FOUND', `Post with ID ${id} not found`)
+    let result = locked
+    if (Object.keys(updateData).length > 0) {
+      ;[result] = await tx.update(posts).set(updateData).where(eq(posts.id, id)).returning()
     }
-    updatedPost = result
-  } else {
-    updatedPost = existingPost
-  }
+    if (input.tagIds !== undefined) {
+      await tx.delete(postTags).where(eq(postTags.postId, id))
+      if (input.tagIds.length > 0) {
+        await tx
+          .insert(postTags)
+          .values([...new Set(input.tagIds)].map((tagId) => ({ postId: id, tagId })))
+      }
+    }
+    return result
+  })
 
   // Regenerate embedding (and cascade to merge check) if title or content changed
   if (input.title !== undefined || input.content !== undefined) {
@@ -416,15 +441,6 @@ export async function updatePost(
         generatePostEmbedding(id, updatedPost.title, updatedPost.content)
       )
       .catch((err) => log.error({ err, post_id: id }, 'embedding regen failed'))
-  }
-
-  // Update tags if provided
-  if (input.tagIds !== undefined) {
-    // Remove all existing tags then add new ones if any
-    await db.delete(postTags).where(eq(postTags.postId, id))
-    if (input.tagIds.length > 0) {
-      await db.insert(postTags).values(input.tagIds.map((tagId) => ({ postId: id, tagId })))
-    }
   }
 
   if (statusChanged && newStatus) {

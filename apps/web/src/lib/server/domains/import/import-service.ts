@@ -4,9 +4,15 @@
  * This module contains the business logic for CSV import processing.
  */
 
+import {
+  isGovernedFeatureBoard,
+  validateSemanticTags,
+} from '@/lib/server/feature-pipeline/semantic-tags'
+import { recordFeatureIntent } from '@/lib/server/feature-pipeline/intent'
+import { toUuid } from '@quackback/ids'
 import Papa from 'papaparse'
 import { z } from 'zod'
-import { db, posts, tags, postTags, postStatuses, eq } from '@/lib/server/db'
+import { db, posts, tags, postTags, postStatuses, eq, sql } from '@/lib/server/db'
 import {
   boardIdSchema,
   createId,
@@ -299,22 +305,59 @@ export async function processBatch(
     }
   }
 
-  // Execute sequential inserts (no interactive transaction needed)
-  // Insert new tags first
-  if (newTagsWithIds.length > 0) {
-    await db.insert(tags).values(newTagsWithIds)
+  const governed = new Set<BoardId>()
+  for (const boardId of new Set(postsToInsert.map((post) => post.boardId))) {
+    if (await isGovernedFeatureBoard(boardId)) governed.add(boardId)
+  }
+  if (governed.size > 0) {
+    for (const post of postsToInsert) {
+      if (governed.has(post.boardId)) {
+        await validateSemanticTags(
+          post.boardId,
+          postTagsToInsert.filter((tag) => tag.postId === post.id).map((tag) => tag.tagId),
+          true
+        )
+      }
+    }
+    await db.transaction(async (tx) => {
+      if (newTagsWithIds.length) await tx.insert(tags).values(newTagsWithIds)
+      if (postsToInsert.length) await tx.insert(posts).values(postsToInsert)
+      if (postTagsToInsert.length)
+        await tx.insert(postTags).values(postTagsToInsert).onConflictDoNothing()
+      for (const post of postsToInsert) {
+        if (!governed.has(post.boardId)) continue
+        const board = await tx.execute(
+          sql`SELECT slug FROM boards WHERE id=${toUuid(post.boardId)}::uuid AND deleted_at IS NULL FOR SHARE`
+        )
+        if (!board[0]) throw new Error('Import board is unavailable')
+        await recordFeatureIntent(tx, post, {
+          boardSlug: String(board[0].slug),
+          tagIds: postTagsToInsert.filter((tag) => tag.postId === post.id).map((tag) => tag.tagId),
+          author: 'Imported feedback contributor',
+          callerIsStaff: true,
+        })
+      }
+    })
     result.createdTags = tagsToCreateArray
-  }
-
-  // Insert posts
-  if (postsToInsert.length > 0) {
-    await db.insert(posts).values(postsToInsert)
     result.imported = validRows.length
-  }
+  } else {
+    // Execute sequential inserts (no interactive transaction needed)
+    // Insert new tags first
+    if (newTagsWithIds.length > 0) {
+      await db.insert(tags).values(newTagsWithIds)
+      result.createdTags = tagsToCreateArray
+    }
 
-  // Insert post-tag relationships
-  if (postTagsToInsert.length > 0) {
-    await db.insert(postTags).values(postTagsToInsert).onConflictDoNothing()
+    // Insert posts
+    if (postsToInsert.length > 0) {
+      await db.insert(posts).values(postsToInsert)
+      result.imported = validRows.length
+    }
+
+    // Insert post-tag relationships
+    if (postTagsToInsert.length > 0) {
+      await db.insert(postTags).values(postTagsToInsert).onConflictDoNothing()
+    }
   }
 
   return result

@@ -167,19 +167,23 @@ const SUMMARY_EVENT_TYPES = ['post.created', 'comment.created'] as const
  * Get all hook targets for an event.
  * Gracefully handles errors - returns empty array on failure.
  */
-export async function getHookTargets(event: EventData): Promise<HookTarget[]> {
+export async function getHookTargets(
+  event: EventData,
+  opts?: { strict?: boolean }
+): Promise<HookTarget[]> {
   try {
     // Build context ONCE at the start - consolidates all settings/URL queries
     const context = await buildHookContext()
     if (!context) {
       log.error('failed to build hook context')
+      if (opts?.strict) throw new Error('Hook context is unavailable')
       return []
     }
 
     const targets: HookTarget[] = []
 
     // Integration targets (Slack, Discord, etc.)
-    const integrationTargets = await getIntegrationTargets(event, context)
+    const integrationTargets = await getIntegrationTargets(event, context, opts?.strict)
     targets.push(...integrationTargets)
 
     // Email and in-app notification targets (subscribers)
@@ -221,12 +225,13 @@ export async function getHookTargets(event: EventData): Promise<HookTarget[]> {
     }
 
     // Webhook targets - external HTTP endpoints (all event types)
-    const webhookTargets = await getWebhookTargets(event)
+    const webhookTargets = await getWebhookTargets(event, opts?.strict)
     targets.push(...webhookTargets)
 
     return targets
   } catch (error) {
     log.error({ err: error, event_type: event.type }, 'failed to resolve targets')
+    if (opts?.strict) throw error
     return [] // Graceful degradation - don't crash event processing
   }
 }
@@ -270,7 +275,8 @@ async function getCachedIntegrationMappings(): Promise<CachedIntegrationMapping[
  */
 async function getIntegrationTargets(
   event: EventData,
-  context: HookContext
+  context: HookContext,
+  strict = false
 ): Promise<HookTarget[]> {
   // Never forward private comments to external integrations
   if (
@@ -313,6 +319,7 @@ async function getIntegrationTargets(
 
     if (!channelId) {
       log.warn({ integration_type: m.integrationType }, 'no channel id for integration, skipping')
+      if (strict) throw new Error('Integration destination is not configured')
       continue
     }
 
@@ -331,6 +338,7 @@ async function getIntegrationTargets(
           { err: error, integration_type: m.integrationType },
           'failed to decrypt integration secrets'
         )
+        if (strict) throw error
         continue
       }
     }
@@ -902,7 +910,7 @@ export function webhookSubscriptionMatches(
  * Get webhook hook targets for an event.
  * Queries active webhooks subscribed to this event type and filters by board.
  */
-async function getWebhookTargets(event: EventData): Promise<HookTarget[]> {
+async function getWebhookTargets(event: EventData, strict = false): Promise<HookTarget[]> {
   // Never deliver private comments to external webhooks
   if (
     (event.type === 'comment.created' ||
@@ -957,12 +965,14 @@ async function getWebhookTargets(event: EventData): Promise<HookTarget[]> {
         })
       } catch (error) {
         log.error({ err: error, webhook_id: webhook.id }, 'failed to decrypt webhook secret')
+        if (strict) throw error
         // Skip this webhook rather than crash all
       }
     }
     return targets
   } catch (error) {
     log.error({ err: error }, 'failed to resolve webhook targets')
+    if (strict) throw error
     return []
   }
 }

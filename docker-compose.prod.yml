@@ -34,6 +34,9 @@ services:
     init: true
     # Carries BASE_URL, SECRET_KEY, email settings, S3_BUCKET/S3_REGION, etc.
     env_file: .env
+    # Issue-only Unix bridge; the application receives no host AWS credentials.
+    volumes:
+      - /run/quackback-feature-pipeline:/run/quackback-feature-pipeline:ro
     # Internal wiring is fixed here (derived from the secrets in .env) so a
     # self-hoster can't point these at the wrong host — these override env_file.
     environment:

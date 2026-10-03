@@ -362,3 +362,55 @@ describe('webhook caching', () => {
     expect(webhookTargets[0].target).toEqual({ url: 'https://example.com/hook2' })
   })
 })
+
+describe('strict target resolution for durable status events', () => {
+  it('distinguishes missing hook context from an empty destination set', async () => {
+    const { buildHookContext } = await import('../hook-context')
+    vi.mocked(buildHookContext).mockResolvedValueOnce(null)
+    await expect(getHookTargets(makePostCreatedEvent(), { strict: true })).rejects.toThrow(
+      'Hook context'
+    )
+    vi.mocked(buildHookContext).mockResolvedValueOnce(null)
+    await expect(getHookTargets(makePostCreatedEvent())).resolves.toEqual([])
+  })
+  it('propagates integration query failure only for strict callers', async () => {
+    setupIntegrationDbChain([])
+    mockDbWhere.mockRejectedValue(new Error('integration query unavailable'))
+    await expect(getHookTargets(makePostCreatedEvent(), { strict: true })).rejects.toThrow(
+      'query unavailable'
+    )
+    await expect(getHookTargets(makePostCreatedEvent())).resolves.toEqual([])
+  })
+  it('propagates webhook decryption failure rather than dropping that destination', async () => {
+    const { decryptWebhookSecret } = await import('@/lib/server/domains/webhooks/encryption')
+    mockCacheGet.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        id: 'wh_1',
+        url: 'https://example.com/hook',
+        secret: 'bad',
+        events: ['post.created'],
+        boardIds: null,
+        status: 'active',
+      },
+    ])
+    vi.mocked(decryptWebhookSecret).mockImplementationOnce(() => {
+      throw new Error('decrypt failed')
+    })
+    await expect(getHookTargets(makePostCreatedEvent(), { strict: true })).rejects.toThrow(
+      'decrypt failed'
+    )
+  })
+  it('propagates malformed integration credentials rather than silently skipping the hook', async () => {
+    mockCacheGet.mockResolvedValueOnce([
+      {
+        eventType: 'post.created',
+        integrationType: 'slack',
+        secrets: 'invalid-json',
+        actionConfig: { channelId: 'channel_A' },
+        integrationConfig: {},
+        filters: null,
+      },
+    ])
+    await expect(getHookTargets(makePostCreatedEvent(), { strict: true })).rejects.toThrow()
+  })
+})

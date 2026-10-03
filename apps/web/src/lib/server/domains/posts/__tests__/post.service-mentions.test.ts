@@ -66,6 +66,29 @@ vi.mock('@/lib/server/db', async () => {
     return c
   }
 
+  const updateChain = vi.fn(() => ({
+    set: vi.fn(() => ({
+      where: vi.fn(() => ({
+        returning: vi.fn(async () => [
+          {
+            id: 'post_update' as unknown,
+            boardId: 'board_b' as unknown,
+            statusId: 'status_open' as unknown,
+            title: updateReturningTitle,
+            content: 'Body',
+            contentJson: updateReturningContentJson,
+            principalId: 'principal_author' as unknown,
+            ownerPrincipalId: null,
+            voteCount: 1,
+            commentCount: 0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        ]),
+      })),
+    })),
+  }))
+
   return {
     db: {
       query: {
@@ -96,6 +119,7 @@ vi.mock('@/lib/server/db', async () => {
       },
       transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
         const tx = {
+          update: updateChain,
           insert: vi.fn((table: { __name?: string }) => {
             const label =
               table === undefined
@@ -110,22 +134,26 @@ vi.mock('@/lib/server/db', async () => {
           select: vi.fn(() => ({
             from: vi.fn(() => ({
               where: vi.fn(() => ({
-                for: vi.fn(async () => [
-                  {
-                    access: {
-                      view: 'anonymous',
-                      vote: 'anonymous',
-                      comment: 'anonymous',
-                      submit: 'anonymous',
-                      segments: { view: [], vote: [], comment: [], submit: [] },
-                      moderation: {
-                        anonPosts: 'inherit',
-                        signedPosts: 'inherit',
-                        comments: 'inherit',
-                      },
-                    },
-                  },
-                ]),
+                for: vi.fn(async () =>
+                  updatePostsFindFirstResult
+                    ? [updatePostsFindFirstResult]
+                    : [
+                        {
+                          access: {
+                            view: 'anonymous',
+                            vote: 'anonymous',
+                            comment: 'anonymous',
+                            submit: 'anonymous',
+                            segments: { view: [], vote: [], comment: [], submit: [] },
+                            moderation: {
+                              anonPosts: 'inherit',
+                              signedPosts: 'inherit',
+                              comments: 'inherit',
+                            },
+                          },
+                        },
+                      ]
+                ),
               })),
             })),
           })),
@@ -135,28 +163,7 @@ vi.mock('@/lib/server/db', async () => {
       select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })) })),
       // Used by updatePost. Echoes back a fake "updated post" using the contentJson
       // captured from the call site via updateReturningContentJson.
-      update: vi.fn(() => ({
-        set: vi.fn(() => ({
-          where: vi.fn(() => ({
-            returning: vi.fn(async () => [
-              {
-                id: 'post_update' as unknown,
-                boardId: 'board_b' as unknown,
-                statusId: 'status_open' as unknown,
-                title: updateReturningTitle,
-                content: 'Body',
-                contentJson: updateReturningContentJson,
-                principalId: 'principal_author' as unknown,
-                ownerPrincipalId: null,
-                voteCount: 1,
-                commentCount: 0,
-                createdAt: new Date(),
-                updatedAt: new Date(),
-              },
-            ]),
-          })),
-        })),
-      })),
+      update: updateChain,
       delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
       insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
     },
@@ -390,3 +397,12 @@ describe('updatePost mention dispatch', () => {
     expect(syncPostMentions).not.toHaveBeenCalled()
   })
 })
+
+// These attribution/mention tests use ungoverned board fixtures. The real
+// governed SQL invariants are exercised by status-effects-postgres.test.ts.
+vi.mock('@/lib/server/feature-pipeline/semantic-tags', () => ({
+  validateSemanticTags: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/server/feature-pipeline/intent', () => ({
+  recordFeatureIntent: vi.fn().mockResolvedValue(undefined),
+}))

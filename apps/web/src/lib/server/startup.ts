@@ -112,6 +112,10 @@ export function logStartupBanner(): void {
   // any of them start so a fast Ctrl-C in dev still gets a clean exit.
   wireGracefulShutdown()
 
+  import('./feature-pipeline/worker')
+    .then(({ startFeaturePipeline }) => startFeaturePipeline())
+    .catch((err) => log.error({ err }, 'failed to start feature pipeline'))
+
   // Restore any dynamic segment evaluation schedules that were persisted in the
   // DB but may be absent from Redis (e.g. after a Redis wipe in dev). BullMQ
   // repeatable jobs survive normal app restarts, but this is a safety net.

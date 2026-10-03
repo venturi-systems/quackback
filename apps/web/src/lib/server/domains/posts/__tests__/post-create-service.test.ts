@@ -492,5 +492,13 @@ describe('createPost TOCTOU board re-check', () => {
     expect(insertedRows.posts).toHaveLength(0)
     expect(insertedRows.votes).toHaveLength(0)
   })
-
 })
+
+// These attribution/mention tests use ungoverned board fixtures. The real
+// governed SQL invariants are exercised by status-effects-postgres.test.ts.
+vi.mock('@/lib/server/feature-pipeline/semantic-tags', () => ({
+  validateSemanticTags: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/server/feature-pipeline/intent', () => ({
+  recordFeatureIntent: vi.fn().mockResolvedValue(undefined),
+}))

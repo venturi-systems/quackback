@@ -11,6 +11,7 @@ import type { PostCreatedEvent } from '../types'
 // --- Mocks ---
 
 const mockQueueAddBulk = vi.fn().mockResolvedValue(undefined)
+const mockQueueGetJobs = vi.fn().mockResolvedValue([])
 const mockQueueClose = vi.fn().mockResolvedValue(undefined)
 const mockWorkerClose = vi.fn().mockResolvedValue(undefined)
 
@@ -21,6 +22,7 @@ let capturedFailedHandler: ((job: unknown, error: Error) => void) | null = null
 vi.mock('bullmq', () => {
   class MockQueue {
     addBulk = mockQueueAddBulk
+    getJobs = mockQueueGetJobs
     close = mockQueueClose
     waitUntilReady = vi.fn().mockResolvedValue(undefined)
     constructor() {}
@@ -63,6 +65,7 @@ vi.mock('../registry', () => ({
 // db mock: inline to avoid hoisting issues. Access via import for assertions.
 vi.mock('@/lib/server/db', () => ({
   db: {
+    execute: vi.fn().mockResolvedValue([]),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
         where: vi.fn().mockResolvedValue(undefined),
@@ -119,7 +122,7 @@ function makeJob(overrides: Record<string, unknown> = {}) {
 // Import once to initialize the module. The first processEvent call with targets
 // triggers ensureQueue() which creates the Queue and Worker singletons.
 
-import { processEvent, closeQueue } from '../process'
+import { processEvent, closeQueue, garbageCollectDurableHookJobs } from '../process'
 import { db } from '@/lib/server/db'
 
 // --- Tests ---
@@ -336,5 +339,97 @@ describe('Event Processing (BullMQ)', () => {
       expect(mockWorkerClose).toHaveBeenCalled()
       expect(mockQueueClose).toHaveBeenCalled()
     })
+  })
+})
+
+describe('durable processEvent opt-in', () => {
+  it('requires strict resolution and reuses retained queue identities after acknowledgment loss', async () => {
+    mockGetHookTargets.mockResolvedValue([
+      {
+        type: 'email',
+        target: { email: 'subscriber@example.com', unsubscribeUrl: 'first' },
+        config: {},
+      },
+    ])
+    const event = makeEvent()
+    await processEvent(event, { durable: true })
+    const first = mockQueueAddBulk.mock.calls.at(-1)?.[0]
+    mockGetHookTargets.mockResolvedValue([
+      {
+        type: 'email',
+        target: { email: 'subscriber@example.com', unsubscribeUrl: 'rotated' },
+        config: {},
+      },
+    ])
+    await processEvent(event, { durable: true })
+    const retry = mockQueueAddBulk.mock.calls.at(-1)?.[0]
+    expect(mockGetHookTargets).toHaveBeenLastCalledWith(event, { strict: true })
+    expect(first[0].opts.jobId).toBe(retry[0].opts.jobId)
+    expect(retry[0].opts).toMatchObject({ removeOnComplete: false, removeOnFail: false })
+  })
+  it('propagates strict target resolution failure before queue admission', async () => {
+    mockQueueAddBulk.mockClear()
+    mockGetHookTargets.mockRejectedValueOnce(new Error('target lookup failed'))
+    await expect(processEvent(makeEvent(), { durable: true })).rejects.toThrow(
+      'target lookup failed'
+    )
+    expect(mockQueueAddBulk).not.toHaveBeenCalled()
+  })
+})
+
+describe('durable credential resolution and acknowledged cleanup', () => {
+  it('loads current credentials only when delivering a queued destination', async () => {
+    const event = makeEvent()
+    mockGetHookTargets.mockResolvedValue([
+      {
+        type: 'email',
+        target: { email: 'subscriber@example.com', unsubscribeUrl: 'fresh-token' },
+        config: { accessToken: 'fresh-secret' },
+      },
+    ])
+    await processEvent(event, { durable: true })
+    const data = mockQueueAddBulk.mock.calls.at(-1)![0][0].data
+    expect(JSON.stringify(data)).not.toContain('fresh-secret')
+    const hook = { run: vi.fn().mockResolvedValue({ success: true }) }
+    mockGetHook.mockReturnValue(hook)
+    await capturedProcessor!({ id: 'durable-test', data })
+    expect(hook.run).toHaveBeenCalledWith(
+      event,
+      { email: 'subscriber@example.com', unsubscribeUrl: 'fresh-token' },
+      { accessToken: 'fresh-secret' },
+      { jobId: 'durable-test' }
+    )
+    mockGetHookTargets.mockResolvedValue([])
+    hook.run.mockClear()
+    await capturedProcessor!({ id: 'durable-test', data })
+    expect(hook.run).not.toHaveBeenCalled()
+  })
+  it('redacts terminal payload after acknowledgment loss but retains its deduplication ID', async () => {
+    const job = { ...makeJob(), id: 'durable-test', remove: vi.fn(), updateData: vi.fn() }
+    mockQueueGetJobs.mockResolvedValue([job])
+    vi.mocked(db.execute).mockResolvedValue([{ delivered_at: null }] as never)
+    await garbageCollectDurableHookJobs()
+    expect(job.remove).not.toHaveBeenCalled()
+    expect(job.updateData).toHaveBeenCalledWith(
+      expect.objectContaining({ redacted: true, config: {}, target: {} })
+    )
+    expect(job.updateData.mock.calls[0][0].event).toEqual({
+      id: job.data.event.id,
+      type: job.data.event.type,
+    })
+  })
+  it('removes terminal IDs only after the outbox acknowledgment is durable', async () => {
+    const job = { ...makeJob(), id: 'durable-test', remove: vi.fn(), updateData: vi.fn() }
+    mockQueueGetJobs.mockResolvedValue([job])
+    vi.mocked(db.execute).mockResolvedValue([{ delivered_at: new Date() }] as never)
+    await garbageCollectDurableHookJobs()
+    expect(job.remove).toHaveBeenCalledOnce()
+    expect(job.updateData).not.toHaveBeenCalled()
+    expect(mockQueueGetJobs).toHaveBeenLastCalledWith(
+      ['completed', 'failed'],
+      expect.any(Number),
+      expect.any(Number),
+      true
+    )
   })
 })

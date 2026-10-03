@@ -33,6 +33,7 @@ import {
 } from '@/components/admin/feedback/merge-section'
 import { AiSummaryCard } from '@/components/admin/feedback/ai-summary-card'
 import { SimilarPostsCard } from '@/components/admin/feedback/similar-posts-card'
+import { FeaturePipelineStatus } from './feature-pipeline-status'
 import { PostActivityTimeline } from '@/components/admin/feedback/detail/post-activity-timeline'
 import { useNavigationContext } from '@/components/admin/feedback/detail/use-navigation-context'
 import {
@@ -291,6 +292,7 @@ function PostModalContent({
 
   return (
     <div className="flex flex-col h-full">
+      <FeaturePipelineStatus postId={postId} />
       {/* Header */}
       <ModalHeader
         section="Feedback"

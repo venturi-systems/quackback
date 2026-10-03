@@ -9,6 +9,7 @@ import { Queue, Worker, UnrecoverableError, type JobsOptions } from 'bullmq'
 import { getQueueRedis, REDIS_READY_TIMEOUT_MS } from '@/lib/server/queue/redis-config'
 import { getHook } from './registry'
 import { getHookTargets } from './targets'
+import { durableHookJobs, durableTargets, durableDestination } from './durable-jobs'
 import { isRetryableError } from './hook-utils'
 import type { HookResult } from './hook-types'
 import type { EventData } from './types'
@@ -22,6 +23,8 @@ interface HookJobData {
   event: EventData
   target: unknown
   config: Record<string, unknown>
+  durableDestination?: string
+  redacted?: boolean
 }
 
 // Hashtag pins all keys to a single Dragonfly thread for Lua script compat.
@@ -79,7 +82,21 @@ async function initializeQueue() {
   const worker = new Worker<HookJobData>(
     QUEUE_NAME,
     async (job) => {
-      const { hookType, event, target, config: hookConfig } = job.data
+      const { hookType, event } = job.data
+      let { target, config: hookConfig } = job.data
+      if (job.data.redacted) throw new UnrecoverableError('Terminal durable job has been redacted')
+      if (job.data.durableDestination !== undefined) {
+        const targets = durableTargets(await getHookTargets(event, { strict: true }))
+        const current = targets.find(
+          (entry) =>
+            entry.type === hookType && durableDestination(entry) === job.data.durableDestination
+        )
+        // A removed subscription/integration is a revocation, not a reason to
+        // deliver using stale credentials or to restore the old recipient.
+        if (!current) return
+        target = current.target
+        hookConfig = current.config
+      }
 
       // Handle delayed changelog publish sentinel
       if (hookType === '__changelog_publish__') {
@@ -225,8 +242,10 @@ async function persistExternalLink(data: HookJobData, result: HookResult): Promi
  * Process an event by resolving targets and enqueuing hooks.
  * Target resolution is awaited (~10-50ms). Hook execution runs in the background.
  */
-export async function processEvent(event: EventData): Promise<void> {
-  const targets = await getHookTargets(event)
+export async function processEvent(event: EventData, opts?: { durable?: boolean }): Promise<void> {
+  const targets = opts?.durable
+    ? await getHookTargets(event, { strict: true })
+    : await getHookTargets(event)
   if (targets.length === 0) return
 
   log.debug(
@@ -237,10 +256,12 @@ export async function processEvent(event: EventData): Promise<void> {
   const queue = await ensureQueue()
 
   await queue.addBulk(
-    targets.map(({ type, target, config: hookConfig }) => ({
-      name: `${event.type}:${type}`,
-      data: { hookType: type, event, target, config: hookConfig },
-    }))
+    opts?.durable
+      ? durableHookJobs(event, targets)
+      : targets.map(({ type, target, config: hookConfig }) => ({
+          name: `${event.type}:${type}`,
+          data: { hookType: type, event, target, config: hookConfig },
+        }))
   )
 }
 
@@ -340,4 +361,46 @@ async function handlePostMergeRecheck(hookConfig: Record<string, unknown>): Prom
     await import('@/lib/server/domains/merge-suggestions/merge-check.service')
   await checkPostForMergeCandidates(postId as import('@quackback/ids').PostId)
   log.debug({ post_id: postId }, 'post-merge recheck complete')
+}
+
+let durableGcOffset = 0
+/** Keep retry IDs while admission is unacknowledged, but erase terminal payloads. */
+export async function garbageCollectDurableHookJobs(limit = 100) {
+  const queue = await ensureQueue()
+  const { db, sql } = await import('@/lib/server/db')
+  const jobs = await queue.getJobs(
+    ['completed', 'failed'],
+    durableGcOffset,
+    durableGcOffset + limit - 1,
+    true
+  )
+  let removed = 0
+  let redacted = 0
+  for (const job of jobs) {
+    if (!job.id?.startsWith('durable-')) continue
+    const rows = await db.execute(sql`SELECT delivered_at FROM feature_pipeline_status_outbox
+      WHERE event_id=${job.data.event.id}::uuid`)
+    // Outbox rows are created before admission. An absent row is an already
+    // collected acknowledgment; UUID event identities are never reused.
+    if (!rows[0] || rows[0].delivered_at) {
+      await job.remove()
+      removed++
+    } else if (!job.data.redacted) {
+      await job.updateData({
+        hookType: job.data.hookType,
+        event: { id: job.data.event.id, type: job.data.event.type } as EventData,
+        target: {},
+        config: {},
+        durableDestination: '',
+        redacted: true,
+      })
+      redacted++
+    }
+  }
+  // Rotate past unacknowledged/ordinary jobs so one stalled event cannot block
+  // collection of later acknowledgments. Deletions shorten the next page.
+  durableGcOffset = jobs.length < limit ? 0 : durableGcOffset + jobs.length - removed
+  await db.execute(sql`DELETE FROM feature_pipeline_status_outbox
+    WHERE delivered_at < now()-interval '7 days'`)
+  return { removed, redacted }
 }

@@ -1,4 +1,5 @@
-import type { BoardId } from '@quackback/ids'
+import { CapabilitySelector } from './capability-selector'
+import type { TagId, BoardId } from '@quackback/ids'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useIntl, FormattedMessage } from 'react-intl'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
@@ -88,6 +89,7 @@ function FeedbackComposer({
   const { session } = useRouteContext({ from: '__root__' })
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
+  const [capabilityId, setCapabilityId] = useState<TagId | undefined>()
   const [submitted, setSubmitted] = useState<{
     id: string
     boardSlug: string
@@ -239,6 +241,7 @@ function FeedbackComposer({
 
       const result = await createPost.mutateAsync({
         boardId: selectedBoardId as BoardId,
+        tagIds: capabilityId ? [capabilityId] : [],
         title: title.trim(),
         content: contentMarkdown,
         contentJson,
@@ -283,6 +286,7 @@ function FeedbackComposer({
   function resetForm() {
     setSelectedBoardId(initialBoardId)
     setTitle('')
+    setCapabilityId(undefined)
     setContentJson(null)
     setContentMarkdown('')
     setError('')
@@ -471,6 +475,11 @@ function FeedbackComposer({
               transition={{ duration: 0.2, delay: 0.15 }}
               className="px-4 sm:px-5 pb-4"
             >
+              <CapabilitySelector
+                boardId={selectedBoardId ?? ''}
+                value={capabilityId}
+                onChange={setCapabilityId}
+              />
               <RichTextEditor
                 value={contentJson || ''}
                 onChange={handleContentChange}

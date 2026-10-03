@@ -1,3 +1,4 @@
+import { hasFeatureIntent } from '@/lib/server/feature-pipeline/intent'
 /**
  * GitHub hook handler.
  * Creates GitHub issues when feedback events occur.
@@ -31,6 +32,9 @@ export const githubHook: HookHandler = {
     if (event.type !== 'post.created') {
       return { success: true }
     }
+
+    if (await hasFeatureIntent(event.data.post.id as import('@quackback/ids').PostId))
+      return { success: true }
 
     log.debug({ event_type: event.type, repo: ownerRepo }, 'creating issue')
 

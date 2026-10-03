@@ -18,7 +18,7 @@ import {
 } from '@/lib/client/hooks/use-portal-posts-query'
 import { portalDetailQueries, type PublicPostDetailView } from '@/lib/client/queries/portal-detail'
 import type { PublicPostListItem } from '@/lib/shared/types'
-import type { PostId, BoardId } from '@quackback/ids'
+import type { PostId, BoardId, TagId } from '@quackback/ids'
 
 // ============================================================================
 // Types
@@ -43,6 +43,7 @@ interface VoteMutationContext {
 }
 
 interface CreatePostInput {
+  tagIds?: TagId[]
   boardId: BoardId
   title: string
   content: string
@@ -201,12 +202,13 @@ export function useCreatePublicPost() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ boardId, title, content, contentJson }: CreatePostInput) =>
+    mutationFn: ({ boardId, title, content, contentJson, tagIds }: CreatePostInput) =>
       createPublicPostFn({
         data: {
           boardId,
           title,
           content,
+          tagIds,
           contentJson: contentJson as { type: 'doc'; content?: unknown[] },
         },
       }),
