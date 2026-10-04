@@ -120,7 +120,10 @@ test.describe('Unauthenticated user — comments section', () => {
   // -------------------------------------------------------------------------
   test('Edit button is NOT shown to unauthenticated users', async ({ page }) => {
     const commentItems = page.locator('div[id^="comment-"]')
-    if ((await commentItems.count()) === 0) return
+    if ((await commentItems.count()) === 0) {
+      test.skip(true, 'no comment items on the page')
+      return
+    }
     await expect(page.getByRole('button', { name: /^edit$/i })).toHaveCount(0, { timeout: 5000 })
   })
 
@@ -158,7 +161,7 @@ test.describe('Unauthenticated user — comments section', () => {
   test('comments show author name', async ({ page }) => {
     const commentItems = page.locator('div[id^="comment-"]')
     if ((await commentItems.count()) === 0) {
-      // No seed comments on this post — skip gracefully
+      test.skip(true, 'No seed comments on this post')
       return
     }
 
@@ -175,13 +178,17 @@ test.describe('Unauthenticated user — comments section', () => {
   test('comments show a relative timestamp', async ({ page }) => {
     const commentItems = page.locator('div[id^="comment-"]')
     if ((await commentItems.count()) === 0) {
+      test.skip(true, 'no comment items on the page')
       return
     }
 
     // The <time datetime="..."> element is always rendered for timestamps,
     // regardless of the display format (e.g. "2 days ago", "just now", "3h").
     const timestamp = commentItems.first().locator('time[datetime]')
-    if ((await timestamp.count()) === 0) return
+    if ((await timestamp.count()) === 0) {
+      test.skip(true, 'no timestamp on the page')
+      return
+    }
     await expect(timestamp.first()).toBeVisible({ timeout: 5000 })
     const datetimeVal = await timestamp.first().getAttribute('datetime')
     expect(datetimeVal).toBeTruthy()
@@ -191,18 +198,27 @@ test.describe('Unauthenticated user — comments section', () => {
   test('comments are sorted most-recent-first (newest comment appears first)', async ({ page }) => {
     const commentItems = page.locator('div[id^="comment-"]')
     const count = await commentItems.count()
-    if (count < 2) return // need at least two comments to test ordering
+    if (count < 2) {
+      test.skip(true, 'need at least two comments to test ordering')
+      return
+    }
 
     // Grab the text content of the first two timestamps (TimeAgo elements)
     // They live inside the `<span>` rendered by <TimeAgo> which has a `datetime` attribute
     const timeEls = page.locator('div[id^="comment-"] time')
     const timeCount = await timeEls.count()
-    if (timeCount < 2) return // need at least two time elements to compare ordering
+    if (timeCount < 2) {
+      test.skip(true, 'need at least two time elements to compare ordering')
+      return
+    }
 
     const firstDatetime = await timeEls.nth(0).getAttribute('datetime')
     const secondDatetime = await timeEls.nth(1).getAttribute('datetime')
 
-    if (!firstDatetime || !secondDatetime) return
+    if (!firstDatetime || !secondDatetime) {
+      test.skip(true, 'no first datetime; no second datetime')
+      return
+    }
 
     const firstDate = new Date(firstDatetime).getTime()
     const secondDate = new Date(secondDatetime).getTime()
@@ -219,7 +235,10 @@ test.describe('Unauthenticated user — comments section', () => {
     const headingText =
       (await page.getByRole('heading', { name: /\d+ comments?/i }).textContent()) ?? ''
     const match = headingText.match(/^(\d+)\s+(.+)$/)
-    if (!match) return
+    if (!match) {
+      test.skip(true, 'no match')
+      return
+    }
 
     const count = parseInt(match[1], 10)
     const word = match[2].trim().toLowerCase()

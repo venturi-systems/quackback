@@ -566,7 +566,7 @@ test.describe('Voting — filtered board context', () => {
     const hasButtons = (await filteredVoteButtons.count()) > 0
 
     if (!hasButtons) {
-      // Board has no posts — nothing to vote on, test is vacuously satisfied
+      test.skip(true, 'Board has no posts — nothing to vote on, test is vacuously satisfied')
       return
     }
 

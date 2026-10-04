@@ -971,7 +971,7 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
     const cardCount = await postCards.count()
 
     if (cardCount === 0) {
-      // No posts for this status — valid result, test passes
+      test.skip(true, 'No posts for this status — valid result, test passes')
       return
     }
 
@@ -1003,7 +1003,7 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
     const emptyState = page.locator('text=/no posts|no results/i')
 
     if ((await emptyState.count()) > 0) {
-      // Empty state is acceptable
+      test.skip(true, 'Empty state is acceptable')
       return
     }
 

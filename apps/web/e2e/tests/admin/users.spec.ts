@@ -533,7 +533,10 @@ test.describe('Admin Users - Engagement Metrics', () => {
     const userCards = page.locator('[class*="cursor-pointer"]').filter({
       has: page.locator('div').filter({ hasText: /@/ }),
     })
-    if ((await userCards.count()) === 0) return
+    if ((await userCards.count()) === 0) {
+      test.skip(true, 'no user cards on the page')
+      return
+    }
 
     await userCards.first().click()
     await expect(page).toHaveURL(/selected=/, { timeout: 10000 })
@@ -559,7 +562,10 @@ test.describe('Admin Users - Engagement Metrics', () => {
     const userCards = page.locator('[class*="cursor-pointer"]').filter({
       has: page.locator('div').filter({ hasText: /@/ }),
     })
-    if ((await userCards.count()) === 0) return
+    if ((await userCards.count()) === 0) {
+      test.skip(true, 'no user cards on the page')
+      return
+    }
 
     await userCards.first().click()
     await expect(page).toHaveURL(/selected=/, { timeout: 10000 })
@@ -577,7 +583,10 @@ test.describe('Admin Users - Engagement Metrics', () => {
     const userCards = page.locator('[class*="cursor-pointer"]').filter({
       has: page.locator('div').filter({ hasText: /@/ }),
     })
-    if ((await userCards.count()) === 0) return
+    if ((await userCards.count()) === 0) {
+      test.skip(true, 'no user cards on the page')
+      return
+    }
 
     await userCards.first().click()
     await expect(page).toHaveURL(/selected=/, { timeout: 10000 })
@@ -665,7 +674,10 @@ test.describe('Admin Users - Advanced Filters', () => {
 
   test('Add filter button opens a popover with filter categories', async ({ page }) => {
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    if ((await addFilterButton.count()) === 0) {
+      test.skip(true, 'no add filter button on the page')
+      return
+    }
 
     await addFilterButton.click()
 
@@ -675,7 +687,10 @@ test.describe('Admin Users - Advanced Filters', () => {
 
   test('can filter by verified email status', async ({ page }) => {
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    if ((await addFilterButton.count()) === 0) {
+      test.skip(true, 'no add filter button on the page')
+      return
+    }
 
     await addFilterButton.click()
     await expect(page.getByText('Email Status')).toBeVisible({ timeout: 3000 })
@@ -694,7 +709,10 @@ test.describe('Admin Users - Advanced Filters', () => {
 
   test('can filter by post count', async ({ page }) => {
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    if ((await addFilterButton.count()) === 0) {
+      test.skip(true, 'no add filter button on the page')
+      return
+    }
 
     await addFilterButton.click()
     await expect(page.getByText('Post Count')).toBeVisible({ timeout: 3000 })
@@ -716,7 +734,10 @@ test.describe('Admin Users - Advanced Filters', () => {
   test('can clear an individual filter chip', async ({ page }) => {
     // Apply a verified filter first
     const addFilterButton = page.getByRole('button', { name: /add filter/i })
-    if ((await addFilterButton.count()) === 0) return
+    if ((await addFilterButton.count()) === 0) {
+      test.skip(true, 'no add filter button on the page')
+      return
+    }
 
     await addFilterButton.click()
     await page.getByText('Email Status').click()
@@ -746,7 +767,10 @@ test.describe('Admin Users - Advanced Filters', () => {
   test('sort pill buttons update URL with correct sort param', async ({ page }) => {
     // Sort options are rendered as pill buttons (not a combobox)
     const mostActiveButton = page.getByRole('button', { name: 'Most Active' })
-    if ((await mostActiveButton.count()) === 0) return
+    if ((await mostActiveButton.count()) === 0) {
+      test.skip(true, 'no most active button on the page')
+      return
+    }
 
     await mostActiveButton.click()
     await page.waitForLoadState('networkidle')
@@ -762,7 +786,10 @@ test.describe('Admin Users - Advanced Filters', () => {
 
   test('sort pill for Most Comments updates URL', async ({ page }) => {
     const button = page.getByRole('button', { name: 'Most Comments' })
-    if ((await button.count()) === 0) return
+    if ((await button.count()) === 0) {
+      test.skip(true, 'no button on the page')
+      return
+    }
 
     await button.click()
     await page.waitForLoadState('networkidle')
@@ -771,7 +798,10 @@ test.describe('Admin Users - Advanced Filters', () => {
 
   test('sort pill for Most Votes updates URL', async ({ page }) => {
     const button = page.getByRole('button', { name: 'Most Votes' })
-    if ((await button.count()) === 0) return
+    if ((await button.count()) === 0) {
+      test.skip(true, 'no button on the page')
+      return
+    }
 
     await button.click()
     await page.waitForLoadState('networkidle')
@@ -781,7 +811,10 @@ test.describe('Admin Users - Advanced Filters', () => {
   test('active sort pill is visually highlighted', async ({ page }) => {
     // "Newest" should be active on initial load
     const newestButton = page.getByRole('button', { name: 'Newest' })
-    if ((await newestButton.count()) === 0) return
+    if ((await newestButton.count()) === 0) {
+      test.skip(true, 'no newest button on the page')
+      return
+    }
 
     const classAttr = await newestButton.getAttribute('class')
     // Active pills have bg-muted / font-medium class
