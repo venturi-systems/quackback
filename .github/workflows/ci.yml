@@ -824,12 +824,17 @@ jobs:
       REDIS_URL: redis://localhost:6379
       TRUSTED_ORIGINS: http://acme.localhost:3000
       VENTURI_TEAM_EMAIL_DOMAINS: example.com,acme.example
-      DESIGN_FIXTURE_POSTGRES_ID: ${{ job.services.postgres.id }}
-      DESIGN_FIXTURE_REDIS_ID: ${{ job.services.redis.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           persist-credentials: false
+
+      - name: Record isolated render service identities
+        env:
+          DESIGN_FIXTURE_POSTGRES_ID: ${{ job.services.postgres.id }}
+          DESIGN_FIXTURE_REDIS_ID: ${{ job.services.redis.id }}
+        run: |
+          printf 'DESIGN_FIXTURE_POSTGRES_ID=%s\nDESIGN_FIXTURE_REDIS_ID=%s\n' "$DESIGN_FIXTURE_POSTGRES_ID" "$DESIGN_FIXTURE_REDIS_ID" >> "$GITHUB_ENV"
 
       - name: Verify the vendored design suite against its pin
         # The checker must be the suite release, byte for byte. Refuse to run
