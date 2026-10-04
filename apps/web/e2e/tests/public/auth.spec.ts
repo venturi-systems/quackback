@@ -237,9 +237,7 @@ test.describe('Portal Auth Dialog', () => {
     expect((await sessionResponse.json())?.user?.email).toBe(email)
   })
 
-  test('can return from the code step to the selected email and sign-in methods', async ({
-    page,
-  }, testInfo) => {
+  test('can change the email after requesting a verification code', async ({ page }, testInfo) => {
     await page.getByRole('button', { name: /log in/i }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible({ timeout: 5000 })
@@ -247,8 +245,9 @@ test.describe('Portal Auth Dialog', () => {
     await requestEmailCode(page, email)
     await dialog.getByRole('button', { name: 'Use a different email', exact: true }).click()
     await expect(dialog.getByLabel('Verification code', { exact: true })).toHaveCount(0)
-    await expect(dialog.locator('#inline-email-locked')).toBeVisible()
-    await expect(dialog.locator('#inline-email-locked')).toHaveValue(email)
+    await expect(dialog.locator('#inline-email-locked')).toHaveCount(0)
+    await expect(dialog.locator('#inline-email')).toBeEditable()
+    await enterEmail(page, email.replace('alex.morgan+', 'avery.stone+'))
   })
 
   test('resend cooldown button appears after sending code', async ({ page }, testInfo) => {
