@@ -8,9 +8,10 @@ test.use({ storageState: { cookies: [], origins: [] } })
 
 // FB-R21-READINESS-SHIFT-01: server-rendered help must survive hydration without
 // moving the form or losing an already-open native disclosure and its focus.
-for (const { width, textScale } of [
+for (const { width, height = 844, textScale } of [
   { width: 320, textScale: 1 },
   { width: 390, textScale: 1 },
+  { width: 375, height: 667, textScale: 1 },
   { width: 1440, textScale: 1 },
   { width: 320, textScale: 2 },
 ]) {
@@ -31,7 +32,7 @@ for (const { width, textScale } of [
         context = await browser.newContext({
           baseURL,
           storageState: { cookies: [], origins: [] },
-          viewport: { width, height: 844 },
+          viewport: { width, height },
         })
         await context.route('**/*', async (route) => {
           if (route.request().resourceType() === 'script') await scriptsReady
@@ -58,6 +59,21 @@ for (const { width, textScale } of [
           await document.fonts.ready
         })
         await summary.focus()
+        // Keep the keyboard indicator inside its target so it cannot overlap
+        // the adjacent provider button or the summary's marker and label.
+        const focusIndicator = await summary.evaluate((element) => {
+          const style = getComputedStyle(element)
+          return {
+            style: style.outlineStyle,
+            width: Number.parseFloat(style.outlineWidth),
+            offset: Number.parseFloat(style.outlineOffset),
+            inset: Number.parseFloat(style.paddingInlineStart),
+          }
+        })
+        expect(focusIndicator.style).not.toBe('none')
+        expect(focusIndicator.width).toBeGreaterThanOrEqual(2)
+        expect(focusIndicator.offset + focusIndicator.width).toBeLessThanOrEqual(0)
+        expect(focusIndicator.inset).toBeGreaterThanOrEqual(focusIndicator.width)
         if (expanded) await page.keyboard.press('Space')
         await expect(help).toHaveJSProperty('open', expanded)
         const geometry = () =>
@@ -73,6 +89,11 @@ for (const { width, textScale } of [
             )
         const before = await geometry()
         expect(before.length).toBe(5)
+        if (height === 667 && !expanded) {
+          expect(
+            await page.evaluate(() => document.documentElement.scrollHeight)
+          ).toBeLessThanOrEqual(height)
+        }
         const controls = readiness.locator('fieldset button, fieldset input')
         const ownDisabled = await controls.evaluateAll((elements) =>
           elements.map((element) => (element as HTMLInputElement | HTMLButtonElement).disabled)
@@ -92,6 +113,11 @@ for (const { width, textScale } of [
           for (const dimension of ['x', 'y', 'width', 'height'] as const) {
             expect(Math.abs(after[index][dimension] - before[index][dimension])).toBeLessThan(0.5)
           }
+        }
+        if (height === 667 && !expanded) {
+          expect(
+            await page.evaluate(() => document.documentElement.scrollHeight)
+          ).toBeLessThanOrEqual(height)
         }
         await expect(readiness.locator('fieldset')).toHaveJSProperty('disabled', false)
         // Readiness must not override a control's own validation/busy state.

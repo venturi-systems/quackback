@@ -20,7 +20,7 @@ export function PublicSignInReadiness({ children }: { children: ReactNode }) {
       {/* A native toggle before hydration may add open. Preserve that browser-owned
           state; all other attributes remain deterministic. */}
       <details className="text-base" data-public-sign-in-help suppressHydrationWarning>
-        <summary className="min-h-11 cursor-pointer py-2 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+        <summary className="min-h-11 cursor-pointer p-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring">
           {/* Both labels size one grid cell, so translations and text enlargement
               cannot move the form when readiness changes. Only one is exposed. */}
           <span className="inline-grid align-middle">

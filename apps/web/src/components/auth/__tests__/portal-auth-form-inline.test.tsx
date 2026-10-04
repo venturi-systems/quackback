@@ -187,28 +187,32 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
 
   // The OAuth tiles set `error` on popup/redirect failure; that error must show
   // even in OAuth-only setups where the email form (its old home) is hidden.
-  it('surfaces an OAuth provider error when the email form is hidden', async () => {
-    getEnabledOAuthProvidersMock.mockReturnValue([
-      { id: 'custom-oidc', name: 'Custom OIDC', type: 'generic-oauth' },
-    ])
-    const broadcast = await import('@/lib/client/hooks/use-auth-broadcast')
-    vi.mocked(broadcast.openAuthPopup).mockReturnValueOnce({
-      location: { href: '' },
-      close: vi.fn(),
-    } as unknown as Window)
-    // getOAuthRedirectUrl (mocked) returns undefined → initiateOAuth's error path.
-    render(
-      <PortalAuthFormInline
-        mode="login"
-        authConfig={{
-          found: true,
-          oauth: { password: false, magicLink: false, 'custom-oidc': true },
-        }}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /sign in with custom oidc/i }))
-    expect(await screen.findByText(/failed to initiate sign in/i)).toBeInTheDocument()
-  })
+  it.each(['default', 'brand'] as const)(
+    'FB-R21 preserves provider error content in the %s variant',
+    async (providerAppearance) => {
+      getEnabledOAuthProvidersMock.mockReturnValue([
+        { id: 'custom-oidc', name: 'Custom OIDC', type: 'generic-oauth' },
+      ])
+      const broadcast = await import('@/lib/client/hooks/use-auth-broadcast')
+      vi.mocked(broadcast.openAuthPopup).mockReturnValueOnce({
+        location: { href: '' },
+        close: vi.fn(),
+      } as unknown as Window)
+      // getOAuthRedirectUrl (mocked) returns undefined → initiateOAuth's error path.
+      render(
+        <PortalAuthFormInline
+          mode="login"
+          providerAppearance={providerAppearance}
+          authConfig={{
+            found: true,
+            oauth: { password: false, magicLink: false, 'custom-oidc': true },
+          }}
+        />
+      )
+      fireEvent.click(screen.getByRole('button', { name: /sign in with custom oidc/i }))
+      expect(await screen.findByText(/failed to initiate sign in/i)).toBeInTheDocument()
+    }
+  )
 })
 
 describe('PortalAuthFormInline — recovery-code break-glass link', () => {

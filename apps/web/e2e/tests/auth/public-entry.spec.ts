@@ -51,45 +51,78 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
     await expect(page.getByRole('navigation', { name: 'Legal and sitemap' })).toHaveCount(1)
     const initialViewports = []
-    for (const [width, height] of [
-      [1440, 900],
-      [1366, 768],
-      [1280, 720],
-      [768, 1024],
-      [390, 844],
-      [375, 667],
-    ]) {
-      await page.setViewportSize({ width, height })
-      await page.evaluate(() => document.fonts.ready.then(() => undefined))
-      const initial = await page.evaluate(() => {
-        const root = document.documentElement
-        const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
-        const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
-        const disclosure = document.querySelector('.portal-gate__roles')!.getBoundingClientRect()
-        return {
-          width: innerWidth,
-          height: innerHeight,
-          documentWidth: root.scrollWidth,
-          documentHeight: root.scrollHeight,
-          layoutTop: layout.top,
-          footerBottom: footer.bottom,
-          utilityGap: footer.top - disclosure.bottom,
-          overflow: getComputedStyle(root).overflowY,
-        }
+    try {
+      for (const [width, height] of [
+        [1440, 900],
+        [1366, 768],
+        [1280, 720],
+        [768, 1024],
+        [390, 844],
+        [375, 667],
+      ]) {
+        await page.setViewportSize({ width, height })
+        await page.evaluate(() => document.fonts.ready.then(() => undefined))
+        const initial = await page.evaluate(() => {
+          const root = document.documentElement
+          const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
+          const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
+          const disclosure = document.querySelector('.portal-gate__roles')!.getBoundingClientRect()
+          return {
+            width: innerWidth,
+            height: innerHeight,
+            documentWidth: root.scrollWidth,
+            documentHeight: root.scrollHeight,
+            clientWidth: root.clientWidth,
+            layoutTop: layout.top,
+            footerBottom: footer.bottom,
+            footerHeight: footer.height,
+            footerNavWidth: document
+              .querySelector('.venturi-footer__legal')!
+              .getBoundingClientRect().width,
+            footerLinks: Array.from(document.querySelectorAll('.venturi-footer a')).map((link) => {
+              const style = getComputedStyle(link)
+              return {
+                text: link.textContent,
+                box: link.getBoundingClientRect().toJSON(),
+                fontSize: style.fontSize,
+                fontWeight: style.fontWeight,
+                letterSpacing: style.letterSpacing,
+                fontOpticalSizing: style.fontOpticalSizing,
+                fontVariationSettings: style.fontVariationSettings,
+              }
+            }),
+            utilityGap: footer.top - disclosure.bottom,
+            overflow: getComputedStyle(root).overflowY,
+          }
+        })
+        // Preserve the failing viewport too: browser font advances can wrap a
+        // footer row even when the same font file and computed styles are used.
+        const footerFonts = await measureRenderedFonts(
+          page,
+          Array.from(
+            { length: 5 },
+            (_, index) => '.venturi-footer__legal li:nth-child(' + (index + 1) + ') a'
+          )
+        )
+        initialViewports.push({
+          ...initial,
+          browserVersion: page.context().browser()?.version(),
+          footerFonts,
+        })
+        expect(initial.documentHeight).toBeLessThanOrEqual(height)
+        expect(initial.documentWidth).toBeLessThanOrEqual(width)
+        expect(initial.layoutTop).toBeGreaterThanOrEqual(0)
+        expect(initial.footerBottom).toBeLessThanOrEqual(height)
+        expect(initial.utilityGap).toBeGreaterThanOrEqual(0)
+        expect(initial.utilityGap).toBeLessThanOrEqual(32)
+        expect(initial.overflow).not.toMatch(/hidden|clip/)
+      }
+    } finally {
+      await testInfo.attach('entry-initial-viewport', {
+        body: Buffer.from(JSON.stringify(initialViewports)),
+        contentType: 'application/json',
       })
-      expect(initial.documentHeight).toBeLessThanOrEqual(height)
-      expect(initial.documentWidth).toBeLessThanOrEqual(width)
-      expect(initial.layoutTop).toBeGreaterThanOrEqual(0)
-      expect(initial.footerBottom).toBeLessThanOrEqual(height)
-      expect(initial.utilityGap).toBeGreaterThanOrEqual(0)
-      expect(initial.utilityGap).toBeLessThanOrEqual(32)
-      expect(initial.overflow).not.toMatch(/hidden|clip/)
-      initialViewports.push(initial)
     }
-    await testInfo.attach('entry-initial-viewport', {
-      body: Buffer.from(JSON.stringify(initialViewports)),
-      contentType: 'application/json',
-    })
     await summary.focus()
     const focus = await measureFocusIndicator(summary)
     expect(

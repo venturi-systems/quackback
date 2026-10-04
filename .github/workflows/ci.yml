@@ -923,7 +923,7 @@ jobs:
           docker logs quackback-render 2>&1 | tail -100
           exit 1
 
-      # FB-R21 reuses this image and browser for eight serial readiness cases.
+      # FB-R21 reuses this image and browser for ten serial readiness cases.
       # No new job, matrix leg, or schedule; expected added runtime is under one
       # runner-minute and replaces the ad hoc readiness geometry check.
       - name: Sign in fixture identities, walk routes, and check public readiness
