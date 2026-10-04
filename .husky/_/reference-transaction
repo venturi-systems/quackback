@@ -1,0 +1,9 @@
+#!/bin/sh
+# venturi sister-device branch guard (stub). Placed in this repository's hooks directory by
+# venturi-sister-branch-guard on the services hub; it hands the `prepared` state of each
+# reference transaction to the device's one copy of the guard. Source: infra
+# agent-invariants/services-hub/sister-branch-guard/.
+[ "${1:-}" = prepared ] || exit 0
+guard="$HOME/.local/share/venturi/git-branch-guard/reference-transaction"
+[ -x "$guard" ] || exit 0
+exec "$guard" "$@"
