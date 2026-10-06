@@ -77,11 +77,13 @@ function result(overrides: Record<string, unknown> = {}) {
   }
 }
 
-/** Router state headed for `href`, resolved at `resolvedHref` (settled when equal). */
+/** Router state headed for `href`, resolved at `resolvedHref` (idle when equal). */
 function routerAt(href: string, resolvedHref: string | undefined = href) {
+  const at = (target: string) => ({ href: target, pathname: target.split('?')[0] })
   return {
-    location: { href },
-    resolvedLocation: resolvedHref === undefined ? undefined : { href: resolvedHref },
+    status: href === resolvedHref ? 'idle' : 'pending',
+    location: at(href),
+    resolvedLocation: resolvedHref === undefined ? undefined : at(resolvedHref),
   }
 }
 
@@ -203,7 +205,9 @@ describe('Roadmap selection query continuity', () => {
 // its default on every render, also after the visitor had clicked Home and
 // before that navigation committed, which replaced Home with the roadmap.
 describe('Roadmap default selection', () => {
-  function renderSelection(defaultRoadmapId: string | null = 'roadmap_first') {
+  const first = 'roadmap_first' as RoadmapId
+
+  function renderSelection(defaultRoadmapId: RoadmapId | null = first) {
     return renderHook(({ id }) => usePublicRoadmapSelection(id), {
       initialProps: { id: defaultRoadmapId },
     })
@@ -216,7 +220,7 @@ describe('Roadmap default selection', () => {
     expect(navigate).not.toHaveBeenCalled()
 
     routerIs(routerAt('/roadmap?sort=oldest'))
-    rerender({ id: 'roadmap_first' })
+    rerender({ id: first })
     expect(navigate).toHaveBeenCalledTimes(1)
     expect(navigate).toHaveBeenCalledWith({
       to: '/roadmap',
@@ -233,9 +237,30 @@ describe('Roadmap default selection', () => {
 
     // The board re-renders before Home commits: a query settles, a scroll.
     routerIs(routerAt('/', '/roadmap'))
-    rerender({ id: 'roadmap_first' })
-    rerender({ id: 'roadmap_first' })
+    rerender({ id: first })
+    rerender({ id: first })
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('does not navigate back after a navigation away has already settled', () => {
+    // Home commits after the board renders and before its effect runs, so the
+    // router is settled again, at the new address.
+    renderedRouter.mockReturnValue(routerAt('/roadmap'))
+    liveRouter.mockReturnValue(routerAt('/'))
+    renderSelection()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('writes the default when the idle address is encoded or ordered differently', () => {
+    // The guard reads the router's status, not a comparison of two hrefs that
+    // could differ in encoding or parameter order while nothing is pending.
+    routeSearch.mockReturnValue({ sort: 'oldest', search: 'a b' })
+    routerIs({
+      ...routerAt('/roadmap?sort=oldest&search=a%20b'),
+      resolvedLocation: { href: '/roadmap?search=a+b&sort=oldest', pathname: '/roadmap' },
+    })
+    renderSelection()
+    expect(navigate).toHaveBeenCalledTimes(1)
   })
 
   it('writes the default once while its own navigation is pending', () => {
@@ -243,13 +268,13 @@ describe('Roadmap default selection', () => {
     expect(navigate).toHaveBeenCalledTimes(1)
 
     routerIs(routerAt('/roadmap?roadmap=roadmap_first', '/roadmap'))
-    rerender({ id: 'roadmap_first' })
-    rerender({ id: 'roadmap_first' })
+    rerender({ id: first })
+    rerender({ id: first })
     expect(navigate).toHaveBeenCalledTimes(1)
 
     routeSearch.mockReturnValue({ roadmap: 'roadmap_first' })
     routerIs(routerAt('/roadmap?roadmap=roadmap_first'))
-    rerender({ id: 'roadmap_first' })
+    rerender({ id: first })
     expect(navigate).toHaveBeenCalledTimes(1)
   })
 
