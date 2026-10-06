@@ -16,6 +16,14 @@ export interface InboundWebhookResult {
   externalStatus: string
   /** Event type for logging (e.g. 'issue.updated', 'taskStatusUpdated') */
   eventType: string
+  /**
+   * Canonical URL of the changed item, for platforms whose `externalId` is
+   * unique only within a container. A GitHub issue number is unique only
+   * within its repository, so two repositories can each have issue #7. When
+   * set, only a link recorded with exactly this URL matches; a link with a
+   * different or missing URL is never updated by this event.
+   */
+  externalUrl?: string
 }
 
 /**
