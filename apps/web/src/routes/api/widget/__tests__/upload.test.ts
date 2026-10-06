@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mockSession, mockImageFile } from '../../__tests__/upload-fixtures'
 
+const admission = vi.hoisted(() => ({ assert: vi.fn() }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@/lib/server/auth', () => ({
   auth: { api: { getSession: vi.fn() } },
 }))
@@ -39,6 +44,7 @@ function authAs() {
 describe('POST /api/widget/upload', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    admission.assert.mockResolvedValue(undefined)
     widget.enabled = true
     vi.mocked(isS3Configured).mockReturnValue(true)
   })
@@ -55,6 +61,17 @@ describe('POST /api/widget/upload', () => {
     const res = await handleWidgetUpload({ request: makeRequest() })
     expect(res.status).toBe(401)
     expect(await res.json()).toMatchObject({ error: 'Unauthorized' })
+  })
+
+  it('refuses revoked widget approval without writing an attachment', async () => {
+    authAs()
+    admission.assert.mockRejectedValueOnce(new Error('Approval revoked'))
+    const res = await handleWidgetUpload({
+      request: makeRequest(mockImageFile('private.png', 'image/png'), 'valid-token'),
+    })
+    expect(res.status).toBe(403)
+    expect(admission.assert).toHaveBeenCalledWith(validSession.user.id)
+    expect(uploadObject).not.toHaveBeenCalled()
   })
 
   it('returns 503 when S3 is not configured', async () => {
@@ -89,9 +106,9 @@ describe('POST /api/widget/upload', () => {
     expect(await res.json()).toMatchObject({ error: expect.stringContaining('too large') })
   })
 
-  it('uploads image and returns publicUrl for any valid widget session', async () => {
-    // Identified or anonymous — the route only requires a valid session, so a
-    // live-chat visitor without an account can attach images too.
+  it('uploads image for a session admitted by the current portal policy', async () => {
+    // Public mode can admit an anonymous live-chat visitor. Private mode
+    // requires the same current account approval as other protected data.
     authAs()
     vi.mocked(uploadObject).mockResolvedValueOnce('https://cdn.example.com/widget-images/shot.webp')
     const file = mockImageFile('shot.webp', 'image/webp')

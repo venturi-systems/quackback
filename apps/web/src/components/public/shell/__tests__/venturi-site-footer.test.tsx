@@ -5,7 +5,7 @@ import { VenturiSiteFooter } from '../venturi-site-footer'
 
 // The footer mirrors the public website's contract (landing-page
 // src/content/site.ts legalLinks): the same five legal links, in the same
-// order, with the same labels, after the related sites and software notices.
+// order, immediately after copyright, below Product / Trust / Connect.
 describe('VenturiSiteFooter', () => {
   it('ends with the legal row in the public website order and labels', () => {
     render(<VenturiSiteFooter />)
@@ -21,29 +21,37 @@ describe('VenturiSiteFooter', () => {
     ])
   })
 
-  it('names the copyright holder and links the related sites and public notices', () => {
+  it('groups navigation consistently with the marketing footer', () => {
     render(<VenturiSiteFooter />)
-
-    const footer = screen.getByRole('contentinfo')
+    const product = screen.getByRole('region', { name: 'Product' })
     expect(
-      within(footer).getByText(`© ${new Date().getFullYear()} Venturi Systems, Inc.`)
-    ).toBeInTheDocument()
-    const related = within(footer).getByRole('navigation', { name: 'Related Venturi sites' })
-    expect(within(related).getByRole('link', { name: 'Venturi' })).toHaveAttribute(
+      within(product)
+        .getAllByRole('link')
+        .map((link) => link.textContent?.replace(' ↗', '').trim())
+    ).toEqual([
+      'Use Cases',
+      'How It Works',
+      'Platform',
+      'Documentation',
+      'Pricing',
+      'Product demo (opens in a new tab)',
+      'Login',
+    ])
+    expect(screen.queryByRole('link', { name: 'Deployment' })).not.toBeInTheDocument()
+    const demo = screen.getByRole('link', { name: /Product demo/ })
+    expect(demo).toHaveAttribute('target', '_blank')
+    expect(demo).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(screen.getByRole('link', { name: 'Legal' })).toHaveAttribute(
       'href',
-      'https://venturi.systems/'
-    )
-    expect(within(related).getByRole('link', { name: 'Documentation' })).toHaveAttribute(
-      'href',
-      'https://docs.venturi.systems/'
-    )
-    expect(within(related).getByRole('link', { name: 'Software notices' })).toHaveAttribute(
-      'href',
-      '/software-notices'
+      'https://venturi.systems/legal/'
     )
   })
-  it('keeps source licensing details on the public notices page', () => {
+  it('keeps copyright and sitemap adjacent in the same compact legal list', () => {
     render(<VenturiSiteFooter />)
+    const legal = screen.getByRole('navigation', { name: 'Legal and sitemap' })
+    const items = within(legal).getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('Venturi Systems, Inc.')
+    expect(items[1]).toHaveTextContent('Sitemap')
     expect(screen.queryByRole('link', { name: /Source code/ })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
       'href',

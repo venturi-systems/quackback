@@ -64,7 +64,9 @@ vi.mock('@/lib/client/hooks/use-auth-broadcast', () => ({
 
 // OtpCodeStep imports input-otp, which schedules real setTimeouts on mount.
 vi.mock('@/components/ui/input-otp', () => ({
-  InputOTP: (props: Record<string, unknown>) => <input {...(props as object)} />,
+  InputOTP: ({ children: _children, ...props }: Record<string, unknown>) => (
+    <input {...(props as object)} />
+  ),
   InputOTPGroup: ({ children }: { children?: ReactNode }) => <>{children}</>,
   InputOTPSlot: () => null,
   InputOTPSeparator: () => null,
@@ -165,11 +167,13 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
     const publicGate = document.createElement('div')
     publicGate.innerHTML = serverMarkup('brand')
     expect(publicGate.querySelector('button')).toBeDisabled()
-    expect(publicGate.querySelector('[role="status"]')).toHaveTextContent('enable JavaScript')
+    expect(
+      publicGate.querySelector('[data-public-sign-in-help] summary [aria-hidden="false"]')
+    ).toHaveTextContent('Sign-in needs JavaScript')
     const dialog = document.createElement('div')
     dialog.innerHTML = serverMarkup('default')
     expect(dialog.querySelector('fieldset')).toBeNull()
-    expect(dialog.querySelector('[role="status"]')).toBeNull()
+    expect(dialog.querySelector('[data-public-sign-in-help]')).toBeNull()
   })
 
   it('shows a no-methods message when neither email methods nor OAuth are configured', () => {
@@ -185,28 +189,32 @@ describe('PortalAuthFormInline — OAuth-only Stage 1 (#231)', () => {
 
   // The OAuth tiles set `error` on popup/redirect failure; that error must show
   // even in OAuth-only setups where the email form (its old home) is hidden.
-  it('surfaces an OAuth provider error when the email form is hidden', async () => {
-    getEnabledOAuthProvidersMock.mockReturnValue([
-      { id: 'custom-oidc', name: 'Custom OIDC', type: 'generic-oauth' },
-    ])
-    const broadcast = await import('@/lib/client/hooks/use-auth-broadcast')
-    vi.mocked(broadcast.openAuthPopup).mockReturnValueOnce({
-      location: { href: '' },
-      close: vi.fn(),
-    } as unknown as Window)
-    // getOAuthRedirectUrl (mocked) returns undefined → initiateOAuth's error path.
-    render(
-      <PortalAuthFormInline
-        mode="login"
-        authConfig={{
-          found: true,
-          oauth: { password: false, magicLink: false, 'custom-oidc': true },
-        }}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /sign in with custom oidc/i }))
-    expect(await screen.findByText(/failed to initiate sign in/i)).toBeInTheDocument()
-  })
+  it.each(['default', 'brand'] as const)(
+    'FB-R21 preserves provider error content in the %s variant',
+    async (providerAppearance) => {
+      getEnabledOAuthProvidersMock.mockReturnValue([
+        { id: 'custom-oidc', name: 'Custom OIDC', type: 'generic-oauth' },
+      ])
+      const broadcast = await import('@/lib/client/hooks/use-auth-broadcast')
+      vi.mocked(broadcast.openAuthPopup).mockReturnValueOnce({
+        location: { href: '' },
+        close: vi.fn(),
+      } as unknown as Window)
+      // getOAuthRedirectUrl (mocked) returns undefined → initiateOAuth's error path.
+      render(
+        <PortalAuthFormInline
+          mode="login"
+          providerAppearance={providerAppearance}
+          authConfig={{
+            found: true,
+            oauth: { password: false, magicLink: false, 'custom-oidc': true },
+          }}
+        />
+      )
+      fireEvent.click(screen.getByRole('button', { name: /sign in with custom oidc/i }))
+      expect(await screen.findByText(/failed to initiate sign in/i)).toBeInTheDocument()
+    }
+  )
 })
 
 describe('PortalAuthFormInline — recovery-code break-glass link', () => {
@@ -311,6 +319,83 @@ describe('PortalAuthFormInline — post-sign-in navigation', () => {
     // Navigation is solely the dialog opener's responsibility via the broadcast.
     expect(navigate).not.toHaveBeenCalled()
   })
+})
+
+describe('PortalAuthFormInline — OTP email return', () => {
+  const originalEmail = 'original@example.test'
+  const replacementEmail = 'replacement@example.test'
+  const sentEmails: string[] = []
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sentEmails.length = 0
+    getEnabledOAuthProvidersMock.mockReturnValue([])
+    lookupFnSpy.mockResolvedValue({ kind: 'methods', authConfig: { magicLink: true } })
+    vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      if (input === '/api/auth/invitation/inv_otp') {
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'inv_otp',
+            email: originalEmail,
+            role: null,
+            workspaceName: 'Acme',
+            inviterName: null,
+          }),
+        } as Response
+      }
+      expect(input).toBe('/api/auth/portal-signin')
+      const body = JSON.parse(String(init?.body)) as { email: string }
+      sentEmails.push(body.email)
+      return { ok: true } as Response
+    })
+  })
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it.each([
+    { invitation: false, action: 'button' },
+    { invitation: false, action: 'Escape' },
+    { invitation: true, action: 'button' },
+    { invitation: true, action: 'Escape' },
+  ])(
+    'returns with the correct email boundary for invitation=$invitation via $action',
+    async ({ invitation, action }) => {
+      renderForm({
+        mode: 'login',
+        authConfig: { found: true, oauth: { password: false, magicLink: true } },
+        invitationId: invitation ? 'inv_otp' : undefined,
+      })
+      if (!invitation) {
+        fireEvent.change(screen.getByLabelText(/^email$/i), { target: { value: originalEmail } })
+        fireEvent.click(screen.getByRole('button', { name: /^continue/i }))
+      }
+      fireEvent.click(await screen.findByRole('button', { name: 'Continue with email' }))
+      const code = await screen.findByLabelText('Verification code')
+      if (action === 'Escape') fireEvent.keyDown(code, { key: 'Escape' })
+      else fireEvent.click(screen.getByRole('button', { name: 'Use a different email' }))
+
+      expect(screen.queryByLabelText('Verification code')).not.toBeInTheDocument()
+      const email = screen.getByLabelText(/^email$/i)
+      expect(email).toHaveValue(originalEmail)
+      if (invitation) {
+        expect(email).toHaveAttribute('id', 'inline-email-locked')
+        expect(email).toHaveAttribute('readonly')
+      } else {
+        expect(email).toHaveAttribute('id', 'inline-email')
+        expect(email).not.toHaveAttribute('readonly')
+        expect(email).toBeEnabled()
+        fireEvent.change(email, { target: { value: replacementEmail } })
+        fireEvent.click(screen.getByRole('button', { name: /^continue/i }))
+      }
+      fireEvent.click(await screen.findByRole('button', { name: 'Continue with email' }))
+      await screen.findByLabelText('Verification code')
+      expect(sentEmails).toEqual([originalEmail, invitation ? originalEmail : replacementEmail])
+      expect(authClient.signIn.emailOtp).not.toHaveBeenCalled()
+    }
+  )
 })
 
 // E-16: a request that never reached the server surfaces as the browser's raw

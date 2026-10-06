@@ -44,6 +44,7 @@ vi.mock('@tanstack/react-start/server', () => ({
 
 const hoisted = vi.hoisted(() => ({
   mockRequireAuth: vi.fn(),
+  mockAdmission: vi.fn(),
   mockRecordAuditEvent: vi.fn(),
   mockDbInsert: vi.fn(),
   mockDbUpdate: vi.fn(),
@@ -65,6 +66,10 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock('@/lib/server/functions/auth-helpers', () => ({
   requireAuth: hoisted.mockRequireAuth,
+}))
+
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: hoisted.mockAdmission,
 }))
 
 vi.mock('@/lib/server/audit/log', () => ({
@@ -106,6 +111,7 @@ vi.mock('@/lib/server/db', () => {
     user: { email: 'email', id: 'id' },
     eq: vi.fn((col, val) => ({ col, val })),
     and: vi.fn((...args: unknown[]) => args),
+    inArray: vi.fn((col, val) => ({ col, val })),
     or: vi.fn((...args: unknown[]) => args),
     gt: vi.fn((col, val) => ({ col, val })),
     isNull: vi.fn((col) => ({ col, isNull: true })),
@@ -175,6 +181,7 @@ beforeEach(async () => {
 
   // Sensible defaults
   hoisted.mockRequireAuth.mockResolvedValue(ADMIN_AUTH)
+  hoisted.mockAdmission.mockResolvedValue(undefined)
   hoisted.mockGetBaseUrl.mockReturnValue('https://acme.example.com')
   hoisted.mockMintMagicLinkUrl.mockResolvedValue({
     url: 'https://acme.example.com/verify-magic-link?token=abc',
@@ -515,15 +522,41 @@ describe('cancelPortalInviteFn — validation', () => {
     )
   })
 
-  it('throws when invite is already accepted (non-pending)', async () => {
+  it('revokes an accepted portal approval and rechecks remaining grants', async () => {
     hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue({
       id: 'invite_1',
       kind: 'portal',
       status: 'accepted',
-      email: 'user@example.com',
+      email: 'avery@acme.example',
     })
+    hoisted.mockDbQuery.user.findFirst.mockResolvedValue({ id: 'user_avery' })
+    hoisted.mockAdmission.mockRejectedValue(new Error('Approval revoked'))
+    const result = await cancelHandler({ data: { inviteId: 'invite_1' } })
+    expect(result).toEqual({ inviteId: 'invite_1', status: 'canceled' })
+    expect(hoisted.mockAdmission).toHaveBeenCalledWith('user_avery')
+    expect(hoisted.mockDbUpdate).toHaveBeenCalledWith(
+      expect.arrayContaining([{ col: 'status', val: ['pending', 'accepted'] }])
+    )
+    expect(hoisted.mockRecordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'portal.invite.revoked',
+        before: { email: 'avery@acme.example', status: 'accepted' },
+      })
+    )
+    expect(hoisted.mockSendPortalInviteEmail).not.toHaveBeenCalled()
+  })
 
-    await expect(cancelHandler({ data: { inviteId: 'invite_1' } })).rejects.toThrow('already')
+  it('rejects an already canceled invitation without issuing another audit event', async () => {
+    hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue({
+      id: 'invite_1',
+      kind: 'portal',
+      status: 'canceled',
+      email: 'avery@acme.example',
+    })
+    await expect(cancelHandler({ data: { inviteId: 'invite_1' } })).rejects.toThrow(
+      'already canceled'
+    )
+    expect(hoisted.mockRecordAuditEvent).not.toHaveBeenCalled()
   })
 
   it('throws when kind is not portal (wrong kind guard)', async () => {
@@ -943,13 +976,13 @@ describe('cancelPortalInviteFn — race guard', () => {
     email: 'user@example.com',
   }
 
-  it('returns no_op_already_accepted when the UPDATE affects 0 rows', async () => {
+  it('returns no_op_already_revoked when the UPDATE affects 0 rows', async () => {
     hoisted.mockDbQuery.invitation.findFirst.mockResolvedValue(PENDING_INV)
-    // Simulate: row was concurrently accepted — WHERE status='pending' matches nothing.
+    // Simulate: the row was already revoked by another administrator.
     hoisted.mockDbReturning.mockResolvedValue([])
 
     const result = await cancelHandler({ data: { inviteId: 'invite_1' } })
-    expect((result as { status: string }).status).toBe('no_op_already_accepted')
+    expect((result as { status: string }).status).toBe('no_op_already_revoked')
   })
 
   it('does NOT record an audit event on race no-op', async () => {

@@ -16,6 +16,9 @@
     "e2e/utils/design-fixture-guard.ts",
     "e2e/utils/rendered-font-evidence.ts",
     "e2e/utils/browser-zoom-evidence.ts",
-    "e2e/utils/browser-zoom-actuator.ts"
+    "e2e/utils/browser-zoom-actuator.ts",
+    "playwright.render.config.ts",
+    "e2e/render/public-readiness.spec.ts",
+    "e2e/tests/auth/public-recovery.spec.ts"
   ]
 }

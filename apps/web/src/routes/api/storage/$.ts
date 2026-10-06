@@ -11,8 +11,12 @@ const PROXY_CACHE_TTL = 60 * 60 * 1000 // 1 hour
 const KEY_PREFIX = '/api/storage/'
 
 function extractKey(url: URL): string | null {
-  const key = decodeURIComponent(url.pathname.slice(KEY_PREFIX.length))
-  return key && !key.includes('..') ? key : null
+  try {
+    const key = decodeURIComponent(url.pathname.slice(KEY_PREFIX.length))
+    return key && !key.includes('..') ? key : null
+  } catch {
+    return null
+  }
 }
 
 // Reads up to maxBytes from the request body stream, cancelling early if exceeded.
@@ -125,11 +129,44 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
     return Response.json({ error: 'Invalid storage key' }, { status: 400 })
   }
 
+  // Only the currently configured public brand assets may be fetched before
+  // admission. Exact keys preserve sign-in and email logos without making a
+  // whole storage prefix public or trusting the caller's ?email=1 flag.
+  let publicBrandAsset: boolean
+  try {
+    const { db } = await import('@/lib/server/db')
+    const branding = await db.query.settings.findFirst({
+      columns: { logoKey: true, faviconKey: true, headerLogoKey: true },
+    })
+    publicBrandAsset =
+      !!branding && [branding.logoKey, branding.faviconKey, branding.headerLogoKey].includes(key)
+    if (!publicBrandAsset) {
+      const { resolvePortalAccessForRequest } = await import('@/lib/server/functions/portal-access')
+      const access = await resolvePortalAccessForRequest()
+      if (!access.granted) {
+        return Response.json(
+          { error: 'Forbidden' },
+          { status: 403, headers: { 'Cache-Control': 'no-store' } }
+        )
+      }
+    }
+  } catch {
+    return Response.json(
+      { error: 'Access unavailable' },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } }
+    )
+  }
+  // Protected content is always streamed through the admission boundary.
+  // Never hand out a reusable presigned URL or a cacheable private response.
+  const cacheControl = publicBrandAsset
+    ? 'public, max-age=31536000, immutable'
+    : 'private, no-store'
+
   // Force proxy for email embeds (?email=1) since email clients don't follow redirects
   const forceProxy = url.searchParams.has('email')
 
   try {
-    if (config.s3Proxy || forceProxy) {
+    if (config.s3Proxy || forceProxy || !publicBrandAsset) {
       const cached = proxyCache.get(key)
       if (cached) {
         if (Date.now() - cached.cachedAt < PROXY_CACHE_TTL) {
@@ -137,7 +174,7 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
             status: 200,
             headers: {
               'Content-Type': cached.contentType,
-              'Cache-Control': 'public, max-age=31536000, immutable',
+              'Cache-Control': cacheControl,
               // Stored Content-Types originate from upload requests — never
               // let a browser second-guess them on a same-origin response.
               'X-Content-Type-Options': 'nosniff',
@@ -156,7 +193,7 @@ export async function handleStorageGet({ request }: { request: Request }): Promi
         status: 200,
         headers: {
           'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Cache-Control': cacheControl,
           'X-Content-Type-Options': 'nosniff',
         },
       })

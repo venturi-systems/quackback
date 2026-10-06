@@ -79,61 +79,27 @@ export function headerForStep(
     }
   }
 
-  // Base step. On the private-portal gate the copy frames the portal as private
-  // rather than nudging the public "vote and comment" action.
+  // Frame the entry around collaboration rather than access to the product.
   if (opts?.surface === 'private-portal') {
-    const workspace = opts.workspaceName?.trim()
+    const workspace = opts.workspaceName?.trim() || 'Venturi'
     return {
-      title:
-        mode === 'login' ? (
-          workspace ? (
-            <FormattedMessage
-              id="portal.auth.private.loginTitle"
-              defaultMessage="Sign in to access {workspace}"
-              values={{ workspace }}
-            />
-          ) : (
-            <FormattedMessage
-              id="portal.auth.private.loginTitleGeneric"
-              defaultMessage="Sign in to continue"
-            />
-          )
-        ) : workspace ? (
-          <FormattedMessage
-            id="portal.auth.private.signupTitle"
-            defaultMessage="Create your {workspace} account"
-            values={{ workspace }}
-          />
-        ) : (
-          <FormattedMessage
-            id="portal.auth.private.signupTitleGeneric"
-            defaultMessage="Create an account to continue"
-          />
-        ),
-      // An authenticated portal is open to anyone who signs in: say that, as
-      // the gate's own lead does, instead of calling it private.
+      title: (
+        <FormattedMessage
+          id="portal.auth.feedback.title"
+          defaultMessage="Share feedback with {workspace}"
+          values={{ workspace }}
+        />
+      ),
       description:
         opts.visibility === 'authenticated' ? (
-          mode === 'login' ? (
-            <FormattedMessage
-              id="portal.auth.open.loginTagline"
-              defaultMessage="Anyone who signs in can read and take part. Sign in or create an account to continue."
-            />
-          ) : (
-            <FormattedMessage
-              id="portal.auth.open.signupTagline"
-              defaultMessage="Anyone who signs in can read and take part. Create an account to continue."
-            />
-          )
-        ) : mode === 'login' ? (
           <FormattedMessage
-            id="portal.auth.private.loginTagline"
-            defaultMessage="This portal is private. Sign in or create an account to continue."
+            id="portal.auth.feedback.description"
+            defaultMessage="Share ideas, discuss improvements, and follow progress with our team."
           />
         ) : (
           <FormattedMessage
-            id="portal.auth.private.signupTagline"
-            defaultMessage="This portal is private. Create an account to continue."
+            id="portal.auth.feedback.approvedDescription"
+            defaultMessage="Sign in with an approved account to share ideas, discuss improvements, and follow progress."
           />
         ),
     }

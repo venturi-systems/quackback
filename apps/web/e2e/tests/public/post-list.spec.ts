@@ -107,8 +107,8 @@ test.describe('Public Post List', () => {
     const trendingButton = page.getByRole('button', { name: /^Trending$/i })
     await trendingButton.click()
 
-    // URL should update with sort parameter
-    await expect(page).toHaveURL(/[?&]sort=trending/)
+    // Trending is the default, so its redundant parameter is omitted.
+    await expect(page).toHaveURL((url) => url.pathname === '/' && !url.searchParams.has('sort'))
 
     // "Trending" should now be active
     await expect(trendingButton).toHaveClass(/font-medium/)
@@ -153,7 +153,7 @@ test.describe('Public Post List', () => {
 
     // Switch back to Trending
     await trendingButton.click()
-    await expect(page).toHaveURL(/[?&]sort=trending/)
+    await expect(page).toHaveURL((url) => url.pathname === '/' && !url.searchParams.has('sort'))
     await expect(trendingButton).toHaveClass(/font-medium/)
     await expect(topButton).not.toHaveClass(/font-medium/)
   })

@@ -1,5 +1,8 @@
 import path from 'node:path'
 import { defineConfig, devices } from '@playwright/test'
+import { assertDesignFixtureEnvironmentSync } from './e2e/utils/design-fixture-guard'
+
+if (process.env.CI) assertDesignFixtureEnvironmentSync()
 
 /**
  * Playwright configuration for the signed-in render lane (e2e/render/README.md).
@@ -44,6 +47,14 @@ export default defineConfig({
       name: 'render-keyboard',
       testMatch: /render\/keyboard-walk\.spec\.ts/,
       dependencies: ['render-identities'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'render-public-readiness',
+      testMatch: /render\/public-readiness\.spec\.ts/,
+      // Readiness changes fixture visibility only after existing walks finish.
+      dependencies: ['render-keyboard'],
+      fullyParallel: false,
       use: { ...devices['Desktop Chrome'] },
     },
   ],

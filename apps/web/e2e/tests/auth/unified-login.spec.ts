@@ -108,8 +108,8 @@ test('(1b) signed-in admin navigating to /admin lands there (not on the dialog)'
   // bypass the `beforeEach` clearCookies + initScript, which would interfere
   // with loading an existing session via storageState.
   const ctx = await browser.newContext({ storageState: 'e2e/.auth/admin.json' })
-  const page = await ctx.newPage()
   try {
+    const page = await ctx.newPage()
     await page.goto('/admin')
     await expect(page).toHaveURL(/\/admin/, { timeout: 15000 })
     await expect(page.getByRole('navigation').first()).toBeVisible({ timeout: 15000 })
@@ -124,36 +124,39 @@ test('(1b) signed-in admin navigating to /admin lands there (not on the dialog)'
 
 test('(2) portal user reaching /admin gets not_team_member error toast', async ({ context }) => {
   // Enable magic-link just long enough to establish the portal user session.
-  setPortalAuthMethods('enable-magic-link')
   try {
+    setPortalAuthMethods('enable-magic-link')
     await loginViaMagicLink(context, PORTAL_EMAIL, { role: 'user' })
   } finally {
     setPortalAuthMethods('restore')
   }
 
   const page = await context.newPage()
-  await page.goto('/admin')
-  await page.waitForLoadState('networkidle')
+  try {
+    await page.goto('/admin')
+    await page.waitForLoadState('networkidle')
 
-  // requireWorkspaceRole bounces via buildSigninRedirect('/admin', { error: 'not_team_member' }).
-  // auth=signin serializes cleanly; match directly.
-  await expect(page).toHaveURL(/[?&]auth=signin/, { timeout: 15000 })
+    // requireWorkspaceRole bounces via buildSigninRedirect('/admin', { error: 'not_team_member' }).
+    // auth=signin serializes cleanly; match directly.
+    await expect(page).toHaveURL(/[?&]auth=signin/, { timeout: 15000 })
 
-  // Assert the specific error code is not_team_member.
-  const errorUrl = new URL(page.url())
-  const rawError = errorUrl.searchParams.get('error')
-  const errorCode = rawError?.startsWith('"') ? JSON.parse(rawError) : rawError
-  expect(errorCode).toBe('not_team_member')
+    // Assert the specific error code is not_team_member.
+    const errorUrl = new URL(page.url())
+    const rawError = errorUrl.searchParams.get('error')
+    const errorCode = rawError?.startsWith('"') ? JSON.parse(rawError) : rawError
+    expect(errorCode).toBe('not_team_member')
 
-  // useAutoOpenAuthDialog fires the error toast before opening the dialog. Scope
-  // to the toast: portal copy (the participation explainer) also mentions team access.
-  await expect(
-    page.locator('[data-sonner-toast]').filter({ hasText: /team access|team membership/i })
-  ).toBeVisible({ timeout: 10000 })
+    // useAutoOpenAuthDialog fires the error toast before opening the dialog. Scope
+    // to the toast: portal copy (the participation explainer) also mentions team access.
+    await expect(
+      page.locator('[data-sonner-toast]').filter({ hasText: /team access|team membership/i })
+    ).toBeVisible({ timeout: 10000 })
 
-  // The user is NOT on /admin.
-  expect(page.url()).not.toMatch(/\/admin/)
-  await page.close()
+    // The user is NOT on /admin.
+    expect(page.url()).not.toMatch(/\/admin/)
+  } finally {
+    await page.close()
+  }
 })
 
 // ── Journey 3 ────────────────────────────────────────────────────────────────
@@ -181,8 +184,8 @@ test('(2) portal user reaching /admin gets not_team_member error toast', async (
 //      router.navigate({ to: '/admin' }).
 
 test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ page }) => {
-  setPortalVisibility('private')
   try {
+    setPortalVisibility('private')
     // /admin redirects to /?auth=signin&callbackUrl=/admin; the _portal loader
     // evaluates the anonymous visitor against the private portal → denied →
     // gate rendered with autoOpenSignin='login'.
@@ -194,7 +197,7 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 
     // The gate renders the shared auth form inline (no modal). Its private-
     // portal copy + the email field prove the gate rendered the form directly.
-    await expect(page.getByText(/this portal is private/i)).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText(/sign in with an approved account/i)).toBeVisible({ timeout: 15000 })
     await expect(page.getByLabel(/email/i)).toBeVisible({ timeout: 15000 })
 
     // ── Simulate post-sign-in: inject admin session + broadcast auth-success ──
@@ -236,18 +239,19 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 test('(4) /?prompt=login shows the dialog with OIDC button and recovery-code link', async ({
   page,
 }) => {
-  seedIdentityProvider({
-    registrationId: BTN_RID,
-    label: BTN_LABEL,
-    clientId: 'e2e-unified-btn-client',
-    discoveryUrl: DISCOVERY_URL,
-    enabled: true,
-    showButton: true,
-  })
-  // Disable password + magic-link so Stage 1 is SSO-only: the recovery link
-  // renders only in the SSO views, not in the generic email-entry Stage 1.
-  setPortalAuthMethods('disable')
   try {
+    // Helpers can write before their subprocess reports failure.
+    seedIdentityProvider({
+      registrationId: BTN_RID,
+      label: BTN_LABEL,
+      clientId: 'e2e-unified-btn-client',
+      discoveryUrl: DISCOVERY_URL,
+      enabled: true,
+      showButton: true,
+    })
+    // Disable password + magic-link so Stage 1 is SSO-only: the recovery link
+    // renders only in the SSO views, not in the generic email-entry Stage 1.
+    setPortalAuthMethods('disable')
     // ?prompt=login opens the dialog; ?callbackUrl=/admin makes isTeamCallback true
     // so the recovery-code link renders inside the SSO-only Stage 1.
     await page.goto('/?prompt=login&callbackUrl=%2Fadmin')
@@ -270,8 +274,12 @@ test('(4) /?prompt=login shows the dialog with OIDC button and recovery-code lin
       /\/auth\/recovery/
     )
   } finally {
-    removeIdentityProvider(BTN_RID)
-    setPortalAuthMethods('restore')
+    try {
+      removeIdentityProvider(BTN_RID)
+    } finally {
+      // Restoration must still be attempted if provider removal fails.
+      setPortalAuthMethods('restore')
+    }
   }
 })
 
@@ -302,26 +310,26 @@ test('(5) /auth/recovery renders the standalone recovery form', async ({ page })
 test('(6) corporate button hidden; verified-domain email routes to corporate IdP', async ({
   page,
 }) => {
-  // Button-only provider: visible in the button list (control).
-  seedIdentityProvider({
-    registrationId: BTN_RID,
-    label: BTN_LABEL,
-    clientId: 'e2e-unified-btn-client',
-    discoveryUrl: DISCOVERY_URL,
-    enabled: true,
-    showButton: true,
-  })
-  // Routed-only corporate provider: enforced verified domain, NOT in button list.
-  seedIdentityProvider({
-    registrationId: CORP_RID,
-    label: CORP_LABEL,
-    clientId: 'e2e-unified-corp-client',
-    discoveryUrl: DISCOVERY_URL,
-    enabled: true,
-    showButton: false,
-    domain: { name: CORP_DOMAIN, verified: true, enforced: true },
-  })
   try {
+    // Button-only provider: visible in the button list (control).
+    seedIdentityProvider({
+      registrationId: BTN_RID,
+      label: BTN_LABEL,
+      clientId: 'e2e-unified-btn-client',
+      discoveryUrl: DISCOVERY_URL,
+      enabled: true,
+      showButton: true,
+    })
+    // Routed-only corporate provider: enforced verified domain, NOT in button list.
+    seedIdentityProvider({
+      registrationId: CORP_RID,
+      label: CORP_LABEL,
+      clientId: 'e2e-unified-corp-client',
+      discoveryUrl: DISCOVERY_URL,
+      enabled: true,
+      showButton: false,
+      domain: { name: CORP_DOMAIN, verified: true, enforced: true },
+    })
     // Open dialog via ?auth=signin (serializes cleanly, no JSON-quoting needed).
     await page.goto('/?auth=signin')
     await page.waitForLoadState('networkidle')
@@ -357,7 +365,11 @@ test('(6) corporate button hidden; verified-domain email routes to corporate IdP
     expect(body).toContain('sso-redirect')
     expect(body).toContain(CORP_RID)
   } finally {
-    removeIdentityProvider(BTN_RID)
-    removeIdentityProvider(CORP_RID)
+    try {
+      removeIdentityProvider(BTN_RID)
+    } finally {
+      // Attempt both removals even if the first cleanup fails.
+      removeIdentityProvider(CORP_RID)
+    }
   }
 })

@@ -58,6 +58,12 @@ export async function getWidgetSession(opts?: {
     if (!sessionRecord?.user) return null
 
     const userId = sessionRecord.userId as UserId
+    const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+    try {
+      await assertPortalContentAdmission(userId)
+    } catch {
+      return null
+    }
 
     const { getSettings } = await import('./workspace')
     const appSettings = await getSettings()
@@ -134,6 +140,9 @@ export async function getWidgetBetterAuthFallback(
     if (!sessionResult?.user) return null
 
     const userId = sessionResult.user.id as UserId
+    const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+    await assertPortalContentAdmission(userId)
+
     const principalRecord = await db.query.principal.findFirst({
       where: eq(principal.userId, userId),
     })

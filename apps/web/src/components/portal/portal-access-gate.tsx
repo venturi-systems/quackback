@@ -4,12 +4,11 @@
  * Rendered in place (HTTP 200) when the visitor may not read the portal yet.
  * Portal chrome, boards, posts and roadmap content are not rendered before
  * access is granted. The unauthenticated page is a compact sign-in surface
- * with the Venturi header, access guidance and an optional permissions
- * disclosure. Signed-in access-denied rendering keeps its existing shell.
+ * with the Venturi header and collaboration guidance. Signed-in access-denied
+ * rendering keeps its existing shell.
  *
  * Two variants:
- *   - unauthenticated: explanation, the shared portal auth form, and the
- *     who-can-do-what summary.
+ *   - unauthenticated: collaboration context and the shared portal auth form.
  *   - unauthorized: the signed-in account has no access; explanation and a
  *     sign-out action.
  *
@@ -33,7 +32,6 @@ import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
 import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer'
-import { PortalRolesExplainer } from '@/components/portal/portal-roles-explainer'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
@@ -176,7 +174,6 @@ function GateCard({
   // The base step explains the portal; later steps (email code, password
   // reset) show that step's own description instead.
   const isBaseStep = stepCtx.step === 'credentials'
-  const anyoneCanRead = visibility === 'authenticated'
 
   // Why the last sign-in or access attempt was refused, kept on the page
   // (the redirect's toast alone disappears). A code without its own message
@@ -233,17 +230,7 @@ function GateCard({
         {notice}
         {isBaseStep ? (
           <p className="portal-gate__access" data-testid="portal-gate-access">
-            {anyoneCanRead ? (
-              <FormattedMessage
-                id="portal.gate.accessOpen"
-                defaultMessage="Anyone who signs in can read and take part."
-              />
-            ) : (
-              <FormattedMessage
-                id="portal.gate.accessPrivate"
-                defaultMessage="This portal is private: only people given access can read it."
-              />
-            )}
+            {header.description}
           </p>
         ) : (
           <p className="portal-gate__lead">{header.description}</p>
@@ -270,18 +257,6 @@ function GateCard({
           )}
         </div>
       </section>
-
-      {/* Keep permissions available on demand without lengthening the initial sign-in view. */}
-      {isBaseStep && (
-        <details className="portal-gate__roles">
-          <summary className="portal-gate__roles-summary">
-            <h2 id="portal-gate-roles-title">
-              <FormattedMessage id="portal.roles.title" defaultMessage="Who can do what" />
-            </h2>
-          </summary>
-          <PortalRolesExplainer visibility={visibility} labelledBy="portal-gate-roles-title" />
-        </details>
-      )}
     </div>
   )
 }
