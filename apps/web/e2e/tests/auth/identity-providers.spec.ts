@@ -3,7 +3,7 @@
  *
  * Covers the two visibility/routing shapes the provider model introduces:
  *  (1) A button-only provider (enabled, creds, NO verified domain) surfaces in
- *      the portal login's public OIDC button list ("Continue with <label>").
+ *      the portal login's public OIDC button list ("Sign in with <label>").
  *  (2) A domain-bound ENFORCED provider:
  *        - an email at its verified domain routes to it: `lookupAuthMethodsFn`
  *          returns `{ kind: 'sso-redirect', providerId: <that provider> }`;
@@ -73,15 +73,15 @@ test('(1) button-only provider surfaces in the portal OIDC button list', async (
   await page.goto('/auth/login')
   await page.waitForLoadState('networkidle')
 
-  // The button-only provider renders its "Continue with <label>" button.
+  // The button-only provider renders its "Sign in with <label>" button.
   await expect(
-    page.getByRole('button', { name: new RegExp(`Continue with ${BUTTON_LABEL}`, 'i') })
+    page.getByRole('button', { name: new RegExp(`Sign in with ${BUTTON_LABEL}`, 'i') })
   ).toBeVisible({ timeout: 15000 })
 
   // The enforced provider is routed-only (verified domain + showButton:false),
   // so it must NOT appear as a public button.
   await expect(
-    page.getByRole('button', { name: new RegExp(`Continue with ${ENFORCED_LABEL}`, 'i') })
+    page.getByRole('button', { name: new RegExp(`Sign in with ${ENFORCED_LABEL}`, 'i') })
   ).toHaveCount(0)
 })
 

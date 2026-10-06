@@ -222,39 +222,32 @@ test.describe('Admin Post Management', () => {
     }
   })
 
-  test('can vote on a post in detail view', async ({ page }) => {
-    // First, select a post to view details
-    const postCards = page.locator('[class*="cursor-pointer"]').filter({
-      has: page.locator('h3'),
-    })
+  test('can add a voter from post detail and persist the vote', async ({ page }) => {
+    const firstPost = page.locator('h3').first()
+    await expect(firstPost).toBeVisible()
+    await firstPost.click()
+    const modal = page.getByRole('dialog', { name: 'Edit post', exact: true })
+    await expect(modal).toBeVisible()
 
-    if ((await postCards.count()) > 0) {
-      await postCards.first().click()
+    // Editors manage votes on behalf of users; the self-vote button belongs to
+    // the public post view. Measure the count in this post's metadata only.
+    const upvotes = modal.getByText('Upvotes', { exact: true }).locator('..').locator('..')
+    const voteCount = upvotes.locator('.tabular-nums')
+    await expect(voteCount).toHaveText(/^\d+$/)
+    const initialCount = Number(await voteCount.textContent())
 
-      // Wait for detail panel to load
-      await page.waitForLoadState('networkidle')
+    await modal.getByRole('button', { name: 'Add voter', exact: true }).click()
+    await page.getByRole('button', { name: 'Create new user', exact: true }).click()
+    await page.getByPlaceholder('Name', { exact: true }).fill('Jordan Mercer')
+    await page
+      .getByPlaceholder('Email (optional)', { exact: true })
+      .fill('jordan.mercer.' + Date.now() + '@acme.example')
+    await page.getByRole('button', { name: 'Create & add vote', exact: true }).click()
+    await expect(voteCount).toHaveText(String(initialCount + 1))
 
-      // The post opens in a modal dialog
-      const modal = page.getByRole('dialog')
-      await expect(modal).toBeVisible({ timeout: 10000 })
-
-      // Look for the vote button in the detail panel
-      const voteButton = page.getByTestId('vote-button')
-
-      if ((await voteButton.count()) > 0) {
-        // Get initial vote count scoped to the modal to avoid strict-mode violation
-        const voteCount = modal.getByTestId('vote-count')
-        const initialCount = await voteCount.textContent()
-
-        // Click to vote
-        await voteButton.click()
-
-        // Vote count should change
-        await page.waitForTimeout(500)
-        const newCount = await voteCount.textContent()
-        expect(newCount).not.toBe(initialCount)
-      }
-    }
+    await page.reload()
+    await expect(modal).toBeVisible()
+    await expect(voteCount).toHaveText(String(initialCount + 1))
   })
 
   test('can open edit dialog from post detail', async ({ page }) => {

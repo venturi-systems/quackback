@@ -324,16 +324,17 @@ test.describe('Changelog edit entry', () => {
 
   test('closing edit modal removes entry param from URL', async ({ page }) => {
     const firstCard = page.locator('h3').first()
-    if ((await firstCard.count()) === 0) {
-      test.skip()
-      return
-    }
-
+    await expect(firstCard).toBeVisible()
     await firstCard.click()
     await expect(page).toHaveURL(/entry=/, { timeout: 10000 })
 
+    // The URL changes before the asynchronously loaded dialog is ready for Escape.
+    const dialog = page.getByRole('dialog', { name: 'Edit changelog entry' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByPlaceholder("What's new?")).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(page).not.toHaveURL(/entry=/, { timeout: 5000 })
+    await expect(dialog).toBeHidden()
+    await expect(page).not.toHaveURL(/entry=/)
   })
 })
 
@@ -945,28 +946,20 @@ test.describe('Changelog search and filter', () => {
   })
 
   test('status filter: clicking Draft shows only draft entries', async ({ page }) => {
-    const draftFilter = page.getByRole('option', { name: 'Draft' })
-    if ((await draftFilter.count()) === 0) {
-      test.skip(true, 'no draft filter on the page')
-      return
-    }
-
+    const title = await createEntry(page, 'Draft filter ' + Date.now())
+    expect(title).not.toBeNull()
+    const draftFilter = page.getByRole('option', { name: 'Draft', exact: true })
+    await expect(draftFilter).toBeVisible()
     await draftFilter.click()
-    await page.waitForLoadState('networkidle')
+    await expect(page).toHaveURL(/status=draft/)
+    await expect(draftFilter).toHaveAttribute('aria-selected', 'true')
 
-    // If entries are visible, none should have a "Published" badge.
-    //
-    // Scope to the entry list. The left-hand Status filter pane is always in
-    // the DOM and always renders a "Published" option (ChangelogFiltersPanel's
-    // CHANGELOG_STATUSES), so a page-wide count can never reach 0 and this
-    // assertion could not pass regardless of whether the filter worked.
-    // AdminFilterLayout puts the list in a <main> that is the sibling of the
-    // filter <aside>. Three <main>s nest on this page (admin shell > route >
-    // layout), so select the innermost one rather than counting levels.
+    // Require a nonempty draft result and await query completion. A synchronous
+    // count can still observe the previous unfiltered list during navigation.
     const entryList = page.locator('main:not(:has(main))')
-    const publishedBadges = entryList.getByText(/^Published$/)
-    const count = await publishedBadges.count()
-    expect(count).toBe(0)
+    await expect(entryList.getByRole('heading', { name: title!, exact: true })).toBeVisible()
+    await expect(entryList.getByText(/^Published$/)).toHaveCount(0)
+    await expect(entryList.getByText(/^Scheduled$/)).toHaveCount(0)
   })
 
   test('status filter: clicking All resets the filter', async ({ page }) => {

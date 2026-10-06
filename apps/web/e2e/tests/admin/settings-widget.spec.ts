@@ -116,23 +116,49 @@ test.describe('Admin Widget Settings', () => {
     ).toBeVisible()
   })
 
-  test('shows Content card with image uploads toggle', async ({ page }) => {
-    await expect(page.getByText('Content').first()).toBeVisible({ timeout: 10000 })
-    await expect(
-      page.getByText(
-        'Control what rich content types users can include in their feedback submissions.'
-      )
-    ).toBeVisible()
+  test('persists content tabs and prevents disabling the last section', async ({ page }) => {
+    const feedback = page.getByRole('switch', { name: 'Feedback tab', exact: true })
+    const changelog = page.getByRole('switch', { name: 'Changelog tab', exact: true })
+    await expect(feedback).toBeVisible()
+    await expect(changelog).toBeVisible()
+    const initialFeedback = await feedback.isChecked()
+    const initialChangelog = await changelog.isChecked()
 
-    await expect(page.getByText('Image Uploads')).toBeVisible()
-    await expect(
-      page.getByText(
-        'Allow signed-in users to attach images when submitting feedback through the widget.'
+    async function setTab(tab: typeof feedback, checked: boolean) {
+      if ((await tab.isChecked()) === checked) return
+      await expect(tab).toBeEnabled()
+      const saved = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          response.url().includes('/_serverFn/') &&
+          (response.request().postData() ?? '').includes('"tabs"')
       )
-    ).toBeVisible()
+      await tab.click()
+      expect((await saved).ok()).toBe(true)
+      await expect(tab).toBeChecked({ checked })
+    }
 
-    const imageUploadsSwitch = page.locator('#image-uploads-in-widget')
-    await expect(imageUploadsSwitch).toBeVisible()
+    try {
+      // Widget content is configured by tabs. The retired image-upload switch
+      // never belonged to the current settings route.
+      await setTab(feedback, true)
+      await setTab(changelog, false)
+      await expect(feedback).toBeDisabled()
+      await page.reload()
+      await expect(feedback).toBeChecked()
+      await expect(changelog).not.toBeChecked()
+      await expect(feedback).toBeDisabled()
+
+      await setTab(changelog, true)
+      await expect(feedback).toBeEnabled()
+    } finally {
+      // Enable both before restoring the original combination so the last-tab
+      // invariant cannot prevent fixture cleanup.
+      await setTab(feedback, true)
+      await setTab(changelog, true)
+      await setTab(feedback, initialFeedback)
+      await setTab(changelog, initialChangelog)
+    }
   })
 
   test('shows Installation panel', async ({ page }) => {
