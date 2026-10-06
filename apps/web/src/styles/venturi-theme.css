@@ -312,8 +312,10 @@
   }
 }
 @media (min-width: 1024px) {
+  /* Keep the Product labels whole under accessibility text spacing while
+     preserving the accepted two rows of four and three links. */
   .venturi-footer__nav {
-    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
   }
   .venturi-footer__nav section:first-child ul {
     display: grid;
@@ -321,14 +323,6 @@
   }
   .venturi-footer__nav section:first-child li {
     min-width: 0;
-  }
-}
-/* The accepted public footer keeps Product in two rows of four and three.
-   On narrower desktops, size that group to its content while preserving
-   the longest Trust and Connect labels; enlarged text can still wrap. */
-@media (min-width: 1024px) and (max-width: 1279px) {
-  .venturi-footer__nav {
-    grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
   }
 }
 @media (max-width: 1023px) {
@@ -851,13 +845,14 @@
 .portal-feedback-faq summary {
   min-block-size: var(--ds-component-touch-minimum);
   padding-block: 12px;
+  padding-inline: 4px;
   cursor: pointer;
   font: var(--ds-typography-body-16);
   text-wrap: balance;
 }
 .portal-feedback-faq summary:focus-visible {
   outline: 2px solid var(--ring);
-  outline-offset: 4px;
+  outline-offset: -2px;
 }
 .portal-feedback-faq p {
   margin: 0 0 16px;
