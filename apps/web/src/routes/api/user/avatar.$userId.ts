@@ -22,6 +22,12 @@ const notFound = () => Response.json({ error: 'User not found' }, { status: 404 
 async function callerMayReadAvatar(request: Request, userId: UserId): Promise<boolean> {
   const session = await auth.api.getSession({ headers: request.headers }).catch(() => null)
   if (!session?.user) return false
+  const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+  try {
+    await assertPortalContentAdmission(session.user.id)
+  } catch {
+    return false
+  }
   if (session.user.id === userId) return true
   const principalRecord = await db.query.principal.findFirst({
     where: eq(principal.userId, session.user.id as UserId),

@@ -36,6 +36,10 @@ vi.mock('@tanstack/react-start', () => ({
 // --- Mock: auth (dynamic import target) ---
 
 const mockGetSession = vi.fn()
+const mockAdmission = vi.fn()
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalContentAdmission: (...args: unknown[]) => mockAdmission(...args),
+}))
 
 vi.mock('@/lib/server/auth/index', () => ({
   auth: { api: { getSession: (...args: unknown[]) => mockGetSession(...args) } },
@@ -113,6 +117,7 @@ import { NotFoundError } from '@/lib/shared/errors'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockAdmission.mockResolvedValue(undefined)
   // Default: no accepted portal invite.
   mockInvitationFindFirst.mockResolvedValue(null)
   // Default: no widget origin marker.
@@ -672,6 +677,24 @@ describe('resolvePortalAccessForRequest — segment lookup', () => {
 
     await resolvePortalAccessForRequest()
 
+    expect(mockSegmentIdsForPrincipal).not.toHaveBeenCalled()
+  })
+})
+
+describe('FB-019 private admission precedes secondary portal grants', () => {
+  it('denies an old authenticated session even when a widget or segment might grant access', async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user_01', email: 'avery@acme.example', emailVerified: true },
+    })
+    mockGetPortalConfig.mockResolvedValue({
+      access: { visibility: 'private', widgetSignIn: true, allowedSegmentIds: ['segment_01'] },
+    })
+    mockAdmission.mockRejectedValue(new Error('Approval revoked'))
+    expect(await resolvePortalAccessForRequest()).toEqual({
+      granted: false,
+      reason: 'unauthorized',
+    })
+    expect(mockAdmission).toHaveBeenCalledWith('user_01')
     expect(mockSegmentIdsForPrincipal).not.toHaveBeenCalled()
   })
 })

@@ -6,6 +6,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mockSession, mockPrincipal } from '../../../__tests__/upload-fixtures'
 
+const admission = vi.hoisted(() => ({ assert: vi.fn() }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@/lib/server/auth', () => ({
   auth: {
     api: {
@@ -86,6 +91,7 @@ function mockTargetRow(row: TargetRow | null): void {
 describe('GET /api/v1/users/:principalId/card', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    admission.assert.mockResolvedValue(undefined)
     selectChain.from.mockReturnValue(selectChain)
     selectChain.leftJoin.mockReturnValue(selectChain)
     selectChain.where.mockReturnValue(selectChain)

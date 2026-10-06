@@ -85,7 +85,9 @@ async function resolveOAuthContext(token: string): Promise<McpAuthContext | null
       columns: { id: true, role: true, type: true, userId: true },
       with: { user: { columns: { id: true, email: true, emailVerified: true } } },
     })
-    if (!principalRecord) return null
+    if (!principalRecord || !principalRecord.userId || principalRecord.userId !== sub) return null
+    const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+    await assertPortalContentAdmission(principalRecord.userId)
 
     // Same rule as a browser session: a team role counts only on a human
     // principal whose identity satisfies the team identity rule.

@@ -79,19 +79,19 @@ describe('PortalAccessGate — inline auth form', () => {
     expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(formProps.providerAppearance).toBe('brand')
-    expect(screen.getByRole('link', { name: 'Software notices' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Legal' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Legal' })).toHaveAttribute(
       'href',
-      '/software-notices'
+      'https://venturi.systems/legal/'
     )
     expect(screen.queryByRole('link', { name: 'Source code (AGPL-3.0)' })).not.toBeInTheDocument()
     rerender(<PortalAccessGate {...baseProps} reason="unauthorized" />)
     expect(container.querySelector('.portal-gate--entry')).not.toBeInTheDocument()
     expect(screen.queryByTestId('venturi-landing-footer')).not.toBeInTheDocument()
     expect(screen.getByTestId('venturi-site-footer')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Software notices' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Legal' })).toHaveAttribute(
       'href',
-      '/software-notices'
+      'https://venturi.systems/legal/'
     )
   })
 
@@ -115,98 +115,57 @@ describe('PortalAccessGate — content privacy', () => {
   })
 })
 
-describe('PortalAccessGate — explanatory sign-in page', () => {
-  // REQ-FEEDBACK-AUTH-VIEWPORT: show authentication and optional permissions;
-  // the shared signed-in shell is not part of this change.
-  it('is a full public page with the Venturi header, a main landmark and the footer', () => {
-    render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    expect(screen.getByRole('link', { name: 'Venturi home' })).toBeInTheDocument()
+describe('PortalAccessGate — feedback entry', () => {
+  it('is a full public page with the company header, main landmark and footer', () => {
+    render(<PortalAccessGate {...baseProps} visibility="private" />)
+    expect(screen.getAllByRole('link', { name: 'Venturi home' })).toHaveLength(2)
     expect(screen.getByRole('main')).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Legal and sitemap' })).toBeInTheDocument()
   })
 
-  it('shows access guidance and keeps the permissions disclosure collapsed', () => {
-    render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    expect(screen.queryByTestId('portal-gate-lead')).not.toBeInTheDocument()
-    expect(
-      screen.queryByText('Share product ideas, vote on requests and follow the roadmap.')
-    ).not.toBeInTheDocument()
+  it('explains collaboration and approval without exposing help intended for admitted users', () => {
+    render(<PortalAccessGate {...baseProps} visibility="private" />)
     expect(screen.getByTestId('portal-gate-access')).toHaveTextContent(
-      'Anyone who signs in can read and take part.'
+      'Sign in with an approved account to share ideas, discuss improvements, and follow progress.'
     )
-    expect(screen.getByRole('heading', { level: 1, name: 'Sign in to access Acme' })).toBeVisible()
-    // The optional guide remains accessible without expanding the landing view.
-    const disclosure = screen.getByText('Who can do what').closest('details')
-    expect(disclosure).not.toHaveAttribute('open')
-    expect(disclosure?.querySelector('summary')).toHaveTextContent('Who can do what')
-    expect(disclosure).toHaveTextContent('Read ideas and the roadmap')
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Share feedback with Acme' })
+    ).toBeVisible()
+    expect(
+      screen.queryByText('Anyone who signs in can read and take part.')
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Who can do what')).not.toBeInTheDocument()
+    expect(screen.queryByText('Feedback FAQ')).not.toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Sign in' })).toContainElement(
       screen.getByTestId('auth-form-body')
     )
   })
 
-  it('calls the portal private only when sign-in does not grant read access', () => {
+  it.each(['email', 'two-factor-enroll', 'two-factor-challenge'])(
+    'retains approved-account guidance during the %s step',
+    (step) => {
+      const { container } = render(<PortalAccessGate {...baseProps} visibility="private" />)
+      const onContextChange = formProps.onContextChange as (ctx: {
+        step: string
+        email: string
+      }) => void
+      act(() => onContextChange({ step, email: 'alex@acme.example' }))
+      expect(container.querySelector('.portal-gate__intro')).toHaveTextContent(
+        'Sign in with an approved account'
+      )
+      expect(container).not.toHaveTextContent('Who can do what')
+    }
+  )
+
+  it('retains the email-code step and its destination address', () => {
     render(<PortalAccessGate {...baseProps} visibility="private" />)
-    expect(screen.getByTestId('portal-gate-access')).toHaveTextContent(
-      'This portal is private: only people given access can read it.'
-    )
-  })
-
-  // DEF-06 residual: the later base steps (email, two-factor) take their copy
-  // from the shared step header, which must follow the read posture too. The
-  // open copy carries the open lead's own sentence.
-  const OPEN_SENTENCE = 'Anyone who signs in can read and take part.'
-  const LATER_BASE_STEPS = ['email', 'two-factor-enroll', 'two-factor-challenge'] as const
-
-  function moveToStep(step: string) {
     const onContextChange = formProps.onContextChange as (ctx: {
       step: string
       email: string
     }) => void
-    act(() => onContextChange({ step, email: 'alice@example.com' }))
-  }
-
-  function introText(container: HTMLElement): string {
-    return container.querySelector('.portal-gate__intro')?.textContent ?? ''
-  }
-
-  it.each(
-    (['login', 'signup'] as const).flatMap((mode) =>
-      LATER_BASE_STEPS.map((step) => [mode, step] as const)
-    )
-  )('never calls an open portal private on a later step (%s, %s)', (mode, step) => {
-    const { container } = render(
-      <PortalAccessGate {...baseProps} visibility="authenticated" autoOpenSignin={mode} />
-    )
-    moveToStep(step)
-    // The lead now comes from the step header, not the first-step lead.
-    expect(screen.queryByTestId('portal-gate-lead')).not.toBeInTheDocument()
-    expect(introText(container)).toContain(
-      mode === 'login'
-        ? `${OPEN_SENTENCE} Sign in or create an account to continue.`
-        : `${OPEN_SENTENCE} Create an account to continue.`
-    )
-    expect(introText(container)).not.toMatch(/private/i)
-  })
-
-  it.each(LATER_BASE_STEPS)('still calls a private portal private on the %s step', (step) => {
-    const { container } = render(<PortalAccessGate {...baseProps} visibility="private" />)
-    moveToStep(step)
-    expect(introText(container)).toContain(
-      'This portal is private. Sign in or create an account to continue.'
-    )
-    expect(introText(container)).not.toContain(OPEN_SENTENCE)
-  })
-
-  it('keeps the who-can-do-what summary off the later sign-in steps', () => {
-    render(<PortalAccessGate {...baseProps} visibility="authenticated" />)
-    const onContextChange = formProps.onContextChange as (ctx: {
-      step: string
-      email: string
-    }) => void
-    act(() => onContextChange({ step: 'code', email: 'alice@example.com' }))
-    expect(screen.queryByRole('heading', { name: 'Who can do what' })).not.toBeInTheDocument()
-    expect(screen.queryByTestId('portal-gate-lead')).not.toBeInTheDocument()
+    act(() => onContextChange({ step: 'code', email: 'alex@acme.example' }))
+    expect(screen.getByRole('heading', { name: 'Check your email' })).toBeInTheDocument()
+    expect(screen.getByText('alex@acme.example')).toBeInTheDocument()
   })
 })
 

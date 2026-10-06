@@ -14,7 +14,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import type { InviteId, UserId } from '@quackback/ids'
 import { generateId } from '@quackback/ids'
-import { db, invitation, principal, user, eq, and, gt, or, sql } from '@/lib/server/db'
+import { db, invitation, principal, user, eq, and, gt, or, sql, inArray } from '@/lib/server/db'
 import { requireAuth } from './auth-helpers'
 import { appendInviteMagicLinkToken, removeInviteMagicLinkToken } from './invitation-magic-link'
 import { actorFromAuth, recordAuditEvent } from '@/lib/server/audit/log'
@@ -281,14 +281,12 @@ export const cancelPortalInviteFn = createServerFn({ method: 'POST' })
     if (!inv) {
       throw new Error('Portal invitation not found.')
     }
-    if (inv.status !== 'pending') {
+    if (inv.status !== 'pending' && inv.status !== 'accepted') {
       throw new Error(`Cannot cancel an invitation that is already ${inv.status}.`)
     }
 
-    // Include status='pending' in the WHERE clause to guard against a concurrent
-    // accept that flips the row between the SELECT above and this UPDATE.
-    // If the row was concurrently accepted, affected rows = 0 — treat as no-op
-    // and skip the audit event; the admin's next list refresh will see the new state.
+    // Revoke either a pending invitation or a previously accepted approval.
+    // The conditional update prevents duplicate revocation audit events.
     const updated = await db
       .update(invitation)
       .set({ status: 'canceled' })
@@ -296,14 +294,14 @@ export const cancelPortalInviteFn = createServerFn({ method: 'POST' })
         and(
           eq(invitation.id, inviteId),
           eq(invitation.kind, 'portal'),
-          eq(invitation.status, 'pending')
+          inArray(invitation.status, ['pending', 'accepted'])
         )
       )
       .returning({ id: invitation.id, magicLinkTokens: invitation.magicLinkTokens })
 
     if (updated.length === 0) {
       log.debug({ invite_id: inviteId }, 'cancel portal invite no-op, row concurrently mutated')
-      return { inviteId, status: 'no_op_already_accepted' as const }
+      return { inviteId, status: 'no_op_already_revoked' as const }
     }
 
     // Invalidate every link this invite ever minted so a cancelled invite can't
@@ -312,13 +310,23 @@ export const cancelPortalInviteFn = createServerFn({ method: 'POST' })
     // rotating pointer could leave a token live but untracked.
     const { revokeMagicLinkTokens } = await import('@/lib/server/auth/magic-link-mint')
     await revokeMagicLinkTokens(updated[0].magicLinkTokens)
+    const person = await db.query.user.findFirst({ where: eq(user.email, inv.email.toLowerCase()) })
+    if (person) {
+      const { assertPortalSessionAdmission } = await import('@/lib/server/auth/portal-admission')
+      // Revoke old sessions only if no other approval remains.
+      try {
+        await assertPortalSessionAdmission(person.id)
+      } catch {
+        // Expected when this was the last remaining approval.
+      }
+    }
 
     await recordAuditEvent({
       event: 'portal.invite.revoked',
       actor,
       headers,
       target: { type: 'invitation', id: inviteId },
-      before: { email: inv.email, status: 'pending' },
+      before: { email: inv.email, status: inv.status },
       after: { email: inv.email, status: 'canceled' },
     })
 

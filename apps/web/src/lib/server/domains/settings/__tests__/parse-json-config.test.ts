@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseJsonConfig } from '../settings.helpers'
+import { parseJsonConfig, parsePortalConfig } from '../settings.helpers'
 import {
   DEFAULT_AUTH_CONFIG,
   DEFAULT_PORTAL_CONFIG,
@@ -149,5 +149,28 @@ describe('workspaceAllowsAnonymous', () => {
   it('fails closed on malformed JSON instead of throwing', () => {
     expect(() => workspaceAllowsAnonymous('{ not valid json')).not.toThrow()
     expect(workspaceAllowsAnonymous('{ not valid json')).toBe(false)
+  })
+})
+
+describe('FB-019 strict portal access configuration', () => {
+  it.each([
+    '{',
+    'not valid json',
+    'null',
+    '[]',
+    '{"access":null}',
+    '{"access":{"visibility":"unknown"}}',
+    '{"access":{"visibility":["public"]}}',
+    '{"access":{"allowedDomains":"acme.example"}}',
+    '{"access":{"widgetSignIn":"true"}}',
+  ])('rejects corrupt policy %s instead of silently opening the workspace', (stored) => {
+    expect(() => parsePortalConfig(stored)).toThrow('Portal access configuration is invalid')
+  })
+  it('preserves a fresh install default and valid private settings', () => {
+    expect(parsePortalConfig(null)).toEqual(DEFAULT_PORTAL_CONFIG)
+    expect(
+      parsePortalConfig('{"access":{"visibility":"private","allowedDomains":["acme.example"]}}')
+        .access
+    ).toMatchObject({ visibility: 'private', allowedDomains: ['acme.example'] })
   })
 })

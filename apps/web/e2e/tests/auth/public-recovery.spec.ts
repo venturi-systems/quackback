@@ -28,7 +28,12 @@ for (const failure of ['disabled', 'blocked'] as const) {
       await page.goto('/', { waitUntil: 'domcontentloaded' })
       const recovery = page.locator('[data-public-sign-in-ready="false"]')
       await expect(recovery).toBeVisible()
-      await expect(recovery.getByRole('status')).toContainText('enable JavaScript')
+      const help = recovery.locator('[data-public-sign-in-help]')
+      await expect(help.locator('summary')).toHaveAccessibleName('Sign-in needs JavaScript')
+      await help.locator('summary').click()
+      await expect(
+        help.getByText('If sign-in does not open, enable JavaScript and reload this page.')
+      ).toBeVisible()
       const controls = recovery.locator('button, input')
       expect(await controls.count()).toBeGreaterThan(0)
       for (const control of await controls.all()) await expect(control).toBeDisabled()
@@ -39,7 +44,10 @@ for (const failure of ['disabled', 'blocked'] as const) {
       const originalUrl = page.url()
       await recovery.getByRole('link', { name: 'Reload this page' }).click()
       await expect(page).toHaveURL(originalUrl)
-      await expect(recovery.getByRole('status')).toBeVisible()
+      await help.locator('summary').click()
+      await expect(
+        help.getByText('If sign-in does not open, enable JavaScript and reload this page.')
+      ).toBeVisible()
     } finally {
       await context?.close()
       setPortalVisibility('public')
@@ -60,9 +68,6 @@ test('APP-FB-01 and APP-FB-02 keep public headers opaque and notices branded', a
         await page.goto(path)
         if (path === '/') {
           await expect(page.locator('[data-public-sign-in-ready="true"]')).toBeVisible()
-          await page.locator('details.portal-gate__roles').evaluate((el) => {
-            ;(el as HTMLDetailsElement).open = true
-          })
         }
         const header = page.locator('.venturi-site-header')
         const surface = await header.evaluate((el) => {

@@ -5,6 +5,12 @@ import { API_KEY_SCOPES } from '@/lib/shared/api-key-scopes'
 
 // ── Mocks ──────────────────────────────────────────────────────────────────────
 
+const admission = vi.hoisted(() => ({ assert: vi.fn(async () => undefined) }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: admission.assert,
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@/lib/server/domains/api-keys/api-key.service', () => ({
   verifyApiKey: vi.fn(),
 }))
@@ -434,6 +440,7 @@ async function setupValidOAuth(overrides?: { role?: string; scopes?: string[]; t
 describe('MCP HTTP Handler', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    admission.assert.mockResolvedValue(undefined)
   })
 
   // ===========================================================================
@@ -569,6 +576,48 @@ describe('MCP HTTP Handler', () => {
       expect(auth).not.toBeInstanceOf(Response)
       expect((auth as { scopes: string[] }).scopes).toEqual(['read:feedback'])
     })
+
+    it('rejects a previously accepted OAuth token after approval is revoked', async () => {
+      await setupValidOAuth({ role: 'user' })
+      const { resolveAuthContext, handleMcpRequest } = await import('../handler')
+      const { listInboxPosts } = await import('@/lib/server/domains/posts/post.inbox')
+      const request = () =>
+        oauthRequest(
+          jsonRpcRequest('tools/call', {
+            name: 'search',
+            arguments: { query: 'private feedback' },
+          })
+        )
+      expect(await resolveAuthContext(request())).not.toBeInstanceOf(Response)
+      admission.assert.mockRejectedValueOnce(new Error('Admission revoked'))
+
+      const response = await handleMcpRequest(request())
+
+      expect(response.status).toBe(401)
+      expect(response.headers.get('www-authenticate')).toContain('resource_metadata=')
+      expect(admission.assert).toHaveBeenCalledTimes(2)
+      expect(admission.assert).toHaveBeenLastCalledWith(MOCK_USER_ID)
+      expect(listInboxPosts).not.toHaveBeenCalled()
+    })
+
+    it.each([null, 'user_relinked'])(
+      'rejects an OAuth token whose principal is no longer linked to its subject (%s)',
+      async (userId) => {
+        await setupValidOAuth()
+        mockFindFirst.mockResolvedValue({
+          id: MOCK_MEMBER_ID,
+          role: 'admin',
+          type: 'user',
+          userId,
+        })
+        const { handleMcpRequest } = await import('../handler')
+
+        const response = await handleMcpRequest(oauthRequest(jsonRpcRequest('initialize')))
+
+        expect(response.status).toBe(401)
+        expect(admission.assert).not.toHaveBeenCalled()
+      }
+    )
 
     it('should return 401 for expired OAuth token', async () => {
       const { verifyAccessToken } = await import('better-auth/oauth2')

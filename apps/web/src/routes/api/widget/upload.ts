@@ -14,6 +14,12 @@ export async function handleWidgetUpload({ request }: { request: Request }): Pro
   if (!sessionData?.user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+  try {
+    await assertPortalContentAdmission(sessionData.user.id)
+  } catch {
+    return Response.json({ error: 'Feedback access requires approval' }, { status: 403 })
+  }
   if (!isS3Configured()) {
     return Response.json({ error: 'Storage not configured' }, { status: 503 })
   }

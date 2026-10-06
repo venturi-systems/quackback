@@ -750,8 +750,11 @@ export function PortalAuthFormInline({
         )}
 
         {emailEntryEnabled && (
-          <>
-            <form onSubmit={continueFromEmail} className="space-y-4">
+          <div className={providerAppearance === 'brand' ? 'space-y-0' : 'space-y-6'}>
+            <form
+              onSubmit={continueFromEmail}
+              className={providerAppearance === 'brand' ? 'space-y-2' : 'space-y-4'}
+            >
               <div className="space-y-2">
                 <Label htmlFor="inline-email">
                   <FormattedMessage id="portal.auth.email.label" defaultMessage="Email" />
@@ -820,7 +823,7 @@ export function PortalAuthFormInline({
                 )}
               </p>
             )}
-          </>
+          </div>
         )}
 
         {/* Break-glass only in the SSO-only Stage 1 — just the SSO button, no
@@ -1216,7 +1219,7 @@ export function PortalAuthFormInline({
           onComplete={(otp) => emailSignin.verify(email, otp)}
           onSubmit={handleCodeSubmit}
           onResend={handleResend}
-          onBack={backToMethods}
+          onBack={showBack ? backToEmail : backToMethods}
           loading={emailSignin.loading}
           error={emailSignin.error}
           resendCooldown={emailSignin.resendCooldown}
