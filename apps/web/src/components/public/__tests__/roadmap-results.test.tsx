@@ -5,12 +5,29 @@ import { IntlProvider } from 'react-intl'
 import type { RoadmapId, StatusId } from '@quackback/ids'
 import type { RoadmapFilters } from '@/lib/shared/types'
 
-const { query, navigate, routeSearch } = vi.hoisted(() => ({
-  query: vi.fn(),
-  navigate: vi.fn(),
-  routeSearch: vi.fn(),
+const { query, navigate, routeSearch, renderedRouter, liveRouter, router } = vi.hoisted(() => {
+  // The router state a render subscribes to, and the state the router holds
+  // when an effect reads it. They differ when a navigation starts in between.
+  const renderedRouter = vi.fn()
+  const liveRouter = vi.fn()
+  return {
+    query: vi.fn(),
+    navigate: vi.fn(),
+    routeSearch: vi.fn(),
+    renderedRouter,
+    liveRouter,
+    router: {
+      get state() {
+        return liveRouter()
+      },
+    },
+  }
+})
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => navigate,
+  useRouter: () => router,
+  useRouterState: ({ select }: { select: (state: unknown) => unknown }) => select(renderedRouter()),
 }))
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => navigate }))
 vi.mock('@/routes/_portal/roadmap.index', () => ({
   Route: { useSearch: () => routeSearch() },
 }))
@@ -60,10 +77,24 @@ function result(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/** Router state headed for `href`, resolved at `resolvedHref` (settled when equal). */
+function routerAt(href: string, resolvedHref: string | undefined = href) {
+  return {
+    location: { href },
+    resolvedLocation: resolvedHref === undefined ? undefined : { href: resolvedHref },
+  }
+}
+
+function routerIs(state: ReturnType<typeof routerAt>) {
+  renderedRouter.mockReturnValue(state)
+  liveRouter.mockReturnValue(state)
+}
+
 beforeEach(() => {
   query.mockReturnValue(result())
   navigate.mockClear()
   routeSearch.mockReturnValue({})
+  routerIs(routerAt('/roadmap'))
 })
 
 describe('Roadmap result states', () => {
@@ -76,14 +107,13 @@ describe('Roadmap result states', () => {
     expect(screen.queryByText('No items yet')).not.toBeInTheDocument()
   })
 
-  it.each([
-    { board: ['board_test'] },
-    { tags: ['tag_test'] },
-    { segmentIds: ['segment_test'] },
-  ])('recognizes facet-only no-match states: %j', (filters) => {
-    render(column(filters))
-    expect(screen.getByText('No posts match your filters.')).toBeVisible()
-  })
+  it.each([{ board: ['board_test'] }, { tags: ['tag_test'] }, { segmentIds: ['segment_test'] }])(
+    'recognizes facet-only no-match states: %j',
+    (filters) => {
+      render(column(filters))
+      expect(screen.getByText('No posts match your filters.')).toBeVisible()
+    }
+  )
 
   it('keeps a stable status channel and announces counts only after results settle', () => {
     query.mockReturnValue(result({ isLoading: true, isFetching: true, data: undefined }))
@@ -95,20 +125,24 @@ describe('Roadmap result states', () => {
     expect(screen.getByRole('status')).toBe(status)
     expect(status).toHaveTextContent('Planned: 1,200')
 
-    query.mockReturnValue(result({
-      data: { pages: [{ items: [], total: 1200 }] },
-      isFetching: true,
-    }))
+    query.mockReturnValue(
+      result({
+        data: { pages: [{ items: [], total: 1200 }] },
+        isFetching: true,
+      })
+    )
     rerender(column())
     expect(status).toHaveTextContent('Loading...')
     expect(status).not.toHaveTextContent('1,200')
   })
 
   it('does not announce cached or placeholder counts as a successful result', () => {
-    query.mockReturnValue(result({
-      data: { pages: [{ items: [], total: 12 }] },
-      isPlaceholderData: true,
-    }))
+    query.mockReturnValue(
+      result({
+        data: { pages: [{ items: [], total: 12 }] },
+        isPlaceholderData: true,
+      })
+    )
     const { rerender } = render(column())
     expect(screen.getByRole('status')).toHaveTextContent('Loading...')
     expect(screen.getByRole('status')).not.toHaveTextContent('12')
@@ -162,5 +196,66 @@ describe('Roadmap selection query continuity', () => {
       search: { ...search, roadmap: 'roadmap_next' },
       replace: true,
     })
+  })
+})
+
+// venturi-systems/feedback#369: with no roadmap in the address, the board wrote
+// its default on every render, also after the visitor had clicked Home and
+// before that navigation committed, which replaced Home with the roadmap.
+describe('Roadmap default selection', () => {
+  function renderSelection(defaultRoadmapId: string | null = 'roadmap_first') {
+    return renderHook(({ id }) => usePublicRoadmapSelection(id), {
+      initialProps: { id: defaultRoadmapId },
+    })
+  }
+
+  it('writes the default once the router settles on the roadmap', () => {
+    routeSearch.mockReturnValue({ sort: 'oldest' })
+    routerIs(routerAt('/roadmap?sort=oldest', '/'))
+    const { rerender } = renderSelection()
+    expect(navigate).not.toHaveBeenCalled()
+
+    routerIs(routerAt('/roadmap?sort=oldest'))
+    rerender({ id: 'roadmap_first' })
+    expect(navigate).toHaveBeenCalledTimes(1)
+    expect(navigate).toHaveBeenCalledWith({
+      to: '/roadmap',
+      search: { sort: 'oldest', roadmap: 'roadmap_first' },
+      replace: true,
+    })
+  })
+
+  it('does not replace a navigation that starts after the board renders', () => {
+    renderedRouter.mockReturnValue(routerAt('/roadmap'))
+    liveRouter.mockReturnValue(routerAt('/', '/roadmap'))
+    const { rerender } = renderSelection()
+    expect(navigate).not.toHaveBeenCalled()
+
+    // The board re-renders before Home commits: a query settles, a scroll.
+    routerIs(routerAt('/', '/roadmap'))
+    rerender({ id: 'roadmap_first' })
+    rerender({ id: 'roadmap_first' })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('writes the default once while its own navigation is pending', () => {
+    const { rerender } = renderSelection()
+    expect(navigate).toHaveBeenCalledTimes(1)
+
+    routerIs(routerAt('/roadmap?roadmap=roadmap_first', '/roadmap'))
+    rerender({ id: 'roadmap_first' })
+    rerender({ id: 'roadmap_first' })
+    expect(navigate).toHaveBeenCalledTimes(1)
+
+    routeSearch.mockReturnValue({ roadmap: 'roadmap_first' })
+    routerIs(routerAt('/roadmap?roadmap=roadmap_first'))
+    rerender({ id: 'roadmap_first' })
+    expect(navigate).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a roadmap the address already names', () => {
+    routeSearch.mockReturnValue({ roadmap: 'roadmap_previous' })
+    renderSelection()
+    expect(navigate).not.toHaveBeenCalled()
   })
 })
