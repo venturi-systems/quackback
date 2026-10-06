@@ -1219,7 +1219,7 @@ export function PortalAuthFormInline({
           onComplete={(otp) => emailSignin.verify(email, otp)}
           onSubmit={handleCodeSubmit}
           onResend={handleResend}
-          onBack={backToMethods}
+          onBack={showBack ? backToEmail : backToMethods}
           loading={emailSignin.loading}
           error={emailSignin.error}
           resendCooldown={emailSignin.resendCooldown}
