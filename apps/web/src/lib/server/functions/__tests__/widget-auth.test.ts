@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Mock getRequestHeaders before importing the module under test
 const mockGet = vi.fn()
+const admission = vi.hoisted(() => ({ assert: vi.fn(async () => undefined) }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: admission.assert,
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@tanstack/react-start/server', () => ({
   getRequestHeaders: () => ({ get: mockGet }),
 }))

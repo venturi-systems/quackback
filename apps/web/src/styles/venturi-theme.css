@@ -186,19 +186,57 @@
   }
 }
 
-/* Public footer: related sites and the AGPL source link, then the full-width
-   legal row (12px medium, 24px gaps, 44px targets), mirroring the public
-   website's footer contract. */
+/* Public footer: compact Product, Trust and Connect groups followed by the
+   legal row, matching the public website while preserving 44px targets. */
 .venturi-footer {
   margin-top: auto;
-  padding-block: var(--ds-primitive-dimension-space-24, 24px);
+  padding-block: 16px 12px;
   border-top: 1px solid var(--border);
   background: var(--background);
 }
 
 .venturi-footer__shell {
   display: grid;
-  gap: var(--ds-primitive-dimension-space-8, 8px);
+  grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1.55fr);
+  gap: 8px 24px;
+}
+.venturi-footer__brand p {
+  margin: 0;
+  color: var(--ds-color-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+.venturi-footer__nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 24px;
+}
+.venturi-footer__nav h2 {
+  margin: 0;
+  color: var(--ds-color-text-secondary);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: start;
+}
+.venturi-footer__nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 16px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.venturi-footer__nav li {
+  flex: 1 0 calc(50% - 16px);
+}
+.venturi-footer__nav a {
+  min-inline-size: 44px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.35;
 }
 
 .venturi-footer__related {
@@ -211,6 +249,7 @@
   display: inline-flex;
   align-items: center;
   min-height: var(--ds-component-touch-minimum);
+  min-inline-size: var(--ds-component-touch-minimum);
   color: var(--ds-color-text-strong);
   font-weight: var(--ds-primitive-font-weight-medium);
   text-decoration: none;
@@ -226,18 +265,22 @@
 }
 
 .venturi-footer__legal-row {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  column-gap: var(--ds-primitive-dimension-space-24, 24px);
-  padding-top: var(--ds-primitive-dimension-space-8, 8px);
+  justify-content: flex-start;
+  column-gap: 16px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
   font-size: var(--ds-primitive-font-size-12);
   font-weight: var(--ds-primitive-font-weight-medium);
 }
 
 .venturi-footer__copyright {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   margin: 0;
   color: var(--ds-color-text-legal);
 }
@@ -252,19 +295,76 @@
 }
 
 .venturi-footer__legal a {
+  overflow-wrap: anywhere;
   color: var(--ds-color-text-primary);
   font-size: var(--ds-primitive-font-size-12);
 }
 
-@media (max-width: 767px) {
-  .venturi-footer__legal-row {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
+@media (max-width: 1023px) {
+  .venturi-footer__shell {
+    grid-template-columns: minmax(0, 1fr);
   }
+  .venturi-footer__brand {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 16px;
+  }
+}
+@media (min-width: 1024px) {
+  /* Keep the Product labels whole under accessibility text spacing while
+     preserving the accepted two rows of four and three links. */
+  .venturi-footer__nav {
+    grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
+  }
+  .venturi-footer__nav section:first-child ul {
+    display: grid;
+    grid-template-columns: repeat(4, auto);
+  }
+  .venturi-footer__nav section:first-child li {
+    min-width: 0;
+  }
+}
+@media (max-width: 1023px) {
+  .venturi-footer__nav {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .venturi-footer__nav section {
+    display: grid;
+    grid-template-columns: minmax(4rem, max-content) minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+  }
+  .venturi-footer__nav h2 {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+  }
+  .venturi-footer__nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    margin: 0;
+  }
+  .venturi-footer__nav li {
+    flex: 0 0 auto;
+  }
+}
+@media (max-width: 560px) {
   .venturi-footer__legal ul {
-    justify-content: center;
-    column-gap: var(--ds-primitive-dimension-space-16, 16px);
+    column-gap: 16px;
+  }
+}
+@media (max-width: 448px) {
+  /* Legal names keep their intrinsic width so the native font does not
+     strand the final word of a three-word title in a forced half-column. */
+  .venturi-footer__legal li:nth-child(n + 3) {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .venturi-footer__legal a {
+    max-width: 100%;
   }
 }
 
@@ -685,69 +785,94 @@
   font-size: var(--ds-primitive-font-size-16);
 }
 
-/* REQ-FEEDBACK-AUTH-VIEWPORT: a compact entry with no marketing content.
-   Content stays in natural flow so zoom, longer translations and an expanded
-   permissions guide remain accessible rather than clipped to the viewport.
-   All overrides are scoped to the unauthenticated gate. */
+/* REQ-FEEDBACK-ENTRY: keep the useful content together at the reading start.
+   No viewport-centering margins or empty band below the footer. The form
+   grows naturally for additional providers, error states and text zoom. */
 .portal-gate--entry {
   min-block-size: 100svh;
 }
 .portal-gate--entry .public-frame__main {
-  flex: 0 0 auto;
-  margin-block-start: auto;
+  flex: 1 0 auto;
+  display: flex;
+  align-items: flex-start;
 }
 .portal-gate--entry .venturi-footer {
-  margin-block: 0 auto;
-  padding-block: 16px;
-}
-.portal-gate--entry .venturi-footer a {
-  min-inline-size: var(--ds-component-touch-minimum);
+  margin-block: 0;
 }
 .portal-gate--entry .public-frame__content {
   inline-size: 100%;
-  padding-block: 24px;
+  padding-block: clamp(40px, 6vh, 72px);
 }
 .portal-gate--entry .portal-gate__layout {
-  grid-template-columns: minmax(0, 1fr);
-  max-inline-size: 26rem;
-  margin-inline: auto;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
+  gap: clamp(32px, 7vw, 112px);
+  align-items: start;
 }
 .portal-gate--entry .portal-gate__layout > .portal-gate__intro {
-  text-align: center;
+  max-inline-size: 44rem;
 }
 .portal-gate--entry .portal-gate__title {
-  font: var(--ds-typography-heading-32);
+  font: var(--ds-typography-heading-40);
+  text-wrap: balance;
 }
-.portal-gate--entry .portal-gate__lead {
-  font: var(--ds-typography-body-16);
-  margin: 0;
+.portal-gate--entry .portal-gate__access {
+  max-inline-size: 38rem;
+  text-wrap: balance;
 }
 .portal-gate--entry .portal-gate__layout > .portal-gate__signin {
   border: 0;
-  padding: 0;
+  padding: 4px 0 0;
 }
 .portal-gate--entry .portal-gate__form {
-  max-inline-size: none;
+  inline-size: 100%;
+  max-inline-size: 26rem;
 }
-.portal-gate--entry .portal-gate__roles {
+.portal-feedback-faq {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(0, 2fr);
+  gap: 24px;
+  padding-block: 32px;
+  margin-block-start: 24px;
+  border-block-start: 1px solid var(--border);
+}
+.portal-feedback-faq h2 {
   margin: 0;
+  font: var(--ds-typography-heading-24);
 }
-.portal-gate--entry .portal-gate__roles-summary {
+.portal-feedback-faq details {
+  border-block-end: 1px solid var(--border);
+}
+.portal-feedback-faq summary {
   min-block-size: var(--ds-component-touch-minimum);
   padding-block: 12px;
+  padding-inline: 4px;
+  cursor: pointer;
+  font: var(--ds-typography-body-16);
+  text-wrap: balance;
 }
-.portal-gate--entry .portal-roles__grid {
-  grid-template-columns: minmax(0, 1fr);
+.portal-feedback-faq summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
-@media (max-height: 700px) {
+.portal-feedback-faq p {
+  margin: 0 0 16px;
+  max-inline-size: 70ch;
+  color: var(--ds-color-text-secondary);
+  font: var(--ds-typography-body-16);
+}
+@media (max-width: 767px) {
   .portal-gate--entry .public-frame__content {
-    padding-block: 8px;
+    padding-block: 32px;
   }
   .portal-gate--entry .portal-gate__layout {
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
   }
   .portal-gate--entry .portal-gate__title {
-    font: var(--ds-typography-heading-24);
+    font: var(--ds-typography-heading-32);
+  }
+  .portal-feedback-faq {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
 }

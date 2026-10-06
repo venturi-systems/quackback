@@ -108,15 +108,15 @@ export type PortalAccessResult =
 // Helpers
 // =============================================================================
 
-/**
- * Extracts the lowercased domain part of an email address.
- * Returns `null` when the input is null or has no `@`.
- */
-function emailDomain(email: string | null): string | null {
-  if (!email) return null
-  const at = email.lastIndexOf('@')
-  if (at === -1) return null
-  return email.slice(at + 1).toLowerCase()
+/** Exact normalized domain matching; neither suffixes nor subdomains inherit approval. */
+export function matchesApprovedPortalDomain(
+  email: string | null,
+  allowedDomains: string[]
+): boolean {
+  if (!email) return false
+  const parts = email.trim().toLowerCase().split('@')
+  if (parts.length !== 2 || !parts[0] || !parts[1] || /\s/.test(parts.join(''))) return false
+  return allowedDomains.some((domain) => domain.trim().toLowerCase() === parts[1])
 }
 
 // =============================================================================
@@ -173,8 +173,7 @@ export function evaluatePortalAccess(ctx: PortalAccessContext): PortalAccessResu
   // 3. Verified email on the domain allowlist.
   //    emailVerified MUST be true — an unverified claim must not unlock access.
   if (ctx.isAuthenticated && ctx.emailVerified && ctx.allowedDomains.length > 0) {
-    const domain = emailDomain(ctx.userEmail)
-    if (domain && ctx.allowedDomains.includes(domain)) {
+    if (matchesApprovedPortalDomain(ctx.userEmail, ctx.allowedDomains)) {
       return { granted: true, reason: 'domain' }
     }
   }

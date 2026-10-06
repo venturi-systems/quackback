@@ -353,6 +353,15 @@ async function createAuth() {
     // All OAuth signups get 'user' role (portal user)
     // Team members are added via invitations only
     databaseHooks: {
+      session: {
+        create: {
+          before: async (session) => {
+            const { assertPortalSessionAdmission } = await import('./portal-admission')
+            await assertPortalSessionAdmission(session.userId)
+            return { data: session }
+          },
+        },
+      },
       user: {
         create: {
           after: async (user) => {

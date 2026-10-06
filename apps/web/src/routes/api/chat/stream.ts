@@ -53,9 +53,9 @@ interface StreamPrincipal {
    *  the rule acts as a contributor here as everywhere else. */
   role: string
   type: string
-  /** How the principal was authenticated: a minted token (portal access already
-   *  enforced at mint) vs a raw session cookie (must be re-gated here). */
+  /** Authentication transport; both paths must retain current admission. */
   via: 'token' | 'session'
+  userId: string | null
 }
 
 /** Resolve the principal for a stream from a signed token (widget) or the
@@ -68,7 +68,7 @@ async function resolveStreamPrincipal(request: Request): Promise<StreamPrincipal
     if (!row) return null
     // A token carries no session, so the identity is read from the account.
     const role = await resolveTeamRole(row)
-    return { principalId: row.id, role, type: row.type, via: 'token' }
+    return { principalId: row.id, role, type: row.type, via: 'token', userId: row.userId }
   }
 
   const session = await auth.api.getSession({ headers: request.headers })
@@ -78,7 +78,7 @@ async function resolveStreamPrincipal(request: Request): Promise<StreamPrincipal
   })
   if (!row) return null
   const role = await resolveSessionRole(row, session.user, request.headers)
-  return { principalId: row.id, role, type: row.type, via: 'session' }
+  return { principalId: row.id, role, type: row.type, via: 'session', userId: row.userId }
 }
 
 function sse(event: string, data: unknown, id?: string): string {
@@ -116,9 +116,36 @@ export const Route = createFileRoute('/api/chat/stream')({
           return new Response('Unauthorized', { status: 401 })
         }
 
+        // Both signed stream tokens and cookie sessions must retain current
+        // approval. Token issuance does not freeze an administrator's grant.
+        const checkAdmission = async (): Promise<boolean> => {
+          try {
+            if (me.userId) {
+              const { assertPortalContentAdmission } =
+                await import('@/lib/server/auth/portal-admission')
+              await assertPortalContentAdmission(me.userId)
+              const currentPrincipal = await db.query.principal.findFirst({
+                where: eq(principal.id, me.principalId),
+              })
+              return (
+                !!currentPrincipal &&
+                currentPrincipal.userId === me.userId &&
+                currentPrincipal.type === me.type &&
+                (await resolveTeamRole(currentPrincipal)) === me.role
+              )
+            }
+            const { getPortalConfig } =
+              await import('@/lib/server/domains/settings/settings.service')
+            return (await getPortalConfig()).access?.visibility === 'public'
+          } catch {
+            return false
+          }
+        }
+        if (!(await checkAdmission())) return new Response('Forbidden', { status: 403 })
+
         // Feature-flag gate: stop streams when every conversation surface is
         // off (a token may have been minted before the flag flipped). Portal
-        // access for visitors was enforced when the stream token was minted.
+        // access for visitors is rechecked above and before protected delivery.
         const { isConversationsEnabled } =
           await import('@/lib/server/domains/settings/settings.support')
         if (!(await isConversationsEnabled())) {
@@ -243,6 +270,16 @@ export const Route = createFileRoute('/api/chat/stream')({
               }
             }
 
+            const sendProtected = async (chunk: string): Promise<boolean> => {
+              if (closed) return false
+              if (!(await checkAdmission())) {
+                await cleanup()
+                return false
+              }
+              send(chunk)
+              return !closed
+            }
+
             // The runtime aborts the request signal on client disconnect.
             // addEventListener does NOT fire for an already-aborted signal, so
             // also check it up front (the client may drop during the awaits).
@@ -271,21 +308,31 @@ export const Route = createFileRoute('/api/chat/stream')({
               let backfilling = Boolean(backfillConversationId && lastEventId)
               const liveBuffer: Array<{ id?: string; frame: string }> = []
 
+              // Serialize authorization and delivery so asynchronous checks
+              // cannot reorder events or publish after a revoked grant.
+              let delivery = Promise.resolve()
               const unsub = await subscribe(channels, (_channel, message) => {
-                const event = parseChatFrame(message)
-                // Never echo a subscriber's own typing back to them, on any
-                // surface — clients can treat every typing event they receive
-                // as someone else's.
-                if (isOwnTyping(event, me.principalId)) {
-                  return
-                }
-                const { id, frame } = formatFrame(message, event)
-                if (backfilling) {
-                  liveBuffer.push({ id, frame })
-                  return
-                }
-                if (id) sentMessageIds.add(id)
-                send(frame)
+                delivery = delivery
+                  .then(async () => {
+                    const event = parseChatFrame(message)
+                    // Never echo a subscriber's own typing back to them, on any
+                    // surface — clients can treat every typing event they receive
+                    // as someone else's.
+                    if (isOwnTyping(event, me.principalId)) {
+                      return
+                    }
+                    const { id, frame } = formatFrame(message, event)
+                    if (backfilling) {
+                      liveBuffer.push({ id, frame })
+                      return
+                    }
+                    if (id) sentMessageIds.add(id)
+                    await sendProtected(frame)
+                  })
+                  .catch(async (err) => {
+                    log.warn({ err }, 'chat stream admission failed')
+                    await cleanup()
+                  })
               })
               // If the client aborted while subscribe() was in flight, cleanup
               // already ran (with unsubscribe still null) — release this orphan
@@ -338,7 +385,7 @@ export const Route = createFileRoute('/api/chat/stream')({
                           : null
                       )
                       sentMessageIds.add(dto.id)
-                      send(
+                      await sendProtected(
                         sse(
                           'message',
                           { kind: 'message', conversationId: dto.conversationId, message: dto },
@@ -358,12 +405,19 @@ export const Route = createFileRoute('/api/chat/stream')({
               for (const { id, frame } of liveBuffer) {
                 if (id && sentMessageIds.has(id)) continue
                 if (id) sentMessageIds.add(id)
-                send(frame)
+                await sendProtected(frame)
               }
 
+              if (closed) return
               heartbeat = setInterval(() => {
-                send(`: ping\n\n`)
-                void refreshPresence(me.principalId, streamId, isAgentStream)
+                void sendProtected(`: ping\n\n`)
+                  .then((sent) => {
+                    if (sent) return refreshPresence(me.principalId, streamId, isAgentStream)
+                  })
+                  .catch(async (err) => {
+                    log.warn({ err }, 'chat stream heartbeat failed')
+                    await cleanup()
+                  })
               }, HEARTBEAT_MS)
 
               // A late abort (during the awaits above) must still tear down.

@@ -5,6 +5,7 @@ import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer
 import { InShell } from '@/components/public/shell/shell-context'
 import { AuthPopoverProvider } from '@/components/auth/auth-popover-context'
 import { AuthDialog } from '@/components/auth/auth-dialog'
+import { PortalFeedbackFaq } from '@/components/portal/portal-feedback-faq'
 import { PortalAccessGate } from '@/components/portal/portal-access-gate'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 import { DEFAULT_AUTH_CONFIG } from '@/lib/shared/types/settings'
@@ -321,6 +322,7 @@ function PortalLayout() {
                 </div>
               )}
               <Outlet />
+              {isAuthenticated && <PortalFeedbackFaq />}
             </InShell>
           </main>
           <VenturiSiteFooter />

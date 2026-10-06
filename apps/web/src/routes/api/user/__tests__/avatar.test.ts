@@ -10,6 +10,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { generateId } from '@quackback/ids'
 
 const getSession = vi.fn()
+const admission = vi.hoisted(() => ({ assert: vi.fn(async () => undefined) }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: admission.assert,
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@/lib/server/auth', () => ({
   auth: { api: { getSession: (...a: unknown[]) => getSession(...a) } },
 }))

@@ -18,6 +18,11 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+// FB-019 admission has its own boundary matrix; this suite exercises onboarding roles.
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: vi.fn(async () => undefined),
+}))
+
 type Row = Record<string, unknown>
 type Cond =
   | { op: 'eq'; col: string; val: unknown }

@@ -11,6 +11,7 @@ const hoisted = vi.hoisted(() => ({
   listPublicPosts: vi.fn(),
   hybridSearch: vi.fn(),
   readable: vi.fn(),
+  access: vi.fn(),
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -18,6 +19,9 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 vi.mock('@/lib/server/domains/settings/settings.widget', () => ({
   getWidgetConfig: async () => ({ enabled: true }),
+}))
+vi.mock('@/lib/server/functions/portal-access', () => ({
+  resolvePortalAccessForRequest: hoisted.access,
 }))
 vi.mock('@/lib/server/domains/posts/post.public', () => ({
   listPublicPosts: hoisted.listPublicPosts,
@@ -60,9 +64,20 @@ beforeEach(() => {
   hoisted.listPublicPosts.mockResolvedValue({ items: [], total: 0, hasMore: false })
   hoisted.hybridSearch.mockResolvedValue([])
   hoisted.readable.mockResolvedValue(true)
+  hoisted.access.mockResolvedValue({ granted: true, reason: 'public' })
 })
 
 describe('/api/widget/search query values', () => {
+  it.each(['unauthenticated', 'unauthorized'])(
+    'denies %s callers before anonymous fallback',
+    async (reason) => {
+      hoisted.access.mockResolvedValue({ granted: false, reason })
+      const response = await call(searchGET, '/api/widget/search?q=private')
+      expect(response.status).toBe(403)
+      expect(hoisted.listPublicPosts).not.toHaveBeenCalled()
+      expect(response.headers.get('Cache-Control')).toBe('no-store')
+    }
+  )
   it.each([
     '?q=%00',
     '?q=a%00b',
