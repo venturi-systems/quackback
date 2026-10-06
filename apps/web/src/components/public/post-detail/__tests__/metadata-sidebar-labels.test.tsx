@@ -38,7 +38,9 @@ const LONG_ROADMAP = 'Integrations and data connectors planned for the second ha
 const OTHER_ROADMAP = 'Accessibility, localization and right-to-left language support'
 const LONG_BOARD = 'Customer requests from enterprise workspace administrators'
 
-function renderSidebar() {
+function renderSidebar(
+  author: { authorName?: string | null; authorPrincipalId?: string | null } = {}
+) {
   const noop = vi.fn(async () => {})
   return render(
     <IntlProvider locale="en" messages={{}}>
@@ -46,7 +48,8 @@ function renderSidebar() {
         postId={'post_1' as never}
         voteCount={3}
         board={{ id: 'board_1', name: 'Feature requests', slug: 'features' }}
-        authorName="Demo User"
+        authorName={'authorName' in author ? author.authorName! : 'Demo User'}
+        authorPrincipalId={author.authorPrincipalId}
         createdAt={new Date('2026-09-01T12:00:00Z')}
         roadmaps={[{ id: 'roadmap_1', name: LONG_ROADMAP, slug: 'integrations' }]}
         allRoadmaps={[
@@ -106,5 +109,39 @@ describe('MetadataSidebar: admin-written names (REQ-07, v6.6 text rules)', () =>
   it('shows each board name whole in the board picker', () => {
     renderSidebar()
     expectWholeUserLabel(LONG_BOARD)
+  })
+})
+
+// The seed gives each run a different author, so the render lane measures a
+// different name and different initials every time.
+const LONG_AUTHOR = 'Marcus Thompson'
+
+describe('MetadataSidebar: author row', () => {
+  it.each([
+    ['plain', undefined],
+    ['linked to the user detail', 'principal_1'],
+  ])('marks a real author name as user text in the %s row', (_label, authorPrincipalId) => {
+    renderSidebar({ authorName: LONG_AUTHOR, authorPrincipalId })
+    expectWholeUserLabel(LONG_AUTHOR)
+  })
+
+  it('keeps the Anonymous fallback as page copy', () => {
+    renderSidebar({ authorName: null })
+    const label = screen.getByText('Anonymous')
+    // The design suite checker reads the nearest data-text-origin ancestor.
+    expect(label.closest('[data-text-origin]')).toBeNull()
+  })
+
+  it('lets the avatar widen for wide initials instead of clipping them', async () => {
+    renderSidebar({ authorName: LONG_AUTHOR })
+    // Radix renders the fallback after a zero-delay timer.
+    const initials = await screen.findByText('MT')
+    expect(initials.className).toMatch(/\bpx-1\b/)
+    const avatar = initials.closest('[data-slot="avatar"]')
+    expect(avatar).not.toBeNull()
+    expect(avatar!.className).toMatch(/\bw-auto\b/)
+    expect(avatar!.className).toMatch(/\bmin-w-5\b/)
+    // The fixed 20px width clipped two wide initials under text spacing.
+    expect(avatar!.className.split(/\s+/)).not.toContain('w-5')
   })
 })
