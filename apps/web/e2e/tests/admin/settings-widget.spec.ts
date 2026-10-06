@@ -142,6 +142,12 @@ test.describe('Admin Widget Settings', () => {
       // Widget content is configured by tabs. The retired image-upload switch
       // never belonged to the current settings route.
       await setTab(feedback, true)
+      await setTab(changelog, true)
+      await page.reload()
+      await expect(feedback).toBeChecked()
+      await expect(changelog).toBeChecked()
+
+      // Toggle away from that persisted state before testing the last-tab guard.
       await setTab(changelog, false)
       await expect(feedback).toBeDisabled()
       await page.reload()
@@ -158,6 +164,9 @@ test.describe('Admin Widget Settings', () => {
       await setTab(changelog, true)
       await setTab(feedback, initialFeedback)
       await setTab(changelog, initialChangelog)
+      await page.reload()
+      await expect(feedback).toBeChecked({ checked: initialFeedback })
+      await expect(changelog).toBeChecked({ checked: initialChangelog })
     }
   })
 
