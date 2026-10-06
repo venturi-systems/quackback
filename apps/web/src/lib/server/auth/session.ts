@@ -43,6 +43,12 @@ export async function getSession(): Promise<Session | null> {
     }
 
     const userId = session.user.id as UserId
+    const { assertPortalSessionAdmission } = await import('@/lib/server/auth/portal-admission')
+    try {
+      await assertPortalSessionAdmission(userId)
+    } catch {
+      return null
+    }
 
     const principalRecord = await db.query.principal.findFirst({
       where: eq(principalTable.userId, userId),

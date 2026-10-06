@@ -40,12 +40,15 @@ describe('portal gate step copy', () => {
       it(`${step} (${mode}) does not call an authenticated portal private`, () => {
         const text = gateDescription(step, mode, 'authenticated')
         expect(text).not.toMatch(/private/i)
-        expect(text).toContain('Anyone who signs in can read and take part.')
+        expect(text).toContain(
+          'Share ideas, discuss improvements, and follow progress with our team.'
+        )
+        expect(text).not.toContain('Anyone who signs in')
       })
 
       it(`${step} (${mode}) keeps the private copy for a private portal`, () => {
-        expect(gateDescription(step, mode, 'private')).toContain('This portal is private.')
-        expect(gateDescription(step, mode)).toContain('This portal is private.')
+        expect(gateDescription(step, mode, 'private')).toContain('Sign in with an approved account')
+        expect(gateDescription(step, mode)).toContain('Sign in with an approved account')
       })
     }
   }

@@ -7,6 +7,7 @@
  * client controls `sub` there, so keying on it would allow account takeover.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_PORTAL_CONFIG } from '@/lib/server/domains/settings/settings.types'
 
 const mockUserFindFirst = vi.fn()
 const mockPrincipalFindFirst = vi.fn()
@@ -14,6 +15,16 @@ const mockSessionFindFirst = vi.fn()
 const insertValues = vi.fn()
 const updateSet = vi.fn()
 const mockVerifyJWT = vi.fn()
+
+const admission = vi.hoisted(() => ({ assert: vi.fn(async () => undefined) }))
+vi.mock('@/lib/server/domains/settings/settings.service', () => ({
+  getPortalConfig: vi.fn(async () => ({ access: { visibility: 'public' } })),
+}))
+
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: admission.assert,
+  assertPortalContentAdmission: admission.assert,
+}))
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: vi.fn(() => (opts: unknown) => ({ options: opts })),
@@ -97,11 +108,14 @@ type RouteOpts = {
 }
 const { POST } = (Route as unknown as { options: RouteOpts }).options.server.handlers
 
-function postIdentify(body: Record<string, unknown>): Promise<Response> {
+function postIdentify(body: Record<string, unknown>, bearerToken?: string): Promise<Response> {
   return POST({
     request: new Request('http://test/api/widget/identify', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(bearerToken ? { authorization: 'Bearer ' + bearerToken } : {}),
+      },
       body: JSON.stringify(body),
     }),
   })
@@ -117,6 +131,7 @@ function userInsertValues(): Record<string, unknown> | undefined {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  admission.assert.mockResolvedValue(undefined)
   mockSessionFindFirst.mockResolvedValue(null)
 })
 
@@ -195,5 +210,91 @@ describe('POST /api/widget/identify — external_id is untrusted on the unverifi
     // The client-supplied sub is NOT persisted as an identity key.
     const created = userInsertValues()
     expect(created?.externalId ?? null).toBeNull()
+  })
+})
+
+describe('POST /api/widget/identify — private workspace admission', () => {
+  it('rejects an unsigned claim to an approved address before looking up or mutating identity', async () => {
+    const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+    const { getAllUserVotedPostIds } = await import('@/lib/server/domains/posts/post.public')
+    const { reconcileWidgetMemberships } =
+      await import('@/lib/server/domains/segments/segment-membership.service')
+    vi.mocked(getPortalConfig).mockResolvedValueOnce({
+      ...DEFAULT_PORTAL_CONFIG,
+      access: {
+        visibility: 'private',
+        allowedDomains: [],
+        widgetSignIn: true,
+        allowedSegmentIds: [],
+      },
+    })
+    mockUserFindFirst.mockResolvedValue({
+      id: 'user_alice',
+      email: 'alice@acme.example',
+      emailVerified: true,
+    })
+
+    const response = await postIdentify({ id: 'client_sub', email: 'alice@acme.example' })
+
+    expect(response.status).toBe(403)
+    expect(mockUserFindFirst).not.toHaveBeenCalled()
+    expect(mockPrincipalFindFirst).not.toHaveBeenCalled()
+    expect(mockSessionFindFirst).not.toHaveBeenCalled()
+    expect(insertValues).not.toHaveBeenCalled()
+    expect(updateSet).not.toHaveBeenCalled()
+    expect(reconcileWidgetMemberships).not.toHaveBeenCalled()
+    expect(getAllUserVotedPostIds).not.toHaveBeenCalled()
+  })
+
+  it('fails closed before identity work when the unsigned caller cannot load access policy', async () => {
+    const { getPortalConfig } = await import('@/lib/server/domains/settings/settings.service')
+    vi.mocked(getPortalConfig).mockRejectedValueOnce(new Error('Invalid stored access policy'))
+
+    const response = await postIdentify({ id: 'client_sub', email: 'alice@acme.example' })
+
+    expect(response.status).toBe(403)
+    expect(mockUserFindFirst).not.toHaveBeenCalled()
+    expect(insertValues).not.toHaveBeenCalled()
+    expect(updateSet).not.toHaveBeenCalled()
+  })
+
+  it('rejects a signed but unapproved identity before sessions, segments, merges, or voted-post reads', async () => {
+    const { getAllUserVotedPostIds } = await import('@/lib/server/domains/posts/post.public')
+    const { reconcileWidgetMemberships } =
+      await import('@/lib/server/domains/segments/segment-membership.service')
+    const { resolveAndMergeAnonymousToken } = await import('@/lib/server/auth/identify-merge')
+    mockVerifyJWT.mockReturnValue({
+      sub: 'sub_alice',
+      email: 'alice@acme.example',
+      name: 'Alice',
+      segments: ['enterprise'],
+    })
+    mockUserFindFirst.mockResolvedValue({
+      id: 'user_alice',
+      externalId: 'sub_alice',
+      email: 'alice@acme.example',
+      name: 'Alice',
+      image: null,
+      metadata: null,
+    })
+    mockPrincipalFindFirst.mockResolvedValue({ id: 'principal_alice', role: 'user' })
+    admission.assert.mockRejectedValueOnce(new Error('Approval revoked'))
+
+    const response = await postIdentify(
+      { ssoToken: 'jwt', previousToken: 'anonymous_previous_token' },
+      'anonymous_previous_token'
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({
+      error: { code: 'ACCESS_DENIED', message: 'Feedback access requires approval' },
+    })
+    expect(admission.assert).toHaveBeenCalledWith('user_alice')
+    expect(mockSessionFindFirst).not.toHaveBeenCalled()
+    expect(insertValues).not.toHaveBeenCalled()
+    expect(updateSet).not.toHaveBeenCalled()
+    expect(reconcileWidgetMemberships).not.toHaveBeenCalled()
+    expect(resolveAndMergeAnonymousToken).not.toHaveBeenCalled()
+    expect(getAllUserVotedPostIds).not.toHaveBeenCalled()
   })
 })

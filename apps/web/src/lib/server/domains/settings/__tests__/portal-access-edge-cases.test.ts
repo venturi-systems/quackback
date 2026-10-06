@@ -220,20 +220,16 @@ describe('evaluatePortalAccess — domain matching edge cases', () => {
     if (!r.granted) expect(r.reason).toBe('unauthorized')
   })
 
-  it('email with multiple @: lastIndexOf picks the correct domain part', () => {
-    // E.g. "foo@bar@acme.com" — lastIndexOf('@') extracts "acme.com".
-    const r = evaluatePortalAccess({
+  it('rejects malformed email with multiple domain delimiters', () => {
+    const result = evaluatePortalAccess({
       visibility: 'private',
       role: 'user',
       isAuthenticated: true,
-      userEmail: 'foo@bar@acme.com',
+      userEmail: 'avery@sub@acme.example',
       emailVerified: true,
-      allowedDomains: ['acme.com'],
+      allowedDomains: ['acme.example'],
     })
-    // lastIndexOf('@') on 'foo@bar@acme.com' gives index 7, so domain = 'acme.com'
-    // This is the actual behavior; assert it.
-    expect(r.granted).toBe(true)
-    if (r.granted) expect(r.reason).toBe('domain')
+    expect(result).toEqual({ granted: false, reason: 'unauthorized' })
   })
 
   it('null userEmail → emailDomain returns null → denied without crash', () => {

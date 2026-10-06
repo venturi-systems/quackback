@@ -59,6 +59,13 @@ export async function handlePrincipalCard({
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+  try {
+    await assertPortalContentAdmission(session.user.id)
+  } catch {
+    return Response.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   // Caller must be a real human user — anonymous portal voters and service
   // (API key) principals never get to read individual principal records.
   const callerPrincipal = await db.query.principal.findFirst({

@@ -22,6 +22,12 @@ const hoisted = vi.hoisted(() => ({
   warn: vi.fn(),
 }))
 
+const admission = vi.hoisted(() => ({ assert: vi.fn(async () => undefined) }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalSessionAdmission: admission.assert,
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@tanstack/react-start', () => ({
   createServerFn: () => {
     const chain = { validator: () => chain, handler: (fn: unknown) => fn }

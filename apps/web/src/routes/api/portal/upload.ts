@@ -9,6 +9,12 @@ export async function handlePortalUpload({ request }: { request: Request }): Pro
   if (!session?.user) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+  try {
+    await assertPortalContentAdmission(session.user.id)
+  } catch {
+    return Response.json({ error: 'Feedback access requires approval' }, { status: 403 })
+  }
   const principalRecord = await db.query.principal.findFirst({
     where: eq(principal.userId, session.user.id as UserId),
     columns: { type: true },

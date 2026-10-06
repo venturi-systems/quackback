@@ -41,13 +41,13 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     await page.goto('/')
     await page.waitForLoadState('networkidle')
     await expect(
-      page.getByRole('heading', { level: 1, name: 'Sign in to access Acme Corp' })
+      page.getByRole('heading', { level: 1, name: 'Share feedback with Acme Corp' })
     ).toBeVisible()
-    const roles = page.locator('details.portal-gate__roles')
-    const summary = roles.locator('summary')
-    // REQ-FEEDBACK-AUTH-VIEWPORT: the guide is optional and the standard footer remains present.
-    await expect(roles).not.toHaveAttribute('open', '')
-    await expect(page.locator('.portal-roles__grid')).toBeHidden()
+    const help = page.locator('details[data-public-sign-in-help]')
+    const summary = help.locator('summary')
+    // REQ-FEEDBACK-AUTH-VIEWPORT: native sign-in help is optional and the full compact footer remains present.
+    await expect(help).not.toHaveAttribute('open', '')
+    await expect(page.getByText('Who can do what', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
     await expect(page.getByRole('navigation', { name: 'Legal and sitemap' })).toHaveCount(1)
     const initialViewports = []
@@ -66,7 +66,6 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           const root = document.documentElement
           const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
           const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
-          const disclosure = document.querySelector('.portal-gate__roles')!.getBoundingClientRect()
           return {
             width: innerWidth,
             height: innerHeight,
@@ -74,8 +73,10 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
             documentHeight: root.scrollHeight,
             clientWidth: root.clientWidth,
             layoutTop: layout.top,
-            footerBottom: footer.bottom,
+            layoutBottom: layout.bottom,
             footerHeight: footer.height,
+            footerBottom: footer.bottom,
+            footerTop: footer.top,
             footerNavWidth: document
               .querySelector('.venturi-footer__legal')!
               .getBoundingClientRect().width,
@@ -91,17 +92,15 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
                 fontVariationSettings: style.fontVariationSettings,
               }
             }),
-            utilityGap: footer.top - disclosure.bottom,
             overflow: getComputedStyle(root).overflowY,
           }
         })
-        // Preserve the failing viewport too: browser font advances can wrap a
-        // footer row even when the same font file and computed styles are used.
+        // Preserve evidence for the failing viewport before assertions run.
         const footerFonts = await measureRenderedFonts(
           page,
           Array.from(
             { length: 5 },
-            (_, index) => '.venturi-footer__legal li:nth-child(' + (index + 1) + ') a'
+            (_, index) => '.venturi-footer__legal li:nth-child(' + (index + 2) + ') a'
           )
         )
         initialViewports.push({
@@ -109,12 +108,19 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           browserVersion: page.context().browser()?.version(),
           footerFonts,
         })
-        expect(initial.documentHeight).toBeLessThanOrEqual(height)
         expect(initial.documentWidth).toBeLessThanOrEqual(width)
         expect(initial.layoutTop).toBeGreaterThanOrEqual(0)
-        expect(initial.footerBottom).toBeLessThanOrEqual(height)
-        expect(initial.utilityGap).toBeGreaterThanOrEqual(0)
-        expect(initial.utilityGap).toBeLessThanOrEqual(32)
+        // Natural vertical scrolling preserves readable text on short screens.
+        // The footer ends the document, without an empty band after it.
+        expect(Math.abs(initial.footerBottom - initial.documentHeight)).toBeLessThanOrEqual(1)
+        expect(initial.footerTop).toBeGreaterThanOrEqual(initial.layoutBottom)
+        const footerGap = initial.footerTop - initial.layoutBottom
+        // A short page can use the remaining viewport height to pin its footer.
+        // Once content needs scrolling, only the designed bottom padding remains.
+        expect(footerGap).toBeLessThanOrEqual(
+          Math.max(72, height - initial.layoutBottom - initial.footerHeight) + 1
+        )
+        expect(initial.layoutTop).toBeLessThanOrEqual(160)
         expect(initial.overflow).not.toMatch(/hidden|clip/)
       }
     } finally {
@@ -135,11 +141,11 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       contentType: 'application/json',
     })
     await page.keyboard.press('Enter')
-    await expect(roles).toHaveAttribute('open', '')
-    await expect(page.getByRole('heading', { name: 'Contributor', exact: true })).toBeVisible()
+    await expect(help).toHaveAttribute('open', '')
+    await expect(help.getByRole('link', { name: 'Reload this page' })).toBeVisible()
     await page.keyboard.press('Space')
-    await expect(roles).not.toHaveAttribute('open', '')
-    await expect(page.locator('.portal-roles__grid')).toBeHidden()
+    await expect(help).not.toHaveAttribute('open', '')
+    await expect(page.getByText('Who can do what', { exact: true })).toHaveCount(0)
     await expect(summary).toBeFocused()
     await page.keyboard.press('Enter')
 
@@ -148,8 +154,8 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       320, 390, 639, 640, 641, 767, 768, 769, 1023, 1024, 1025, 1440, 1920, 2560,
     ]) {
       await page.setViewportSize({ width, height: 1000 })
-      // Expanded permissions remain readable after the visitor requests them.
-      await expect(roles).toHaveAttribute('open', '')
+      // Expanded native recovery help remains readable after the visitor requests it.
+      await expect(help).toHaveAttribute('open', '')
       await page.evaluate(() => document.fonts.ready.then(() => undefined))
       const geometry = await page.evaluate(() => {
         const intro = document.querySelector('.portal-gate__layout > .portal-gate__intro')!
@@ -161,7 +167,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           form: form.getBoundingClientRect().toJSON(),
           text: Array.from(
             document.querySelectorAll(
-              '.portal-gate__layout h1, .portal-gate__layout h2, .portal-gate__layout h3, .portal-gate__lead, .portal-gate__access, .portal-gate .portal-roles p, .portal-gate .portal-roles li'
+              '.portal-gate__layout h1, .portal-gate__lead, .portal-gate__access, [data-public-sign-in-help] p'
             )
           ).map((element) => ({
             text: element.textContent,
@@ -173,23 +179,26 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       expect(geometry.document).toBeLessThanOrEqual(width)
       for (const item of geometry.text)
         expect(item.size, item.text ?? '').toBeGreaterThanOrEqual(item.heading ? 18 : 16)
-      // The entry is one centered component at every width; the form is bounded,
-      // while the standard related and legal links remain available.
-      expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.y + geometry.intro.height)
-      expect(Math.abs(geometry.form.x + geometry.form.width / 2 - width / 2)).toBeLessThanOrEqual(1)
+      // Desktop uses adjacent context and sign-in columns; narrow screens
+      // keep the form on the same reading rail below the introduction.
+      if (width >= 768) {
+        expect(geometry.form.x).toBeGreaterThanOrEqual(geometry.intro.right)
+        expect(Math.abs(geometry.form.y - geometry.intro.y)).toBeLessThanOrEqual(8)
+      } else {
+        expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.bottom)
+        expect(Math.abs(geometry.form.x - geometry.intro.x)).toBeLessThanOrEqual(1)
+      }
       const typography = await measureTypography(
         page,
         [
           {
-            selector:
-              '.portal-gate__title, .portal-gate__signin-title, .portal-gate__roles-summary h2, .portal-gate .portal-roles__role',
+            selector: '.portal-gate__title',
             profile: 'headline',
             origin: 'authored',
             locale: 'en-US',
           },
           {
-            selector:
-              '.portal-gate__lead, .portal-gate__access, .portal-gate .portal-roles__who, .portal-gate .portal-roles__list li, .portal-gate .portal-roles__note',
+            selector: '.portal-gate__access',
             profile: 'short-copy',
             origin: 'authored',
             locale: 'en-US',
@@ -217,14 +226,10 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       }
       // The folded state, then open again for the next width.
       await summary.click()
-      await expect(roles).not.toHaveAttribute('open', '')
+      await expect(help).not.toHaveAttribute('open', '')
       const compact = await page.evaluate(() => {
-        const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
         const form = document.querySelector('.portal-gate__form')!.getBoundingClientRect()
         return {
-          gap:
-            footer.top -
-            document.querySelector('.portal-gate__roles')!.getBoundingClientRect().bottom,
           formWidth: form.width,
           targets: Array.from(document.querySelectorAll('.venturi-footer a')).map((element) => {
             const rect = element.getBoundingClientRect()
@@ -232,9 +237,8 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           }),
         }
       })
-      expect(compact.gap).toBeLessThanOrEqual(32)
       expect(compact.formWidth).toBeLessThanOrEqual(416)
-      expect(compact.targets).toHaveLength(8)
+      expect(compact.targets).toHaveLength(19)
       for (const target of compact.targets) {
         expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
         expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
@@ -248,7 +252,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         })
       }
       await summary.click()
-      await expect(roles).toHaveAttribute('open', '')
+      await expect(help).toHaveAttribute('open', '')
     }
     await testInfo.attach('entry-layout-evidence', {
       body: Buffer.from(JSON.stringify(records)),
@@ -262,12 +266,15 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           await zoomPage.goto('/')
           await expect(zoomPage.locator('.portal-gate__layout')).toBeVisible()
           const zoom = await setZoom(factor)
-          await expect(zoomPage.locator('details.portal-gate__roles')).not.toHaveAttribute(
+          await expect(zoomPage.locator('details[data-public-sign-in-help]')).not.toHaveAttribute(
             'open',
             ''
           )
-          await zoomPage.locator('details.portal-gate__roles summary').click()
-          await expect(zoomPage.locator('details.portal-gate__roles')).toHaveAttribute('open', '')
+          await zoomPage.locator('details[data-public-sign-in-help] summary').click()
+          await expect(zoomPage.locator('details[data-public-sign-in-help]')).toHaveAttribute(
+            'open',
+            ''
+          )
           await zoomPage.addStyleTag({
             content: `
             .portal-gate--entry * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }
@@ -288,7 +295,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           )
           expect(reflow.issues).toEqual([])
           await expect(
-            zoomPage.getByRole('heading', { level: 1, name: 'Sign in to access Acme Corp' })
+            zoomPage.getByRole('heading', { level: 1, name: 'Share feedback with Acme Corp' })
           ).toBeVisible()
           await expect(zoomPage.getByLabel(/email/i)).toBeVisible()
           await testInfo.attach(`entry-zoom-${factor}`, {

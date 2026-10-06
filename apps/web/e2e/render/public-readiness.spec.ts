@@ -90,9 +90,29 @@ for (const { width, height = 844, textScale } of [
         const before = await geometry()
         expect(before.length).toBe(5)
         if (height === 667 && !expanded) {
-          expect(
-            await page.evaluate(() => document.documentElement.scrollHeight)
-          ).toBeLessThanOrEqual(height)
+          const compact = await page.evaluate(() => {
+            const root = document.documentElement
+            const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
+            const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
+            return {
+              documentWidth: root.scrollWidth,
+              documentHeight: root.scrollHeight,
+              layoutBottom: layout.bottom + scrollY,
+              footerTop: footer.top + scrollY,
+              footerBottom: footer.bottom + scrollY,
+              footerHeight: footer.height,
+              overflow: getComputedStyle(root).overflowY,
+            }
+          })
+          // The complete footer may scroll naturally on a short phone. It must
+          // end the document without horizontal overflow or an empty tail.
+          expect(compact.documentWidth).toBeLessThanOrEqual(width)
+          expect(Math.abs(compact.footerBottom - compact.documentHeight)).toBeLessThanOrEqual(1)
+          expect(compact.footerTop).toBeGreaterThanOrEqual(compact.layoutBottom)
+          expect(compact.footerTop - compact.layoutBottom).toBeLessThanOrEqual(
+            Math.max(72, height - compact.layoutBottom - compact.footerHeight) + 1
+          )
+          expect(compact.overflow).not.toMatch(/hidden|clip/)
         }
         const controls = readiness.locator('fieldset button, fieldset input')
         const ownDisabled = await controls.evaluateAll((elements) =>
@@ -115,9 +135,29 @@ for (const { width, height = 844, textScale } of [
           }
         }
         if (height === 667 && !expanded) {
-          expect(
-            await page.evaluate(() => document.documentElement.scrollHeight)
-          ).toBeLessThanOrEqual(height)
+          const compact = await page.evaluate(() => {
+            const root = document.documentElement
+            const layout = document.querySelector('.portal-gate__layout')!.getBoundingClientRect()
+            const footer = document.querySelector('.venturi-footer')!.getBoundingClientRect()
+            return {
+              documentWidth: root.scrollWidth,
+              documentHeight: root.scrollHeight,
+              layoutBottom: layout.bottom + scrollY,
+              footerTop: footer.top + scrollY,
+              footerBottom: footer.bottom + scrollY,
+              footerHeight: footer.height,
+              overflow: getComputedStyle(root).overflowY,
+            }
+          })
+          // The complete footer may scroll naturally on a short phone. It must
+          // end the document without horizontal overflow or an empty tail.
+          expect(compact.documentWidth).toBeLessThanOrEqual(width)
+          expect(Math.abs(compact.footerBottom - compact.documentHeight)).toBeLessThanOrEqual(1)
+          expect(compact.footerTop).toBeGreaterThanOrEqual(compact.layoutBottom)
+          expect(compact.footerTop - compact.layoutBottom).toBeLessThanOrEqual(
+            Math.max(72, height - compact.layoutBottom - compact.footerHeight) + 1
+          )
+          expect(compact.overflow).not.toMatch(/hidden|clip/)
         }
         await expect(readiness.locator('fieldset')).toHaveJSProperty('disabled', false)
         // Readiness must not override a control's own validation/busy state.

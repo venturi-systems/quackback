@@ -68,9 +68,6 @@ test('APP-FB-01 and APP-FB-02 keep public headers opaque and notices branded', a
         await page.goto(path)
         if (path === '/') {
           await expect(page.locator('[data-public-sign-in-ready="true"]')).toBeVisible()
-          await page.locator('details.portal-gate__roles').evaluate((el) => {
-            ;(el as HTMLDetailsElement).open = true
-          })
         }
         const header = page.locator('.venturi-site-header')
         const surface = await header.evaluate((el) => {

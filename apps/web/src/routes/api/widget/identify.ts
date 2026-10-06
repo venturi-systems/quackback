@@ -108,6 +108,11 @@ async function findOrCreateSession(
   userId: UserId,
   request: Request
 ): Promise<{ id: string; token: string }> {
+  // This route inserts sessions directly, outside Better Auth's database hooks.
+  // It must enforce the same private-workspace admission before reuse or minting.
+  const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+  await assertPortalContentAdmission(userId)
+
   // Reuse only a session this route minted earlier (it carries a
   // widget_identified_session row). A session the person created by signing
   // in to the portal is never handed to a widget caller: on the unverified
@@ -198,6 +203,30 @@ export const Route = createFileRoute('/api/widget/identify')({
           delete claims.ssoToken
           delete claims.previousToken
           delete claims.segments
+        }
+
+        // An unsigned email claim cannot borrow an existing approved user's
+        // verified identity. Private workspaces require a verified identity token.
+        if (!claimsAreVerified) {
+          try {
+            const { getPortalConfig } =
+              await import('@/lib/server/domains/settings/settings.service')
+            const config = await getPortalConfig()
+            if (config.access?.visibility === 'private') {
+              return Response.json(
+                {
+                  error: 'Verified identity is required for this feedback workspace',
+                  code: 'TOKEN_REQUIRED',
+                },
+                { status: 403 }
+              )
+            }
+          } catch {
+            return Response.json(
+              { error: 'Access unavailable', code: 'ACCESS_DENIED' },
+              { status: 403 }
+            )
+          }
         }
 
         // Extract identity fields, supporting both JWT and unverified body shapes
@@ -386,6 +415,13 @@ export const Route = createFileRoute('/api/widget/identify')({
 
         const principalId = principalRecord.id as PrincipalId
 
+        let sessionInfo: { id: string; token: string }
+        try {
+          sessionInfo = await findOrCreateSession(userId, request)
+        } catch {
+          return jsonError('ACCESS_DENIED', 'Feedback access requires approval', 403)
+        }
+
         // Segments claim — the customer can tag the identified user with one
         // or more segment slugs in the signed JWT. ONLY honored on the
         // verified-token path; the unverified body's `segments` was stripped
@@ -448,12 +484,9 @@ export const Route = createFileRoute('/api/widget/identify')({
           }
         }
 
-        // Find/create session and fetch voted posts in parallel
-        // (voted posts include any merged anonymous votes)
-        const [sessionInfo, votedPostIdSet] = await Promise.all([
-          findOrCreateSession(userId, request),
-          getAllUserVotedPostIds(principalId),
-        ])
+        // Admission precedes protected activity reads. Include any anonymous
+        // votes merged above, but never query them for a rejected identity.
+        const votedPostIdSet = await getAllUserVotedPostIds(principalId)
         const votedPostIds = Array.from(votedPostIdSet)
 
         // Record HMAC-verification provenance for this session. The

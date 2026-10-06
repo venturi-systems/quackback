@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { resolvePortalAccessForRequest } from '@/lib/server/functions/portal-access'
 import { listPublicPosts } from '@/lib/server/domains/posts/post.public'
 import { getWidgetSession } from '@/lib/server/functions/widget-auth'
 import { ANONYMOUS_ACTOR, type Actor } from '@/lib/server/policy'
@@ -15,6 +16,13 @@ export const Route = createFileRoute('/api/widget/search')({
       GET: async ({ request }) => {
         const disabled = await widgetDisabledResponse(corsHeaders())
         if (disabled) return disabled
+        const access = await resolvePortalAccessForRequest()
+        if (!access.granted) {
+          return Response.json(
+            { error: { code: 'FORBIDDEN', message: 'Feedback access requires approval' } },
+            { status: 403, headers: corsHeaders() }
+          )
+        }
         const url = new URL(request.url)
         const q = url.searchParams.get('q')?.trim()
         const board = url.searchParams.get('board') || undefined
