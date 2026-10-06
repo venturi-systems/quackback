@@ -73,6 +73,18 @@ export const resolvePortalAccessForRequest = createServerOnlyFn(
       // No session available; treat as anonymous.
     }
 
+    // Recheck the current approval list for every protected data request.
+    // An old cookie cannot retain access after a domain or individual grant
+    // is revoked. Revoke this rejected session before returning the denial.
+    if (session?.user) {
+      const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+      try {
+        await assertPortalContentAdmission(session.user.id)
+      } catch {
+        return { granted: false, reason: 'unauthorized' }
+      }
+    }
+
     let role: 'admin' | 'member' | 'user' | null = null
     let userEmail: string | null = null
     let emailVerified = false

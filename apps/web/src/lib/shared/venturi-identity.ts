@@ -26,6 +26,37 @@ export const VENTURI_LEGAL_LINKS: ReadonlyArray<{ label: string; href: string }>
   },
 ]
 
+export const VENTURI_FOOTER_GROUPS = [
+  {
+    label: 'Product',
+    links: [
+      { label: 'Use Cases', href: 'https://venturi.systems/use-cases/' },
+      { label: 'How It Works', href: 'https://venturi.systems/how-it-works/' },
+      { label: 'Platform', href: 'https://venturi.systems/platform/' },
+      { label: 'Documentation', href: VENTURI_DOCS_URL },
+      { label: 'Pricing', href: 'https://venturi.systems/pricing/' },
+      { label: 'Product demo', href: 'https://venturi.systems/investor/demo/', newTab: true },
+      { label: 'Login', href: 'https://app.venturi.systems/' },
+    ],
+  },
+  {
+    label: 'Trust',
+    links: [
+      { label: 'Security', href: 'https://venturi.systems/security/' },
+      { label: 'Legal', href: 'https://venturi.systems/legal/' },
+      { label: 'Software notices', href: '/software-notices' },
+    ],
+  },
+  {
+    label: 'Connect',
+    links: [
+      { label: 'Contact', href: 'https://venturi.systems/contact/' },
+      { label: 'Careers', href: 'https://venturi.systems/careers/' },
+      { label: 'Feedback', href: 'https://feedback.venturi.systems/' },
+    ],
+  },
+] as const
+
 const SOURCE_REPOSITORY_URL = 'https://github.com/venturi-systems/quackback'
 
 /**

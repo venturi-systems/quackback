@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mockSession, mockPrincipal, mockImageFile } from '../../__tests__/upload-fixtures'
 
+const admission = vi.hoisted(() => ({ assert: vi.fn() }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@/lib/server/auth', () => ({
   auth: {
     api: {
@@ -49,6 +54,7 @@ const anonymousPrincipal = mockPrincipal({ type: 'anonymous' })
 describe('POST /api/portal/upload', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    admission.assert.mockResolvedValue(undefined)
     vi.mocked(isS3Configured).mockReturnValue(true)
   })
 
@@ -65,6 +71,18 @@ describe('POST /api/portal/upload', () => {
     const res = await handlePortalUpload({ request: makeRequest() })
     expect(res.status).toBe(403)
     expect(await res.json()).toMatchObject({ error: expect.stringContaining('Authentication') })
+  })
+
+  it('refuses a revoked session before reading the file or writing storage', async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValueOnce(identifiedSession)
+    admission.assert.mockRejectedValueOnce(new Error('Approval revoked'))
+    const res = await handlePortalUpload({
+      request: makeRequest(mockImageFile('private.png', 'image/png')),
+    })
+    expect(res.status).toBe(403)
+    expect(admission.assert).toHaveBeenCalledWith(identifiedSession.user.id)
+    expect(db.query.principal.findFirst).not.toHaveBeenCalled()
+    expect(uploadObject).not.toHaveBeenCalled()
   })
 
   it('returns 503 when S3 is not configured', async () => {

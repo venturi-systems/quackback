@@ -58,7 +58,7 @@ interface InviteRowProps {
 
 /**
  * One row in the portal-invites list. Pending invites show Copy-link /
- * Resend / Revoke actions; other statuses just show the badge.
+ * Resend / Revoke actions; accepted approvals retain a Revoke action.
  *
  * The Revoke button uses an inline "confirm" two-step (avoids a dialog
  * for a per-row destructive action). Copy-link mints a fresh magic-link
@@ -118,36 +118,40 @@ export function InviteRow({ invite, onRevoke, onResend, revoking, resending }: I
           <p className="mt-0.5 text-xs text-muted-foreground">Sent {formatInviteDate(sentDate)}</p>
         </div>
         <InviteStatusBadge status={invite.status} />
-        {invite.status === 'pending' && (
+        {(invite.status === 'pending' || invite.status === 'accepted') && (
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void handleCopyLink()}
-              disabled={copyState === 'copying' || revoking || resending}
-              className="h-7 px-2 text-xs"
-              title="Mint a fresh sign-in link and copy it to your clipboard"
-            >
-              {copyState === 'copying' && (
-                <ArrowPathIcon className="mr-1 h-3.5 w-3.5 animate-spin" />
-              )}
-              {copyState === 'copied'
-                ? 'Link copied'
-                : copyState === 'error'
-                  ? 'Copy failed'
-                  : 'Copy link'}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => void onResend(invite.id)}
-              disabled={resending || revoking}
-              className="h-7 px-2 text-xs"
-            >
-              {resending ? <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> : 'Resend'}
-            </Button>
+            {invite.status === 'pending' && (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void handleCopyLink()}
+                  disabled={copyState === 'copying' || revoking || resending}
+                  className="h-7 px-2 text-xs"
+                  title="Mint a fresh sign-in link and copy it to your clipboard"
+                >
+                  {copyState === 'copying' && (
+                    <ArrowPathIcon className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  )}
+                  {copyState === 'copied'
+                    ? 'Link copied'
+                    : copyState === 'error'
+                      ? 'Copy failed'
+                      : 'Copy link'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void onResend(invite.id)}
+                  disabled={resending || revoking}
+                  className="h-7 px-2 text-xs"
+                >
+                  {resending ? <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" /> : 'Resend'}
+                </Button>
+              </>
+            )}
             <Button
               type="button"
               variant="ghost"

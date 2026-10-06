@@ -12,6 +12,7 @@ import {
   DEFAULT_PORTAL_CONFIG,
   PORTAL_WELCOME_CARD_TITLE_MAX,
   type PortalWelcomeCard,
+  type PortalConfig,
 } from './settings.types'
 
 const log = logger.child({ component: 'settings-helpers' })
@@ -26,6 +27,38 @@ export function parseJsonConfig<T extends object>(json: string | null, defaultVa
   } catch {
     return defaultValue
   }
+}
+
+/** Security policy must never become public because stored JSON is corrupt. */
+export function parsePortalConfig(json: string | null): PortalConfig {
+  if (!json) return DEFAULT_PORTAL_CONFIG
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    throw new ValidationError('VALIDATION_ERROR', 'Portal access configuration is invalid')
+  }
+  if (!isPlainObject(parsed)) {
+    throw new ValidationError('VALIDATION_ERROR', 'Portal access configuration is invalid')
+  }
+  const access = parsed.access
+  if (
+    access !== undefined &&
+    (!isPlainObject(access) ||
+      (access.visibility !== undefined &&
+        (typeof access.visibility !== 'string' ||
+          !['public', 'authenticated', 'private'].includes(access.visibility))) ||
+      (access.allowedDomains !== undefined &&
+        (!Array.isArray(access.allowedDomains) ||
+          !access.allowedDomains.every((domain) => typeof domain === 'string'))) ||
+      (access.allowedSegmentIds !== undefined &&
+        (!Array.isArray(access.allowedSegmentIds) ||
+          !access.allowedSegmentIds.every((id) => typeof id === 'string'))) ||
+      (access.widgetSignIn !== undefined && typeof access.widgetSignIn !== 'boolean'))
+  ) {
+    throw new ValidationError('VALIDATION_ERROR', 'Portal access configuration is invalid')
+  }
+  return deepMerge(DEFAULT_PORTAL_CONFIG, parsed as Partial<PortalConfig>)
 }
 
 /**

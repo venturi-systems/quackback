@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { createFileRoute, redirect, stripSearchParams } from '@tanstack/react-router'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { FormattedMessage } from 'react-intl'
 import { lazy, Suspense } from 'react'
@@ -48,6 +48,8 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute('/_portal/')({
   validateSearch: searchSchema,
+  // Trending is the default view, not an address users need to share.
+  search: { middlewares: [stripSearchParams({ sort: 'trending' })] },
   // Note: No loaderDeps - loader only runs on initial route load for SSR.
   // Client-side filter changes are handled by FeedbackContainer's usePublicPosts.
   // We access search params via location.search for initial SSR without triggering

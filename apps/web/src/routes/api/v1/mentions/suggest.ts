@@ -62,6 +62,13 @@ export async function handleMentionSuggest({ request }: { request: Request }): P
     return Response.json({ error: 'Forbidden' }, { status: 403 })
   }
 
+  const { assertPortalContentAdmission } = await import('@/lib/server/auth/portal-admission')
+  try {
+    await assertPortalContentAdmission(session.user.id)
+  } catch {
+    return Response.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
   // Caller must be a real human user — anonymous (portal voters) and service
   // (API key) principals never get to enumerate the user directory.
   const principalRecord = await db.query.principal.findFirst({

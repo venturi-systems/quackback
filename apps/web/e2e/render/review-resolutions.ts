@@ -45,6 +45,21 @@ const SIDEBAR_WIDTHS = ['1024s', '1440s', '1920s', '2560s'] as const
 
 export const REVIEW_RESOLUTIONS: readonly ReviewResolution[] = [
   {
+    routes: [
+      'admin-feed',
+      'admin-roadmap',
+      'admin-changelog',
+      'admin-post',
+      'admin-notifications',
+      'anonymous-feed',
+      'anonymous-post',
+    ],
+    text: /^Software notices$/,
+    widths: ['1024s'],
+    resolution:
+      'Accepted as text-spacing reflow after inspecting PR 225 run 37437754918 and the independent footer review. The narrow desktop Trust column wraps this label to two complete words. The full label remains legible, its target stays at least 44px tall, and nothing clips or overlaps. An intrinsic-width experiment for this link displaced the neighboring Product and Connect tracks and split their words instead. Preserving this complete two-word wrap keeps all navigation readable without smaller type or forced single-line text.',
+  },
+  {
     routes: FEEDS,
     text: /^Feature Requests \d+$/,
     widths: SIDEBAR_WIDTHS,

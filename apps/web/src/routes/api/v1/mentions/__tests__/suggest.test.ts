@@ -15,6 +15,11 @@ import { mockSession, mockPrincipal } from '../../../__tests__/upload-fixtures'
 const mockSelect = vi.fn()
 const mockIncrementBucket = vi.fn()
 
+const admission = vi.hoisted(() => ({ assert: vi.fn() }))
+vi.mock('@/lib/server/auth/portal-admission', () => ({
+  assertPortalContentAdmission: admission.assert,
+}))
+
 vi.mock('@/lib/server/auth', () => ({
   auth: {
     api: {
@@ -110,6 +115,7 @@ function makeChain(rows: unknown[], capture: QueryChainCapture) {
 describe('GET /api/v1/mentions/suggest', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    admission.assert.mockResolvedValue(undefined)
     // Default: rate limit allows (first request in window).
     mockIncrementBucket.mockResolvedValue({ count: 1 })
   })

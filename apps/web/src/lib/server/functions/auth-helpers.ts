@@ -100,6 +100,8 @@ export async function requireAuth(options?: { roles?: Role[] }): Promise<AuthCon
       throw new Error('Authentication required')
     }
     const userId = session.user.id as UserId
+    const { assertPortalSessionAdmission } = await import('@/lib/server/auth/portal-admission')
+    await assertPortalSessionAdmission(userId)
 
     const appSettings = await getSettings()
     if (!appSettings) {
@@ -163,6 +165,12 @@ export async function getOptionalAuth(): Promise<AuthContext | null> {
       return null
     }
     const userId = session.user.id as UserId
+    const { assertPortalSessionAdmission } = await import('@/lib/server/auth/portal-admission')
+    try {
+      await assertPortalSessionAdmission(userId)
+    } catch {
+      return null
+    }
 
     const appSettings = await getSettings()
     if (!appSettings) {
