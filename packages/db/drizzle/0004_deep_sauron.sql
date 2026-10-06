@@ -1,1 +1,0 @@
-ALTER TABLE "settings" ADD COLUMN "telemetry_config" text;
