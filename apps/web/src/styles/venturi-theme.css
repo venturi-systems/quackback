@@ -205,6 +205,7 @@
   color: var(--ds-color-text-secondary);
   font-size: 14px;
   line-height: 1.5;
+  text-wrap: balance;
 }
 .venturi-footer__nav {
   display: grid;
@@ -316,10 +317,21 @@
   }
   .venturi-footer__nav section:first-child ul {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    grid-template-columns: repeat(4, auto);
+  }
+  .venturi-footer__nav section:first-child li {
+    min-width: 0;
   }
 }
-@media (max-width: 768px) {
+/* The accepted public footer keeps Product in two rows of four and three.
+   On narrower desktops, size that group to its content while preserving
+   the longest Trust and Connect labels; enlarged text can still wrap. */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .venturi-footer__nav {
+    grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
+  }
+}
+@media (max-width: 1023px) {
   .venturi-footer__nav {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -351,8 +363,10 @@
   }
 }
 @media (max-width: 448px) {
+  /* Legal names keep their intrinsic width so the native font does not
+     strand the final word of a three-word title in a forced half-column. */
   .venturi-footer__legal li:nth-child(n + 3) {
-    flex: 0 1 calc(50% - 8px);
+    flex: 0 1 auto;
     min-width: 0;
   }
   .venturi-footer__legal a {
@@ -809,7 +823,7 @@
 }
 .portal-gate--entry .portal-gate__access {
   max-inline-size: 38rem;
-  text-wrap: pretty;
+  text-wrap: balance;
 }
 .portal-gate--entry .portal-gate__layout > .portal-gate__signin {
   border: 0;
@@ -839,6 +853,7 @@
   padding-block: 12px;
   cursor: pointer;
   font: var(--ds-typography-body-16);
+  text-wrap: balance;
 }
 .portal-feedback-faq summary:focus-visible {
   outline: 2px solid var(--ring);

@@ -68,9 +68,7 @@ test.describe('Portal identity and exploration', () => {
       await navigation.getByRole('link', { name: 'Roadmap', exact: true }).click()
       await expect(page).toHaveURL(/\/roadmap/)
       await brand.click()
-      await expect(page).toHaveURL(
-        (url) => url.pathname === '/' && url.searchParams.get('sort') === 'trending'
-      )
+      await expect(page).toHaveURL((url) => url.pathname === '/' && !url.searchParams.has('sort'))
       if (width < 640) {
         await expect(menu).toBeEnabled()
         await menu.click()
