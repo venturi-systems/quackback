@@ -38,6 +38,12 @@ export const githubInboundHandler: InboundWebhookHandler = {
 
     if (!payload.issue?.number) return null
 
+    // An issue number is unique only within its repository. Without the
+    // issue's own URL this event cannot be told apart from an equally
+    // numbered issue in another repository, so ignore it rather than guess.
+    const issueUrl = payload.issue.html_url
+    if (typeof issueUrl !== 'string' || issueUrl.length === 0) return null
+
     // Map GitHub actions to status names
     const externalStatus = payload.action === 'closed' ? 'Closed' : 'Open'
 
@@ -45,6 +51,7 @@ export const githubInboundHandler: InboundWebhookHandler = {
       externalId: String(payload.issue.number),
       externalStatus,
       eventType: `issues.${payload.action}`,
+      externalUrl: issueUrl,
     }
   },
 }

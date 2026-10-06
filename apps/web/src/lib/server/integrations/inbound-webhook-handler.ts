@@ -77,16 +77,25 @@ export async function handleInboundWebhook(
     'inbound status change received'
   )
 
-  // Reverse lookup: find the post linked to this external ID
+  // Reverse lookup: find the post linked to this external ID. When the
+  // platform's ID is unique only within a container (a GitHub issue number
+  // within its repository), the item's URL must match as well, so an event
+  // for one repository's issue #7 never updates a post linked to another
+  // repository's issue #7.
   const link = await db.query.postExternalLinks.findFirst({
     where: and(
       eq(postExternalLinks.integrationType, integrationType),
-      eq(postExternalLinks.externalId, result.externalId)
+      eq(postExternalLinks.externalId, result.externalId),
+      ...(result.externalUrl ? [eq(postExternalLinks.externalUrl, result.externalUrl)] : [])
     ),
   })
   if (!link) {
     log.debug(
-      { integration_type: integrationType, external_id: result.externalId },
+      {
+        integration_type: integrationType,
+        external_id: result.externalId,
+        external_url: result.externalUrl,
+      },
       'no linked post for external id, ignoring'
     )
     return new Response('OK', { status: 200 })
