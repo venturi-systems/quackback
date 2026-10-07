@@ -26,6 +26,8 @@ import {
 
 assertDesignFixtureEnvironmentSync()
 
+test.use({ trace: 'retain-on-failure' })
+
 const ADMIN_STATE = 'e2e/.auth/admin.json'
 const USER_EMAIL = 'olivia.chen@acme.example'
 const MEMBER_EMAIL = 'noah.brooks@acme.example'

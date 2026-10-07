@@ -36,6 +36,8 @@ const PORTAL_EMAIL = 'e2e-portal-unified@example.test'
 // Registration IDs scoped to this suite to avoid collisions with identity-providers.spec.ts.
 const BTN_RID = 'e2e-unified-btn'
 const BTN_LABEL = 'E2E Unified Button'
+const ALT_BTN_RID = 'e2e-unified-alternate-btn'
+const ALT_BTN_LABEL = 'E2E Alternate Button'
 const CORP_RID = 'e2e-unified-corp'
 const CORP_LABEL = 'E2E Corp IdP'
 // Avoid .test/.example/.invalid/.localhost — normalizeDomain rejects them as
@@ -232,11 +234,9 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 // /?auth=signin escape hatch: the dialog opens with the seeded OIDC button and
 // the break-glass recovery-code link (callbackUrl=/admin satisfies isTeamCallback).
 //
-// DEFERRED — anonymous `/` → IdP redirect: requires a live OIDC discovery
-// document. The instant-SSO resolver calls auth.api.signInWithOAuth2 which
-// fetches the provider's discovery URL; with a synthetic URL this returns null
-// and no redirect fires. Tracking: run this sub-case against the CI environment
-// where a mock-OIDC container is available.
+// Two registered providers retain the chooser. A sole provider intentionally
+// takes the instant-SSO path, which requires a live discovery endpoint and is
+// a separate journey from this dialog and recovery-link acceptance case.
 
 test('(4) /?auth=signin shows the dialog with OIDC button and recovery-code link', async ({
   page,
@@ -247,6 +247,14 @@ test('(4) /?auth=signin shows the dialog with OIDC button and recovery-code link
       registrationId: BTN_RID,
       label: BTN_LABEL,
       clientId: 'e2e-unified-btn-client',
+      discoveryUrl: DISCOVERY_URL,
+      enabled: true,
+      showButton: true,
+    })
+    seedIdentityProvider({
+      registrationId: ALT_BTN_RID,
+      label: ALT_BTN_LABEL,
+      clientId: 'e2e-unified-alternate-client',
       discoveryUrl: DISCOVERY_URL,
       enabled: true,
       showButton: true,
@@ -266,6 +274,9 @@ test('(4) /?auth=signin shows the dialog with OIDC button and recovery-code link
     await expect(
       page.getByRole('button', { name: new RegExp(`Sign in with ${BTN_LABEL}`, 'i') })
     ).toBeVisible({ timeout: 10000 })
+    await expect(
+      page.getByRole('button', { name: new RegExp(`Sign in with ${ALT_BTN_LABEL}`, 'i') })
+    ).toBeVisible({ timeout: 10000 })
 
     // Break-glass recovery-code link is visible (SSO-only Stage 1 + callbackUrl=/admin → isTeamCallback).
     await expect(page.getByRole('link', { name: /use a recovery code/i })).toBeVisible({
@@ -279,8 +290,12 @@ test('(4) /?auth=signin shows the dialog with OIDC button and recovery-code link
     try {
       removeIdentityProvider(BTN_RID)
     } finally {
-      // Restoration must still be attempted if provider removal fails.
-      setPortalAuthMethods('restore')
+      try {
+        removeIdentityProvider(ALT_BTN_RID)
+      } finally {
+        // Restore methods even if either provider cleanup fails.
+        setPortalAuthMethods('restore')
+      }
     }
   }
 })
