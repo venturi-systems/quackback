@@ -2,6 +2,9 @@ import { expect, type Page } from '@playwright/test'
 
 /** Open the real category menu and require seeded options before selecting one. */
 export async function openFilterCategory(page: Page, category: string) {
+  // Wait for the page's initial scripts and requests before its first interaction.
+  // The server-rendered trigger is visible before its click handler is attached.
+  await page.waitForLoadState('networkidle')
   await page.getByRole('button', { name: 'Filter', exact: true }).click()
   const menu = page.locator('[data-slot="popover-content"]')
   await menu.getByRole('button', { name: category, exact: true }).click()
