@@ -885,10 +885,11 @@ test.describe('Rich Text Editor', () => {
     const boldButton = globalPage.locator('button:has(svg.lucide-bold)')
     await boldButton.click()
 
-    // Click back in editor to position cursor within bold text
-    await editor.click()
+    await expect(editor.locator('strong')).toHaveText('bold text')
 
-    // Bold button should have active state (bg-muted class)
+    // The selection toolbar is available only while text is selected.
+    await editor.click({ clickCount: 3 })
+    await expect(boldButton).toBeVisible()
     await expect(boldButton).toHaveClass(/bg-muted/)
   })
 })
