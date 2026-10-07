@@ -237,7 +237,7 @@ describe('public filter readiness', () => {
       const container = document.createElement('div')
       document.body.append(container)
       container.innerHTML = renderToString(element)
-      const trigger = within(container).getByRole('button', { name, exact: true })
+      const trigger = within(container).getByRole('button', { name })
       const initialClassName = trigger.className
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       let root: ReturnType<typeof hydrateRoot> | undefined
@@ -255,13 +255,13 @@ describe('public filter readiness', () => {
 
         // Hydration attaches behavior to the same control without replacing the
         // trigger, changing its label or changing its layout classes.
-        expect(within(container).getByRole('button', { name, exact: true })).toBe(trigger)
+        expect(within(container).getByRole('button', { name })).toBe(trigger)
         expect(trigger.className).toBe(initialClassName)
         expect(trigger).toBeEnabled()
         fireEvent.click(trigger)
         expect(trigger).toHaveAttribute('aria-expanded', 'true')
-        fireEvent.click(screen.getByRole('button', { name: 'Vote count', exact: true }))
-        fireEvent.click(screen.getByRole('option', { name: '25+ votes', exact: true }))
+        fireEvent.click(screen.getByRole('button', { name: 'Vote count' }))
+        fireEvent.click(screen.getByRole('option', { name: '25+ votes' }))
         expect(setFilters).toHaveBeenCalledExactlyOnceWith({ minVotes: 25 })
         expect(trigger).toHaveAttribute('aria-expanded', 'false')
         expect(consoleError).not.toHaveBeenCalled()
