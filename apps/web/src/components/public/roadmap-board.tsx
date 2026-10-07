@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useIntl } from 'react-intl'
@@ -40,12 +40,16 @@ export function RoadmapBoard({
 }: RoadmapBoardProps): React.ReactElement {
   const intl = useIntl()
   const searchTriggerRef = useRef<HTMLButtonElement>(null)
-  const { selectedRoadmapId, setSelectedRoadmap } = usePublicRoadmapSelection()
   const { data: roadmaps } = usePublicRoadmaps({ enabled: !initialRoadmaps })
+  const availableRoadmaps = initialRoadmaps ?? roadmaps ?? []
+  // With no roadmap in the address, the hook writes the first one there once
+  // the router has settled on this page.
+  const { selectedRoadmapId, setSelectedRoadmap } = usePublicRoadmapSelection(
+    availableRoadmaps[0]?.id ?? null
+  )
   const columnsScroll = usePillsScroll()
 
-  const { filters, setFilters, toggleBoard, toggleTag, toggleSegment } =
-    usePublicRoadmapFilters()
+  const { filters, setFilters, toggleBoard, toggleTag, toggleSegment } = usePublicRoadmapFilters()
 
   const hasAppliedFilters = Boolean(
     filters.search || filters.board?.length || filters.tags?.length || filters.segmentIds?.length
@@ -63,7 +67,6 @@ export function RoadmapBoard({
   // Segments are admin/member-only — anonymous viewers can't filter on them.
   const { data: segments } = useSegments({ enabled: !!isTeamMember })
 
-  const availableRoadmaps = initialRoadmaps ?? roadmaps ?? []
   // A roadmap id from the URL that names no roadmap this viewer can see
   // (deleted, private, mistyped) falls back to the first one instead of
   // rendering columns whose posts query the server would reject.
@@ -74,12 +77,6 @@ export function RoadmapBoard({
   const selectedRoadmap = availableRoadmaps.find((r) => r.id === effectiveSelectedId)
   const signInRequiredForRoadmapItems =
     !isAuthenticated && availableRoadmaps.length > 0 && (boards?.length ?? 0) === 0
-
-  useEffect(() => {
-    if (availableRoadmaps.length > 0 && !selectedRoadmapId) {
-      setSelectedRoadmap(availableRoadmaps[0].id)
-    }
-  }, [availableRoadmaps, selectedRoadmapId, setSelectedRoadmap])
 
   if (availableRoadmaps.length === 0) {
     return (

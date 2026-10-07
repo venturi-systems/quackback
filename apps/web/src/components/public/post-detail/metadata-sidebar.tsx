@@ -879,9 +879,9 @@ export function MetadataSidebar({
             <Link
               to="/admin/users"
               search={{ selected: authorPrincipalId }}
-              className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+              className="flex min-w-0 items-center gap-1.5 hover:opacity-80 transition-opacity"
             >
-              <Avatar className="h-5 w-5">
+              <Avatar className="h-5 w-auto min-w-5">
                 {authorAvatarUrl && (
                   <AvatarImage
                     src={authorAvatarUrl}
@@ -894,9 +894,12 @@ export function MetadataSidebar({
                     }
                   />
                 )}
-                <AvatarFallback className="text-xs">{getInitials(authorName)}</AvatarFallback>
+                <AvatarFallback className="px-1 text-xs">{getInitials(authorName)}</AvatarFallback>
               </Avatar>
-              <span className="text-sm font-medium text-foreground underline decoration-muted-foreground/30 underline-offset-2">
+              <span
+                className="min-w-0 break-words text-sm font-medium text-foreground underline decoration-muted-foreground/30 underline-offset-2"
+                data-text-origin={authorName ? 'user' : undefined}
+              >
                 {authorName ||
                   intl.formatMessage({
                     id: 'portal.postDetail.metadata.authorFallback',
@@ -905,8 +908,8 @@ export function MetadataSidebar({
               </span>
             </Link>
           ) : (
-            <div className="flex items-center gap-1.5">
-              <Avatar className="h-5 w-5">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Avatar className="h-5 w-auto min-w-5">
                 {authorAvatarUrl && (
                   <AvatarImage
                     src={authorAvatarUrl}
@@ -919,9 +922,12 @@ export function MetadataSidebar({
                     }
                   />
                 )}
-                <AvatarFallback className="text-xs">{getInitials(authorName)}</AvatarFallback>
+                <AvatarFallback className="px-1 text-xs">{getInitials(authorName)}</AvatarFallback>
               </Avatar>
-              <span className="text-sm font-medium text-foreground">
+              <span
+                className="min-w-0 break-words text-sm font-medium text-foreground"
+                data-text-origin={authorName ? 'user' : undefined}
+              >
                 {authorName ||
                   intl.formatMessage({
                     id: 'portal.postDetail.metadata.authorFallback',
