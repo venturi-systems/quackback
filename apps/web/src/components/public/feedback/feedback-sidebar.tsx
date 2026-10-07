@@ -1,6 +1,7 @@
 import { ListBulletIcon, ChatBubbleLeftIcon } from '@heroicons/react/24/solid'
 import { FormattedMessage } from 'react-intl'
 import { cn } from '@/lib/shared/utils'
+import { VENTURI_SITE_URL } from '@/lib/shared/venturi-identity'
 import type { PublicBoardWithStats } from '@/lib/shared/types'
 
 interface FeedbackSidebarProps {
@@ -100,7 +101,7 @@ export function FeedbackSidebar({
         {/* Separate company destination, named for where it leads. */}
         <div className="flex justify-center mt-3">
           <a
-            href={`https://venturi.systems/?utm_campaign=${encodeURIComponent(workspaceSlug || 'feedback')}&utm_content=feedback-board&utm_medium=referral&utm_source=feedback-portal`}
+            href={`${VENTURI_SITE_URL}?utm_campaign=${encodeURIComponent(workspaceSlug || 'feedback')}&utm_content=feedback-board&utm_medium=referral&utm_source=feedback-portal`}
             className="group inline-flex min-h-11 items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1 rounded-full bg-muted/50 hover:bg-muted border border-transparent hover:border-border/50"
           >
             <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary " />
