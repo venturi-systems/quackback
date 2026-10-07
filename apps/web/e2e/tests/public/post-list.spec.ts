@@ -11,6 +11,7 @@ test.describe('Public Post List', () => {
   test.beforeEach(async ({ page }) => {
     // Navigate to the public portal (tenant subdomain)
     await page.goto('/')
+    await page.waitForLoadState('networkidle')
   })
 
   test('displays feedback posts', async ({ page }) => {
