@@ -30,7 +30,10 @@ vi.mock('@/lib/server/domains/settings/settings.widget', () => ({
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('Telemetry SQL tests require DATABASE_URL')
 const url = new URL(databaseUrl)
-if (!['localhost', '127.0.0.1'].includes(url.hostname) || !url.pathname.endsWith('_test')) {
+if (
+  !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+  !url.pathname.endsWith('_test')
+) {
   throw new Error('Telemetry SQL fixtures require an isolated loopback test database')
 }
 const client = postgres(databaseUrl, { max: 1 })
