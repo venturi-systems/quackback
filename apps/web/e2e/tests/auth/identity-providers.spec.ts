@@ -38,13 +38,14 @@ const DISCOVERY_URL = 'https://idp.example.org/.well-known/openid-configuration'
 test.describe.configure({ mode: 'default' })
 
 test.beforeAll(() => {
-  // Button-only: enabled + creds, no verified domain → public button.
+  // Button-only: explicitly show the enabled provider without a verified domain.
   seedIdentityProvider({
     registrationId: BUTTON_RID,
     label: BUTTON_LABEL,
     clientId: 'e2e-button-client',
     discoveryUrl: DISCOVERY_URL,
     enabled: true,
+    showButton: true,
   })
   // Domain-bound + enforced: enabled + creds + verified enforced domain →
   // routed-only (hidden from buttons), hard-binds its domain to SSO.

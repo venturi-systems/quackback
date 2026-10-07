@@ -13,11 +13,8 @@
     "a spec file does not churn the list."
   ],
   "tests": [
-    "chromium | tests/admin/post-management.spec.ts | Admin Post Management > can vote on a post in detail view",
-    "chromium | tests/admin/settings-widget.spec.ts | Admin Widget Settings > shows Content card with image uploads toggle",
     "chromium-auth | tests/auth/identity-providers.spec.ts | (1) button-only provider surfaces in the portal OIDC button list",
     "chromium-auth | tests/auth/unified-login.spec.ts | (4) /?prompt=login shows the dialog with OIDC button and recovery-code link",
-    "chromium-public | tests/public/notifications.spec.ts | Portal Notifications (unauthenticated) > redirects away from /notifications when not logged in",
     "chromium-public | tests/public/post-list-filters.spec.ts | Public Post List — chip filters > Add filter → Vote count → 5+ filters posts and adds a chip",
     "chromium-public | tests/public/post-list-filters.spec.ts | Public Post List — chip filters > Clear all wipes filters and the hint reappears",
     "chromium-public | tests/public/post-list-filters.spec.ts | Public Post List — chip filters > Show all reveals all statuses (URL contains status param)",

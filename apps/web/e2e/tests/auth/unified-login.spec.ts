@@ -10,7 +10,7 @@
  *  3. Private portal, unauth /admin → gate shows the inline auth form; admin
  *     completes sign-in in the gate; loader re-evaluates and lands on /admin
  *     (proves #270 ① gate→sign-in→callbackUrl path end-to-end).
- *  4. /?prompt=login escape hatch: shows the dialog with any seeded OIDC button +
+ *  4. /?auth=signin escape hatch: shows the dialog with any seeded OIDC button +
  *     the break-glass recovery-code link. (The anonymous-/ → IdP redirect is
  *     deferred: it requires an OIDC discovery document at a live URL.)
  *  5. Recovery break-glass: /auth/recovery renders the standalone form directly.
@@ -197,7 +197,9 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 
     // The gate renders the shared auth form inline (no modal). Its private-
     // portal copy + the email field prove the gate rendered the form directly.
-    await expect(page.getByText(/sign in with an approved account/i)).toBeVisible({ timeout: 15000 })
+    await expect(page.getByText(/sign in with an approved account/i)).toBeVisible({
+      timeout: 15000,
+    })
     await expect(page.getByLabel(/email/i)).toBeVisible({ timeout: 15000 })
 
     // ── Simulate post-sign-in: inject admin session + broadcast auth-success ──
@@ -227,7 +229,7 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 })
 
 // ── Journey 4 ────────────────────────────────────────────────────────────────
-// /?prompt=login escape hatch: the dialog opens with the seeded OIDC button and
+// /?auth=signin escape hatch: the dialog opens with the seeded OIDC button and
 // the break-glass recovery-code link (callbackUrl=/admin satisfies isTeamCallback).
 //
 // DEFERRED — anonymous `/` → IdP redirect: requires a live OIDC discovery
@@ -236,7 +238,7 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 // and no redirect fires. Tracking: run this sub-case against the CI environment
 // where a mock-OIDC container is available.
 
-test('(4) /?prompt=login shows the dialog with OIDC button and recovery-code link', async ({
+test('(4) /?auth=signin shows the dialog with OIDC button and recovery-code link', async ({
   page,
 }) => {
   try {
@@ -252,12 +254,12 @@ test('(4) /?prompt=login shows the dialog with OIDC button and recovery-code lin
     // Disable password + magic-link so Stage 1 is SSO-only: the recovery link
     // renders only in the SSO views, not in the generic email-entry Stage 1.
     setPortalAuthMethods('disable')
-    // ?prompt=login opens the dialog; ?callbackUrl=/admin makes isTeamCallback true
+    // ?auth=signin opens the dialog; ?callbackUrl=/admin makes isTeamCallback true
     // so the recovery-code link renders inside the SSO-only Stage 1.
-    await page.goto('/?prompt=login&callbackUrl=%2Fadmin')
+    await page.goto('/?auth=signin&callbackUrl=%2Fadmin')
     await page.waitForLoadState('networkidle')
 
-    // Dialog must open (prompt=login triggers useAutoOpenAuthDialog).
+    // Dialog must open (auth=signin triggers useAutoOpenAuthDialog).
     await expect(page.getByRole('dialog')).toBeVisible({ timeout: 15000 })
 
     // The seeded button-only provider's "Sign in with …" button appears.
