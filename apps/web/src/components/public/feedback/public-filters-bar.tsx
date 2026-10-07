@@ -284,6 +284,7 @@ function AddFilterButton({
               'border border-dashed border-border/50',
               'text-muted-foreground hover:text-foreground',
               'hover:border-border hover:bg-muted/30',
+              'disabled:pointer-events-none disabled:opacity-50',
               'transition-colors'
             )}
           >
