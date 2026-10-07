@@ -6,9 +6,8 @@ const TEST_EMAIL = 'demo@example.com'
 
 // Run the file's tests one at a time and in order (no parallelization), which
 // prevents OTP race conditions across the describe blocks. Default mode, not
-// serial: serial mode skipped every test after the known failure "shows error
-// when submitting without description", so 28 tests never ran in CI. After a
-// failure the fresh worker signs in again in beforeAll.
+// serial: each test still runs if a prior assertion fails. After a failure
+// the fresh worker signs in again in beforeAll.
 test.describe.configure({ mode: 'default' })
 
 /**
@@ -218,27 +217,28 @@ test.describe('Public Post Submission', () => {
     await expect(errorMessage).toContainText('Please add a title')
   })
 
-  test('shows error when submitting without description', async () => {
-    // Open the dialog
-    const createPostInput = globalPage.getByPlaceholder("What's your idea?")
-    await createPostInput.click()
-
-    // Wait for dialog to open
-    const titleInput = globalPage.getByPlaceholder("What's your idea?")
-    const editor = globalPage.locator('.tiptap')
-    await expect(editor).toBeVisible({ timeout: 5000 })
-
-    // Fill only the title
-    await titleInput.fill('Test Post Title')
-
-    // Click Submit without filling description
-    const submitButton = globalPage.getByRole('button', { name: /^submit$/i })
-    await submitButton.click()
-
-    // Error message should appear
-    const errorMessage = globalPage.locator('.bg-destructive\\/10')
-    await expect(errorMessage).toBeVisible({ timeout: 5000 })
-    await expect(errorMessage).toContainText('Please add a description')
+  test('can submit a title-only post and reload the saved result', async () => {
+    const page = globalPage
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    await expect(page).toHaveURL(/[?&]sort=new/)
+    const title = `E2E title-only ${Date.now()}-${crypto.randomUUID()}`
+    const titleInput = page.getByPlaceholder("What's your idea?")
+    await titleInput.click()
+    const editor = page.locator('.tiptap')
+    await expect(editor).toBeVisible()
+    await expect(editor).toHaveText('')
+    await titleInput.fill(title)
+    await page.getByRole('button', { name: 'Submit', exact: true }).click()
+    await expect(editor).not.toBeVisible({ timeout: 10000 })
+    const post = page.locator('[data-post-id]').filter({
+      has: page.getByRole('heading', { name: title, exact: true }),
+    })
+    await expect(post).toBeVisible({ timeout: 10000 })
+    const id = await post.getAttribute('data-post-id')
+    expect(id).toBeTruthy()
+    await page.reload()
+    await expect(post).toBeVisible({ timeout: 10000 })
+    await expect(post).toHaveAttribute('data-post-id', id!)
   })
 
   test('can submit a basic post', async () => {
