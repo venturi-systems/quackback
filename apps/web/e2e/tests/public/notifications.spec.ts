@@ -48,7 +48,10 @@ test.describe('Portal Notifications (unauthenticated)', () => {
     await page.waitForLoadState('networkidle')
 
     // The bell sits next to the avatar; it should be absent for anonymous visitors
-    const bell = page.locator('[aria-label*="notification" i], [data-testid*="notification-bell"]')
+    const bell = page.getByRole('button', {
+      name: /^Notifications(?: \(\d+ unread\))?$/,
+      includeHidden: true,
+    })
     await expect(bell).toHaveCount(0)
   })
 })

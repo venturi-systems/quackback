@@ -143,14 +143,14 @@ test.describe('Admin Widget Settings', () => {
       // never belonged to the current settings route.
       await setTab(feedback, true)
       await setTab(changelog, true)
-      await page.reload()
+      await page.reload({ waitUntil: 'networkidle' })
       await expect(feedback).toBeChecked()
       await expect(changelog).toBeChecked()
 
       // Toggle away from that persisted state before testing the last-tab guard.
       await setTab(changelog, false)
       await expect(feedback).toBeDisabled()
-      await page.reload()
+      await page.reload({ waitUntil: 'networkidle' })
       await expect(feedback).toBeChecked()
       await expect(changelog).not.toBeChecked()
       await expect(feedback).toBeDisabled()
@@ -164,7 +164,7 @@ test.describe('Admin Widget Settings', () => {
       await setTab(changelog, true)
       await setTab(feedback, initialFeedback)
       await setTab(changelog, initialChangelog)
-      await page.reload()
+      await page.reload({ waitUntil: 'networkidle' })
       await expect(feedback).toBeChecked({ checked: initialFeedback })
       await expect(changelog).toBeChecked({ checked: initialChangelog })
     }

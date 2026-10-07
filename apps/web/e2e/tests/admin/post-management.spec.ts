@@ -228,6 +228,7 @@ test.describe('Admin Post Management', () => {
     await firstPost.click()
     const modal = page.getByRole('dialog', { name: 'Edit post', exact: true })
     await expect(modal).toBeVisible()
+    await expect(page).toHaveURL(/[?&]post=[^&]+/)
 
     // Editors manage votes on behalf of users; the self-vote button belongs to
     // the public post view. Measure the count in this post's metadata only.
@@ -238,14 +239,15 @@ test.describe('Admin Post Management', () => {
 
     await modal.getByRole('button', { name: 'Add voter', exact: true }).click()
     await page.getByRole('button', { name: 'Create new user', exact: true }).click()
-    await page.getByPlaceholder('Name', { exact: true }).fill('Jordan Mercer')
-    await page
-      .getByPlaceholder('Email (optional)', { exact: true })
-      .fill('jordan.mercer.' + Date.now() + '@acme.example')
+    const name = page.getByPlaceholder('Name', { exact: true })
+    await name.fill('Jordan Mercer ' + Date.now())
+    // A name-only portal user can receive a proxy vote. Team-domain identities
+    // are reserved for their owners signing in through Google or GitHub.
     await page.getByRole('button', { name: 'Create & add vote', exact: true }).click()
+    await expect(name).toBeHidden()
     await expect(voteCount).toHaveText(String(initialCount + 1))
 
-    await page.reload()
+    await page.reload({ waitUntil: 'networkidle' })
     await expect(modal).toBeVisible()
     await expect(voteCount).toHaveText(String(initialCount + 1))
   })

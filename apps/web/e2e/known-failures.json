@@ -13,8 +13,6 @@
     "a spec file does not churn the list."
   ],
   "tests": [
-    "chromium | tests/admin/changelog.spec.ts | Changelog edit entry > closing edit modal removes entry param from URL",
-    "chromium | tests/admin/changelog.spec.ts | Changelog search and filter > status filter: clicking Draft shows only draft entries",
     "chromium | tests/admin/post-management.spec.ts | Admin Post Management > can vote on a post in detail view",
     "chromium | tests/admin/settings-widget.spec.ts | Admin Widget Settings > shows Content card with image uploads toggle",
     "chromium-auth | tests/auth/identity-providers.spec.ts | (1) button-only provider surfaces in the portal OIDC button list",
