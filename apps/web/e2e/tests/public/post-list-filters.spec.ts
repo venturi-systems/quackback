@@ -67,6 +67,9 @@ test.describe('Public Post List - chip filters', () => {
     await page.goto('/?board=features&sort=new')
     await selectFilterOption(page, 'Vote count', '5+ votes')
     await selectFilterOption(page, 'Created date', 'Last 7 days')
+    await expect(
+      page.getByRole('button', { name: 'Remove Date: Last 7 days filter', exact: true })
+    ).toBeVisible()
     await expect(page).toHaveURL(/[?&]minVotes=5/)
     await expect(page).toHaveURL(/[?&]dateFrom=/)
     await page.getByRole('button', { name: 'Clear all', exact: true }).click()
@@ -75,6 +78,6 @@ test.describe('Public Post List - chip filters', () => {
     await expect(page).toHaveURL(/[?&]sort=new/)
     const chips = page.getByRole('region', { name: 'Active filters' })
     await expect(chips.getByRole('button', { name: /^Remove Board:/ })).toHaveCount(1)
-    await expect(chips.getByRole('button', { name: /^Remove (Min votes|Created):/ })).toHaveCount(0)
+    await expect(chips.getByRole('button', { name: /^Remove (Min votes|Date):/ })).toHaveCount(0)
   })
 })
