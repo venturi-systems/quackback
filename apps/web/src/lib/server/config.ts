@@ -335,6 +335,12 @@ export const config = {
     return loadConfig().aiMergeModel
   },
 
+  // Optional upstream reporting requires literal consent. Keep this separate
+  // from the general boolean parser: '1' or a typo must never enable reporting.
+  get enableTelemetry(): boolean {
+    return process.env.ENABLE_TELEMETRY === 'true'
+  },
+
   // Telemetry
   get disableTelemetry() {
     return loadConfig().disableTelemetry

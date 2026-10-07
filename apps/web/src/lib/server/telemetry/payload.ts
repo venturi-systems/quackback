@@ -87,15 +87,15 @@ async function getExperimentalFeatures(): Promise<Record<string, boolean>> {
 
 async function getScale(): Promise<TelemetryPayload['scale']> {
   try {
-    const { db } = await import('@/lib/server/db')
+    const { db, user, posts, boards } = await import('@/lib/server/db')
     const { sql } = await import('drizzle-orm')
     const { getExecuteRows } = await import('@/lib/server/utils')
 
     const result = await db.execute<{ users: number; posts: number; boards: number }>(
       sql`SELECT
-        (SELECT count(*)::int FROM "user") as users,
-        (SELECT count(*)::int FROM "post") as posts,
-        (SELECT count(*)::int FROM "board") as boards`
+        (SELECT count(*)::int FROM ${user}) as users,
+        (SELECT count(*)::int FROM ${posts}) as posts,
+        (SELECT count(*)::int FROM ${boards}) as boards`
     )
     const row = getExecuteRows<{ users: number; posts: number; boards: number }>(result)[0]
     return {
