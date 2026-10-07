@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent, within } from '@testing-library/react'
+import { renderToString } from 'react-dom/server'
+import { hydrateRoot } from 'react-dom/client'
 import { IntlProvider } from 'react-intl'
 import {
   PublicFiltersBar,
@@ -209,4 +211,65 @@ describe('PublicFiltersAddButton (pill variant)', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Open' }))
     expect(setFilters).toHaveBeenCalledWith({ status: ['open'] })
   })
+})
+
+// An enabled filter trigger must have a working handler, including while
+// server-rendered controls wait for the application to hydrate.
+describe('public filter readiness', () => {
+  it.each([
+    ['Filter', PublicFiltersToolbarButton],
+    ['Add filter', PublicFiltersAddButton],
+  ] as const)(
+    '%s is disabled in server HTML and works on the first hydrated click',
+    async (name, Component) => {
+      const setFilters = vi.fn()
+      const element = (
+        <IntlProvider locale="en" defaultLocale="en">
+          <Component
+            filters={{ sort: 'top' }}
+            setFilters={setFilters}
+            statuses={statuses}
+            tags={tags}
+            boards={boards}
+          />
+        </IntlProvider>
+      )
+      const container = document.createElement('div')
+      document.body.append(container)
+      container.innerHTML = renderToString(element)
+      const trigger = within(container).getByRole('button', { name, exact: true })
+      const initialClassName = trigger.className
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      let root: ReturnType<typeof hydrateRoot> | undefined
+
+      try {
+        expect(trigger).toBeDisabled()
+        trigger.click()
+        expect(trigger).toHaveAttribute('aria-expanded', 'false')
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(setFilters).not.toHaveBeenCalled()
+
+        await act(async () => {
+          root = hydrateRoot(container, element)
+        })
+
+        // Hydration attaches behavior to the same control without replacing the
+        // trigger, changing its label or changing its layout classes.
+        expect(within(container).getByRole('button', { name, exact: true })).toBe(trigger)
+        expect(trigger.className).toBe(initialClassName)
+        expect(trigger).toBeEnabled()
+        fireEvent.click(trigger)
+        expect(trigger).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.click(screen.getByRole('button', { name: 'Vote count', exact: true }))
+        fireEvent.click(screen.getByRole('option', { name: '25+ votes', exact: true }))
+        expect(setFilters).toHaveBeenCalledExactlyOnceWith({ minVotes: 25 })
+        expect(trigger).toHaveAttribute('aria-expanded', 'false')
+        expect(consoleError).not.toHaveBeenCalled()
+      } finally {
+        await act(async () => root?.unmount())
+        container.remove()
+        consoleError.mockRestore()
+      }
+    }
+  )
 })
