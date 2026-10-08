@@ -149,11 +149,16 @@ export function getMentionTarget(excludeEmail: string = 'demo@example.com'): {
  * Find a seeded post and the current user's visible root comment without
  * creating content or relying on the seed's denormalized comment counts.
  */
-export function getPostWithOwnComment(email: string): { path: string; commentId: string } {
+export function getPostWithOwnComment(
+  email: string,
+  options: { requireRelated?: boolean } = {}
+): { path: string; commentId: string } {
   const scriptPath = resolve(__dirname, '../scripts/get-post-with-own-comment.ts')
 
   try {
-    const result = execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, email], {
+    const args = ['-e', '../../.env', '--', 'bun', scriptPath, email]
+    if (options.requireRelated) args.push('--require-related')
+    const result = execFileSync('dotenv', args, {
       encoding: 'utf-8',
       cwd: resolve(__dirname, '../..'),
       timeout: E2E_SCRIPT_TIMEOUT_MS,

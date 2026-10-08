@@ -146,16 +146,16 @@ async function recordHeaderControls(page: Page, testInfo: TestInfo, route: Route
 
 async function waitForRouteAnimations(page: Page, route: Route) {
   if (route === 'post') {
-    // The seed repeats title families across 500 posts. Its selected post has
-    // related results, but the exact count varies when the current post is
-    // excluded. Require that content before enumerating its entrance animation:
+    // The fixture selector requires a distinct public full-text match.
+    // The UI excludes the current post, so the result count is not fixed.
+    // Require Related content before enumerating its entrance animation:
     // network idle and post-detail visibility can precede client hydration.
     const heading = page.getByRole('heading', { level: 3, name: 'Related', exact: true })
     await expect(heading, 'The seeded post must render its Related section').toBeVisible()
     const related = heading.locator('..').locator('..')
     await expect(
       related.getByRole('link').first(),
-      'The repeated-title seed must expose a related post link'
+      'The selected fixture must expose a related post link'
     ).toBeVisible()
   }
   await page.evaluate(async () => {
@@ -173,7 +173,7 @@ async function waitForRouteAnimations(page: Page, route: Route) {
 async function openRoute(page: Page, route: Route, revealParticipation = true) {
   const path =
     route === 'post'
-      ? (await getPostWithOwnComment(TEST_ADMIN.email)).path
+      ? (await getPostWithOwnComment(TEST_ADMIN.email, { requireRelated: true })).path
       : route === 'feed'
         ? '/'
         : `/${route}`

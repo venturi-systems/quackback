@@ -597,7 +597,7 @@ async function unpublishEntry(page: import('@playwright/test').Page, title: stri
   const card = entryCard(page, title)
   await card.click()
 
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Edit changelog entry', exact: true })
   await expect(dialog).toBeVisible({ timeout: 10000 })
 
   await dialog.getByRole('button', { name: 'Published', exact: true }).click()
@@ -703,7 +703,7 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
       await page.waitForLoadState('networkidle')
 
       await entryCard(page, title).click()
-      const dialog = page.getByRole('dialog')
+      const dialog = page.getByRole('dialog', { name: 'Edit changelog entry', exact: true })
       await expect(dialog).toBeVisible({ timeout: 10000 })
 
       const displayDateLabel = dialog.getByText('Published date', { exact: true })
