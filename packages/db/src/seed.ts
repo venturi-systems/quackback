@@ -597,7 +597,33 @@ async function seed() {
 
     // Create comments
     console.log('Creating comments...')
-    const commentInserts: (typeof comments.$inferInsert)[] = []
+    // Keep the public design fixture independent of random comment counts and authors.
+    // The first unsuffixed title has a distinct full-text match in its later variants.
+    const [demoPrincipal] = await db
+      .select({ id: principal.id })
+      .from(principal)
+      .innerJoin(user, eq(principal.userId, user.id))
+      .where(eq(user.email, DEMO_USER.email))
+      .limit(1)
+    const designPost = postRecords[0]
+    const relatedDesignPost = postRecords[postTitles.length]
+    if (!demoPrincipal || !designPost || !relatedDesignPost) {
+      throw new Error('Seed fixture requires the demo principal and a Related post pair')
+    }
+
+    // This block only runs when creating posts, so reseeding cannot duplicate this comment.
+    const commentInserts: (typeof comments.$inferInsert)[] = [
+      {
+        postId: designPost.id,
+        principalId: demoPrincipal.id,
+        content: commentContents[0],
+        parentId: null,
+        isPrivate: false,
+        moderationState: 'published',
+        isTeamMember: true,
+        createdAt: new Date(),
+      },
+    ]
     for (const post of postRecords) {
       const numComments = Math.floor(Math.random() * 5) // 0-4 comments per post
       for (let c = 0; c < numComments; c++) {

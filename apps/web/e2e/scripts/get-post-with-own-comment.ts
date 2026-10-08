@@ -11,12 +11,13 @@
  * applies the same match to published posts on anonymously visible boards, a
  * subset of what any viewer sees, and posts that have one are preferred.
  *
- * Usage: bun get-post-with-own-comment.ts <email>
+ * Usage: bun get-post-with-own-comment.ts <email> [--require-related]
  */
 import postgres from 'postgres'
 import { fromUuid } from '@quackback/ids'
 
 const email = process.argv[2]
+const requireRelated = process.argv.includes('--require-related')
 const connectionString = process.env.DATABASE_URL
 if (!email || !connectionString) {
   console.error('Email argument and DATABASE_URL environment variable are required')
@@ -26,6 +27,7 @@ if (!email || !connectionString) {
 const sql = postgres(connectionString)
 
 try {
+  // The preferred match sorts first; strict callers fail if the top row has none.
   const rows = await sql`
     SELECT
       p.id AS post_id,
@@ -63,8 +65,12 @@ try {
     ORDER BY has_related DESC, p.id ASC, c.id ASC
     LIMIT 1
   `
-  if (rows.length === 0) {
-    throw new Error('No public post with an own visible root comment exists in the E2E seed')
+  if (rows.length === 0 || (requireRelated && rows[0].has_related !== true)) {
+    throw new Error(
+      requireRelated
+        ? 'E2E fixture contract: no public post has both an own visible root comment and a distinct public full-text Related match'
+        : 'No public post with an own visible root comment exists in the E2E seed'
+    )
   }
 
   // Use the same UUID-to-TypeID encoder as the application route and DOM IDs.

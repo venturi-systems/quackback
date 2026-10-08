@@ -564,36 +564,29 @@ test.describe('Changelog delete entry', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Helper: create and immediately publish an entry from the create dialog.
- * Returns the title, or null if the dialog was unavailable.
+ * Create and publish an entry through the required admin controls.
  */
 async function createAndPublishEntry(
   page: import('@playwright/test').Page,
   title: string
-): Promise<string | null> {
-  const dialog = await openCreateDialog(page)
-  if (!dialog) return null
+): Promise<void> {
+  await page.getByRole('button', { name: /new entry/i }).click()
+  const dialog = page.getByRole('dialog', { name: 'Create changelog entry', exact: true })
+  await expect(dialog).toBeVisible({ timeout: 5000 })
 
   await dialog.getByPlaceholder("What's new?").fill(title)
+  await dialog
+    .locator('.ProseMirror[contenteditable="true"]')
+    .fill('Published changelog test content.')
 
-  // Switch status to "Published"
-  const statusSelect = dialog.locator('button[role="combobox"]').first()
-  if ((await statusSelect.count()) === 0) return null
-  await statusSelect.click()
-  const publishedOption = page.getByRole('option', { name: /published/i })
-  if ((await publishedOption.count()) === 0) {
-    await page.keyboard.press('Escape')
-    return null
-  }
-  await publishedOption.click()
+  // StatusSelect exposes ordinary buttons in a popover.
+  await dialog.getByRole('button', { name: 'Draft', exact: true }).click()
+  await page.getByRole('button', { name: 'Published', exact: true }).click()
 
-  // Submit button should now say "Publish Now"
   const publishBtn = dialog.getByRole('button', { name: /publish now/i })
   await expect(publishBtn).toBeVisible({ timeout: 5000 })
   await publishBtn.click()
-
   await expect(dialog).toBeHidden({ timeout: 15000 })
-  return title
 }
 
 /**
@@ -604,13 +597,11 @@ async function unpublishEntry(page: import('@playwright/test').Page, title: stri
   const card = entryCard(page, title)
   await card.click()
 
-  const dialog = page.getByRole('dialog')
+  const dialog = page.getByRole('dialog', { name: 'Edit changelog entry', exact: true })
   await expect(dialog).toBeVisible({ timeout: 10000 })
 
-  const statusSelect = dialog.locator('button[role="combobox"]').first()
-  await statusSelect.click()
-  const draftOption = page.getByRole('option', { name: /^draft$/i })
-  await draftOption.click()
+  await dialog.getByRole('button', { name: 'Published', exact: true }).click()
+  await page.getByRole('button', { name: 'Draft', exact: true }).click()
 
   await dialog.getByRole('button', { name: /save draft/i }).click()
   await expect(dialog).toBeHidden({ timeout: 15000 })
@@ -692,72 +683,65 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
   test('published entry appears on public /changelog', async ({ page }) => {
     const title = `Publish Pipeline Test ${Date.now()}`
 
-    const published = await createAndPublishEntry(page, title)
-    if (!published) {
-      test.skip(true, 'createAndPublishEntry() found nothing to test')
-      return
+    try {
+      await createAndPublishEntry(page, title)
+      await page.waitForLoadState('networkidle')
+
+      await page.goto('/changelog')
+      await page.waitForLoadState('networkidle')
+      await expect(page.locator('h2').filter({ hasText: title })).toBeVisible({ timeout: 10000 })
+    } finally {
+      await deleteEntryByTitle(page, title)
     }
-
-    await page.waitForLoadState('networkidle')
-
-    // Navigate to public changelog
-    await page.goto('/changelog')
-    await page.waitForLoadState('networkidle')
-
-    // The entry title should be visible as an h2 in a public entry card
-    await expect(page.locator('h2').filter({ hasText: title })).toBeVisible({ timeout: 10000 })
-
-    // Clean up
-    await deleteEntryByTitle(page, title)
   })
 
   test('display date override appears on public /changelog', async ({ page }) => {
     const title = `Display Date Test ${Date.now()}`
 
-    const published = await createAndPublishEntry(page, title)
-    if (!published) {
-      test.skip(true, 'createAndPublishEntry() found nothing to test')
-      return
+    try {
+      await createAndPublishEntry(page, title)
+      await page.waitForLoadState('networkidle')
+
+      await entryCard(page, title).click()
+      const dialog = page.getByRole('dialog', { name: 'Edit changelog entry', exact: true })
+      await expect(dialog).toBeVisible({ timeout: 10000 })
+
+      const displayDateLabel = dialog.getByText('Published date', { exact: true })
+      await expect(displayDateLabel).toBeVisible({ timeout: 5000 })
+      await displayDateLabel.locator('..').getByRole('button').click()
+
+      // A date in the previous month stays in the past without an aging fixed target.
+      const displayDate = await page.evaluate(() => {
+        const date = new Date()
+        date.setDate(15)
+        date.setMonth(date.getMonth() - 1)
+        return {
+          month: date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+          label: date.toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+        }
+      })
+      await page.getByRole('button', { name: /previous month/i }).click()
+      const calendar = page.getByRole('grid', { name: displayDate.month, exact: true })
+      await expect(calendar).toBeVisible()
+      await calendar.getByRole('button').filter({ hasText: /^15$/ }).click()
+
+      await dialog.getByRole('button', { name: /update & publish/i }).click()
+      await expect(dialog).toBeHidden({ timeout: 15000 })
+      await page.waitForLoadState('networkidle')
+
+      await page.goto('/changelog')
+      await page.waitForLoadState('networkidle')
+      const entry = page.locator('article').filter({ hasText: title })
+      await expect(entry.locator('time').first()).toContainText(displayDate.label, {
+        timeout: 10000,
+      })
+    } finally {
+      await deleteEntryByTitle(page, title)
     }
-
-    await page.waitForLoadState('networkidle')
-
-    await entryCard(page, title).click()
-    const dialog = page.getByRole('dialog')
-    await expect(dialog).toBeVisible({ timeout: 10000 })
-
-    const displayDateLabel = dialog.getByText('Published date', { exact: true })
-    await expect(displayDateLabel).toBeVisible({ timeout: 5000 })
-
-    const displayDateRow = dialog.locator('div').filter({
-      has: page.getByText('Published date', { exact: true }),
-    })
-    await displayDateRow.getByRole('button').first().click()
-
-    const prevMonth = page.getByRole('button', { name: /previous month/i })
-    for (let i = 0; i < 24; i++) {
-      const caption = page.locator('[class*="CaptionLabel"]')
-      const text = (await caption.textContent()) ?? ''
-      if (/january 2024/i.test(text)) break
-      if ((await prevMonth.count()) === 0) break
-      await prevMonth.click()
-    }
-
-    await page.getByRole('button', { name: /^15$/ }).first().click()
-
-    await dialog.getByRole('button', { name: /update & publish/i }).click()
-    await expect(dialog).toBeHidden({ timeout: 15000 })
-    await page.waitForLoadState('networkidle')
-
-    await page.goto('/changelog')
-    await page.waitForLoadState('networkidle')
-
-    const entry = page.locator('article').filter({ hasText: title })
-    await expect(entry.locator('time').first()).toContainText('January 15, 2024', {
-      timeout: 10000,
-    })
-
-    await deleteEntryByTitle(page, title)
   })
 
   test('entry content on public page matches what was entered in admin', async ({ page }) => {
@@ -812,32 +796,24 @@ test.describe('Changelog - Admin/Public Publishing Pipeline', () => {
   test('unpublishing an entry removes it from public /changelog', async ({ page }) => {
     const title = `Unpublish Pipeline Test ${Date.now()}`
 
-    // Publish the entry first
-    const published = await createAndPublishEntry(page, title)
-    if (!published) {
-      test.skip(true, 'createAndPublishEntry() found nothing to test')
-      return
+    try {
+      await createAndPublishEntry(page, title)
+      await page.waitForLoadState('networkidle')
+
+      await page.goto('/changelog')
+      await page.waitForLoadState('networkidle')
+      await expect(page.locator('h2').filter({ hasText: title })).toBeVisible({ timeout: 10000 })
+
+      await page.goto('/admin/changelog')
+      await page.waitForLoadState('networkidle')
+      await unpublishEntry(page, title)
+
+      await page.goto('/changelog')
+      await page.waitForLoadState('networkidle')
+      await expect(page.locator('h2').filter({ hasText: title })).toHaveCount(0)
+    } finally {
+      await deleteEntryByTitle(page, title)
     }
-
-    await page.waitForLoadState('networkidle')
-
-    // Verify it is visible on the public page
-    await page.goto('/changelog')
-    await page.waitForLoadState('networkidle')
-    await expect(page.locator('h2').filter({ hasText: title })).toBeVisible({ timeout: 10000 })
-
-    // Go back to admin and revert to draft
-    await page.goto('/admin/changelog')
-    await page.waitForLoadState('networkidle')
-    await unpublishEntry(page, title)
-
-    // Return to public changelog and verify the entry is gone
-    await page.goto('/changelog')
-    await page.waitForLoadState('networkidle')
-    await expect(page.locator('h2').filter({ hasText: title })).toHaveCount(0)
-
-    // Clean up
-    await deleteEntryByTitle(page, title)
   })
 
   test('scheduled entry does not appear on public /changelog before its publish time', async ({

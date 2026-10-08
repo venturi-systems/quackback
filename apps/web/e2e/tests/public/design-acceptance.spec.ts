@@ -146,20 +146,15 @@ async function recordHeaderControls(page: Page, testInfo: TestInfo, route: Route
 
 async function waitForRouteAnimations(page: Page, route: Route, relatedExpected = true) {
   if (route === 'post' && relatedExpected) {
-    // The seed repeats title families across 500 posts, but only the first 60
-    // titles have siblings the similar-posts search can match; a suffixed
-    // title matches only itself (see get-post-with-own-comment.ts). The helper
-    // prefers a post with related results and reports whether it found one.
-    // When it did, require that content before enumerating its entrance
-    // animation: network idle and post-detail visibility can precede client
-    // hydration. Main run 37774119446 measured a suffixed post here, and all
-    // 18 post-geometry cases failed waiting for a section that never renders.
+    // The design caller requires a distinct public complete-title match.
+    // Preserve the metadata contract for other callers, then require visible
+    // content before enumerating animations; hydration can follow network idle.
     const heading = page.getByRole('heading', { level: 3, name: 'Related', exact: true })
     await expect(heading, 'The seeded post must render its Related section').toBeVisible()
     const related = heading.locator('..').locator('..')
     await expect(
       related.getByRole('link').first(),
-      'The repeated-title seed must expose a related post link'
+      'The selected fixture must expose a related post link'
     ).toBeVisible()
   }
   await page.evaluate(async () => {
@@ -175,7 +170,11 @@ async function waitForRouteAnimations(page: Page, route: Route, relatedExpected 
 }
 
 async function openRoute(page: Page, route: Route, revealParticipation = true) {
-  const ownCommentPost = route === 'post' ? getPostWithOwnComment(TEST_ADMIN.email) : null
+  const ownCommentPost =
+    route === 'post' ? getPostWithOwnComment(TEST_ADMIN.email, { requireRelated: true }) : null
+  if (ownCommentPost) {
+    expect(ownCommentPost.hasRelated, 'The design fixture must contain Related content').toBe(true)
+  }
   const path = ownCommentPost !== null ? ownCommentPost.path : route === 'feed' ? '/' : `/${route}`
   const response = await page.goto(path)
   expect(response, 'Required route must return a document response').not.toBeNull()
