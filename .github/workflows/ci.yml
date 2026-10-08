@@ -345,7 +345,9 @@ jobs:
               }
               const requiredSteps = [
                 'Checkout tested source', 'Record the actual tested checkout',
+                'Build exact E2E application image', 'Start attested E2E application image',
                 'Collect the expected tests for this shard', 'Run the Playwright suite',
+                'Capture and stop owned E2E application', 'Upload E2E application evidence',
                 'Check the shard against the known-failure ratchet',
                 'Verify the tested checkout is unchanged', 'Upload tested checkout evidence',
               ];
@@ -374,7 +376,11 @@ jobs:
               try {
                 for (let shard = 1; shard <= 8; shard++) {
                   const matches = evidence.filter(a => a.name === prefix + shard);
-                  if (matches.length !== 1 || matches[0].expired || matches[0].size_in_bytes > 65536) throw new Error('invalid shard evidence');
+                  if (matches.length !== 1 || matches[0].expired ||
+                      !Number.isSafeInteger(matches[0].size_in_bytes) ||
+                      matches[0].size_in_bytes <= 0 || matches[0].size_in_bytes > 65536) {
+                    throw new Error('invalid shard evidence');
+                  }
                   const artifact = matches[0];
                   if (artifact.workflow_run?.id !== successful.id ||
                       artifact.workflow_run?.head_sha !== prHeadSha ||
@@ -385,6 +391,9 @@ jobs:
                     owner, repo, artifact_id: artifact.id, archive_format: 'zip'
                   });
                   const bytes = Buffer.from(download.data);
+                  if (bytes.length > 65536) {
+                    throw new Error('shard evidence archive exceeds size limit');
+                  }
                   const digest = 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex');
                   if (digest !== artifact.digest) throw new Error('artifact digest mismatch');
                   const archive = path.join(tmp, `shard-${shard}.zip`);
@@ -398,6 +407,53 @@ jobs:
                       !/^[0-9a-f]{40}$/.test(receipt.commit || '') ||
                       !/^[0-9a-f]{40}$/.test(receipt.tree || '')) {
                     throw new Error('malformed or mismatched tested-tree receipt');
+                  }
+                  const readImageReceipt = (name) => JSON.parse(execFileSync(
+                    'unzip', ['-p', archive, name], { encoding: 'utf8', maxBuffer: 65536 }
+                  ));
+                  const ready = readImageReceipt('image-server-ready.json');
+                  const after = readImageReceipt('image-server-after.json');
+                  const processIdentity = ready?.process_identity;
+                  const startedAt = typeof processIdentity?.started_at === 'string'
+                    ? processIdentity.started_at.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/)
+                    : null;
+                  // Docker emits UTC RFC3339Nano. Round-trip milliseconds to reject
+                  // normalized invalid dates, while preserving valid nanoseconds.
+                  const normalizedStart = startedAt
+                    ? `${startedAt[1]}.${(startedAt[2] || '').padEnd(3, '0').slice(0, 3)}Z`
+                    : '';
+                  const startMillis = Date.parse(normalizedStart);
+                  const validStart = startedAt && startedAt[1] !== '0001-01-01T00:00:00' &&
+                    Number.isFinite(startMillis) && new Date(startMillis).toISOString() === normalizedStart;
+                  if (ready?.schema !== 1 ||
+                      !['run_id', 'run_attempt', 'shard', 'commit', 'tree'].every(
+                        field => ready[field] === receipt[field]
+                      ) ||
+                      typeof ready.image_id !== 'string' ||
+                      !/^sha256:[0-9a-f]{64}$/.test(ready.image_id) ||
+                      typeof ready.container_id !== 'string' ||
+                      !/^[0-9a-f]{64}$/.test(ready.container_id) ||
+                      typeof ready.fixture_receipt !== 'string' ||
+                      !/^DESIGN_FIXTURE_ENVIRONMENT_OK:[0-9a-f]{64}$/.test(ready.fixture_receipt) ||
+                      ready.mode !== 'development' || ready.runtime_development_mode_verified !== true ||
+                      !Number.isSafeInteger(processIdentity?.pid) || processIdentity.pid <= 0 ||
+                      !Number.isSafeInteger(processIdentity?.restart_count) || processIdentity.restart_count < 0 ||
+                      !validStart || ready.process_continuity_verified !== true ||
+                      ready.development_mode_probe?.requests !== 4 ||
+                      ready.development_mode_probe.origin_rejected !== true ||
+                      !Number.isFinite(ready.development_mode_probe?.elapsed_ms) ||
+                      ready.development_mode_probe.elapsed_ms < 0 || ready.development_mode_probe.elapsed_ms >= 60000 ||
+                      ready.ready !== true || ready.inspected_before_start !== true) {
+                    throw new Error('malformed or mismatched image readiness receipt');
+                  }
+                  const imageIdentity = [
+                    'schema', 'run_id', 'run_attempt', 'shard', 'commit', 'tree',
+                    'image_id', 'container_id', 'fixture_receipt', 'mode',
+                  ];
+                  if (!after || !imageIdentity.every(field => after[field] === ready[field]) ||
+                      after.configuration_verified !== true || after.source_unchanged !== true ||
+                      after.running_before_stop !== true || after.stopped !== true) {
+                    throw new Error('malformed or mismatched image shutdown receipt');
                   }
                   receipts.push(receipt);
                 }
@@ -582,10 +638,9 @@ jobs:
         # database helpers go through getaddrinfo.
         run: echo '127.0.0.1 acme.localhost' | sudo tee -a /etc/hosts
 
-      - name: Write the .env the dev server and the e2e helpers read
-        # Workflow-level env is not enough. apps/web `dev` runs
-        # `bun --env-file=../../.env vite dev`, and e2e/utils/db-helpers.ts
-        # shells out through `dotenv -e ../../.env`; both read this file.
+      - name: Write the .env the application and the e2e helpers read
+        # Host-side fixture and database helpers still load this file through
+        # dotenv-cli; the image launcher supplies the inspected application env.
         run: |
           cat > .env <<EOF
           DATABASE_URL=$DATABASE_URL
@@ -618,6 +673,23 @@ jobs:
 
       - run: bun run --filter @quackback/widget build
 
+      # Same eight jobs: existing production build/start measurements of 44-52s
+      # imply 5.9-6.9 gross runner-minutes/run; net change is unmeasured.
+      # Replaces the Vite server without disabling HMR or adding a job/matrix/schedule.
+      - name: Build exact E2E application image
+        id: image_build
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD --
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          mkdir -p "$RUNNER_TEMP/e2e-evidence"
+          docker --host unix:///var/run/docker.sock build --file apps/web/Dockerfile \
+            --build-arg "SOURCE_COMMIT=$SOURCE_COMMIT" \
+            --iidfile "$RUNNER_TEMP/e2e-evidence/image-server-image.id" . 2>&1 \
+            | tee "$RUNNER_TEMP/e2e-evidence/image-server-build.log"
+
       # The database setup steps each get their own cap. The job cap alone
       # (90 minutes) let a hung step hold the runner for an hour: on run
       # 35980940017, shard 8 attempt 1, `bun run db:migrate` printed its
@@ -644,6 +716,14 @@ jobs:
         working-directory: apps/web
         run: bunx playwright install --with-deps chromium
 
+      - name: Start attested E2E application image
+        id: image_server
+        working-directory: apps/web
+        timeout-minutes: 5
+        env:
+          E2E_IMAGE_SHARD: ${{ matrix.shard }}
+        run: bun e2e/scripts/image-server.ts start "$RUNNER_TEMP/e2e-evidence/image-server-image.id"
+
       - name: Collect the expected tests for this shard
         working-directory: apps/web
         # Collect independently before execution: a partial JSON report must
@@ -651,12 +731,12 @@ jobs:
         run: bunx playwright test --list --reporter=json --shard=${{ matrix.shard }}/8 > e2e-plan.json
 
       - name: Run the Playwright suite
+        id: playwright_suite
         working-directory: apps/web
-        # playwright.config.ts starts the dev server itself (webServer) and,
-        # because CI is set, forbids test.only, retries twice and uses one
-        # worker per shard.
+        # The inspected image is already ready; Playwright does not start Vite.
+        # CI still forbids test.only, retries twice and uses one worker per shard.
         #
-        # `|| true` on purpose: the NEXT step is the gate. Playwright exits
+        # `|| true` on purpose: the independent ratchet below is the gate. Playwright exits
         # non-zero for a failure that is already on e2e/known-failures.json,
         # and that must not redden the shard while the entry stands. Everything
         # a swallowed exit code could hide -- a missing or truncated report, a
@@ -670,7 +750,17 @@ jobs:
         timeout-minutes: 5
         run: bun e2e/scripts/set-auth-acceptance-fixture.ts restore
 
+      - name: Capture and stop owned E2E application
+        if: ${{ always() && (steps.image_server.outcome == 'success' || steps.image_server.outcome == 'failure' || steps.image_server.outcome == 'cancelled') }}
+        working-directory: apps/web
+        timeout-minutes: 5
+        env:
+          E2E_IMAGE_SHARD: ${{ matrix.shard }}
+        run: bun e2e/scripts/image-server.ts finish
+
       - name: Check the shard against the known-failure ratchet
+        # Teardown errors remain job failures and cannot suppress the result gate.
+        if: ${{ always() && (steps.playwright_suite.outcome == 'success' || steps.playwright_suite.outcome == 'failure' || steps.playwright_suite.outcome == 'cancelled') }}
         working-directory: apps/web
         run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json
 
@@ -699,12 +789,24 @@ jobs:
       - name: Upload tested checkout evidence
         # Failure archives are diagnostic only: queue reuse still requires every
         # shard, ratchet and checkout verification step to have succeeded.
-        # No new job or test execution; one small post-checkout JSON per shard.
+        # Compact checkout and image lifecycle receipts only; logs are separate.
         if: ${{ always() && github.event_name == 'pull_request' && steps.tested_checkout.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-tested-tree-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
-          path: ${{ runner.temp }}/e2e-evidence/tested-tree*.json
+          path: |
+            ${{ runner.temp }}/e2e-evidence/tested-tree*.json
+            ${{ runner.temp }}/e2e-evidence/image-server-ready.json
+            ${{ runner.temp }}/e2e-evidence/image-server-after.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload E2E application evidence
+        if: ${{ always() && (steps.image_build.outcome == 'success' || steps.image_build.outcome == 'failure' || steps.image_build.outcome == 'cancelled') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-evidence/image-server*
           retention-days: 7
           if-no-files-found: error
 

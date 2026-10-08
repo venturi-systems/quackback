@@ -176,7 +176,7 @@ describe('QB-CI-005 isolated authentication acceptance fixture', () => {
       EMAIL_SMTP_SECURE: 'false',
       EMAIL_FROM: 'Avery Stone <avery.stone@acme.example>',
     })
-    const dotenv = step('Write the .env the dev server and the e2e helpers read')
+    const dotenv = step('Write the .env the application and the e2e helpers read')
     for (const key of Object.keys(email)) expect(dotenv).toContain(`${key}=$${key}\n`)
 
     const preflight = step('Validate isolated services and all fixture environment loaders')
@@ -242,6 +242,132 @@ describe('QB-CI-005 isolated authentication acceptance fixture', () => {
     expect(job.indexOf(enable)).toBeLessThan(job.indexOf('name: Collect the expected tests'))
     expect(job.indexOf(restore)).toBeGreaterThan(job.indexOf('name: Run the Playwright suite'))
     expect(job.indexOf(restore)).toBeLessThan(job.indexOf('name: Check the shard'))
+  })
+})
+
+describe('QB-CI-006 attested E2E image lifecycle', () => {
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+  const job = ci.split('\n  e2e_tests:\n', 2)[1]?.split(/\n {2}[a-z0-9_-]+:\n/, 1)[0] ?? ''
+
+  function step(name: string): string {
+    const matches = job.split(/\n {6}- /).filter((part) => part.startsWith(`name: ${name}\n`))
+    expect(matches, `exactly one image lifecycle step: ${name}`).toHaveLength(1)
+    return matches[0] ?? ''
+  }
+
+  it('builds the exact clean checkout on local Docker before database mutation', () => {
+    const build = step('Build exact E2E application image')
+    const preflight = step('Validate isolated services and all fixture environment loaders')
+    expect(build).toContain('        id: image_build\n')
+    expect(build).toContain('        timeout-minutes: 10\n')
+    expect(build).toContain('        shell: bash\n')
+    expect(build).toContain('set -euo pipefail')
+    expect(build).toContain('git diff --exit-code HEAD --')
+    expect(build).toContain('SOURCE_COMMIT="$(git rev-parse HEAD)"')
+    expect(build).toContain(
+      'docker --host unix:///var/run/docker.sock build --file apps/web/Dockerfile'
+    )
+    expect(build).toContain('--build-arg "SOURCE_COMMIT=$SOURCE_COMMIT"')
+    expect(build).toContain('--iidfile "$RUNNER_TEMP/e2e-evidence/image-server-image.id"')
+    expect(build).toContain('2>&1')
+    expect(build).toContain('| tee "$RUNNER_TEMP/e2e-evidence/image-server-build.log"')
+    expect(build.indexOf('git diff --exit-code HEAD --')).toBeLessThan(
+      build.indexOf('docker --host')
+    )
+    expect(job.indexOf(preflight)).toBeLessThan(job.indexOf(build))
+    for (const command of ['bun run db:migrate', 'bun run --cwd packages/db db:seed']) {
+      expect(job.indexOf(command)).toBeGreaterThan(job.indexOf(build))
+    }
+    expect(job).toContain('shard: [1, 2, 3, 4, 5, 6, 7, 8]')
+    expect(job).toContain('bun run --filter @quackback/widget build')
+    expect(job).toContain('5.9-6.9 gross runner-minutes/run; net change is unmeasured.')
+    expect(job).not.toMatch(/run:.*(?:vite dev|HMR|hmr)/)
+  })
+
+  it('starts only after fixture setup and delegates the inspected app tuple to the launcher', () => {
+    const start = step('Start attested E2E application image')
+    expect(start).toContain('        id: image_server\n')
+    expect(start).toContain('        working-directory: apps/web\n')
+    expect(start).toContain('        timeout-minutes: 5\n')
+    expect(start).toContain('E2E_IMAGE_SHARD: ${{ matrix.shard }}')
+    expect(start).toContain(
+      'run: bun e2e/scripts/image-server.ts start "$RUNNER_TEMP/e2e-evidence/image-server-image.id"'
+    )
+    for (const name of [
+      'Enable isolated authentication acceptance settings',
+      'Install the Playwright browser',
+    ]) {
+      expect(job.indexOf(step(name))).toBeLessThan(job.indexOf(start))
+    }
+    expect(job.indexOf(start)).toBeLessThan(
+      job.indexOf(step('Collect the expected tests for this shard'))
+    )
+    // Only the launcher may export image mode after create/inspect/start/readiness.
+    const jobEnv = job.split('\n    env:\n', 2)[1]?.split('\n    steps:\n', 1)[0] ?? ''
+    expect(jobEnv).not.toMatch(/E2E_SERVER_MODE|DESIGN_FIXTURE_APP_/)
+    expect(start).not.toMatch(/GITHUB_ENV|E2E_SERVER_MODE|DESIGN_FIXTURE_APP_|\|\| true/)
+    expect(existsSync(join(process.cwd(), 'apps/web/e2e/scripts/image-server.ts'))).toBe(true)
+    // Collection and execution must load the same fail-closed configuration;
+    // neither command may inject image mode in place of the launcher's receipt.
+    for (const name of ['Collect the expected tests for this shard', 'Run the Playwright suite']) {
+      const consumer = step(name)
+      expect(consumer).not.toMatch(/E2E_SERVER_MODE|DESIGN_FIXTURE_APP_|--config/)
+      expect(consumer).toContain('working-directory: apps/web')
+    }
+  })
+
+  it('restores settings before capturing and stopping, without suppressing the ratchet', () => {
+    const restore = step('Restore isolated authentication acceptance settings')
+    const finish = step('Capture and stop owned E2E application')
+    const suite = step('Run the Playwright suite')
+    const ratchet = step('Check the shard against the known-failure ratchet')
+    expect(finish).toContain(
+      "if: ${{ always() && (steps.image_server.outcome == 'success' || steps.image_server.outcome == 'failure' || steps.image_server.outcome == 'cancelled') }}"
+    )
+    expect(finish).toContain('        working-directory: apps/web\n')
+    expect(finish).toContain('        timeout-minutes: 5\n')
+    expect(finish).toContain('E2E_IMAGE_SHARD: ${{ matrix.shard }}')
+    expect(finish).toContain('run: bun e2e/scripts/image-server.ts finish')
+    expect(finish).not.toMatch(/continue-on-error|\|\| true/)
+    expect(job.indexOf(restore)).toBeLessThan(job.indexOf(finish))
+    expect(job.indexOf(finish)).toBeLessThan(job.indexOf(ratchet))
+    expect(suite).toContain('        id: playwright_suite\n')
+    expect(suite).toContain('run: bun run test:e2e -- --shard=${{ matrix.shard }}/8 || true')
+    expect(ratchet).toContain(
+      "if: ${{ always() && (steps.playwright_suite.outcome == 'success' || steps.playwright_suite.outcome == 'failure' || steps.playwright_suite.outcome == 'cancelled') }}"
+    )
+    expect(ratchet).toContain(
+      'run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json'
+    )
+  })
+
+  it('keeps full application evidence separate from compact queue-reuse receipts', () => {
+    const upload = step('Upload E2E application evidence')
+    const compact = step('Upload tested checkout evidence')
+    expect(upload).toContain(
+      "if: ${{ always() && (steps.image_build.outcome == 'success' || steps.image_build.outcome == 'failure' || steps.image_build.outcome == 'cancelled') }}"
+    )
+    expect(upload).toContain(
+      'name: e2e-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}'
+    )
+    expect(upload).toContain('path: ${{ runner.temp }}/e2e-evidence/image-server*')
+    for (const part of [upload, compact]) {
+      expect(part).toContain(
+        'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
+      )
+      expect(part).toContain('retention-days: 7')
+      expect(part).toContain('if-no-files-found: error')
+    }
+    const paths = [...compact.matchAll(/^ {12}(.+)$/gm)].map((match) => match[1])
+    expect(paths).toEqual([
+      '${{ runner.temp }}/e2e-evidence/tested-tree*.json',
+      '${{ runner.temp }}/e2e-evidence/image-server-ready.json',
+      '${{ runner.temp }}/e2e-evidence/image-server-after.json',
+    ])
+    expect(compact).not.toMatch(/image-server-build\.log|image-server\*|inspect/)
+    expect(job.indexOf(step('Capture and stop owned E2E application'))).toBeLessThan(
+      job.indexOf(upload)
+    )
   })
 })
 
