@@ -978,40 +978,15 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
     }
   })
 
-  test('after search, all visible post titles contain the search term or empty state shown', async ({
-    page,
-  }) => {
+  test('searching an English stopword shows an empty result', async ({ page }) => {
     const searchInput = page.getByPlaceholder(/search/i)
-    if ((await searchInput.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(searchInput).toBeVisible()
 
-    // Use a term that likely matches seed data
-    const searchTerm = 'a'
-    await searchInput.fill(searchTerm)
-    // Debounced search — wait for network
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(800)
-
-    const postCards = page.locator('[data-post-id]')
-    const emptyState = page.locator('text=/no posts|no results/i')
-
-    if ((await emptyState.count()) > 0) {
-      test.skip(true, 'Empty state is acceptable')
-      return
-    }
-
-    // Each visible post title should contain the search term (case-insensitive)
-    const cardCount = await postCards.count()
-    expect(cardCount).toBeGreaterThan(0)
-
-    for (let i = 0; i < Math.min(cardCount, 5); i++) {
-      const card = postCards.nth(i)
-      const titleEl = card.locator('h3').first()
-      const titleText = ((await titleEl.textContent()) ?? '').toLowerCase()
-      expect(titleText).toContain(searchTerm.toLowerCase())
-    }
+    // English full-text search ignores this stopword. Wait for its actual result,
+    // rather than allowing pre-search cards to satisfy an immediate count check.
+    await searchInput.fill('a')
+    await expect(page.getByText('No posts match your filters', { exact: true })).toBeVisible()
+    await expect(page.locator('[data-post-id]')).toHaveCount(0)
   })
 
   test('clearing search restores a list with count greater than or equal to filtered count', async ({
