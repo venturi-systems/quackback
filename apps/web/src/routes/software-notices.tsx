@@ -26,7 +26,10 @@ function SoftwareNotices() {
           <p>
             Venturi Feedback includes Quackback, licensed under the GNU Affero General Public
             License, version 3. You can inspect and download the corresponding source for the
-            software running this portal, including Venturi modifications, at no charge.
+            software running this portal,{' '}
+            <span className="inline-block max-w-full text-balance">
+              including Venturi modifications, at no charge.
+            </span>
           </p>
           <p>
             <a
