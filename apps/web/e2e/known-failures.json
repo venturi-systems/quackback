@@ -12,7 +12,5 @@
     "Id form: `project | file | describe > ... > title`. No line number, so editing",
     "a spec file does not churn the list."
   ],
-  "tests": [
-    "chromium-auth | tests/auth/unified-login.spec.ts | (4) /?prompt=login shows the dialog with OIDC button and recovery-code link"
-  ]
+  "tests": []
 }
