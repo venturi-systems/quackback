@@ -570,11 +570,14 @@ jobs:
       # PWTEST_SHARD_WEIGHTS moves the cut points. Each weight is that shard's
       # share of the total test count, so a shard full of slow tests is given
       # fewer of them. The numbers below were derived from the measured
-      # per-test durations of that run: walk the tests in Playwright's own
-      # order, cut when cumulative duration crosses the next eighth. They sum
-      # to 803, the current test count, which makes the split exact rather
-      # than rounded -- but nothing depends on that, because Playwright uses
-      # the weights proportionally.
+      # per-test durations of run 37513233008 (main, 2026-10-06), on which the
+      # first vector had drifted to 5.6, 7.8, 9.7, 5.6, 7.1, 5.8, 11.6 and
+      # 8.8 minutes of tests: walk the tests in Playwright's own order and
+      # take the eight contiguous ranges whose slowest is shortest, which on
+      # that run is 8.7 minutes against a 8.4 minute mean. They sum to 804,
+      # the current test count, which makes the split exact rather than
+      # rounded -- but nothing depends on that, because Playwright uses the
+      # weights proportionally.
       #
       # Regenerate after a significant change in the suite's shape:
       #   bun apps/web/e2e/scripts/compute-shard-weights.ts <results...>
@@ -594,7 +597,7 @@ jobs:
       # One that rejects it fails loudly in CI. Weights that drift as tests
       # are added degrade toward that same equal-count baseline; they cannot
       # drop a test.
-      PWTEST_SHARD_WEIGHTS: '124:80:157:78:80:92:89:103'
+      PWTEST_SHARD_WEIGHTS: '124:76:173:131:100:25:66:109'
     steps:
       - name: Checkout tested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
