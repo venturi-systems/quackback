@@ -162,6 +162,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         const form = document.querySelector('.portal-gate__signin')!
         return {
           viewport: innerWidth,
+          clientWidth: document.documentElement.clientWidth,
           document: document.documentElement.scrollWidth,
           intro: intro.getBoundingClientRect().toJSON(),
           form: form.getBoundingClientRect().toJSON(),
@@ -179,15 +180,14 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       expect(geometry.document).toBeLessThanOrEqual(width)
       for (const item of geometry.text)
         expect(item.size, item.text ?? '').toBeGreaterThanOrEqual(item.heading ? 18 : 16)
-      // Desktop uses adjacent context and sign-in columns; narrow screens
-      // keep the form on the same reading rail below the introduction.
-      if (width >= 768) {
-        expect(geometry.form.x).toBeGreaterThanOrEqual(geometry.intro.right)
-        expect(Math.abs(geometry.form.y - geometry.intro.y)).toBeLessThanOrEqual(8)
-      } else {
-        expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.bottom)
-        expect(Math.abs(geometry.form.x - geometry.intro.x)).toBeLessThanOrEqual(1)
-      }
+      // Owner direction (2026-10-07): the social sign-in is centered. At every
+      // width the sign-in section sits below the introduction, and both share
+      // the page's center line.
+      const centerOf = (box: { x: number; width: number }) => box.x + box.width / 2
+      expect(geometry.form.y).toBeGreaterThanOrEqual(geometry.intro.bottom)
+      expect(Math.abs(centerOf(geometry.form) - geometry.clientWidth / 2)).toBeLessThanOrEqual(1)
+      expect(Math.abs(centerOf(geometry.intro) - geometry.clientWidth / 2)).toBeLessThanOrEqual(1)
+      expect(geometry.form.width).toBeLessThanOrEqual(416)
       const typography = await measureTypography(
         page,
         [
