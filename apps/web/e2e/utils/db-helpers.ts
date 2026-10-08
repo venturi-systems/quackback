@@ -148,23 +148,24 @@ export function getMentionTarget(excludeEmail: string = 'demo@example.com'): {
 /**
  * Find a seeded post and the current user's visible root comment without
  * creating content or relying on the seed's denormalized comment counts.
+ * Posts whose page will show a Related section are preferred, and
+ * `hasRelated` says whether the chosen one will (see the script).
  */
-export function getPostWithOwnComment(
-  email: string,
-  options: { requireRelated?: boolean } = {}
-): { path: string; commentId: string } {
+export function getPostWithOwnComment(email: string): {
+  path: string
+  commentId: string
+  hasRelated: boolean
+} {
   const scriptPath = resolve(__dirname, '../scripts/get-post-with-own-comment.ts')
 
   try {
-    const args = ['-e', '../../.env', '--', 'bun', scriptPath, email]
-    if (options.requireRelated) args.push('--require-related')
-    const result = execFileSync('dotenv', args, {
+    const result = execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, email], {
       encoding: 'utf-8',
       cwd: resolve(__dirname, '../..'),
       timeout: E2E_SCRIPT_TIMEOUT_MS,
       killSignal: E2E_SCRIPT_KILL_SIGNAL,
     })
-    return JSON.parse(result.trim()) as { path: string; commentId: string }
+    return JSON.parse(result.trim()) as { path: string; commentId: string; hasRelated: boolean }
   } catch (error) {
     throw new Error(`Failed to get post with own comment: ${scriptFailure(error)}`, {
       cause: error,
