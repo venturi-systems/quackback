@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  EVIDENCE_FILE,
   finishImageServer,
   ImageServerProbeError,
   startImageServer,
@@ -914,4 +915,37 @@ describe('explicit Playwright image-server selection', () => {
       await expect(loadConfig(env, fault === 'app-failed')).rejects.toThrow()
     }
   )
+})
+
+describe('evidence file names', () => {
+  // The fake IO above never reaches runtimeIO's path guard. Run 37741514933 failed
+  // every shard because 'image-server.cid' did not match the guard's pattern.
+  it('admits every name the launcher and CI use', () => {
+    for (const name of [
+      'tested-tree.json',
+      'image-server.cid',
+      'image-server.log',
+      'image-server-attempt.json',
+      'image-server-owned.json',
+      'image-server-before.json',
+      'image-server-ready.json',
+      'image-server-after.json',
+      'image-server-image.id',
+      'image-server-build.log',
+    ])
+      expect(EVIDENCE_FILE.test(name), name).toBe(true)
+  })
+
+  it('refuses separators and unrelated names', () => {
+    for (const name of [
+      '../image-server.cid',
+      'image-server.cid/x',
+      'image-server-/x.json',
+      'image-server.pid',
+      'image-server',
+      'tested-tree.json.bak',
+      'other.json',
+    ])
+      expect(EVIDENCE_FILE.test(name), name).toBe(false)
+  })
 })

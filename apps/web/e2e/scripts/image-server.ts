@@ -368,13 +368,18 @@ export function finishImageServer(io: ImageServerIO): void {
   if (problems.length) throw new Error(`${ERROR}: ${problems.join(', ')}`)
 }
 
+/** Every evidence file the launcher may read or write under $RUNNER_TEMP/e2e-evidence:
+ * the checkout receipt, the cidfile and log Docker and the finish step write, and the
+ * hyphenated receipts. No separator can appear, so no name escapes the directory. */
+export const EVIDENCE_FILE = /^(?:tested-tree\.json|image-server\.(?:cid|log)|image-server-[a-z.-]+)$/
+
 function runtimeIO(): ImageServerIO {
   const env = process.env
   if (!isAbsolute(env.RUNNER_TEMP ?? '') || !isAbsolute(env.GITHUB_ENV ?? ''))
     throw new Error(ERROR)
   const directory = resolve(env.RUNNER_TEMP!, 'e2e-evidence')
   const safePath = (name: string) => {
-    if (!/^(?:tested-tree\.json|image-server-[a-z.-]+)$/.test(name)) throw new Error(ERROR)
+    if (!EVIDENCE_FILE.test(name)) throw new Error(ERROR)
     return resolve(directory, name)
   }
   const command = (name: string, args: string[]): string => {
@@ -402,6 +407,9 @@ function runtimeIO(): ImageServerIO {
         ? failure.code
         : 'CHILD_FAILED'
       throw new Error(`${ERROR}: ${name}`, {
+        // The child error carries argv (docker create passes --env values) and its
+        // output; only the sanitized code and exit status may reach the job log.
+        // eslint-disable-next-line preserve-caught-error
         cause: new Error(
           `${code}; status=${typeof failure.status === 'number' ? failure.status : 'unknown'}`
         ),
