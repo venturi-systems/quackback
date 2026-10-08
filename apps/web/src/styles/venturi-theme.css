@@ -803,10 +803,18 @@
   inline-size: 100%;
   padding-block: clamp(40px, 6vh, 72px);
 }
+/* Owner direction (2026-10-07): the public entry's social sign-in is centered.
+   The short entry statement and its provider buttons form one intentional
+   centered composition, the short-statement variant the design system's
+   layout guidance allows. Only the inline axis is centered: the content still
+   starts at the top of the page, so the no-viewport-centering rule above holds.
+   The signed-in no-access gate keeps the reading-start layout. */
 .portal-gate--entry .portal-gate__layout {
-  grid-template-columns: minmax(0, 1fr) minmax(20rem, 26rem);
-  gap: clamp(32px, 7vw, 112px);
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: clamp(24px, 4vw, 40px);
   align-items: start;
+  text-align: center;
 }
 .portal-gate--entry .portal-gate__layout > .portal-gate__intro {
   max-inline-size: 44rem;
@@ -817,15 +825,29 @@
 }
 .portal-gate--entry .portal-gate__access {
   max-inline-size: 38rem;
+  margin-inline: auto;
   text-wrap: balance;
 }
+/* A refusal notice stays a readable start-aligned block on the center line. */
+.portal-gate--entry .portal-gate__notice {
+  margin-inline: auto;
+  text-align: start;
+}
+/* The sign-in section shares the intro's center line at every width. Its
+   fields and native help disclosure keep start alignment on the button rail:
+   the help summary stacks two labels in one grid cell, so centering it would
+   detach the visible label from its marker. */
 .portal-gate--entry .portal-gate__layout > .portal-gate__signin {
+  inline-size: 100%;
+  max-inline-size: 26rem;
   border: 0;
   padding: 4px 0 0;
 }
 .portal-gate--entry .portal-gate__form {
   inline-size: 100%;
   max-inline-size: 26rem;
+  margin-inline: auto;
+  text-align: start;
 }
 .portal-feedback-faq {
   display: grid;
