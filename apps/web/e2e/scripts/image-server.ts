@@ -371,7 +371,8 @@ export function finishImageServer(io: ImageServerIO): void {
 /** Every evidence file the launcher may read or write under $RUNNER_TEMP/e2e-evidence:
  * the checkout receipt, the cidfile and log Docker and the finish step write, and the
  * hyphenated receipts. No separator can appear, so no name escapes the directory. */
-export const EVIDENCE_FILE = /^(?:tested-tree\.json|image-server\.(?:cid|log)|image-server-[a-z.-]+)$/
+export const EVIDENCE_FILE =
+  /^(?:tested-tree\.json|image-server\.(?:cid|log)|image-server-[a-z.-]+)$/
 
 function runtimeIO(): ImageServerIO {
   const env = process.env
