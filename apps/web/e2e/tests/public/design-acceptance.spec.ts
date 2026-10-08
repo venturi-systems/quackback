@@ -144,12 +144,16 @@ async function recordHeaderControls(page: Page, testInfo: TestInfo, route: Route
   if (width < 640) await toggle.click()
 }
 
-async function waitForRouteAnimations(page: Page, route: Route) {
-  if (route === 'post') {
-    // The seed repeats title families across 500 posts. Its selected post has
-    // related results, but the exact count varies when the current post is
-    // excluded. Require that content before enumerating its entrance animation:
-    // network idle and post-detail visibility can precede client hydration.
+async function waitForRouteAnimations(page: Page, route: Route, relatedExpected = true) {
+  if (route === 'post' && relatedExpected) {
+    // The seed repeats title families across 500 posts, but only the first 60
+    // titles have siblings the similar-posts search can match; a suffixed
+    // title matches only itself (see get-post-with-own-comment.ts). The helper
+    // prefers a post with related results and reports whether it found one.
+    // When it did, require that content before enumerating its entrance
+    // animation: network idle and post-detail visibility can precede client
+    // hydration. Main run 37774119446 measured a suffixed post here, and all
+    // 18 post-geometry cases failed waiting for a section that never renders.
     const heading = page.getByRole('heading', { level: 3, name: 'Related', exact: true })
     await expect(heading, 'The seeded post must render its Related section').toBeVisible()
     const related = heading.locator('..').locator('..')
@@ -171,12 +175,8 @@ async function waitForRouteAnimations(page: Page, route: Route) {
 }
 
 async function openRoute(page: Page, route: Route, revealParticipation = true) {
-  const path =
-    route === 'post'
-      ? (await getPostWithOwnComment(TEST_ADMIN.email)).path
-      : route === 'feed'
-        ? '/'
-        : `/${route}`
+  const ownCommentPost = route === 'post' ? getPostWithOwnComment(TEST_ADMIN.email) : null
+  const path = ownCommentPost !== null ? ownCommentPost.path : route === 'feed' ? '/' : `/${route}`
   const response = await page.goto(path)
   expect(response, 'Required route must return a document response').not.toBeNull()
   expect(response!.status()).toBe(200)
@@ -243,7 +243,7 @@ async function openRoute(page: Page, route: Route, revealParticipation = true) {
     }
   }
   await page.evaluate(() => document.fonts.ready.then(() => undefined))
-  await waitForRouteAnimations(page, route)
+  await waitForRouteAnimations(page, route, ownCommentPost?.hasRelated ?? true)
 }
 
 function feedRegions(

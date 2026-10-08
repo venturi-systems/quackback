@@ -2,6 +2,15 @@
  * Read an existing public post with the authenticated admin's own root comment.
  * Card comment counts are denormalized and the seed does not populate them.
  *
+ * The post page shows a Related section only when the similar-posts search
+ * (findSimilarPostsFn) finds another visible post. Its full-text half matches
+ * `plainto_tsquery('english', title)`, and the seed suffixes every title after
+ * the first 60 with ` (k)`, which that query keeps as a required lexeme. A
+ * suffixed post therefore matches only itself and has no Related section, and
+ * which posts carry the user's comments is random per seed. `has_related`
+ * applies the same match to published posts on anonymously visible boards, a
+ * subset of what any viewer sees, and posts that have one are preferred.
+ *
  * Usage: bun get-post-with-own-comment.ts <email>
  */
 import postgres from 'postgres'
@@ -18,7 +27,22 @@ const sql = postgres(connectionString)
 
 try {
   const rows = await sql`
-    SELECT p.id AS post_id, b.slug AS board_slug, c.id AS comment_id
+    SELECT
+      p.id AS post_id,
+      b.slug AS board_slug,
+      c.id AS comment_id,
+      EXISTS (
+        SELECT 1
+        FROM posts s
+        JOIN boards sb ON sb.id = s.board_id
+        WHERE s.id <> p.id
+          AND s.deleted_at IS NULL
+          AND s.canonical_post_id IS NULL
+          AND s.moderation_state = 'published'
+          AND sb.deleted_at IS NULL
+          AND sb.access->>'view' = 'anonymous'
+          AND s.search_vector @@ plainto_tsquery('english', p.title)
+      ) AS has_related
     FROM posts p
     JOIN boards b ON b.id = p.board_id
     JOIN comments c ON c.post_id = p.id
@@ -36,7 +60,7 @@ try {
       AND c.deleted_at IS NULL
       AND c.is_private = false
       AND c.moderation_state = 'published'
-    ORDER BY p.id ASC, c.id ASC
+    ORDER BY has_related DESC, p.id ASC, c.id ASC
     LIMIT 1
   `
   if (rows.length === 0) {
@@ -47,7 +71,8 @@ try {
   const postId = fromUuid('post', rows[0].post_id as string)
   const commentId = fromUuid('comment', rows[0].comment_id as string)
   const boardSlug = encodeURIComponent(rows[0].board_slug as string)
-  console.log(JSON.stringify({ path: `/b/${boardSlug}/posts/${postId}`, commentId }))
+  const hasRelated = rows[0].has_related === true
+  console.log(JSON.stringify({ path: `/b/${boardSlug}/posts/${postId}`, commentId, hasRelated }))
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
