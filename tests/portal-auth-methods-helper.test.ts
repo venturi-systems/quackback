@@ -212,6 +212,44 @@ describe('portal auth helper temporary magic-link restoration', () => {
     expect(fixture.quit).toHaveBeenCalledTimes(2)
   })
 
+  it.each([
+    { name: 'null columns', authConfig: null, portalConfig: null },
+    {
+      name: 'social and email methods with admission settings',
+      authConfig:
+        ' { "oauth": { "password": true, "magicLink": true, "google": true, "github": true, "custom": false }, "openSignup": false } ',
+      portalConfig: original.portalConfig,
+    },
+  ])('restores exact $name after the social-only viewport fixture', async (initial) => {
+    fixture.state.row.auth_config = initial.authConfig
+    fixture.state.row.portal_config = initial.portalConfig
+    await run('disable-email-temporarily')
+    const active = JSON.parse(fixture.state.row.auth_config!)
+    expect(active.oauth.password).toBe(false)
+    expect(active.oauth.magicLink).toBe(false)
+    if (initial.authConfig !== null) {
+      const previous = JSON.parse(initial.authConfig)
+      expect(active).toEqual({
+        ...previous,
+        oauth: { ...previous.oauth, password: false, magicLink: false },
+      })
+    }
+    expect(fixture.state.row.portal_config).toBe(initial.portalConfig)
+    expect(fixture.state.calls.indexOf('snapshot-write')).toBeLessThan(
+      fixture.state.calls.indexOf('update')
+    )
+    await run('restore')
+    expect(fixture.state.row.auth_config).toBe(initial.authConfig)
+    expect(fixture.state.row.portal_config).toBe(initial.portalConfig)
+    expect(fixture.state.snapshot).toBeNull()
+    expect(fixture.state.calls.slice(-4)).toEqual([
+      'update',
+      'restore-readback',
+      'snapshot-remove',
+      'cache',
+    ])
+  })
+
   it('changes only magicLink while temporary enable is active', async () => {
     await run('enable-magic-link-temporarily')
     expect(JSON.parse(fixture.state.row.auth_config!)).toEqual({
@@ -225,6 +263,8 @@ describe('portal auth helper temporary magic-link restoration', () => {
     ['enable-magic-link-temporarily', 'enable-magic-link-temporarily'],
     ['enable-magic-link-temporarily', 'disable'],
     ['disable', 'enable-magic-link-temporarily'],
+    ['disable-email-temporarily', 'enable-magic-link-temporarily'],
+    ['enable-magic-link-temporarily', 'disable-email-temporarily'],
   ])('keeps the first snapshot across %s then %s', async (first, second) => {
     await run(first)
     const snapshot = fixture.state.snapshot

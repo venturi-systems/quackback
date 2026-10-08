@@ -50,8 +50,11 @@
  * Idempotent, and every other stored auth setting is preserved.
  * `enable-magic-link` is permanent fixture setup; `enable-magic-link-temporarily`
  * takes the same snapshot as `disable` and must be paired with `restore`.
+ * `disable-email-temporarily` retains configured social providers while turning
+ * off password and magic-link entry for viewport-fit acceptance. It uses the
+ * same verified snapshot restoration; it never changes production defaults.
  *
- * Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily>
+ * Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily|disable-email-temporarily>
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -76,10 +79,11 @@ if (
   arg !== 'disable' &&
   arg !== 'restore' &&
   arg !== 'enable-magic-link' &&
-  arg !== 'enable-magic-link-temporarily'
+  arg !== 'enable-magic-link-temporarily' &&
+  arg !== 'disable-email-temporarily'
 ) {
   console.error(
-    'Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily>'
+    'Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily|disable-email-temporarily>'
   )
   process.exit(1)
 }
@@ -109,7 +113,11 @@ try {
   const id = rows[0].id
   let restorationReadback: 'matched' | 'no-snapshot' | undefined
 
-  if (arg === 'disable' || arg === 'enable-magic-link-temporarily') {
+  if (
+    arg === 'disable' ||
+    arg === 'enable-magic-link-temporarily' ||
+    arg === 'disable-email-temporarily'
+  ) {
     // Snapshot the LIVE columns before touching them. `wx` fails when a
     // snapshot already exists, and that is the point: on a Playwright retry the
     // first attempt's snapshot holds the true pre-change value, and this
@@ -137,6 +145,18 @@ try {
       : { ...DEFAULT_AUTH_CONFIG, oauth: { ...DEFAULT_AUTH_CONFIG.oauth } }
     const existing = (authConfig.oauth as Record<string, unknown>) ?? {}
     authConfig.oauth = { ...existing, magicLink: true }
+    await sql`UPDATE settings
+      SET auth_config = ${JSON.stringify(authConfig)},
+          auth_config_version = auth_config_version + 1
+      WHERE id = ${id}`
+  } else if (arg === 'disable-email-temporarily') {
+    // Exercise the normal social-provider entry without hiding controls in the
+    // browser. Preserve provider selection, admission and all other settings.
+    const authConfig: Record<string, unknown> = rows[0].auth_config
+      ? parseConfigColumn(rows[0].auth_config)
+      : { ...DEFAULT_AUTH_CONFIG, oauth: { ...DEFAULT_AUTH_CONFIG.oauth } }
+    const existing = (authConfig.oauth as Record<string, unknown>) ?? {}
+    authConfig.oauth = { ...existing, password: false, magicLink: false }
     await sql`UPDATE settings
       SET auth_config = ${JSON.stringify(authConfig)},
           auth_config_version = auth_config_version + 1

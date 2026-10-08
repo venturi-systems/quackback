@@ -106,7 +106,12 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
  * crashed run left behind.
  */
 export function setPortalAuthMethods(
-  action: 'disable' | 'restore' | 'enable-magic-link' | 'enable-magic-link-temporarily'
+  action:
+    | 'disable'
+    | 'restore'
+    | 'enable-magic-link'
+    | 'enable-magic-link-temporarily'
+    | 'disable-email-temporarily'
 ): void {
   runScript('../scripts/set-portal-auth-methods.ts', [action])
 }

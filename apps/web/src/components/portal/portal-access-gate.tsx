@@ -296,7 +296,7 @@ export function PortalAccessGate({
       {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
       <PublicPageFrame
         className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
-        footer={reason === 'unauthenticated' ? <VenturiSiteFooter /> : undefined}
+        footer={reason === 'unauthenticated' ? <VenturiSiteFooter showSourceCode /> : undefined}
       >
         <GateCard
           reason={reason}

@@ -49,6 +49,17 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     await expect(help).not.toHaveAttribute('open', '')
     await expect(page.getByText('Who can do what', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
+    const entrySource = await page
+      .getByRole('link', { name: 'Source code', exact: true })
+      .getAttribute('href')
+    expect(entrySource).toMatch(
+      /^https:\/\/github\.com\/venturi-systems\/quackback\/tree\/[0-9a-f]{7,40}$/
+    )
+    expect(process.env.GITHUB_SHA!.startsWith(entrySource!.split('/').at(-1)!)).toBe(true)
+    await expect(
+      page.locator('a[href*="/investor/demo"], a[href$="/demo"], a[href$="/demo/"]')
+    ).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /product demo/i })).toHaveCount(0)
     await expect(page.getByRole('navigation', { name: 'Legal and sitemap' })).toHaveCount(1)
     const initialViewports = []
     try {
@@ -305,6 +316,74 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         }
       )
     }
+    // REQ-FEEDBACK-AUTH-VIEWPORT: the normal two-provider entry fits in one
+    // viewport. Exercise the real fixture configuration rather than hiding
+    // controls; the earlier email, expanded help and zoom coverage stays intact.
+    const fittedViewports = []
+    try {
+      setPortalVisibility('private')
+      setPortalAuthMethods('disable-email-temporarily')
+      await page.goto('/')
+      await expect(page.getByTestId('portal-gate-access')).toContainText(
+        'Sign in with an approved account'
+      )
+      await expect(page.getByRole('button', { name: /Google/i })).toBeEnabled()
+      await expect(page.getByRole('button', { name: /GitHub/i })).toBeEnabled()
+      await expect(page.getByLabel(/email/i)).toHaveCount(0)
+      await expect(help).not.toHaveAttribute('open', '')
+      for (const [width, height] of [
+        [320, 900],
+        [390, 900],
+        [1280, 720],
+        [1366, 768],
+        [1440, 900],
+      ]) {
+        await page.setViewportSize({ width, height })
+        await page.evaluate(() => document.fonts.ready.then(() => window.scrollTo(0, 0)))
+        const fit = await page.evaluate(() => {
+          const footer = document.querySelector('.venturi-footer')!
+          return {
+            width: innerWidth,
+            height: innerHeight,
+            documentWidth: document.documentElement.scrollWidth,
+            documentHeight: document.documentElement.scrollHeight,
+            footerBottom: footer.getBoundingClientRect().bottom,
+            overflow: [
+              document.documentElement,
+              document.body,
+              document.querySelector('.portal-gate--entry')!,
+              footer,
+            ].map((element) => getComputedStyle(element).overflowY),
+            targets: Array.from(footer.querySelectorAll('a')).map((link) => ({
+              text: link.textContent,
+              width: link.getBoundingClientRect().width,
+              height: link.getBoundingClientRect().height,
+            })),
+          }
+        })
+        fittedViewports.push(fit)
+        expect(fit.documentWidth).toBeLessThanOrEqual(width)
+        expect(fit.documentHeight).toBeLessThanOrEqual(height)
+        expect(fit.footerBottom).toBeLessThanOrEqual(height + 1)
+        expect(fit.overflow.some((value) => /hidden|clip/.test(value))).toBe(false)
+        expect(fit.targets).toHaveLength(19)
+        for (const target of fit.targets) {
+          expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
+          expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
+        }
+        for (const name of ['Product', 'Trust', 'Connect']) {
+          await expect(
+            page.getByRole('region', { name, exact: true }).getByRole('list')
+          ).toHaveCount(1)
+        }
+      }
+    } finally {
+      setPortalAuthMethods('restore')
+      await testInfo.attach('entry-normal-viewport-fit', {
+        body: Buffer.from(JSON.stringify(fittedViewports)),
+        contentType: 'application/json',
+      })
+    }
     // Public notices retain access to the exact build source without provider authentication.
     await expect(page.getByRole('link', { name: 'Software notices', exact: true })).toHaveAttribute(
       'href',
@@ -319,6 +398,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       /^https:\/\/github\.com\/venturi-systems\/quackback\/tree\/[0-9a-f]{7,40}$/
     )
     expect(process.env.GITHUB_SHA!.startsWith(source!.split('/').at(-1)!)).toBe(true)
+    expect(source).toBe(entrySource)
   } finally {
     setPortalVisibility('public')
   }
