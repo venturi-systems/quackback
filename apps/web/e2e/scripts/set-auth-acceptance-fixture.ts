@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type postgres from 'postgres'
 import { assertDesignFixtureEnvironmentSync } from '../utils/design-fixture-guard'
 
 type Scope = { runId: string; runAttempt: string }
@@ -127,6 +128,22 @@ export async function runAuthAcceptanceFixture(
   }
 }
 
+/** Keep configuration ownership and cache-version advancement in the same database write. */
+export async function compareAndSetAuthConfig(
+  sql: postgres.Sql,
+  id: string,
+  expected: string | null,
+  next: string | null
+): Promise<boolean> {
+  const changed = await sql`
+    UPDATE settings
+    SET auth_config = ${next}, auth_config_version = auth_config_version + 1
+    WHERE id = ${id} AND auth_config IS NOT DISTINCT FROM ${expected}
+    RETURNING id
+  `
+  return changed.length === 1
+}
+
 function dependencies(): AuthFixtureDependencies {
   const scope = () => ({
     runId: process.env.GITHUB_RUN_ID ?? '',
@@ -172,14 +189,7 @@ function dependencies(): AuthFixtureDependencies {
           `
           return rows.map((row) => ({ id: row.id, authConfig: row.auth_config }))
         },
-        async compareAndSet(id, expected, next) {
-          const changed = await sql`
-            UPDATE settings SET auth_config = ${next}
-            WHERE id = ${id} AND auth_config IS NOT DISTINCT FROM ${expected}
-            RETURNING id
-          `
-          return changed.length === 1
-        },
+        compareAndSet: (id, expected, next) => compareAndSetAuthConfig(sql, id, expected, next),
         async invalidateCache() {
           // cacheDel swallows Redis errors; fixture ownership requires an acknowledged DEL.
           await redis.del(CACHE_KEYS.TENANT_SETTINGS)

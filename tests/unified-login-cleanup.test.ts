@@ -347,32 +347,48 @@ describe('unified login journey four provider and method cleanup', () => {
   const cases = [
     { name: 'success', faults: [] },
     { name: 'partial seed failure', faults: ['seed'] },
+    { name: 'partial second seed failure', faults: ['alternateSeed'] },
     { name: 'disable after write failure', faults: ['disable'] },
     { name: 'body failure', faults: ['body'] },
     { name: 'removal failure', faults: ['remove'] },
+    { name: 'second provider removal failure', faults: ['alternateRemove'] },
     { name: 'restoration failure', faults: ['restore'] },
     { name: 'partial seed and removal failure', faults: ['seed', 'remove'] },
     { name: 'body and removal failure', faults: ['body', 'remove'] },
     { name: 'both cleanup failures', faults: ['remove', 'restore'] },
     { name: 'body and both cleanup failures', faults: ['body', 'remove', 'restore'] },
+    { name: 'both provider removal failures', faults: ['remove', 'alternateRemove'] },
+    {
+      name: 'all cleanup failures',
+      faults: ['remove', 'alternateRemove', 'restore'],
+    },
+    {
+      name: 'second seed and both provider removal failures',
+      faults: ['alternateSeed', 'remove', 'alternateRemove'],
+    },
   ]
 
-  it.each(cases)('attempts both cleanups after $name', async ({ faults }) => {
+  it.each(cases)('attempts every cleanup after $name', async ({ faults }) => {
     const calls: string[] = []
     const errors = {
       seed: new Error('partial seed'),
+      alternateSeed: new Error('partial second seed'),
       disable: new Error('disable after write'),
       body: new Error('journey body'),
       remove: new Error('provider removal'),
+      alternateRemove: new Error('second provider removal'),
       restore: new Error('auth restoration'),
     }
-    let providerExists = false
+    const providers = new Set<string>()
     let authDisabled = false
-    harness.helpers.seedIdentityProvider.mockImplementation(() => {
-      calls.push('seed')
-      providerExists = true
-      if (faults.includes('seed')) throw errors.seed
-    })
+    harness.helpers.seedIdentityProvider.mockImplementation(
+      ({ registrationId }: { registrationId: string }) => {
+        const stage = registrationId === 'e2e-unified-btn' ? 'seed' : 'alternateSeed'
+        calls.push(stage)
+        providers.add(registrationId)
+        if (faults.includes(stage)) throw errors[stage]
+      }
+    )
     harness.helpers.setPortalAuthMethods.mockImplementation((action: string) => {
       calls.push(action)
       if (action === 'disable') {
@@ -384,52 +400,68 @@ describe('unified login journey four provider and method cleanup', () => {
         authDisabled = false
       }
     })
-    harness.helpers.removeIdentityProvider.mockImplementation(() => {
-      calls.push('remove')
-      if (faults.includes('remove')) throw errors.remove
-      providerExists = false
+    harness.helpers.removeIdentityProvider.mockImplementation((registrationId: string) => {
+      const stage = registrationId === 'e2e-unified-btn' ? 'remove' : 'alternateRemove'
+      calls.push(stage)
+      if (faults.includes(stage)) throw errors[stage]
+      providers.delete(registrationId)
     })
     const page = mockPage(async () => {
       calls.push('body')
       if (faults.includes('body')) throw errors.body
     })
-    const expectedError = faults.includes('restore')
-      ? errors.restore
-      : faults.includes('remove')
-        ? errors.remove
-        : faults.includes('seed')
-          ? errors.seed
-          : faults.includes('disable')
-            ? errors.disable
-            : faults.includes('body')
-              ? errors.body
-              : undefined
-    if (expectedError) await expect(journey('4')({ page })).rejects.toBe(expectedError)
+    const failurePrecedence = [
+      'restore',
+      'alternateRemove',
+      'remove',
+      'seed',
+      'alternateSeed',
+      'disable',
+      'body',
+    ] as const
+    const failedStage = failurePrecedence.find((stage) => faults.includes(stage))
+    if (failedStage) await expect(journey('4')({ page })).rejects.toBe(errors[failedStage])
     else await expect(journey('4')({ page })).resolves.toBeUndefined()
 
-    expect(harness.helpers.seedIdentityProvider).toHaveBeenCalledExactlyOnceWith({
+    const primary = {
       registrationId: 'e2e-unified-btn',
       label: 'E2E Unified Button',
       clientId: 'e2e-unified-btn-client',
       discoveryUrl: 'https://idp.example.org/.well-known/openid-configuration',
       enabled: true,
       showButton: true,
-    })
-    expect(harness.helpers.removeIdentityProvider).toHaveBeenCalledExactlyOnceWith(
-      'e2e-unified-btn'
+    }
+    const alternate = {
+      ...primary,
+      registrationId: 'e2e-unified-alternate-btn',
+      label: 'E2E Alternate Button',
+      clientId: 'e2e-unified-alternate-client',
+    }
+    expect(harness.helpers.seedIdentityProvider.mock.calls).toEqual(
+      faults.includes('seed') ? [[primary]] : [[primary], [alternate]]
     )
+    expect(harness.helpers.removeIdentityProvider.mock.calls).toEqual([
+      ['e2e-unified-btn'],
+      ['e2e-unified-alternate-btn'],
+    ])
+    const seedFailed = faults.includes('seed') || faults.includes('alternateSeed')
     expect(harness.helpers.setPortalAuthMethods.mock.calls).toEqual(
-      faults.includes('seed') ? [['restore']] : [['disable'], ['restore']]
+      seedFailed ? [['restore']] : [['disable'], ['restore']]
     )
     expect(calls).toEqual([
       'seed',
-      ...(faults.includes('seed') ? [] : ['disable']),
-      ...(faults.includes('seed') || faults.includes('disable') ? [] : ['body']),
+      ...(faults.includes('seed') ? [] : ['alternateSeed']),
+      ...(seedFailed ? [] : ['disable']),
+      ...(seedFailed || faults.includes('disable') ? [] : ['body']),
       'remove',
+      'alternateRemove',
       'restore',
     ])
-    expect(providerExists).toBe(faults.includes('remove'))
-    expect(authDisabled).toBe(!faults.includes('seed') && faults.includes('restore'))
+    expect(providers.has('e2e-unified-btn')).toBe(faults.includes('remove'))
+    expect(providers.has('e2e-unified-alternate-btn')).toBe(
+      !faults.includes('seed') && faults.includes('alternateRemove')
+    )
+    expect(authDisabled).toBe(!seedFailed && faults.includes('restore'))
     expect(harness.readFileSync).not.toHaveBeenCalled()
     expect(harness.helpers.loginViaMagicLink).not.toHaveBeenCalled()
     expect(harness.helpers.setPortalVisibility).not.toHaveBeenCalled()

@@ -323,11 +323,11 @@ describe('e2e known-failure ratchet', () => {
 
   // --- the committed baseline ------------------------------------------------
 
-  it('ships a baseline that is well formed, sorted and free of duplicates', () => {
+  it('ships an empty baseline with well-formed, sorted, unique entries', () => {
     const file = path.resolve(__dirname, '../../e2e/known-failures.json')
     const baseline = JSON.parse(readFileSync(file, 'utf8')) as { tests: string[] }
     expect(Array.isArray(baseline.tests)).toBe(true)
-    expect(baseline.tests.length).toBeGreaterThan(0)
+    expect(baseline.tests).toHaveLength(0)
     expect(new Set(baseline.tests).size).toBe(baseline.tests.length)
     expect([...baseline.tests].sort()).toEqual(baseline.tests)
     for (const id of baseline.tests) {

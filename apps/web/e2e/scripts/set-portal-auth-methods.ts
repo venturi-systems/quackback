@@ -108,7 +108,10 @@ try {
       : { ...DEFAULT_AUTH_CONFIG, oauth: { ...DEFAULT_AUTH_CONFIG.oauth } }
     const existing = (authConfig.oauth as Record<string, unknown>) ?? {}
     authConfig.oauth = { ...existing, magicLink: true }
-    await sql`UPDATE settings SET auth_config = ${JSON.stringify(authConfig)} WHERE id = ${id}`
+    await sql`UPDATE settings
+      SET auth_config = ${JSON.stringify(authConfig)},
+          auth_config_version = auth_config_version + 1
+      WHERE id = ${id}`
   } else if (arg === 'disable') {
     // Snapshot the LIVE columns before touching them. `wx` fails when a
     // snapshot already exists, and that is the point: on a Playwright retry the
@@ -153,7 +156,8 @@ try {
     await sql`
       UPDATE settings
          SET auth_config = ${JSON.stringify(authConfig)},
-             portal_config = ${JSON.stringify(portalConfig)}
+             portal_config = ${JSON.stringify(portalConfig)},
+             auth_config_version = auth_config_version + 1
        WHERE id = ${id}
     `
   } else {
@@ -169,7 +173,8 @@ try {
       await sql`
         UPDATE settings
            SET auth_config = ${snapshot.authConfig},
-               portal_config = ${snapshot.portalConfig}
+               portal_config = ${snapshot.portalConfig},
+               auth_config_version = auth_config_version + 1
          WHERE id = ${id}
       `
       rmSync(SNAPSHOT_PATH, { force: true })
@@ -179,6 +184,8 @@ try {
     // described in the header comment, so do nothing.
   }
 
+  // Each write advances the auth instance version in the same SQL statement.
+  // Cache invalidation exposes that version so getAuth rebuilds its cached instance.
   // getTenantSettings caches the whole settings row under CACHE_KEYS.TENANT_SETTINGS
   // for an hour and only the app's own write paths invalidate it, so a raw-SQL
   // patch stays invisible to the running server until the key is dropped. Same
