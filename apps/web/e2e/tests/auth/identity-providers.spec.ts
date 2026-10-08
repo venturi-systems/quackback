@@ -3,7 +3,7 @@
  *
  * Covers the two visibility/routing shapes the provider model introduces:
  *  (1) A button-only provider (enabled, creds, NO verified domain) surfaces in
- *      the portal login's public OIDC button list ("Continue with <label>").
+ *      the portal login's public OIDC button list ("Sign in with <label>").
  *  (2) A domain-bound ENFORCED provider:
  *        - an email at its verified domain routes to it: `lookupAuthMethodsFn`
  *          returns `{ kind: 'sso-redirect', providerId: <that provider> }`;
@@ -38,13 +38,14 @@ const DISCOVERY_URL = 'https://idp.example.org/.well-known/openid-configuration'
 test.describe.configure({ mode: 'default' })
 
 test.beforeAll(() => {
-  // Button-only: enabled + creds, no verified domain → public button.
+  // Button-only: explicitly show the enabled provider without a verified domain.
   seedIdentityProvider({
     registrationId: BUTTON_RID,
     label: BUTTON_LABEL,
     clientId: 'e2e-button-client',
     discoveryUrl: DISCOVERY_URL,
     enabled: true,
+    showButton: true,
   })
   // Domain-bound + enforced: enabled + creds + verified enforced domain →
   // routed-only (hidden from buttons), hard-binds its domain to SSO.
@@ -73,15 +74,15 @@ test('(1) button-only provider surfaces in the portal OIDC button list', async (
   await page.goto('/auth/login')
   await page.waitForLoadState('networkidle')
 
-  // The button-only provider renders its "Continue with <label>" button.
+  // The button-only provider renders its "Sign in with <label>" button.
   await expect(
-    page.getByRole('button', { name: new RegExp(`Continue with ${BUTTON_LABEL}`, 'i') })
+    page.getByRole('button', { name: new RegExp(`Sign in with ${BUTTON_LABEL}`, 'i') })
   ).toBeVisible({ timeout: 15000 })
 
   // The enforced provider is routed-only (verified domain + showButton:false),
   // so it must NOT appear as a public button.
   await expect(
-    page.getByRole('button', { name: new RegExp(`Continue with ${ENFORCED_LABEL}`, 'i') })
+    page.getByRole('button', { name: new RegExp(`Sign in with ${ENFORCED_LABEL}`, 'i') })
   ).toHaveCount(0)
 })
 

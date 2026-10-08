@@ -68,7 +68,7 @@ export const Route = createFileRoute('/_portal')({
     // visitor (defense in depth). The decision is computed server-side
     // (session + allowedDomains never leave the server); only it is returned.
     const accessResult = await evaluateMyPortalAccessFn()
-    // Parse the portal-route auth-prompt params (signin, prompt, callbackUrl)
+    // Parse the portal-route auth-prompt params (auth, callbackUrl, error)
     // once; both the blocked-gate and the accessible branch below consume it.
     const prompt = parseAuthPromptSearch(deps ?? {})
     if (!accessResult.granted) {

@@ -79,16 +79,16 @@ interface SeedConfig {
 
 const sql = postgres(connectionString)
 
-async function remove(registrationId: string): Promise<void> {
+async function remove(sql: postgres.TransactionSql, registrationId: string): Promise<void> {
   // Deleting the provider cascades its sso_verified_domain rows (FK on delete
   // cascade); the credential has no FK, so drop it explicitly.
   await sql`DELETE FROM identity_provider WHERE registration_id = ${registrationId}`
   await sql`DELETE FROM integration_platform_credentials WHERE integration_type = ${`auth_${registrationId}`}`
 }
 
-async function seed(cfg: SeedConfig): Promise<void> {
+async function seed(sql: postgres.TransactionSql, cfg: SeedConfig): Promise<void> {
   // Idempotent: clear any prior row for this registrationId first.
-  await remove(cfg.registrationId)
+  await remove(sql, cfg.registrationId)
 
   const idpUuid = toUuid(generateId('identity_provider'))
   await sql`
@@ -117,21 +117,26 @@ async function seed(cfg: SeedConfig): Promise<void> {
 }
 
 try {
-  if (action === 'remove') {
-    const registrationId = process.argv[3]
-    if (!registrationId) throw new Error('remove requires a <registrationId>')
-    await remove(registrationId)
-    console.log(JSON.stringify({ action: 'remove', registrationId }))
-  } else {
-    const raw = process.argv[3]
-    if (!raw) throw new Error("seed requires a '<json>' config")
-    const cfg = JSON.parse(raw) as SeedConfig
-    if (!cfg.registrationId || !cfg.label || !cfg.clientId) {
-      throw new Error('seed config requires registrationId, label, clientId')
+  const registrationId =
+    action === 'remove'
+      ? process.argv[3]
+      : (JSON.parse(process.argv[3] || '{}') as SeedConfig).registrationId
+  if (!registrationId) throw new Error('A registrationId is required')
+  // Provider rows, credentials and the auth instance version commit together.
+  // Redis eviction alone cannot invalidate the server's cached Better-Auth instance.
+  await sql.begin(async (tx) => {
+    if (action === 'remove') {
+      await remove(tx, registrationId)
+    } else {
+      const cfg = JSON.parse(process.argv[3]) as SeedConfig
+      if (!cfg.label || !cfg.clientId) {
+        throw new Error('seed config requires registrationId, label, clientId')
+      }
+      await seed(tx, cfg)
     }
-    await seed(cfg)
-    console.log(JSON.stringify({ action: 'seed', registrationId: cfg.registrationId }))
-  }
+    await tx`UPDATE settings SET auth_config_version = auth_config_version + 1`
+  })
+  console.log(JSON.stringify({ action, registrationId }))
   await cacheDel(CACHE_KEYS.TENANT_SETTINGS, CACHE_KEYS.PLATFORM_INTEGRATION_TYPES)
   await sql.end()
   await getRedis().quit()
