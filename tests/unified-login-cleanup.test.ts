@@ -200,7 +200,7 @@ describe('unified login journey two method and page cleanup', () => {
       let authEnabled = false
       let pageOpen = false
       harness.helpers.setPortalAuthMethods.mockImplementation((action: string) => {
-        if (action === 'enable-magic-link') {
+        if (action === 'enable-magic-link-temporarily') {
           calls.push('enable')
           authEnabled = true
           if (faults.includes('enable')) throw errors.enable
@@ -250,7 +250,7 @@ describe('unified login journey two method and page cleanup', () => {
       else await expect(journey('2')({ context })).resolves.toBeUndefined()
 
       expect(harness.helpers.setPortalAuthMethods.mock.calls).toEqual([
-        ['enable-magic-link'],
+        ['enable-magic-link-temporarily'],
         ['restore'],
       ])
       expect(harness.helpers.loginViaMagicLink).toHaveBeenCalledTimes(
