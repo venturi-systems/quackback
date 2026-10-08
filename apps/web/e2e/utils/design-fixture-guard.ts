@@ -409,11 +409,15 @@ export function validateFixtureAppImage(
   )
     throw new Error(FAILURE)
   const defaults = dockerEnvironment(image.Config.Env)
+  // oven/bun:1.4.2-alpine sets PATH, BUN_RUNTIME_TRANSPILER_CACHE_PATH and
+  // BUN_INSTALL_BIN (measured with `docker buildx imagetools inspect` on
+  // 2026-10-08); apps/web/Dockerfile adds the rest.
   const allowedDefaults = new Set([
     'PATH',
     'HOME',
     'BUN_VERSION',
     'BUN_INSTALL',
+    'BUN_INSTALL_BIN',
     'BUN_RUNTIME_TRANSPILER_CACHE_PATH',
     'BUN_INSTALL_CACHE_DIR',
     'MIGRATIONS_FOLDER',

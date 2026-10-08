@@ -892,6 +892,26 @@ describe('compiled image app fixture isolation', () => {
   })
 
   describe('immutable production-built image metadata', () => {
+    it('accepts the environment the real runner image carries', () => {
+      // Run 37742214944 failed every shard before docker create: the fixture
+      // above invents BUN_VERSION/BUN_INSTALL, while oven/bun:1.4.2-alpine
+      // (apps/web/Dockerfile runner-base) sets exactly these three.
+      const image = appImage()
+      image.Config.Env = [
+        'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bun-node-fallback-bin',
+        'BUN_RUNTIME_TRANSPILER_CACHE_PATH=0',
+        'BUN_INSTALL_BIN=/usr/local/bin',
+        'NODE_ENV=production',
+        'BUN_INSTALL_CACHE_DIR=/app/.cache',
+        'MIGRATIONS_FOLDER=/app/drizzle',
+        'PORT=3000',
+        'HOSTNAME=0.0.0.0',
+      ]
+      expect(() => validateFixtureAppImage(image, imageId, revision)).not.toThrow()
+      image.Config.Env.push('BUN_UNEXPECTED=1')
+      expect(() => validateFixtureAppImage(image, imageId, revision)).toThrow()
+    })
+
     it.each([
       { label: 'null', command: null },
       { label: 'missing', command: undefined },
