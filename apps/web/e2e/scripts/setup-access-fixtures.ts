@@ -111,8 +111,21 @@ async function upsertBoard(slug: string, name: string, acc: object): Promise<str
   return id
 }
 
-async function anyStatusId(): Promise<string | null> {
-  const r = await sql`SELECT id FROM post_statuses ORDER BY position ASC NULLS LAST LIMIT 1`
+/**
+ * The status a probe post is seeded with: the workspace default, or failing
+ * that the first live status by position. Never a soft-deleted row. This used
+ * to take the first row by position regardless of `deleted_at`, and
+ * admin/statuses.spec.ts soft-deletes a status without restoring it, so when
+ * the shard weights put that spec ahead of board-access-matrix in one shard
+ * (quackback #245, run 37829059820), every probe post carried a deleted
+ * status and no viewer, anonymous or team, saw it in the feed.
+ */
+async function liveStatusId(): Promise<string | null> {
+  const r = await sql`
+    SELECT id FROM post_statuses
+    WHERE deleted_at IS NULL
+    ORDER BY is_default DESC, position ASC NULLS LAST
+    LIMIT 1`
   return r.length > 0 ? (r[0].id as string) : null
 }
 
@@ -145,7 +158,7 @@ try {
   await addToSegment(principalId, segment.uuid)
   const segIds = [segment.typeId]
 
-  const statusId = await anyStatusId()
+  const statusId = await liveStatusId()
   const defs: Array<[string, string, object]> = [
     [
       'e2e-public',
