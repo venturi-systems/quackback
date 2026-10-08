@@ -387,10 +387,13 @@ test('A01 post readiness waits for late Related content and its entrance animati
       '<div id="related"><div><h3>Related</h3></div><div><a href="/related-post">Related request</a></div></div>'
   })
   await readiness
+  const transformAtReadiness = await page
+    .locator('#related')
+    .evaluate((element) => getComputedStyle(element).transform)
   expect(settledBeforeInsertion, 'Readiness cannot finish before Related content mounts').toBe(
     false
   )
-  await expect(page.locator('#related')).toHaveCSS('transform', 'none')
+  expect(transformAtReadiness, 'Readiness must settle the mounted entrance animation').toBe('none')
   const scope = [{ selector: '#portal-main', expectInteractive: true }]
   const evidence = await measureReflow(page, scope, {
     artifactRevision: SOURCE,
