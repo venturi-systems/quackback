@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 const GUARD_PATH = fileURLToPath(import.meta.url)
 const WEB_ROOT = resolve(dirname(GUARD_PATH), '../..')
 const RECEIPT = 'DESIGN_FIXTURE_ENVIRONMENT_OK'
-const LOCAL_DOCKER_ENDPOINT = 'unix:///var/run/docker.sock'
+export const LOCAL_DOCKER_ENDPOINT = 'unix:///var/run/docker.sock'
 const FAILURE = 'Design acceptance requires the isolated GitHub CI fixture'
 
 export function validateDesignFixtureEnvironment(
@@ -92,6 +92,31 @@ export function validateDesignFixtureEnvironment(
   for (const name of Object.keys(env)) {
     if (name.startsWith('EMAIL_') && (!mailpitRequested || !(name in captureEmail))) fail()
   }
+  const imageKeys = [
+    'E2E_SERVER_MODE',
+    'DESIGN_FIXTURE_APP_ID',
+    'DESIGN_FIXTURE_APP_IMAGE',
+    'DESIGN_FIXTURE_APP_REVISION',
+    'DESIGN_FIXTURE_APP_MODE',
+    'DESIGN_FIXTURE_SHARD',
+  ]
+  if (imageKeys.some((name) => env[name] !== undefined)) {
+    if (
+      env.E2E_SERVER_MODE !== 'image' ||
+      env.DESIGN_FIXTURE_APP_MODE !== 'development' ||
+      !mailpitRequested ||
+      !/^[a-f0-9]{64}$/.test(env.DESIGN_FIXTURE_APP_ID ?? '') ||
+      [
+        env.DESIGN_FIXTURE_POSTGRES_ID,
+        env.DESIGN_FIXTURE_REDIS_ID,
+        env.DESIGN_FIXTURE_MAILPIT_ID,
+      ].includes(env.DESIGN_FIXTURE_APP_ID) ||
+      !/^sha256:[a-f0-9]{64}$/.test(env.DESIGN_FIXTURE_APP_IMAGE ?? '') ||
+      !/^[a-f0-9]{40}$/.test(env.DESIGN_FIXTURE_APP_REVISION ?? '') ||
+      !/^[1-8]$/.test(env.DESIGN_FIXTURE_SHARD ?? '')
+    )
+      fail()
+  }
   for (const name of [
     'HTTP_PROXY',
     'HTTPS_PROXY',
@@ -128,6 +153,12 @@ export function designFixtureEnvironmentReceipt(env: NodeJS.ProcessEnv): string 
     env.DESIGN_FIXTURE_MAILPIT_ID ?? null,
     env.DESIGN_FIXTURE_MAILPIT_IMAGE ?? null,
     env.DESIGN_FIXTURE_MAILPIT_NETWORK ?? null,
+    env.E2E_SERVER_MODE ?? null,
+    env.DESIGN_FIXTURE_APP_ID ?? null,
+    env.DESIGN_FIXTURE_APP_IMAGE ?? null,
+    env.DESIGN_FIXTURE_APP_REVISION ?? null,
+    env.DESIGN_FIXTURE_APP_MODE ?? null,
+    env.DESIGN_FIXTURE_SHARD ?? null,
   ]
   return RECEIPT + ':' + createHash('sha256').update(JSON.stringify(identity)).digest('hex')
 }
@@ -267,6 +298,221 @@ function validateJobServices(): void {
     ) {
       throw new Error(FAILURE)
     }
+  }
+}
+
+export interface FixtureAppImage {
+  Id: string
+  Config: {
+    Labels: Record<string, string>
+    Env: string[]
+    Entrypoint: string[]
+    Cmd?: string[] | null
+    WorkingDir: string
+    User: string
+  }
+}
+
+export interface FixtureAppContainer {
+  Id: string
+  Image: string
+  State: { Running: boolean; Status: string; Pid?: number; StartedAt?: string }
+  RestartCount?: number
+  Config: FixtureAppImage['Config'] & { Image: string }
+  HostConfig: {
+    NetworkMode: string
+    Privileged: boolean
+    AutoRemove: boolean
+    CapAdd?: string[] | null
+    Devices?: unknown[] | null
+    PortBindings?: Record<string, unknown> | null
+  }
+  Mounts: unknown[]
+}
+
+/** Docker's effective values, without dotenv fallback or duplicate-key ambiguity. */
+function dockerEnvironment(entries: string[]): Record<string, string> {
+  if (!Array.isArray(entries)) throw new Error(FAILURE)
+  const values: Record<string, string> = Object.create(null)
+  for (const entry of entries) {
+    const equal = typeof entry === 'string' ? entry.indexOf('=') : -1
+    if (equal <= 0) throw new Error(FAILURE)
+    const name = entry.slice(0, equal)
+    if (!/^[A-Z_a-z][A-Z_a-z0-9]*$/.test(name) || Object.hasOwn(values, name))
+      throw new Error(FAILURE)
+    values[name] = entry.slice(equal + 1)
+  }
+  return values
+}
+
+/** Pass only declared fixture values to the app, never the runner's full environment. */
+export function fixtureAppEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {
+  validateDesignFixtureEnvironment(env)
+  if (!env.DESIGN_FIXTURE_MAILPIT_ID) throw new Error(FAILURE)
+  const values: Record<string, string> = {
+    NODE_ENV: 'development',
+    PORT: '3000',
+    HOSTNAME: '127.0.0.1',
+    NITRO_HOST: '127.0.0.1',
+    SKIP_MIGRATIONS: 'true',
+    SEED_DATABASE: 'false',
+    DISABLE_TELEMETRY: 'true',
+  }
+  for (const name of [
+    'DATABASE_URL',
+    'REDIS_URL',
+    'BASE_URL',
+    'TRUSTED_ORIGINS',
+    'SECRET_KEY',
+    'BETTER_AUTH_SECRET',
+    'VENTURI_TEAM_EMAIL_DOMAINS',
+    'EMAIL_SMTP_HOST',
+    'EMAIL_SMTP_PORT',
+    'EMAIL_SMTP_SECURE',
+    'EMAIL_FROM',
+  ]) {
+    if (typeof env[name] !== 'string' || !env[name]) throw new Error(FAILURE)
+    values[name] = env[name]!
+  }
+  return values
+}
+
+export function fixtureAppLabels(env: NodeJS.ProcessEnv): Record<string, string> {
+  return {
+    'systems.venturi.e2e.run': env.GITHUB_RUN_ID!,
+    'systems.venturi.e2e.attempt': env.GITHUB_RUN_ATTEMPT!,
+    'systems.venturi.e2e.shard': env.DESIGN_FIXTURE_SHARD!,
+    'systems.venturi.e2e.mode': 'development',
+    'systems.venturi.e2e.postgres': env.DESIGN_FIXTURE_POSTGRES_ID!,
+    'systems.venturi.e2e.redis': env.DESIGN_FIXTURE_REDIS_ID!,
+    'systems.venturi.e2e.mailpit': env.DESIGN_FIXTURE_MAILPIT_ID!,
+  }
+}
+
+export function validateFixtureAppImage(
+  image: FixtureAppImage,
+  imageId: string,
+  revision: string
+): void {
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(imageId) ||
+    !/^[a-f0-9]{40}$/.test(revision) ||
+    image?.Id !== imageId ||
+    image.Config?.Labels?.['org.opencontainers.image.source'] !==
+      'https://github.com/venturi-systems/quackback' ||
+    image.Config.Labels['org.opencontainers.image.revision'] !== revision ||
+    JSON.stringify(image.Config.Entrypoint) !== JSON.stringify(['./docker-entrypoint.sh']) ||
+    (image.Config.Cmd != null &&
+      (!Array.isArray(image.Config.Cmd) || image.Config.Cmd.length !== 0)) ||
+    image.Config.WorkingDir !== '/app' ||
+    image.Config.User !== 'quackback'
+  )
+    throw new Error(FAILURE)
+  const defaults = dockerEnvironment(image.Config.Env)
+  // oven/bun:1.4.2-alpine sets PATH, BUN_RUNTIME_TRANSPILER_CACHE_PATH and
+  // BUN_INSTALL_BIN (measured with `docker buildx imagetools inspect` on
+  // 2026-10-08); apps/web/Dockerfile adds the rest.
+  const allowedDefaults = new Set([
+    'PATH',
+    'HOME',
+    'BUN_VERSION',
+    'BUN_INSTALL',
+    'BUN_INSTALL_BIN',
+    'BUN_RUNTIME_TRANSPILER_CACHE_PATH',
+    'BUN_INSTALL_CACHE_DIR',
+    'MIGRATIONS_FOLDER',
+    'NODE_ENV',
+    'PORT',
+    'HOSTNAME',
+  ])
+  if (
+    defaults.NODE_ENV !== 'production' ||
+    defaults.PORT !== '3000' ||
+    defaults.HOSTNAME !== '0.0.0.0' ||
+    Object.keys(defaults).some((name) => !allowedDefaults.has(name))
+  )
+    throw new Error(FAILURE)
+}
+
+/** Compiled development-mode acceptance; the separate production render lane remains unchanged. */
+export function validateFixtureAppContainer(
+  env: NodeJS.ProcessEnv,
+  image: FixtureAppImage,
+  container: FixtureAppContainer,
+  revision: string,
+  phase: 'created' | 'running' | 'retained'
+): void {
+  validateDesignFixtureEnvironment(env)
+  if (env.E2E_SERVER_MODE !== 'image' || env.DESIGN_FIXTURE_APP_REVISION !== revision)
+    throw new Error(FAILURE)
+  validateFixtureAppImage(image, env.DESIGN_FIXTURE_APP_IMAGE!, revision)
+  const expected = { ...dockerEnvironment(image.Config.Env), ...fixtureAppEnvironment(env) }
+  const actual = dockerEnvironment(container.Config?.Env)
+  const labels = fixtureAppLabels(env)
+  if (
+    container.Id !== env.DESIGN_FIXTURE_APP_ID ||
+    container.Image !== image.Id ||
+    container.Config.Image !== image.Id ||
+    container.Config.WorkingDir !== image.Config.WorkingDir ||
+    container.Config.User !== image.Config.User ||
+    JSON.stringify(container.Config.Entrypoint) !== JSON.stringify(image.Config.Entrypoint) ||
+    JSON.stringify(container.Config.Cmd ?? null) !== JSON.stringify(image.Config.Cmd ?? null) ||
+    Object.entries(labels).some(([name, value]) => container.Config.Labels?.[name] !== value) ||
+    Object.keys(actual).length !== Object.keys(expected).length ||
+    Object.entries(expected).some(([name, value]) => actual[name] !== value) ||
+    container.HostConfig?.NetworkMode !== 'host' ||
+    container.HostConfig.Privileged !== false ||
+    container.HostConfig.AutoRemove !== false ||
+    (container.HostConfig.CapAdd?.length ?? 0) !== 0 ||
+    (container.HostConfig.Devices?.length ?? 0) !== 0 ||
+    Object.keys(container.HostConfig.PortBindings ?? {}).length !== 0 ||
+    !Array.isArray(container.Mounts) ||
+    container.Mounts.length !== 0 ||
+    typeof container.State?.Running !== 'boolean' ||
+    (container.State.Running
+      ? container.State.Status !== 'running'
+      : !['created', 'exited', 'dead'].includes(container.State.Status)) ||
+    (phase === 'created' && (container.State?.Running || container.State?.Status !== 'created')) ||
+    (phase === 'running' && (!container.State?.Running || container.State?.Status !== 'running'))
+  )
+    throw new Error(FAILURE)
+}
+
+/** Browser/config gate only. DB restore remains possible after an app process exits. */
+export function assertDesignFixtureImageServerSync(): void {
+  validateDesignFixtureEnvironment(process.env)
+  if (process.env.E2E_SERVER_MODE !== 'image') throw new Error(FAILURE)
+  const revision = run('git', ['rev-parse', 'HEAD'], WEB_ROOT, 'app-source').trim()
+  let containers: FixtureAppContainer[]
+  let images: FixtureAppImage[]
+  try {
+    containers = JSON.parse(
+      run('docker', [
+        '--host',
+        LOCAL_DOCKER_ENDPOINT,
+        'inspect',
+        process.env.DESIGN_FIXTURE_APP_ID!,
+      ])
+    )
+    images = JSON.parse(
+      run('docker', [
+        '--host',
+        LOCAL_DOCKER_ENDPOINT,
+        'image',
+        'inspect',
+        process.env.DESIGN_FIXTURE_APP_IMAGE!,
+      ])
+    )
+    if (
+      !Array.isArray(containers) ||
+      containers.length !== 1 ||
+      !Array.isArray(images) ||
+      images.length !== 1
+    )
+      throw new Error(FAILURE)
+    validateFixtureAppContainer(process.env, images[0], containers[0], revision, 'running')
+  } catch {
+    throw new Error(FAILURE)
   }
 }
 

@@ -27,8 +27,12 @@ AGPL-3.0 section 13 source link to the exact built commit. Identity lives in
 `lib/shared/venturi-identity.ts`, not in string comparisons on the workspace
 name.
 
-A portal that requires sign-in to read shows a left-aligned sign-in page, not a
-centered card. It says what the portal is, who can read it (from the portal's
+A portal that requires sign-in to read shows an open, unboxed sign-in page, not a
+card. By the owner's 2026-10-07 direction its short statement and social sign-in
+buttons share one centered column at every width, the short-statement variant
+the design system's layout guidance allows; the page still starts at the top
+rather than centering vertically. The signed-in no-access page keeps the
+reading-start layout. It says what the portal is, who can read it (from the portal's
 real posture), and who can do what: contributors read, post, vote and comment;
 team members also review posts, set status, move roadmap items, merge
 duplicates, publish the changelog, and create and rename boards;

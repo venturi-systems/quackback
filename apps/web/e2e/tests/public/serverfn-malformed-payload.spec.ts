@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from '@playwright/test'
+import { builtServerFnId, servesCompiledImage } from '../../utils/server-fn-id'
 
 /**
  * DEF-59 (landing-page#2309): a /_serverFn/ request whose payload cannot be
@@ -18,7 +19,9 @@ import { test, expect, type APIRequestContext } from '@playwright/test'
  * valid calls, fails here.
  *
  * Function ids come from the dev server's own client module: in dev each id
- * is base64url JSON naming the source file and the extracted export.
+ * is base64url JSON naming the source file and the extracted export. Against
+ * the compiled image (E2E_SERVER_MODE=image, how CI runs) the build hashes the
+ * same file and export instead; see e2e/utils/server-fn-id.ts.
  *
  * POST bodies are sent as raw bytes (a Buffer). Given a string `data` and
  * `content-type: application/json`, Playwright JSON-encodes any string that
@@ -67,6 +70,13 @@ function devFunctionId(file: string, exportName: string): string {
 let fnUrls: Promise<{ get: string; post: string }> | undefined
 
 async function resolveFnUrls(request: APIRequestContext): Promise<{ get: string; post: string }> {
+  if (servesCompiledImage()) {
+    const file = FUNCTIONS_MODULE.slice(1)
+    return {
+      get: `/_serverFn/${builtServerFnId(file, GET_EXPORT)}`,
+      post: `/_serverFn/${builtServerFnId(file, POST_EXPORT)}`,
+    }
+  }
   try {
     const res = await request.get(FUNCTIONS_MODULE, { timeout: 5_000 })
     if (res.status() === 200) {

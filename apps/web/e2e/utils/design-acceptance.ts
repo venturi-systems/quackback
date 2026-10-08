@@ -641,7 +641,7 @@ export async function measureReflow(
   )
     throw new RangeError('tolerance must be a finite non-negative number')
   return page.evaluate(
-    ({ scopes, context, minimumTarget, tolerance }) => {
+    async ({ scopes, context, minimumTarget, tolerance }) => {
       const rect = (r: DOMRect) => ({
         left: r.left,
         right: r.right,
@@ -677,6 +677,109 @@ export async function measureReflow(
         element: string
         evidence: unknown
       }> = []
+      // A route-level animation snapshot can precede a late hydrated panel.
+      // Settle here, then measure synchronously in this same browser callback.
+      const started = performance.now()
+      const timeoutMs = 5000
+      const deadline = started + timeoutMs
+      const finiteSeen = new Set<Animation>()
+      const infiniteSeen = new Set<Animation>()
+      const animationReadiness = {
+        status: 'settled' as 'settled' | 'review-required',
+        timeoutMs,
+        elapsedMs: 0,
+        scans: 0,
+        finiteAnimations: 0,
+        infiniteAnimations: 0,
+        reason: null as string | null,
+      }
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined
+      let frame: number | undefined
+      let frameTask: ReturnType<typeof setTimeout> | undefined
+      const deadlineError = () => new Error('finite-animation-settle-deadline-exceeded')
+      const checkDeadline = () => {
+        if (performance.now() >= deadline) throw deadlineError()
+      }
+      const expired = new Promise<never>((_resolve, reject) => {
+        deadlineTimer = setTimeout(() => reject(deadlineError()), timeoutMs)
+      })
+      try {
+        let quietScans = 0
+        while (quietScans < 2) {
+          checkDeadline()
+          animationReadiness.scans += 1
+          const pending: Promise<{ error?: unknown }>[] = []
+          for (const animation of document.getAnimations()) {
+            if (animation.playState !== 'running' && !animation.pending) continue
+            const endTime = animation.effect?.getComputedTiming().endTime
+            if (endTime === Infinity) {
+              // Infinite motion is not awaited; its geometry still faces every
+              // existing transform, clipping and overflow check below.
+              infiniteSeen.add(animation)
+              continue
+            }
+            if (typeof endTime !== 'number' || !Number.isFinite(endTime))
+              throw new Error('active-animation-timing-unavailable')
+            finiteSeen.add(animation)
+            const finished = animation.finished
+            if (!finished || typeof finished.then !== 'function')
+              throw new Error('active-animation-finished-promise-unavailable')
+            // Attach rejection handling immediately, even if a later animation
+            // is invalid or the shared deadline wins before this one finishes.
+            pending.push(
+              Promise.resolve(finished).then(
+                () => ({}),
+                (error: unknown) => ({ error })
+              )
+            )
+          }
+          // Synchronous enumeration can itself consume the remaining budget.
+          checkDeadline()
+          if (pending.length) {
+            quietScans = 0
+            const outcomes = await Promise.race([Promise.all(pending), expired])
+            checkDeadline()
+            const rejected = outcomes.find((outcome) => 'error' in outcome)
+            if (rejected) throw rejected.error
+          } else {
+            quietScans += 1
+          }
+          if (quietScans < 2) {
+            await Promise.race([
+              new Promise<void>((resolve) => {
+                frame = requestAnimationFrame(() => {
+                  frame = undefined
+                  // Cross a task boundary after the frame, so later callbacks
+                  // in that frame can introduce their own finite animations.
+                  frameTask = setTimeout(() => {
+                    frameTask = undefined
+                    resolve()
+                  }, 0)
+                })
+              }),
+              expired,
+            ])
+            checkDeadline()
+          }
+        }
+      } catch (error) {
+        animationReadiness.status = 'review-required'
+        animationReadiness.reason = String(error)
+        issues.push({
+          kind: 'animation-readiness-unresolved',
+          severity: 'review-required',
+          scope: 'document',
+          element: 'html',
+          evidence: animationReadiness,
+        })
+      } finally {
+        clearTimeout(deadlineTimer)
+        if (frame !== undefined) cancelAnimationFrame(frame)
+        clearTimeout(frameTask)
+        animationReadiness.elapsedMs = performance.now() - started
+        animationReadiness.finiteAnimations = finiteSeen.size
+        animationReadiness.infiniteAnimations = infiniteSeen.size
+      }
       const inspectedCoordinates = new Set<Element>()
       const inspectCoordinates = (element: Element, scope: string, reference: string) => {
         for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
@@ -1037,6 +1140,7 @@ export async function measureReflow(
           pointerCoarse: matchMedia('(pointer: coarse)').matches,
         },
         options: { minimumTarget, tolerance },
+        animationReadiness,
         documentOverflow,
         coverage,
         records,
@@ -1052,6 +1156,7 @@ export async function measureReflow(
           'Hidden responsive content is recorded; required visible scope/control coverage cannot pass vacuously.',
           'Selection controls require associated-label hit-target evidence if target sizing is in scope.',
           'Visual viewport scale and devicePixelRatio do not establish real browser zoom.',
+          'Animation settling covers observed frame/task boundaries, not future asynchronous content or full rendering readiness.',
         ],
       }
     },

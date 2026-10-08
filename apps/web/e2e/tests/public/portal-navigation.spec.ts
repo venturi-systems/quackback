@@ -1,4 +1,5 @@
 import { test, expect, type Route } from '@playwright/test'
+import { isServerFnId, serverFnExport } from '../../utils/server-fn-id'
 
 test.describe('Portal identity and exploration', () => {
   test.use({ storageState: 'e2e/.auth/admin.json' })
@@ -9,11 +10,14 @@ test.describe('Portal identity and exploration', () => {
     const headerReady = new Promise<void>((resolve) => {
       releaseHeader = resolve
     })
-    let headerRequested = false
-    // The CI fixture serves Vite modules. Hold the header module to exercise
-    // the server-rendered control before React can attach its click handler.
-    await page.route('**/src/components/public/portal-header.tsx*', async (route) => {
-      headerRequested = true
+    let scriptRequested = false
+    // Hold every script to exercise the server-rendered control before React
+    // can attach its click handler. Under Vite these are the source modules
+    // (portal-header.tsx among them); in the compiled image CI serves they are
+    // the bundle chunks, where the header has no file of its own.
+    await page.route('**/*', async (route) => {
+      if (route.request().resourceType() !== 'script') return route.continue()
+      scriptRequested = true
       await headerReady
       await route.continue()
     })
@@ -21,7 +25,7 @@ test.describe('Portal identity and exploration', () => {
     const menu = page.getByRole('button', { name: 'Menu', exact: true })
     try {
       await expect(menu).toBeVisible()
-      await expect.poll(() => headerRequested).toBe(true)
+      await expect.poll(() => scriptRequested).toBe(true)
       await expect(menu).toBeDisabled()
       await expect(menu).toHaveAttribute('aria-expanded', 'false')
     } finally {
@@ -89,15 +93,19 @@ test.describe('Portal identity and exploration', () => {
     // Every client navigation calls the root route's bootstrap server function
     // before it commits. Let the Roadmap navigation's call through, then hold
     // the rest: the roadmap's own address update and the way home both stay
-    // pending while the board is mounted. The dev server names a server
-    // function's export in base64url JSON in its URL.
+    // pending while the board is mounted. isServerFnId accepts the dev id
+    // (base64url JSON naming the export) and the compiled image's hashed id.
     const held: Route[] = []
     let bootstrapCalls = 0
     let holding = true
     await page.route('**/_serverFn/**', async (route) => {
       const id = new URL(route.request().url()).pathname.split('/_serverFn/')[1] ?? ''
-      const name = Buffer.from(decodeURIComponent(id), 'base64url').toString('utf8')
-      if (holding && name.includes('getBootstrapData') && ++bootstrapCalls > 1) {
+      const bootstrap = isServerFnId(
+        id,
+        'src/lib/server/functions/bootstrap.ts',
+        serverFnExport('getBootstrapData')
+      )
+      if (holding && bootstrap && ++bootstrapCalls > 1) {
         held.push(route)
         return
       }

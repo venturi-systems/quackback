@@ -127,7 +127,7 @@ test('(1b) signed-in admin navigating to /admin lands there (not on the dialog)'
 test('(2) portal user reaching /admin gets not_team_member error toast', async ({ context }) => {
   // Enable magic-link just long enough to establish the portal user session.
   try {
-    setPortalAuthMethods('enable-magic-link')
+    setPortalAuthMethods('enable-magic-link-temporarily')
     await loginViaMagicLink(context, PORTAL_EMAIL, { role: 'user' })
   } finally {
     setPortalAuthMethods('restore')
