@@ -308,11 +308,12 @@ function generateVoteCount(maxVoters: number): number {
  * missing.
  *
  * The demo account is the documented local login and the author of the design
- * fixture comment, so the seed needs it whatever else the database holds. A
- * database that already has other users but not this one used to skip it and
- * then fail at the fixture after the posts were written. Returns the demo
- * principal and whether this run created it; an existing user, principal or
- * credential is left as it is, so a rerun changes nothing.
+ * fixture comment. seed() calls this only when it will create posts or the
+ * database has no user principals. A database that already had other users
+ * but not this one, and no posts, used to skip it and then fail at the
+ * fixture after the posts were written. Returns the demo principal and
+ * whether this run created it; an existing user, principal or credential is
+ * left as it is, so a rerun changes nothing.
  */
 async function ensureDemoPrincipal(): Promise<{ id: PrincipalId; created: boolean }> {
   const [existingUser] = await db
@@ -440,11 +441,23 @@ async function seed() {
   // Sample users are seeded only into a database with no user principals yet.
   const seedSampleUsers = principals.length === 0
 
-  // The demo principal goes first: changelog authors come from the first four
-  // principals, which a fresh seed makes the admins.
-  const demoPrincipal = await ensureDemoPrincipal()
-  if (demoPrincipal.created) {
-    principals.unshift({ id: demoPrincipal.id, name: DEMO_USER.name })
+  // Posts are seeded only into an empty posts table, and only that path writes
+  // the design fixture comment that the demo principal authors.
+  const [existingPost] = await db.select({ id: posts.id }).from(posts).limit(1)
+  const createPosts = existingPost === undefined
+
+  // Ensure the demo principal only when this run creates posts or the database
+  // has no user principals, the two cases that need it. A database that
+  // already holds users and posts gains no account. The demo principal goes
+  // first: changelog authors come from the first four principals, which a
+  // fresh seed makes the admins.
+  let demoPrincipalId: PrincipalId | undefined
+  if (createPosts || seedSampleUsers) {
+    const demoPrincipal = await ensureDemoPrincipal()
+    demoPrincipalId = demoPrincipal.id
+    if (demoPrincipal.created) {
+      principals.unshift({ id: demoPrincipal.id, name: DEMO_USER.name })
+    }
   }
 
   if (seedSampleUsers) {
@@ -552,9 +565,9 @@ async function seed() {
     console.log(`Created ${roadmapPresets.length} roadmaps`)
   }
 
-  // Check if posts already exist - skip post creation but continue to other sections
-  const existingPostCount = await db.select({ id: posts.id }).from(posts).limit(1)
-  if (existingPostCount.length > 0) {
+  // Posts already exist (checked above, and nothing since writes posts): skip
+  // post creation but continue to other sections
+  if (!createPosts) {
     console.log('Posts already exist, skipping post creation')
   } else if (statusMap.size === 0) {
     throw new Error('No post statuses exist; cannot seed posts')
@@ -676,18 +689,18 @@ async function seed() {
     console.log('Creating comments...')
     // Keep the public design fixture independent of random comment counts and authors.
     // The first unsuffixed title has a distinct full-text match in its later variants.
-    // ensureDemoPrincipal() above guarantees the demo principal that writes it.
+    // ensureDemoPrincipal() ran above because this run creates posts.
     const designPost = postRecords[0]
     const relatedDesignPost = postRecords[postTitles.length]
-    if (!designPost || !relatedDesignPost) {
-      throw new Error('Seed fixture requires a Related post pair')
+    if (!demoPrincipalId || !designPost || !relatedDesignPost) {
+      throw new Error('Seed fixture requires the demo principal and a Related post pair')
     }
 
     // This block only runs when creating posts, so reseeding cannot duplicate this comment.
     const commentInserts: (typeof comments.$inferInsert)[] = [
       {
         postId: designPost.id,
-        principalId: demoPrincipal.id,
+        principalId: demoPrincipalId,
         content: commentContents[0],
         parentId: null,
         isPrivate: false,
