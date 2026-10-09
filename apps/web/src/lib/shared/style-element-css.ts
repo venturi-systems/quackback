@@ -24,10 +24,14 @@ export function containsStyleEndTag(css: string): boolean {
  * Make `css` safe to use as the text of a `<style>` element.
  *
  * Each `</style` becomes `<\/style`, which the HTML tokenizer treats as plain
- * text. The CSS meaning is unchanged wherever such a sequence can legitimately
- * appear: inside a string or an unquoted `url()`, `\/` is an escaped `/` and
- * decodes back to `</style`, and inside a comment it is ignored as before.
- * Any other position was already invalid CSS.
+ * text. Inside a string or an unquoted `url()`, `\/` is an escaped `/`, so the
+ * value decodes back to `</style`; inside a comment the text is ignored as
+ * before. In any other position the sequence is either invalid CSS or, where
+ * arbitrary tokens are accepted (a custom property value, for example), a
+ * token run that never reached the page intact, because the HTML parser ended
+ * the element there. The rewrite does change such a run (`\/style` is read as
+ * one identifier), but a `<style>` element never handed the original run to
+ * the CSS parser either.
  */
 export function cssForStyleElement(css: string): string {
   return css.replace(STYLE_END_TAG, '<\\/$1')
