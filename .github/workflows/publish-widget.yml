@@ -25,6 +25,11 @@ jobs:
     if: >-
       github.repository == 'venturi-systems/quackback' &&
       (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -119,6 +124,11 @@ jobs:
   publish:
     if: github.repository == 'venturi-systems/quackback' && (github.event_name == 'push' || inputs.dry_run == false)
     needs: validate
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: npm-publish
