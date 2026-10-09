@@ -34,6 +34,7 @@ import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
 import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
+import { cssForStyleElement } from '@/lib/shared/style-element-css'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -293,9 +294,13 @@ export function PortalAccessGate({
     // <FormattedMessage> has no context and crashes. No SSR catalog here;
     // useIntlSetup fetches it client-side, well before the form needs it.
     <PortalIntlProvider locale={locale ?? DEFAULT_LOCALE}>
-      {/* Keep the sign-in page visually consistent with the portal. */}
-      {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
-      {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
+      {/* Keep the sign-in page visually consistent with the portal. Both
+          sheets carry workspace-controlled text, so a `</style` in either must
+          not end its element (cssForStyleElement). */}
+      {themeStyles && (
+        <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(themeStyles) }} />
+      )}
+      {customCss && <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(customCss) }} />}
       <PublicPageFrame
         className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
         footer={reason === 'unauthenticated' ? <VenturiSiteFooter showSourceCode /> : undefined}

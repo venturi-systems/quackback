@@ -3,6 +3,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { getRequestHeaders, setResponseHeader } from '@tanstack/react-start/server'
 import { z } from 'zod'
 import { generateThemeCSS } from '@/lib/shared/theme'
+import { cssForStyleElement } from '@/lib/shared/style-element-css'
 import { resolveLocale } from '@/lib/shared/i18n'
 import { WidgetAuthProvider } from '@/components/widget/widget-auth-provider'
 import { extractSessionTokenFromCookie } from '@/lib/server/functions/portal-session-token'
@@ -122,8 +123,12 @@ function WidgetLayout() {
       hmacRequired={hmacRequired}
       initialLocale={locale}
     >
-      {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
-      {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
+      {/* Both sheets carry workspace-controlled text; cssForStyleElement keeps
+          a `</style` in either from ending its element. */}
+      {themeStyles && (
+        <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(themeStyles) }} />
+      )}
+      {customCss && <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(customCss) }} />}
       <style
         dangerouslySetInnerHTML={{
           __html: `

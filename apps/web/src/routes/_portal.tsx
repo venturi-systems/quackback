@@ -10,6 +10,7 @@ import { PortalAccessGate } from '@/components/portal/portal-access-gate'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 import { DEFAULT_AUTH_CONFIG } from '@/lib/shared/types/settings'
 import { generateThemeCSS } from '@/lib/shared/theme'
+import { cssForStyleElement } from '@/lib/shared/style-element-css'
 import { PortalIntlProvider } from '@/components/portal-intl-provider'
 import { getPortalLocaleFn, loadPortalIntl } from '@/lib/server/functions/locale'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
@@ -306,9 +307,15 @@ function PortalLayout() {
               defaultMessage="Skip to content"
             />
           </a>
-          {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
+          {/* Both sheets carry workspace-controlled text; cssForStyleElement
+              keeps a `</style` in either from ending its element. */}
+          {themeStyles && (
+            <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(themeStyles) }} />
+          )}
           {/* Custom CSS is injected after theme styles so it can override */}
-          {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
+          {customCss && (
+            <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(customCss) }} />
+          )}
           <PortalHeader
             userRole={userRole}
             initialUserData={initialUserData}
