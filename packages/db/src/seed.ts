@@ -10,7 +10,7 @@ import { config } from 'dotenv'
 config({ path: '../../.env', quiet: true })
 
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { generateId } from '@quackback/ids'
 import type {
@@ -256,22 +256,51 @@ const changelogPresets = [
 const statusSlugs = ['open', 'under_review', 'planned', 'in_progress', 'complete', 'closed']
 const statusWeights = [30, 20, 20, 15, 10, 5] // Weighted distribution
 
-function weightedStatus(): string {
-  const total = statusWeights.reduce((a, b) => a + b, 0)
-  let random = Math.random() * total
-  for (let i = 0; i < statusSlugs.length; i++) {
-    random -= statusWeights[i]
-    if (random <= 0) return statusSlugs[i]
+/**
+ * Pick a seeded post's status by weight, from the statuses that exist in this
+ * database. A workspace whose statuses were edited before seeding may lack a
+ * weighted slug: its weight is dropped rather than handed to a row that is not
+ * there, and when none of the weighted slugs exist any existing status is
+ * used. The slug and the id always name the same row, so the roadmap step
+ * files each post under the status it was actually given. Before this, a
+ * missing slug left `statusId` null while the roadmap step still treated the
+ * post as planned, in progress or complete.
+ */
+function pickStatus(statusMap: Map<string, StatusId>): { slug: string; id: StatusId } {
+  const weighted: Array<{ slug: string; weight: number; id: StatusId }> = []
+  statusSlugs.forEach((slug, i) => {
+    const id = statusMap.get(slug)
+    if (id) weighted.push({ slug, weight: statusWeights[i], id })
+  })
+  if (weighted.length === 0) {
+    const [slug, id] = pick(Array.from(statusMap.entries()))
+    return { slug, id }
   }
-  return 'open'
+  const total = weighted.reduce((sum, s) => sum + s.weight, 0)
+  let random = Math.random() * total
+  for (const s of weighted) {
+    random -= s.weight
+    if (random <= 0) return { slug: s.slug, id: s.id }
+  }
+  return { slug: weighted[0].slug, id: weighted[0].id }
 }
 
-function generateVoteCount(): number {
-  const roll = Math.random()
-  if (roll < 0.5) return Math.floor(Math.random() * 10) // 0-9
-  if (roll < 0.8) return 10 + Math.floor(Math.random() * 40) // 10-49
-  if (roll < 0.95) return 50 + Math.floor(Math.random() * 100) // 50-149
-  return 150 + Math.floor(Math.random() * 200) // 150-349
+/**
+ * Draw a post's vote total, from 0 through `maxVoters`.
+ *
+ * `posts.vote_count` is a denormalized count of the post's rows in `votes`,
+ * and a principal can vote on a post once (unique on post_id + principal_id).
+ * The seed inserts one vote row per counted vote, so the total is bounded by
+ * the principals that exist. Totals of up to 349 used to be drawn against
+ * about 31 principals: the inserted rows stopped at the principal count while
+ * the post kept the larger figure, and anything that recounts from `votes`
+ * (merging posts recalculates the canonical post's count) dropped it.
+ *
+ * Squaring the roll keeps the skew of a real board: about half the posts get
+ * a quarter of the possible votes or fewer, and a few get nearly all of them.
+ */
+function generateVoteCount(maxVoters: number): number {
+  return Math.floor(Math.random() ** 2 * (maxVoters + 1))
 }
 
 async function seed() {
@@ -482,6 +511,8 @@ async function seed() {
   const existingPostCount = await db.select({ id: posts.id }).from(posts).limit(1)
   if (existingPostCount.length > 0) {
     console.log('Posts already exist, skipping post creation')
+  } else if (statusMap.size === 0) {
+    throw new Error('No post statuses exist; cannot seed posts')
   } else {
     // Create posts in batches
     console.log(`Creating ${CONFIG.posts} posts...`)
@@ -494,9 +525,8 @@ async function seed() {
       const postId = generateId('post')
       const boardId = pick(boardIds)
       const author = pick(principals)
-      const statusSlug = weightedStatus()
-      const statusId = statusMap.get(statusSlug) ?? null
-      const voteCount = generateVoteCount()
+      const status = pickStatus(statusMap)
+      const voteCount = generateVoteCount(principals.length)
       const title =
         postTitles[i % postTitles.length] +
         (i >= postTitles.length ? ` (${Math.floor(i / postTitles.length) + 1})` : '')
@@ -509,13 +539,13 @@ async function seed() {
         content,
         contentJson: textToTipTapJson(content),
         principalId: author.id,
-        statusId,
+        statusId: status.id,
         voteCount,
         createdAt: randomDate(180),
         updatedAt: new Date(),
       })
 
-      postRecords.push({ id: postId, voteCount, statusSlug })
+      postRecords.push({ id: postId, voteCount, statusSlug: status.slug })
 
       // Add 1-2 tags
       const numTags = 1 + Math.floor(Math.random() * 2)
@@ -577,12 +607,14 @@ async function seed() {
     console.log('Creating votes...')
     const voteInserts: (typeof votes.$inferInsert)[] = []
     for (const post of postRecords) {
-      const numVotes = Math.min(post.voteCount, principals.length) // Cap at number of principals
+      // One row per counted vote, each from a different principal, so the
+      // rows match the post's stored voteCount. generateVoteCount drew it no
+      // higher than principals.length.
       const shuffledPrincipals = [...principals].sort(() => Math.random() - 0.5)
-      for (let v = 0; v < numVotes; v++) {
+      for (let v = 0; v < post.voteCount; v++) {
         voteInserts.push({
           postId: post.id,
-          principalId: shuffledPrincipals[v % shuffledPrincipals.length].id,
+          principalId: shuffledPrincipals[v].id,
           createdAt: randomDate(60),
         })
       }
@@ -597,7 +629,33 @@ async function seed() {
 
     // Create comments
     console.log('Creating comments...')
-    const commentInserts: (typeof comments.$inferInsert)[] = []
+    // Keep the public design fixture independent of random comment counts and authors.
+    // The first unsuffixed title has a distinct full-text match in its later variants.
+    const [demoPrincipal] = await db
+      .select({ id: principal.id })
+      .from(principal)
+      .innerJoin(user, eq(principal.userId, user.id))
+      .where(eq(user.email, DEMO_USER.email))
+      .limit(1)
+    const designPost = postRecords[0]
+    const relatedDesignPost = postRecords[postTitles.length]
+    if (!demoPrincipal || !designPost || !relatedDesignPost) {
+      throw new Error('Seed fixture requires the demo principal and a Related post pair')
+    }
+
+    // This block only runs when creating posts, so reseeding cannot duplicate this comment.
+    const commentInserts: (typeof comments.$inferInsert)[] = [
+      {
+        postId: designPost.id,
+        principalId: demoPrincipal.id,
+        content: commentContents[0],
+        parentId: null,
+        isPrivate: false,
+        moderationState: 'published',
+        isTeamMember: true,
+        createdAt: new Date(),
+      },
+    ]
     for (const post of postRecords) {
       const numComments = Math.floor(Math.random() * 5) // 0-4 comments per post
       for (let c = 0; c < numComments; c++) {
@@ -614,6 +672,22 @@ async function seed() {
     for (let i = 0; i < commentInserts.length; i += BATCH_SIZE) {
       await db.insert(comments).values(commentInserts.slice(i, i + BATCH_SIZE))
     }
+    // posts.comment_count is denormalized: the comment service adds one for
+    // each published, non-private comment (comment.service.ts), and the post
+    // list shows that number. These inserts bypass the service, so set the
+    // count from the rows just written, by the same rule. Without this, every
+    // seeded post listed no comments while its detail view showed up to five.
+    // Only seeded posts exist here: this block runs only when the table was
+    // empty.
+    await db.update(posts).set({
+      commentCount: sql`(
+        SELECT COUNT(*)::int FROM ${comments}
+        WHERE ${comments.postId} = ${posts.id}
+          AND ${comments.deletedAt} IS NULL
+          AND ${comments.isPrivate} = false
+          AND ${comments.moderationState} = 'published'
+      )`,
+    })
     console.log(`Created ${commentInserts.length} comments`)
 
     // Create changelog entries

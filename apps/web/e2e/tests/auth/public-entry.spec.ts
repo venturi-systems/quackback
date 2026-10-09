@@ -12,6 +12,7 @@ import { withDesignBrowserZoom } from '../../utils/browser-zoom-actuator'
 import {
   flushMagicLinkRateLimit,
   setPortalAuthMethods,
+  setEntrySocialProviders,
   setPortalVisibility,
 } from '../../utils/access-helpers'
 
@@ -322,7 +323,8 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     const fittedViewports = []
     try {
       setPortalVisibility('private')
-      setPortalAuthMethods('disable-email-temporarily')
+      setPortalAuthMethods('enable-social-only-temporarily')
+      setEntrySocialProviders('seed')
       await page.goto('/')
       await expect(page.getByTestId('portal-gate-access')).toContainText(
         'Sign in with an approved account'
@@ -378,7 +380,14 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         }
       }
     } finally {
-      setPortalAuthMethods('restore')
+      // Setup may commit before a subprocess reports an error. Cleanup targets
+      // only this fixture's credential IDs, and settings restore runs even if
+      // credential cleanup fails.
+      try {
+        setEntrySocialProviders('remove')
+      } finally {
+        setPortalAuthMethods('restore')
+      }
       await testInfo.attach('entry-normal-viewport-fit', {
         body: Buffer.from(JSON.stringify(fittedViewports)),
         contentType: 'application/json',
@@ -399,6 +408,74 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     )
     expect(process.env.GITHUB_SHA!.startsWith(source!.split('/').at(-1)!)).toBe(true)
     expect(source).toBe(entrySource)
+    // REQ-FEEDBACK-AUTH-VIEWPORT: shared-footer targets must not intersect when
+    // text spacing widens labels. Measure the real anchor boxes; page overflow
+    // alone misses an intrinsic-width link extending into the adjacent group.
+    const footerGeometry = []
+    try {
+      for (const width of [1024, 1280]) {
+        await page.setViewportSize({ width, height: 900 })
+        for (const stress of [false, true]) {
+          const stressStyle = stress
+            ? await page.addStyleTag({
+                content: `
+                  .venturi-footer * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }
+                  .venturi-footer p { margin-block-end: 2em !important; }
+                `,
+              })
+            : undefined
+          try {
+            await page.evaluate(() => document.fonts.ready.then(() => undefined))
+            const geometry = await page.evaluate(() => {
+              const links = Array.from(document.querySelectorAll('.venturi-footer a')).map(
+                (link) => {
+                  const rect = link.getBoundingClientRect()
+                  return {
+                    text: link.textContent,
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    width: rect.width,
+                    height: rect.height,
+                  }
+                }
+              )
+              const intersections = []
+              for (let first = 0; first < links.length; first += 1) {
+                for (let second = first + 1; second < links.length; second += 1) {
+                  const a = links[first]
+                  const b = links[second]
+                  const width = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+                  const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+                  if (width > 1 && height > 1) {
+                    intersections.push({ first: a.text, second: b.text, width, height })
+                  }
+                }
+              }
+              return { links, intersections, documentWidth: document.documentElement.scrollWidth }
+            })
+            footerGeometry.push({ width, stress, ...geometry })
+            expect(geometry.documentWidth).toBeLessThanOrEqual(width)
+            expect(geometry.links).toHaveLength(18)
+            expect(geometry.intersections).toEqual([])
+            for (const link of geometry.links) {
+              expect(link.width, link.text ?? '').toBeGreaterThanOrEqual(44)
+              expect(link.height, link.text ?? '').toBeGreaterThanOrEqual(44)
+            }
+          } finally {
+            await stressStyle?.evaluate((element) => {
+              element.parentNode?.removeChild(element)
+            })
+          }
+        }
+      }
+    } finally {
+      await testInfo.attach('shared-footer-target-intersections', {
+        body: Buffer.from(JSON.stringify(footerGeometry)),
+        contentType: 'application/json',
+      })
+    }
   } finally {
     setPortalVisibility('public')
   }

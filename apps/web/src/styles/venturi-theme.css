@@ -313,7 +313,7 @@
 }
 @media (min-width: 1024px) {
   /* Keep the Product labels whole under accessibility text spacing while
-     preserving the accepted two rows of four and three links. */
+     preserving the compact four-column Product grid. */
   .venturi-footer__nav {
     grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
   }
@@ -936,9 +936,16 @@
     line-height: 1.5;
   }
 }
-/* The entry-only fourth Trust link must not force half-width text columns. */
+/* Keep Trust and Connect labels whole while containing each target in its group. */
 @media (min-width: 1024px) {
-  .portal-gate--entry .venturi-footer__nav section:not(:first-child) li {
+  .venturi-footer__nav section:not(:first-child) li {
     flex: 0 0 auto;
+    max-width: 100%;
+    min-width: 0;
   }
+}
+
+/* REQ-FEEDBACK-ENTRY: keep the optional recovery explanation evenly wrapped. */
+.portal-gate--entry [data-public-sign-in-help] > div > p:first-child {
+  text-wrap: balance;
 }

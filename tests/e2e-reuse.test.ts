@@ -117,7 +117,7 @@ function fixture() {
 
 async function probe(f = fixture()) {
   const outputs: Record<string, string> = {}
-  const archives = f.receipts.map((receipt, index) => {
+  const archiveFiles = f.receipts.map((receipt, index) => {
     const files: Record<string, string> = {
       'tested-tree.json': f.badJson ? '{invalid' : JSON.stringify(receipt),
     }
@@ -131,15 +131,32 @@ async function probe(f = fixture()) {
         ? '{invalid'
         : JSON.stringify(f.imageAfter[index])
     }
-    return execFileSync(
+    return files
+  })
+  // Build the same eight independent ZIPs in one process. Starting Python for
+  // every shard dominates these repeated negative cases under shared CI load;
+  // batching removes startup work without changing evidence or its assertions.
+  const encodedArchives = JSON.parse(
+    execFileSync(
       'python3',
       [
         '-c',
-        'import io,json,sys,zipfile; b=io.BytesIO(); z=zipfile.ZipFile(b,"w"); [z.writestr(name,data) for name,data in json.load(sys.stdin).items()]; z.close(); sys.stdout.buffer.write(b.getvalue())',
+        [
+          'import base64, io, json, sys, zipfile',
+          'archives = []',
+          'for files in json.load(sys.stdin):',
+          '    buffer = io.BytesIO()',
+          '    with zipfile.ZipFile(buffer, "w") as archive:',
+          '        for name, data in files.items():',
+          '            archive.writestr(name, data)',
+          '    archives.append(base64.b64encode(buffer.getvalue()).decode("ascii"))',
+          'json.dump(archives, sys.stdout)',
+        ].join('\n'),
       ],
-      { input: JSON.stringify(files) }
+      { input: JSON.stringify(archiveFiles), encoding: 'utf8' }
     )
-  })
+  ) as string[]
+  const archives = encodedArchives.map((encoded) => Buffer.from(encoded, 'base64'))
   const artifacts = archives.map((bytes, i) => ({
     id: i + 100,
     name: `e2e-tested-tree-${f.run.id}-${f.run.run_attempt}-${i + 1}`,
