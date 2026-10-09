@@ -29,13 +29,29 @@
  * off and break every later `loginViaMagicLink` in the run.
  *
  * The snapshot is a file, so it survives the process boundary between one
- * temporary enable or `disable` invocation and the `restore` in the test's `finally`. It is
- * created exclusively (`wx`): a Playwright retry that re-runs `disable` after
- * a crash keeps the ORIGINAL pre-change value rather than snapshotting the
- * already-modified one. `restore` reads both stored columns back before consuming
- * the snapshot and keeps it on read failure or mismatch. A stale snapshot
- * left by a crashed run is repaired by the next `restore` instead of
- * persisting. `restore` with no snapshot is a no-op: no temporary change was recorded.
+ * temporary enable or `disable` invocation and the `restore` in the test's `finally`.
+ * It also names its owner: the process that will restore the change, which
+ * utils/access-helpers.ts sets to its Playwright worker's PID. Parallel
+ * workers share this one settings row, so the owned snapshot is a lock over
+ * the whole snapshot, change and restore lifecycle:
+ *
+ *  - A temporary action waits while another running process owns the
+ *    snapshot, and reads the row only after that, so it can never record
+ *    another worker's temporary change as the original value.
+ *  - `restore` leaves alone a snapshot that another running process owns, so a
+ *    suite's defensive `restore` cannot undo a change another worker is still
+ *    testing.
+ *  - A snapshot whose owner has exited was left by a crashed worker or run.
+ *    The next `restore` repairs it. A temporary action keeps it and takes it
+ *    over, so a Playwright retry that re-runs `disable` after a crash keeps
+ *    the ORIGINAL pre-change value rather than snapshotting the
+ *    already-modified one.
+ *
+ * Each invocation holds a Postgres advisory lock while it reads and writes the
+ * snapshot and the row, so two invocations never interleave those steps.
+ * `restore` reads both stored columns back before consuming the snapshot and
+ * keeps it on read failure or mismatch. `restore` with no snapshot is a no-op:
+ * no temporary change was recorded.
  *
  * When disabling: every stored oauth key plus the core methods (password,
  * magicLink) is set to false — no sign-in method is presented to public users.
@@ -72,7 +88,28 @@ const SNAPSHOT_PATH = resolve(
 interface AuthSnapshot {
   authConfig: string | null
   portalConfig: string | null
+  /** PID of the process that will restore the change (absent in older snapshots). */
+  owner?: number
 }
+
+/**
+ * The process that owns a temporary change this invocation makes. The e2e
+ * helper passes its Playwright worker's PID, which outlives this script and
+ * runs the matching `restore`. A manual run owns its change only while it runs.
+ */
+const OWNER_PID = Number(process.env.E2E_PORTAL_AUTH_OWNER_PID) || process.pid
+
+/** Advisory-lock name that serializes every invocation's snapshot and row steps. */
+const LOCK_NAME = 'e2e:portal-auth-snapshot'
+
+/**
+ * How long a temporary action waits for another process to restore its change.
+ * It is shorter than E2E_SCRIPT_TIMEOUT_MS (utils/db-helpers.ts), so a change
+ * that is never restored fails here with a reason rather than by the helper
+ * killing this script.
+ */
+const OWNER_WAIT_MS = 45_000
+const OWNER_POLL_MS = 250
 
 const arg = (process.argv[2] || '').toLowerCase()
 if (
@@ -95,6 +132,7 @@ if (!connectionString) {
 }
 const sql = postgres(connectionString)
 let cacheOpened = false
+let lock: postgres.ReservedSql | undefined
 
 /** Parse a settings JSON *text* column; {} on null/garbage. */
 function parseConfigColumn(raw: unknown): Record<string, unknown> {
@@ -106,33 +144,87 @@ function parseConfigColumn(raw: unknown): Record<string, unknown> {
   }
 }
 
+/** The recorded temporary change, or null when there is none. */
+function readSnapshot(): AuthSnapshot | null {
+  try {
+    return JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf-8')) as AuthSnapshot
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+    return null
+  }
+}
+
+/** Whether `pid` names a running process. */
+function isRunning(pid: number | undefined): boolean {
+  if (!pid || !Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM: the process exists but belongs to another user.
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/** True while a running process other than this invocation's owner owns `snapshot`. */
+function ownedElsewhere(
+  snapshot: AuthSnapshot | null
+): snapshot is AuthSnapshot & { owner: number } {
+  return snapshot !== null && snapshot.owner !== OWNER_PID && isRunning(snapshot.owner)
+}
+
 try {
+  const temporary =
+    arg === 'disable' ||
+    arg === 'enable-magic-link-temporarily' ||
+    arg === 'enable-social-only-temporarily'
+
+  // The advisory lock lives on one reserved connection, so it is released when
+  // this process ends even if it never reaches the unlock below. A temporary
+  // action waits, without the lock, while another running process owns the
+  // recorded change.
+  lock = await sql.reserve()
+  const deadline = Date.now() + OWNER_WAIT_MS
+  let held: AuthSnapshot | null
+  for (;;) {
+    await lock`SELECT pg_advisory_lock(hashtext(${LOCK_NAME}))`
+    held = readSnapshot()
+    if (!temporary || !ownedElsewhere(held)) break
+    await lock`SELECT pg_advisory_unlock(hashtext(${LOCK_NAME}))`
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Portal auth holds a temporary change owned by process ${held.owner}, ` +
+          `which did not restore it within ${OWNER_WAIT_MS / 1000}s`
+      )
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, OWNER_POLL_MS))
+  }
+
   const rows = await sql`
     SELECT id, auth_config, portal_config FROM settings ORDER BY created_at ASC LIMIT 1
   `
   if (rows.length === 0) throw new Error('No settings row found')
   const id = rows[0].id
-  let restorationReadback: 'matched' | 'no-snapshot' | undefined
+  let restorationReadback: 'matched' | 'no-snapshot' | 'owned-by-another-process' | undefined
 
-  if (
-    arg === 'disable' ||
-    arg === 'enable-magic-link-temporarily' ||
-    arg === 'enable-social-only-temporarily'
-  ) {
-    // Snapshot the LIVE columns before touching them. `wx` fails when a
-    // snapshot already exists, and that is the point: on a Playwright retry the
-    // first attempt's snapshot holds the true pre-change value, and this
-    // attempt's would hold the already-modified one.
-    const snapshot: AuthSnapshot = {
-      authConfig: (rows[0].auth_config as string | null) ?? null,
-      portalConfig: (rows[0].portal_config as string | null) ?? null,
-    }
-    try {
+  if (temporary) {
+    // Snapshot the LIVE columns before touching them, unless a snapshot already
+    // exists. One that exists here is this owner's own or was left by a process
+    // that exited, and on a Playwright retry it holds the true pre-change value
+    // where this attempt's read would hold the already-modified one, so it is
+    // kept. A left-behind snapshot is taken over, so that another worker's
+    // `restore` does not treat it as abandoned while this owner's test runs.
+    if (!held) {
+      const snapshot: AuthSnapshot = {
+        authConfig: (rows[0].auth_config as string | null) ?? null,
+        portalConfig: (rows[0].portal_config as string | null) ?? null,
+        owner: OWNER_PID,
+      }
       mkdirSync(dirname(SNAPSHOT_PATH), { recursive: true })
       writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), { flag: 'wx', mode: 0o600 })
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      // Keep the earlier, truer snapshot.
+    } else if (held.owner !== OWNER_PID) {
+      const snapshot: AuthSnapshot = { ...held, owner: OWNER_PID }
+      writeFileSync(SNAPSHOT_PATH, JSON.stringify(snapshot), { flag: 'w', mode: 0o600 })
     }
   }
 
@@ -202,15 +294,14 @@ try {
        WHERE id = ${id}
     `
   } else {
-    // Restore the exact columns from before the temporary change, including NULL.
-    let snapshot: AuthSnapshot | null = null
-    try {
-      snapshot = JSON.parse(readFileSync(SNAPSHOT_PATH, 'utf-8')) as AuthSnapshot
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
+    // Restore the exact columns from before the temporary change, including
+    // NULL. A change that another running process owns is left for that
+    // process's own `restore`: its test may still depend on it.
+    const snapshot = held
 
-    if (snapshot) {
+    if (ownedElsewhere(snapshot)) {
+      restorationReadback = 'owned-by-another-process'
+    } else if (snapshot) {
       await sql`
         UPDATE settings
            SET auth_config = ${snapshot.authConfig},
@@ -259,12 +350,17 @@ try {
     throw new Error('Portal auth cache invalidation failed; retry the fixture action')
   }
 
+  await lock`SELECT pg_advisory_unlock(hashtext(${LOCK_NAME}))`
+  lock.release()
+
   // Report only the action and restoration outcome, never stored configuration.
   console.log(JSON.stringify({ action: arg, restorationReadback }))
   await sql.end()
   await getRedis().quit()
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
+  // Ending the pool closes the reserved connection, which drops a held lock.
+  lock?.release()
   await sql.end()
   if (cacheOpened) await getRedis().quit()
   process.exit(1)

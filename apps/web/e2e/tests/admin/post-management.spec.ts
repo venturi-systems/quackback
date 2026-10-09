@@ -36,36 +36,54 @@ test.describe('Admin Post Management', () => {
   })
 
   test('can create a new post', async ({ page }) => {
-    // Click the create post button
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
+    // The inbox header's create control is CreatePostDialog's default trigger:
+    // an icon button titled "Create new post" (create-post-dialog.tsx). Its icon
+    // is a Heroicons PencilSquareIcon, which has no `lucide-pen-square` class,
+    // so the old `svg.lucide-pen-square` filter matched nothing and this test
+    // skipped its whole body and passed. Creating a post is the behaviour under
+    // test, so a missing control must fail the test.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
+
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
+
+    // Fill the form
+    const testTitle = `Test Post ${Date.now()}`
+    const testBody = 'This is a test post description'
+    await dialog.getByPlaceholder("What's the feedback about?").fill(testTitle)
+
+    // Fill description (rich text editor)
+    await dialog.locator('.tiptap').click()
+    await page.keyboard.type(testBody)
+
+    // Submit the form
+    await dialog.getByRole('button', { name: 'Create post', exact: true }).click()
+
+    // Dialog should close
+    await expect(dialog).toBeHidden({ timeout: 10000 })
+
+    // A closed dialog does not prove the post was saved. useCreatePost adds
+    // nothing to the list optimistically; the inbox refetches it from the
+    // server, newest first by default, so the saved post heads the list.
+    const createdCard = page.locator('[data-post-id]').filter({
+      has: page.getByRole('heading', { name: testTitle, exact: true }),
     })
+    await expect(createdCard).toBeVisible({ timeout: 10000 })
 
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
+    // Reload so the list is a fresh server render, then reopen the post and
+    // check the stored title and body.
+    await page.reload({ waitUntil: 'networkidle' })
+    await expect(createdCard).toBeVisible()
+    await createdCard.click()
+    const modal = page.getByRole('dialog', { name: 'Edit post', exact: true })
+    await expect(modal).toBeVisible({ timeout: 10000 })
+    await expect(modal.getByPlaceholder("What's the feedback about?")).toHaveValue(testTitle)
+    await expect(postBodyEditor(modal)).toContainText(testBody)
 
-      // Wait for dialog
-      await expect(page.getByRole('dialog')).toBeVisible()
-
-      // Fill the form
-      const testTitle = `Test Post ${Date.now()}`
-      const titleInput = page.getByPlaceholder("What's the feedback about?")
-      await titleInput.fill(testTitle)
-
-      // Fill description (rich text editor)
-      const editor = page.locator('.tiptap')
-      await editor.click()
-      await page.keyboard.type('This is a test post description')
-
-      // Submit the form
-      await page.getByRole('button', { name: /create post/i }).click()
-
-      // Dialog should close
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 10000 })
-
-      // New post should appear in the list (page refreshes)
-      await page.waitForLoadState('networkidle')
-    }
+    // Close dialog
+    await page.keyboard.press('Escape')
   })
 
   test('can submit post with Cmd+Enter keyboard shortcut', async ({ page }) => {

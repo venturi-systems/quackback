@@ -520,11 +520,14 @@ async function seed() {
     console.log(`Created ${tagPresets.length} tags`)
   }
 
-  // Create or get boards
+  // Create or get boards. boardIdBySlug lets seed data that belongs to one
+  // preset board (the feedback signals below) find that board by slug.
   const boardIds: BoardId[] = []
+  const boardIdBySlug = new Map<string, BoardId>()
   const existingBoards = await db.select().from(boards)
   if (existingBoards.length > 0) {
     boardIds.push(...existingBoards.map((b) => b.id))
+    for (const b of existingBoards) boardIdBySlug.set(b.slug, b.id)
     console.log(`Using ${existingBoards.length} existing boards`)
   } else {
     for (const b of boardPresets) {
@@ -537,6 +540,7 @@ async function seed() {
         createdAt: randomDate(60),
       })
       boardIds.push(boardId)
+      boardIdBySlug.set(b.slug, boardId)
     }
     console.log(`Created ${boardPresets.length} boards`)
   }
@@ -1095,11 +1099,15 @@ async function seed() {
     }
     console.log(`Created ${rawItemPresets.length} raw feedback items`)
 
-    // Create signals
+    // Create signals. Each one names the preset board its summary belongs to
+    // (boardPresets slugs). This branch also runs on a database that kept its
+    // own boards, which may number fewer than four, lack these slugs, or come
+    // back in any order, so a positional index could read past the end and
+    // leave the signal without a board, or land on an unrelated board.
     const signalPresets = [
       {
         rawItemIdx: 0,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'usability_issue',
         summary: 'Dashboard loading takes 8-10s for large accounts (>1000 posts)',
         implicitNeed: 'Faster query performance for high-volume accounts',
@@ -1113,7 +1121,7 @@ async function seed() {
       },
       {
         rawItemIdx: 5,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'API rate limits too low for large-scale data sync',
         implicitNeed: 'Higher throughput for enterprise integrations',
@@ -1124,7 +1132,7 @@ async function seed() {
       },
       {
         rawItemIdx: 8,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'usability_issue',
         summary: 'Admin dashboard unusable on tablets due to layout issues',
         implicitNeed: 'Responsive design for mobile/tablet admin usage',
@@ -1135,7 +1143,7 @@ async function seed() {
       },
       {
         rawItemIdx: 1,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Multi-select and bulk move/tag/status change for posts',
         implicitNeed: 'Efficient batch operations for managing large volumes of posts',
@@ -1149,7 +1157,7 @@ async function seed() {
       },
       {
         rawItemIdx: 7,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Merge duplicate posts with vote count aggregation',
         implicitNeed: 'Accurate representation of feature request popularity',
@@ -1163,7 +1171,7 @@ async function seed() {
       },
       {
         rawItemIdx: 8,
-        boardIdx: 1,
+        boardSlug: 'bugs',
         signalType: 'bug_report',
         summary: 'Admin dashboard layout broken on iPad - sidebar overlaps content',
         implicitNeed: 'Tablet-friendly admin interface for on-the-go PM workflows',
@@ -1177,7 +1185,7 @@ async function seed() {
       },
       {
         rawItemIdx: 3,
-        boardIdx: 3,
+        boardSlug: 'integrations',
         signalType: 'bug_report',
         summary: 'CSV export missing vote counts column',
         implicitNeed: 'Complete data export for reporting and analysis',
@@ -1188,7 +1196,7 @@ async function seed() {
       },
       {
         rawItemIdx: 5,
-        boardIdx: 3,
+        boardSlug: 'integrations',
         signalType: 'feature_request',
         summary: 'Need batch API endpoint for high-volume data sync',
         implicitNeed: 'Scalable API for enterprise data integration workflows',
@@ -1199,7 +1207,7 @@ async function seed() {
       },
       {
         rawItemIdx: 10,
-        boardIdx: 3,
+        boardSlug: 'integrations',
         signalType: 'usability_issue',
         summary: 'Webhook documentation missing payload examples for events',
         implicitNeed: 'Clear developer documentation with concrete examples',
@@ -1213,7 +1221,7 @@ async function seed() {
       },
       {
         rawItemIdx: 9,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Timeline/Gantt visualization for roadmaps with target dates',
         implicitNeed: 'Date-driven planning and stakeholder communication',
@@ -1227,7 +1235,7 @@ async function seed() {
       },
       {
         rawItemIdx: 11,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Email digest mode for daily/weekly notification summaries',
         implicitNeed: 'Manageable notification volume without missing important updates',
@@ -1238,7 +1246,7 @@ async function seed() {
       },
       {
         rawItemIdx: 4,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Widget dark mode with prefers-color-scheme detection',
         implicitNeed: 'Visual consistency between widget and host site theming',
@@ -1249,7 +1257,7 @@ async function seed() {
       },
       {
         rawItemIdx: 6,
-        boardIdx: 2,
+        boardSlug: 'feedback',
         signalType: 'praise',
         summary: 'Changelog feature and feedback-to-feature loop highly valued',
         implicitNeed: 'Continue investing in the feedback loop closure experience',
@@ -1272,7 +1280,10 @@ async function seed() {
         implicitNeed: preset.implicitNeed,
         sentiment: preset.sentiment,
         urgency: preset.urgency,
-        boardId: boardIds[preset.boardIdx],
+        // The named board when it exists, otherwise the first board this run
+        // has (boardIds is never empty: the seed creates the presets when
+        // the database has no boards), so every signal references a real board.
+        boardId: boardIdBySlug.get(preset.boardSlug) ?? boardIds[0],
         extractionConfidence: preset.confidence,
         interpretationConfidence: preset.confidence * 0.95,
         processingState: 'completed',
