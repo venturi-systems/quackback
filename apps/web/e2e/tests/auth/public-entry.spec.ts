@@ -12,6 +12,7 @@ import { withDesignBrowserZoom } from '../../utils/browser-zoom-actuator'
 import {
   flushMagicLinkRateLimit,
   setPortalAuthMethods,
+  setEntrySocialProviders,
   setPortalVisibility,
 } from '../../utils/access-helpers'
 
@@ -49,6 +50,17 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     await expect(help).not.toHaveAttribute('open', '')
     await expect(page.getByText('Who can do what', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
+    const entrySource = await page
+      .getByRole('link', { name: 'Source code', exact: true })
+      .getAttribute('href')
+    expect(entrySource).toMatch(
+      /^https:\/\/github\.com\/venturi-systems\/quackback\/tree\/[0-9a-f]{7,40}$/
+    )
+    expect(process.env.GITHUB_SHA!.startsWith(entrySource!.split('/').at(-1)!)).toBe(true)
+    await expect(
+      page.locator('a[href*="/investor/demo"], a[href$="/demo"], a[href$="/demo/"]')
+    ).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /product demo/i })).toHaveCount(0)
     await expect(page.getByRole('navigation', { name: 'Legal and sitemap' })).toHaveCount(1)
     const initialViewports = []
     try {
@@ -305,6 +317,82 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         }
       )
     }
+    // REQ-FEEDBACK-AUTH-VIEWPORT: the normal two-provider entry fits in one
+    // viewport. Exercise the real fixture configuration rather than hiding
+    // controls; the earlier email, expanded help and zoom coverage stays intact.
+    const fittedViewports = []
+    try {
+      setPortalVisibility('private')
+      setPortalAuthMethods('enable-social-only-temporarily')
+      setEntrySocialProviders('seed')
+      await page.goto('/')
+      await expect(page.getByTestId('portal-gate-access')).toContainText(
+        'Sign in with an approved account'
+      )
+      await expect(page.getByRole('button', { name: /Google/i })).toBeEnabled()
+      await expect(page.getByRole('button', { name: /GitHub/i })).toBeEnabled()
+      await expect(page.getByLabel(/email/i)).toHaveCount(0)
+      await expect(help).not.toHaveAttribute('open', '')
+      for (const [width, height] of [
+        [320, 900],
+        [390, 900],
+        [1280, 720],
+        [1366, 768],
+        [1440, 900],
+      ]) {
+        await page.setViewportSize({ width, height })
+        await page.evaluate(() => document.fonts.ready.then(() => window.scrollTo(0, 0)))
+        const fit = await page.evaluate(() => {
+          const footer = document.querySelector('.venturi-footer')!
+          return {
+            width: innerWidth,
+            height: innerHeight,
+            documentWidth: document.documentElement.scrollWidth,
+            documentHeight: document.documentElement.scrollHeight,
+            footerBottom: footer.getBoundingClientRect().bottom,
+            overflow: [
+              document.documentElement,
+              document.body,
+              document.querySelector('.portal-gate--entry')!,
+              footer,
+            ].map((element) => getComputedStyle(element).overflowY),
+            targets: Array.from(footer.querySelectorAll('a')).map((link) => ({
+              text: link.textContent,
+              width: link.getBoundingClientRect().width,
+              height: link.getBoundingClientRect().height,
+            })),
+          }
+        })
+        fittedViewports.push(fit)
+        expect(fit.documentWidth).toBeLessThanOrEqual(width)
+        expect(fit.documentHeight).toBeLessThanOrEqual(height)
+        expect(fit.footerBottom).toBeLessThanOrEqual(height + 1)
+        expect(fit.overflow.some((value) => /hidden|clip/.test(value))).toBe(false)
+        expect(fit.targets).toHaveLength(19)
+        for (const target of fit.targets) {
+          expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
+          expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
+        }
+        for (const name of ['Product', 'Trust', 'Connect']) {
+          await expect(
+            page.getByRole('region', { name, exact: true }).getByRole('list')
+          ).toHaveCount(1)
+        }
+      }
+    } finally {
+      // Setup may commit before a subprocess reports an error. Cleanup targets
+      // only this fixture's credential IDs, and settings restore runs even if
+      // credential cleanup fails.
+      try {
+        setEntrySocialProviders('remove')
+      } finally {
+        setPortalAuthMethods('restore')
+      }
+      await testInfo.attach('entry-normal-viewport-fit', {
+        body: Buffer.from(JSON.stringify(fittedViewports)),
+        contentType: 'application/json',
+      })
+    }
     // Public notices retain access to the exact build source without provider authentication.
     await expect(page.getByRole('link', { name: 'Software notices', exact: true })).toHaveAttribute(
       'href',
@@ -319,6 +407,75 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       /^https:\/\/github\.com\/venturi-systems\/quackback\/tree\/[0-9a-f]{7,40}$/
     )
     expect(process.env.GITHUB_SHA!.startsWith(source!.split('/').at(-1)!)).toBe(true)
+    expect(source).toBe(entrySource)
+    // REQ-FEEDBACK-AUTH-VIEWPORT: shared-footer targets must not intersect when
+    // text spacing widens labels. Measure the real anchor boxes; page overflow
+    // alone misses an intrinsic-width link extending into the adjacent group.
+    const footerGeometry = []
+    try {
+      for (const width of [1024, 1280]) {
+        await page.setViewportSize({ width, height: 900 })
+        for (const stress of [false, true]) {
+          const stressStyle = stress
+            ? await page.addStyleTag({
+                content: `
+                  .venturi-footer * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }
+                  .venturi-footer p { margin-block-end: 2em !important; }
+                `,
+              })
+            : undefined
+          try {
+            await page.evaluate(() => document.fonts.ready.then(() => undefined))
+            const geometry = await page.evaluate(() => {
+              const links = Array.from(document.querySelectorAll('.venturi-footer a')).map(
+                (link) => {
+                  const rect = link.getBoundingClientRect()
+                  return {
+                    text: link.textContent,
+                    left: rect.left,
+                    right: rect.right,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    width: rect.width,
+                    height: rect.height,
+                  }
+                }
+              )
+              const intersections = []
+              for (let first = 0; first < links.length; first += 1) {
+                for (let second = first + 1; second < links.length; second += 1) {
+                  const a = links[first]
+                  const b = links[second]
+                  const width = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+                  const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+                  if (width > 1 && height > 1) {
+                    intersections.push({ first: a.text, second: b.text, width, height })
+                  }
+                }
+              }
+              return { links, intersections, documentWidth: document.documentElement.scrollWidth }
+            })
+            footerGeometry.push({ width, stress, ...geometry })
+            expect(geometry.documentWidth).toBeLessThanOrEqual(width)
+            expect(geometry.links).toHaveLength(18)
+            expect(geometry.intersections).toEqual([])
+            for (const link of geometry.links) {
+              expect(link.width, link.text ?? '').toBeGreaterThanOrEqual(44)
+              expect(link.height, link.text ?? '').toBeGreaterThanOrEqual(44)
+            }
+          } finally {
+            await stressStyle?.evaluate((element) => {
+              element.parentNode?.removeChild(element)
+            })
+          }
+        }
+      }
+    } finally {
+      await testInfo.attach('shared-footer-target-intersections', {
+        body: Buffer.from(JSON.stringify(footerGeometry)),
+        contentType: 'application/json',
+      })
+    }
   } finally {
     setPortalVisibility('public')
   }

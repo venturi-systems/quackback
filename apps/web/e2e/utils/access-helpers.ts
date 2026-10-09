@@ -106,7 +106,12 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
  * crashed run left behind.
  */
 export function setPortalAuthMethods(
-  action: 'disable' | 'restore' | 'enable-magic-link' | 'enable-magic-link-temporarily'
+  action:
+    | 'disable'
+    | 'restore'
+    | 'enable-magic-link'
+    | 'enable-magic-link-temporarily'
+    | 'enable-social-only-temporarily'
 ): void {
   runScript('../scripts/set-portal-auth-methods.ts', [action])
 }
@@ -134,6 +139,11 @@ export function enableMagicLinkSignIn(): void {
  */
 export function flushMagicLinkRateLimit(): void {
   runScript('../scripts/flush-signin-rate-limit.ts', [])
+}
+
+/** Built-in social buttons for the guarded CI entry fixture; pair seed with remove. */
+export function setEntrySocialProviders(action: 'seed' | 'remove'): void {
+  runScript('../scripts/set-entry-social-providers.ts', [action])
 }
 
 /** Config for {@link seedIdentityProvider} (mirrors the seed script's input). */

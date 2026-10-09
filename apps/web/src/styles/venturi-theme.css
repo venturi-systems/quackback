@@ -313,7 +313,7 @@
 }
 @media (min-width: 1024px) {
   /* Keep the Product labels whole under accessibility text spacing while
-     preserving the accepted two rows of four and three links. */
+     preserving the compact four-column Product grid. */
   .venturi-footer__nav {
     grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
   }
@@ -897,4 +897,55 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
+}
+
+/* Anonymous entry only. Preserve inherited type sizes and 44px link targets. */
+@media (max-width: 448px) {
+  .portal-gate--entry .public-frame__content {
+    padding-block: 8px 16px;
+  }
+  .portal-gate--entry .portal-gate__layout {
+    gap: 12px;
+  }
+  .portal-gate--entry .portal-gate__title {
+    margin-block-end: 8px;
+  }
+  .portal-gate--entry .venturi-footer__brand {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 8px;
+  }
+  .portal-gate--entry .venturi-footer__nav section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 8px;
+  }
+  .portal-gate--entry .venturi-footer__nav h2 {
+    flex: 0 0 56px;
+    min-height: 44px;
+  }
+  .portal-gate--entry .venturi-footer__nav ul {
+    display: contents;
+  }
+  .portal-gate--entry .venturi-footer__nav li {
+    flex: 0 0 auto;
+  }
+  .portal-gate--entry .venturi-footer__copyright {
+    flex-basis: 100%;
+    min-height: 0;
+    line-height: 1.5;
+  }
+}
+/* Keep Trust and Connect labels whole while containing each target in its group. */
+@media (min-width: 1024px) {
+  .venturi-footer__nav section:not(:first-child) li {
+    flex: 0 0 auto;
+    max-width: 100%;
+    min-width: 0;
+  }
+}
+
+/* REQ-FEEDBACK-ENTRY: keep the optional recovery explanation evenly wrapped. */
+.portal-gate--entry [data-public-sign-in-help] > div > p:first-child {
+  text-wrap: balance;
 }

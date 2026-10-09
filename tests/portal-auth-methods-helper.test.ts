@@ -89,7 +89,7 @@ const fixture = vi.hoisted(() => {
       state.calls.push('snapshot-remove')
       state.snapshot = null
     }),
-    cacheDel: vi.fn(async () => {
+    del: vi.fn(async () => {
       state.calls.push('cache')
       fail('cache')
     }),
@@ -110,8 +110,7 @@ vi.mock('node:fs', async (importOriginal) => ({
 }))
 vi.mock('../apps/web/src/lib/server/redis', () => ({
   CACHE_KEYS: { TENANT_SETTINGS: 'tenant-settings' },
-  cacheDel: fixture.cacheDel,
-  getRedis: () => ({ quit: fixture.quit }),
+  getRedis: () => ({ del: fixture.del, quit: fixture.quit }),
 }))
 
 const originalArgv = process.argv
@@ -207,9 +206,49 @@ describe('portal auth helper temporary magic-link restoration', () => {
     expect(console.log).toHaveBeenLastCalledWith(
       JSON.stringify({ action: 'restore', restorationReadback: 'matched' })
     )
-    expect(fixture.cacheDel).toHaveBeenCalledTimes(2)
+    expect(fixture.del).toHaveBeenCalledTimes(2)
     expect(fixture.sql.end).toHaveBeenCalledTimes(2)
     expect(fixture.quit).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    { name: 'null columns', authConfig: null, portalConfig: null },
+    {
+      name: 'social and email methods with admission settings',
+      authConfig:
+        ' { "oauth": { "password": true, "magicLink": true, "google": false, "github": false, "custom": false }, "openSignup": false } ',
+      portalConfig: original.portalConfig,
+    },
+  ])('restores exact $name after the social-only viewport fixture', async (initial) => {
+    fixture.state.row.auth_config = initial.authConfig
+    fixture.state.row.portal_config = initial.portalConfig
+    await run('enable-social-only-temporarily')
+    const active = JSON.parse(fixture.state.row.auth_config!)
+    expect(active.oauth.google).toBe(true)
+    expect(active.oauth.github).toBe(true)
+    expect(active.oauth.password).toBe(false)
+    expect(active.oauth.magicLink).toBe(false)
+    if (initial.authConfig !== null) {
+      const previous = JSON.parse(initial.authConfig)
+      expect(active).toEqual({
+        ...previous,
+        oauth: { ...previous.oauth, google: true, github: true, password: false, magicLink: false },
+      })
+    }
+    expect(fixture.state.row.portal_config).toBe(initial.portalConfig)
+    expect(fixture.state.calls.indexOf('snapshot-write')).toBeLessThan(
+      fixture.state.calls.indexOf('update')
+    )
+    await run('restore')
+    expect(fixture.state.row.auth_config).toBe(initial.authConfig)
+    expect(fixture.state.row.portal_config).toBe(initial.portalConfig)
+    expect(fixture.state.snapshot).toBeNull()
+    expect(fixture.state.calls.slice(-4)).toEqual([
+      'update',
+      'restore-readback',
+      'snapshot-remove',
+      'cache',
+    ])
   })
 
   it('changes only magicLink while temporary enable is active', async () => {
@@ -225,6 +264,8 @@ describe('portal auth helper temporary magic-link restoration', () => {
     ['enable-magic-link-temporarily', 'enable-magic-link-temporarily'],
     ['enable-magic-link-temporarily', 'disable'],
     ['disable', 'enable-magic-link-temporarily'],
+    ['enable-social-only-temporarily', 'enable-magic-link-temporarily'],
+    ['enable-magic-link-temporarily', 'enable-social-only-temporarily'],
   ])('keeps the first snapshot across %s then %s', async (first, second) => {
     await run(first)
     const snapshot = fixture.state.snapshot
@@ -267,7 +308,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
     expect(console.error).toHaveBeenCalledWith('snapshot-write')
     expectOriginal()
     expect(fixture.state.calls).not.toContain('update')
-    expect(fixture.cacheDel).not.toHaveBeenCalled()
+    expect(fixture.del).not.toHaveBeenCalled()
   })
 
   it.each(['update-before', 'update-after', 'cache'] as const)(
@@ -275,7 +316,11 @@ describe('portal auth helper temporary magic-link restoration', () => {
     async (stage) => {
       fixture.state.fault = stage
       await expect(run('enable-magic-link-temporarily')).rejects.toThrow('CLI exit 1')
-      expect(console.error).toHaveBeenCalledWith(stage)
+      expect(console.error).toHaveBeenCalledWith(
+        stage === 'cache'
+          ? 'Portal auth cache invalidation failed; retry the fixture action'
+          : stage
+      )
       expect(saved()).toEqual(original)
       if (stage === 'update-before') expectOriginal()
       else expect(JSON.parse(fixture.state.row.auth_config!).oauth.magicLink).toBe(true)
@@ -317,7 +362,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
       )
       expect(fixture.state.snapshot).toBe(snapshot)
       expect(fixture.state.calls).not.toContain('snapshot-remove')
-      expect(fixture.cacheDel).toHaveBeenCalledTimes(1)
+      expect(fixture.del).toHaveBeenCalledTimes(1)
       expect(console.log).toHaveBeenCalledTimes(1)
       expect(console.error).toHaveBeenLastCalledWith(
         'Portal auth restoration readback mismatch; snapshot retained'
@@ -342,7 +387,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
     )
     expect(fixture.state.snapshot).toBe(snapshot)
     expect(fixture.state.calls).not.toContain('snapshot-remove')
-    expect(fixture.cacheDel).toHaveBeenCalledTimes(1)
+    expect(fixture.del).toHaveBeenCalledTimes(1)
     expect(console.log).toHaveBeenCalledTimes(1)
     await run('restore')
     expectOriginal()
@@ -358,7 +403,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
     )
     expect(fixture.state.snapshot).toBe(snapshot)
     expect(fixture.state.calls).not.toContain('snapshot-remove')
-    expect(fixture.cacheDel).toHaveBeenCalledTimes(1)
+    expect(fixture.del).toHaveBeenCalledTimes(1)
     expect(console.log).toHaveBeenCalledTimes(1)
     expect(console.error).toHaveBeenCalledWith(
       'Portal auth restoration readback failed; snapshot retained'
@@ -383,6 +428,6 @@ describe('portal auth helper temporary magic-link restoration', () => {
     expectOriginal()
     await run('restore')
     expectOriginal()
-    expect(fixture.cacheDel).toHaveBeenCalledTimes(3)
+    expect(fixture.del).toHaveBeenCalledTimes(3)
   })
 })

@@ -50,15 +50,18 @@
  * Idempotent, and every other stored auth setting is preserved.
  * `enable-magic-link` is permanent fixture setup; `enable-magic-link-temporarily`
  * takes the same snapshot as `disable` and must be paired with `restore`.
+ * `enable-social-only-temporarily` enables the two dummy social providers while turning
+ * off password and magic-link entry for viewport-fit acceptance. It uses the
+ * same verified snapshot restoration; it never changes production defaults.
  *
- * Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily>
+ * Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily|enable-social-only-temporarily>
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
 import { DEFAULT_AUTH_CONFIG } from '@/lib/server/domains/settings/settings.types'
-import { cacheDel, getRedis, CACHE_KEYS } from '@/lib/server/redis'
+import { getRedis, CACHE_KEYS } from '@/lib/server/redis'
 
 /** Where temporary actions park the original columns for `restore` to put back. */
 const SNAPSHOT_PATH = resolve(
@@ -76,10 +79,11 @@ if (
   arg !== 'disable' &&
   arg !== 'restore' &&
   arg !== 'enable-magic-link' &&
-  arg !== 'enable-magic-link-temporarily'
+  arg !== 'enable-magic-link-temporarily' &&
+  arg !== 'enable-social-only-temporarily'
 ) {
   console.error(
-    'Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily>'
+    'Usage: bun set-portal-auth-methods.ts <disable|restore|enable-magic-link|enable-magic-link-temporarily|enable-social-only-temporarily>'
   )
   process.exit(1)
 }
@@ -90,6 +94,7 @@ if (!connectionString) {
   process.exit(1)
 }
 const sql = postgres(connectionString)
+let cacheOpened = false
 
 /** Parse a settings JSON *text* column; {} on null/garbage. */
 function parseConfigColumn(raw: unknown): Record<string, unknown> {
@@ -109,7 +114,11 @@ try {
   const id = rows[0].id
   let restorationReadback: 'matched' | 'no-snapshot' | undefined
 
-  if (arg === 'disable' || arg === 'enable-magic-link-temporarily') {
+  if (
+    arg === 'disable' ||
+    arg === 'enable-magic-link-temporarily' ||
+    arg === 'enable-social-only-temporarily'
+  ) {
     // Snapshot the LIVE columns before touching them. `wx` fails when a
     // snapshot already exists, and that is the point: on a Playwright retry the
     // first attempt's snapshot holds the true pre-change value, and this
@@ -137,6 +146,25 @@ try {
       : { ...DEFAULT_AUTH_CONFIG, oauth: { ...DEFAULT_AUTH_CONFIG.oauth } }
     const existing = (authConfig.oauth as Record<string, unknown>) ?? {}
     authConfig.oauth = { ...existing, magicLink: true }
+    await sql`UPDATE settings
+      SET auth_config = ${JSON.stringify(authConfig)},
+          auth_config_version = auth_config_version + 1
+      WHERE id = ${id}`
+  } else if (arg === 'enable-social-only-temporarily') {
+    // Exercise the normal two-provider entry without hiding browser controls.
+    // The separate guarded helper supplies dummy credentials; admission and
+    // every other setting retain their exact snapshot for restoration.
+    const authConfig: Record<string, unknown> = rows[0].auth_config
+      ? parseConfigColumn(rows[0].auth_config)
+      : { ...DEFAULT_AUTH_CONFIG, oauth: { ...DEFAULT_AUTH_CONFIG.oauth } }
+    const existing = (authConfig.oauth as Record<string, unknown>) ?? {}
+    authConfig.oauth = {
+      ...existing,
+      google: true,
+      github: true,
+      password: false,
+      magicLink: false,
+    }
     await sql`UPDATE settings
       SET auth_config = ${JSON.stringify(authConfig)},
           auth_config_version = auth_config_version + 1
@@ -221,7 +249,15 @@ try {
   // for an hour and only the app's own write paths invalidate it, so a raw-SQL
   // patch stays invisible to the running server until the key is dropped. Same
   // primitive invalidateSettingsCache() uses.
-  await cacheDel(CACHE_KEYS.TENANT_SETTINGS)
+  // A suppressed DEL failure could keep the app on a stale settings snapshot,
+  // even though the database version advanced. Fail this fixture action and
+  // retain the no-snapshot restore path as a safe cache-invalidation retry.
+  cacheOpened = true
+  try {
+    await getRedis().del(CACHE_KEYS.TENANT_SETTINGS)
+  } catch {
+    throw new Error('Portal auth cache invalidation failed; retry the fixture action')
+  }
 
   // Report only the action and restoration outcome, never stored configuration.
   console.log(JSON.stringify({ action: arg, restorationReadback }))
@@ -230,5 +266,6 @@ try {
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err))
   await sql.end()
+  if (cacheOpened) await getRedis().quit()
   process.exit(1)
 }
