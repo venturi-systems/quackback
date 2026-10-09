@@ -143,7 +143,17 @@ async function ensurePost(
 ): Promise<string> {
   const existing = await sql`
     SELECT id FROM posts WHERE board_id = ${boardId} AND title = ${POST_TITLE} AND deleted_at IS NULL LIMIT 1`
-  if (existing.length > 0) return fromUuid('post', existing[0].id as string)
+  if (existing.length > 0) {
+    const uuid = existing[0].id as string
+    // Re-pin the status on every run. An earlier run may have created this
+    // post with a status a test has since soft-deleted (the failure
+    // liveStatusId describes), and a post on a deleted status is shown to no
+    // viewer. IS DISTINCT FROM keeps the usual rerun a no-op.
+    await sql`
+      UPDATE posts SET status_id = ${statusId}
+      WHERE id = ${uuid} AND status_id IS DISTINCT FROM ${statusId}`
+    return fromUuid('post', uuid)
+  }
   const typeId = generateId('post')
   const uuid = toUuid(typeId)
   await sql`

@@ -5,7 +5,7 @@
  * They should ONLY be used in test environments.
  */
 
-import { execFileSync, execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -16,7 +16,7 @@ const __dirname = dirname(__filename)
  * Wall-clock ceiling for every synchronous helper script this file and
  * `access-helpers.ts` shell out to.
  *
- * `execSync`/`execFileSync` block the Node event loop, so while one is running
+ * `execFileSync` blocks the Node event loop, so while one is running
  * Playwright's own `timeout` timer cannot fire. Without a ceiling here a script
  * that never returns is bounded only by the 90 minute GitHub job cap, and the
  * runner is killed before any reporter writes `e2e-results.json` -- so the
@@ -61,7 +61,8 @@ export function getMagicLinkToken(email: string): string {
   const scriptPath = resolve(__dirname, '../scripts/get-magic-link-token.ts')
 
   try {
-    const result = execSync(`dotenv -e ../../.env -- bun "${scriptPath}" "${email}"`, {
+    // No shell: the email reaches the script as one literal argument.
+    const result = execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, email], {
       encoding: 'utf-8',
       cwd: resolve(__dirname, '../..'), // apps/web directory
       timeout: E2E_SCRIPT_TIMEOUT_MS,
@@ -83,7 +84,7 @@ export function getOtpCode(email: string): string {
   const scriptPath = resolve(__dirname, '../scripts/get-otp-code.ts')
 
   try {
-    const result = execSync(`dotenv -e ../../.env -- bun "${scriptPath}" "${email}"`, {
+    const result = execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, email], {
       encoding: 'utf-8',
       cwd: resolve(__dirname, '../..'), // apps/web directory
       timeout: E2E_SCRIPT_TIMEOUT_MS,
@@ -109,7 +110,7 @@ export function ensureTestUserHasRole(email: string, role: string = 'admin'): vo
   const scriptPath = resolve(__dirname, '../scripts/ensure-role.ts')
 
   try {
-    execSync(`dotenv -e ../../.env -- bun "${scriptPath}" "${email}" "${role}"`, {
+    execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, email, role], {
       encoding: 'utf-8',
       cwd: resolve(__dirname, '../..'), // apps/web directory
       timeout: E2E_SCRIPT_TIMEOUT_MS,
@@ -133,12 +134,16 @@ export function getMentionTarget(excludeEmail: string = 'demo@example.com'): {
   const scriptPath = resolve(__dirname, '../scripts/get-mention-target.ts')
 
   try {
-    const result = execSync(`dotenv -e ../../.env -- bun "${scriptPath}" "${excludeEmail}"`, {
-      encoding: 'utf-8',
-      cwd: resolve(__dirname, '../..'), // apps/web directory
-      timeout: E2E_SCRIPT_TIMEOUT_MS,
-      killSignal: E2E_SCRIPT_KILL_SIGNAL,
-    })
+    const result = execFileSync(
+      'dotenv',
+      ['-e', '../../.env', '--', 'bun', scriptPath, excludeEmail],
+      {
+        encoding: 'utf-8',
+        cwd: resolve(__dirname, '../..'), // apps/web directory
+        timeout: E2E_SCRIPT_TIMEOUT_MS,
+        killSignal: E2E_SCRIPT_KILL_SIGNAL,
+      }
+    )
     return JSON.parse(result.trim()) as { principalId: string; displayName: string }
   } catch (error) {
     throw new Error(`Failed to get mention target: ${scriptFailure(error)}`, { cause: error })
