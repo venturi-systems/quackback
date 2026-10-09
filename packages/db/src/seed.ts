@@ -10,7 +10,7 @@ import { config } from 'dotenv'
 config({ path: '../../.env', quiet: true })
 
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { generateId } from '@quackback/ids'
 import type {
@@ -285,12 +285,22 @@ function pickStatus(statusMap: Map<string, StatusId>): { slug: string; id: Statu
   return { slug: weighted[0].slug, id: weighted[0].id }
 }
 
-function generateVoteCount(): number {
-  const roll = Math.random()
-  if (roll < 0.5) return Math.floor(Math.random() * 10) // 0-9
-  if (roll < 0.8) return 10 + Math.floor(Math.random() * 40) // 10-49
-  if (roll < 0.95) return 50 + Math.floor(Math.random() * 100) // 50-149
-  return 150 + Math.floor(Math.random() * 200) // 150-349
+/**
+ * Draw a post's vote total, from 0 through `maxVoters`.
+ *
+ * `posts.vote_count` is a denormalized count of the post's rows in `votes`,
+ * and a principal can vote on a post once (unique on post_id + principal_id).
+ * The seed inserts one vote row per counted vote, so the total is bounded by
+ * the principals that exist. Totals of up to 349 used to be drawn against
+ * about 31 principals: the inserted rows stopped at the principal count while
+ * the post kept the larger figure, and anything that recounts from `votes`
+ * (merging posts recalculates the canonical post's count) dropped it.
+ *
+ * Squaring the roll keeps the skew of a real board: about half the posts get
+ * a quarter of the possible votes or fewer, and a few get nearly all of them.
+ */
+function generateVoteCount(maxVoters: number): number {
+  return Math.floor(Math.random() ** 2 * (maxVoters + 1))
 }
 
 async function seed() {
@@ -516,7 +526,7 @@ async function seed() {
       const boardId = pick(boardIds)
       const author = pick(principals)
       const status = pickStatus(statusMap)
-      const voteCount = generateVoteCount()
+      const voteCount = generateVoteCount(principals.length)
       const title =
         postTitles[i % postTitles.length] +
         (i >= postTitles.length ? ` (${Math.floor(i / postTitles.length) + 1})` : '')
@@ -597,12 +607,14 @@ async function seed() {
     console.log('Creating votes...')
     const voteInserts: (typeof votes.$inferInsert)[] = []
     for (const post of postRecords) {
-      const numVotes = Math.min(post.voteCount, principals.length) // Cap at number of principals
+      // One row per counted vote, each from a different principal, so the
+      // rows match the post's stored voteCount. generateVoteCount drew it no
+      // higher than principals.length.
       const shuffledPrincipals = [...principals].sort(() => Math.random() - 0.5)
-      for (let v = 0; v < numVotes; v++) {
+      for (let v = 0; v < post.voteCount; v++) {
         voteInserts.push({
           postId: post.id,
-          principalId: shuffledPrincipals[v % shuffledPrincipals.length].id,
+          principalId: shuffledPrincipals[v].id,
           createdAt: randomDate(60),
         })
       }
@@ -660,6 +672,22 @@ async function seed() {
     for (let i = 0; i < commentInserts.length; i += BATCH_SIZE) {
       await db.insert(comments).values(commentInserts.slice(i, i + BATCH_SIZE))
     }
+    // posts.comment_count is denormalized: the comment service adds one for
+    // each published, non-private comment (comment.service.ts), and the post
+    // list shows that number. These inserts bypass the service, so set the
+    // count from the rows just written, by the same rule. Without this, every
+    // seeded post listed no comments while its detail view showed up to five.
+    // Only seeded posts exist here: this block runs only when the table was
+    // empty.
+    await db.update(posts).set({
+      commentCount: sql`(
+        SELECT COUNT(*)::int FROM ${comments}
+        WHERE ${comments.postId} = ${posts.id}
+          AND ${comments.deletedAt} IS NULL
+          AND ${comments.isPrivate} = false
+          AND ${comments.moderationState} = 'published'
+      )`,
+    })
     console.log(`Created ${commentInserts.length} comments`)
 
     // Create changelog entries

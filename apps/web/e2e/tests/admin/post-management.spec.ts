@@ -637,7 +637,7 @@ test.describe('Admin Post Management - Status Transitions', () => {
     await page.keyboard.press('Escape')
   })
 
-  test('status change shows a success toast', async ({ page }) => {
+  test('status change confirms the selected status in the badge', async ({ page }) => {
     const modal = await openFirstPostModal(page)
     if (!modal) {
       test.skip()
@@ -654,54 +654,43 @@ test.describe('Admin Post Management - Status Transitions', () => {
       return
     }
 
-    const initialStatusText = (await statusBadgeButton.textContent()) ?? ''
+    const initialStatusText = ((await statusBadgeButton.textContent()) ?? '').trim()
     await statusBadgeButton.click()
 
     const popover = page.locator('[data-radix-popper-content-wrapper]')
     await expect(popover).toBeVisible({ timeout: 5000 })
 
     const statusOptions = popover.locator('button')
-    let changed = false
+    let selectedStatusText = ''
     for (let i = 0; i < (await statusOptions.count()); i++) {
-      const optText = (await statusOptions.nth(i).textContent()) ?? ''
-      if (optText.trim() !== initialStatusText.trim()) {
+      const optText = ((await statusOptions.nth(i).textContent()) ?? '').trim()
+      if (optText !== initialStatusText) {
         await statusOptions.nth(i).click()
-        changed = true
+        selectedStatusText = optText
         break
       }
     }
 
-    if (!changed) {
+    if (!selectedStatusText) {
       await page.keyboard.press('Escape')
       test.skip()
       return
     }
 
-    // Confirm the change landed, by the toast OR by the badge -- whichever
-    // shows up first.
+    // The admin post modal confirms a status change through the badge alone.
+    // Neither the modal's handler (handleStatusChange in
+    // components/admin/feedback/post-modal.tsx) nor the mutation it awaits
+    // (useChangePostStatusId in lib/client/mutations/posts.ts) raises a toast.
+    // This case used to be named for a success toast and passed on ANY toast
+    // on the page, or on the badge merely leaving its old value, so it could
+    // not catch the confirmation going missing. It now asserts the confirmation
+    // the product gives: the badge names the exact status that was picked.
     //
-    // This used to branch on a single synchronous `toast.count()` sampled right
-    // after the click. Sonner had not mounted yet, so the sample was always 0
-    // and every run took the else branch, which then read the badge before
-    // React had re-rendered it. The status change itself was fine: across the
-    // three attempts of one CI job the initial status read "Under Review",
-    // then "Open", then "Under Review" -- attempt N+1 started from what
-    // attempt N had successfully written. Only the read was too early, and
-    // because the sample was deterministic the case failed all three times
-    // rather than flaking.
-    //
-    // Polling for either signal keeps the assertion real: it fails only if the
-    // status change produces NEITHER a toast nor an updated badge.
-    const toast = page.locator('[data-sonner-toast]')
-    await expect
-      .poll(
-        async () => {
-          if ((await toast.count()) > 0) return true
-          return ((await statusBadgeButton.textContent()) ?? '').trim() !== initialStatusText.trim()
-        },
-        { timeout: 10000 }
-      )
-      .toBe(true)
+    // toHaveText retries until React has re-rendered the badge. A one-shot read
+    // straight after the click raced that render and failed every CI attempt
+    // even though the status change itself had been saved. If the modal ever
+    // gains a success toast, assert it here alongside the badge.
+    await expect(statusBadgeButton).toHaveText(selectedStatusText, { timeout: 10000 })
 
     await page.keyboard.press('Escape')
   })
@@ -770,33 +759,51 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
     await page.keyboard.press('Escape')
   })
 
-  test('detail panel shows comment count', async ({ page }) => {
+  test('detail panel shows the comment count from the list card', async ({ page }) => {
     const postCards = page.locator('[data-post-id]')
     if ((await postCards.count()) === 0) {
       test.skip()
       return
     }
 
-    // Find a post that has a visible comment count in the list
-    for (let i = 0; i < Math.min(await postCards.count(), 5); i++) {
-      const card = postCards.nth(i)
-      // Comment icon + count is rendered via ChatBubbleLeftIcon + commentCount text
-      const commentText = card.locator('span').filter({ hasText: /^\d+$/ })
-      if ((await commentText.count()) > 0) {
-        break
-      }
+    // A list card shows its comment count as one span holding a chat-bubble
+    // icon and the number, and only when the count is above zero
+    // (components/public/post-card.tsx). The icon is what tells it apart from
+    // the vote count (data-testid="vote-count"), the card's other digit-only
+    // span. The old filter matched that vote count on every card, and the loop
+    // then opened the first card whatever it found. `has:` is rooted at the
+    // page because Playwright re-applies it relative to each candidate span.
+    const cardCommentCount = page.locator('span').filter({
+      has: page.locator('svg'),
+      hasText: /^\d+$/,
+    })
+    const cardWithComments = postCards.filter({ has: cardCommentCount }).first()
+    if ((await cardWithComments.count()) === 0) {
+      // No loaded post has a comment, so there is no count to compare; skip
+      test.skip()
+      return
     }
+    const listCount = Number(
+      ((await cardWithComments.locator(cardCommentCount).textContent()) ?? '').trim()
+    )
+    expect(listCount).toBeGreaterThan(0)
 
-    // Use first card regardless — the Comments tab in modal always exists
-    const firstCard = postCards.first()
-    await firstCard.click()
+    await cardWithComments.click()
     const modal = page.getByRole('dialog')
     await expect(modal).toBeVisible({ timeout: 10000 })
     await page.waitForLoadState('networkidle')
 
-    // The modal has a "Comments" tab that is always visible
+    // The Comments tab is open by default and heads the thread with the count,
+    // "1 Comment" or "3 Comments" (CommentsSection in
+    // components/public/post-detail/comments-section.tsx). That heading counts
+    // every live comment the panel loads. The list count leaves out internal
+    // notes and comments still held for moderation, so the two agree on any
+    // post without those, which includes every seeded post.
     const commentsTab = modal.getByRole('button', { name: /^comments$/i })
     await expect(commentsTab).toBeVisible()
+    await expect(
+      modal.getByRole('heading', { name: new RegExp(`^${listCount} comments?$`, 'i') })
+    ).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
