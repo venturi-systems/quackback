@@ -256,14 +256,33 @@ const changelogPresets = [
 const statusSlugs = ['open', 'under_review', 'planned', 'in_progress', 'complete', 'closed']
 const statusWeights = [30, 20, 20, 15, 10, 5] // Weighted distribution
 
-function weightedStatus(): string {
-  const total = statusWeights.reduce((a, b) => a + b, 0)
-  let random = Math.random() * total
-  for (let i = 0; i < statusSlugs.length; i++) {
-    random -= statusWeights[i]
-    if (random <= 0) return statusSlugs[i]
+/**
+ * Pick a seeded post's status by weight, from the statuses that exist in this
+ * database. A workspace whose statuses were edited before seeding may lack a
+ * weighted slug: its weight is dropped rather than handed to a row that is not
+ * there, and when none of the weighted slugs exist any existing status is
+ * used. The slug and the id always name the same row, so the roadmap step
+ * files each post under the status it was actually given. Before this, a
+ * missing slug left `statusId` null while the roadmap step still treated the
+ * post as planned, in progress or complete.
+ */
+function pickStatus(statusMap: Map<string, StatusId>): { slug: string; id: StatusId } {
+  const weighted: Array<{ slug: string; weight: number; id: StatusId }> = []
+  statusSlugs.forEach((slug, i) => {
+    const id = statusMap.get(slug)
+    if (id) weighted.push({ slug, weight: statusWeights[i], id })
+  })
+  if (weighted.length === 0) {
+    const [slug, id] = pick(Array.from(statusMap.entries()))
+    return { slug, id }
   }
-  return 'open'
+  const total = weighted.reduce((sum, s) => sum + s.weight, 0)
+  let random = Math.random() * total
+  for (const s of weighted) {
+    random -= s.weight
+    if (random <= 0) return { slug: s.slug, id: s.id }
+  }
+  return { slug: weighted[0].slug, id: weighted[0].id }
 }
 
 function generateVoteCount(): number {
@@ -482,6 +501,8 @@ async function seed() {
   const existingPostCount = await db.select({ id: posts.id }).from(posts).limit(1)
   if (existingPostCount.length > 0) {
     console.log('Posts already exist, skipping post creation')
+  } else if (statusMap.size === 0) {
+    throw new Error('No post statuses exist; cannot seed posts')
   } else {
     // Create posts in batches
     console.log(`Creating ${CONFIG.posts} posts...`)
@@ -494,8 +515,7 @@ async function seed() {
       const postId = generateId('post')
       const boardId = pick(boardIds)
       const author = pick(principals)
-      const statusSlug = weightedStatus()
-      const statusId = statusMap.get(statusSlug) ?? null
+      const status = pickStatus(statusMap)
       const voteCount = generateVoteCount()
       const title =
         postTitles[i % postTitles.length] +
@@ -509,13 +529,13 @@ async function seed() {
         content,
         contentJson: textToTipTapJson(content),
         principalId: author.id,
-        statusId,
+        statusId: status.id,
         voteCount,
         createdAt: randomDate(180),
         updatedAt: new Date(),
       })
 
-      postRecords.push({ id: postId, voteCount, statusSlug })
+      postRecords.push({ id: postId, voteCount, statusSlug: status.slug })
 
       // Add 1-2 tags
       const numTags = 1 + Math.floor(Math.random() * 2)

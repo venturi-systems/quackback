@@ -839,16 +839,22 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
       return
     }
 
-    // Prefer a card that shows a description preview (posts with content)
-    let targetCard = postCards.first()
+    // Pick a card that shows a description preview. PostCard renders that
+    // paragraph only when the post has content, so the modal it opens must
+    // show a body; every seed post carries one.
+    let targetCard: import('@playwright/test').Locator | null = null
     for (let i = 0; i < Math.min(await postCards.count(), 5); i++) {
       const card = postCards.nth(i)
-      // Description line: <p class="text-sm text-muted-foreground/60 line-clamp-1 mt-1">
+      // Description line: <p class="text-sm text-muted-foreground mt-1 break-words">
       const descLine = card.locator('p.text-sm')
       if ((await descLine.count()) > 0) {
         targetCard = card
         break
       }
+    }
+    if (!targetCard) {
+      test.skip(true, 'None of the first five posts shows a body preview')
+      return
     }
 
     await targetCard.click()
@@ -856,15 +862,12 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
     await expect(modal).toBeVisible({ timeout: 10000 })
     await page.waitForLoadState('networkidle')
 
-    // The TipTap editor is always present even if empty; for posts with content it has text
+    // The TipTap editor is mounted even for an empty body, so a Locator for
+    // it proves nothing (a Locator is always truthy). The body is shown only
+    // if the editor holds non-whitespace text; the placeholder is CSS, not text.
     const editor = postBodyEditor(modal)
     await expect(editor).toBeVisible({ timeout: 5000 })
-
-    // The editor content should not be completely empty (posts from seed data have bodies)
-    // We check that the editor exists and is rendered; content presence depends on seed data
-    // For seed posts with content the editor renders at least one <p> tag
-    // Accept either content present or editor visible — this test confirms the editor renders
-    expect(editor).toBeTruthy()
+    await expect(editor).toHaveText(/\S/, { timeout: 5000 })
 
     await page.keyboard.press('Escape')
   })
@@ -1016,8 +1019,11 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
 
     // Restored list should have at least as many posts as the filtered list
     expect(restoredCount).toBeGreaterThanOrEqual(filteredCount)
-    // And should be back to (or near) the baseline
-    expect(restoredCount).toBeGreaterThanOrEqual(Math.min(baselineCount, restoredCount))
+    // And clearing the search must bring the whole baseline back. The seed
+    // creates 500 posts and the inbox shows one 20-post page, so a post another
+    // worker deletes between the two reads is replaced by the next one; a
+    // shorter list means the filter stuck.
+    expect(restoredCount).toBeGreaterThanOrEqual(baselineCount)
   })
 })
 
