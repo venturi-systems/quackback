@@ -10,6 +10,11 @@ const fixture = vi.hoisted(() => {
     fault: undefined as Fault,
     readbackFault: undefined as ReadbackFault | undefined,
     calls: [] as string[],
+    // The advisory lock on the CLI's reserved connection.
+    locked: false,
+    lockEvents: [] as string[],
+    // Runs once, after the next unlock: another worker acting while this one waits.
+    onUnlock: undefined as (() => void) | undefined,
   }
   function fail(stage: Fault) {
     if (state.fault === stage) {
@@ -22,9 +27,36 @@ const fixture = vi.hoisted(() => {
       throw new Error('Unexpected fixture filesystem path')
     }
   }
+  function requireLock(what: string) {
+    if (!state.locked) throw new Error(what + ' without the advisory lock')
+  }
+  const lockSql = Object.assign(
+    vi.fn(async (parts: TemplateStringsArray, ...values: unknown[]) => {
+      const statement = parts.join('?').replace(/\s+/g, ' ').trim()
+      if (values[0] !== 'e2e:portal-auth-snapshot') throw new Error('Unexpected lock name')
+      if (statement === 'SELECT pg_advisory_lock(hashtext(?))') {
+        if (state.locked) throw new Error('Advisory lock taken twice')
+        state.locked = true
+        state.lockEvents.push('lock')
+        return [{}]
+      }
+      if (statement === 'SELECT pg_advisory_unlock(hashtext(?))') {
+        requireLock('Unlock')
+        state.locked = false
+        state.lockEvents.push('unlock')
+        const other = state.onUnlock
+        state.onUnlock = undefined
+        other?.()
+        return [{}]
+      }
+      throw new Error('Unexpected lock query: ' + statement)
+    }),
+    { release: vi.fn() }
+  )
   const sql = Object.assign(
     vi.fn(async (parts: TemplateStringsArray, ...values: unknown[]) => {
       const statement = parts.join('?').replace(/\s+/g, ' ').trim()
+      requireLock('Settings query')
       if (statement.startsWith('SELECT id, auth_config, portal_config FROM settings')) {
         state.calls.push('select')
         return [{ ...state.row }]
@@ -59,25 +91,40 @@ const fixture = vi.hoisted(() => {
       fail('update-after')
       return []
     }),
-    { end: vi.fn(async () => {}) }
+    {
+      // Ending the pool closes the reserved connection, which drops its lock.
+      end: vi.fn(async () => {
+        state.locked = false
+      }),
+      reserve: vi.fn(async () => lockSql),
+    }
   )
   return {
     state,
     sql,
+    lockSql,
     connect: vi.fn(() => sql),
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn((path: unknown, value: string, options: { flag: string }) => {
       snapshotPath(path)
+      requireLock('Snapshot write')
       state.calls.push('snapshot-write')
-      if (options.flag !== 'wx') throw new Error('Snapshot must be exclusive')
+      // A new snapshot is created exclusively. Only a takeover of an existing
+      // one, left by a process that exited, replaces the file.
+      if (options.flag === 'w') {
+        if (state.snapshot === null) throw new Error('Snapshot must be exclusive')
+      } else if (options.flag !== 'wx') {
+        throw new Error('Snapshot must be exclusive')
+      }
       fail('snapshot-write')
-      if (state.snapshot !== null) {
+      if (options.flag === 'wx' && state.snapshot !== null) {
         throw Object.assign(new Error('exists'), { code: 'EEXIST' })
       }
       state.snapshot = value
     }),
     readFileSync: vi.fn((path: unknown) => {
       snapshotPath(path)
+      requireLock('Snapshot read')
       state.calls.push('snapshot-read')
       if (state.snapshot === null) {
         throw Object.assign(new Error('missing'), { code: 'ENOENT' })
@@ -86,6 +133,7 @@ const fixture = vi.hoisted(() => {
     }),
     rmSync: vi.fn((path: unknown) => {
       snapshotPath(path)
+      requireLock('Snapshot removal')
       state.calls.push('snapshot-remove')
       state.snapshot = null
     }),
@@ -131,7 +179,12 @@ beforeEach(() => {
   fixture.state.fault = undefined
   fixture.state.readbackFault = undefined
   fixture.state.calls = []
+  fixture.state.locked = false
+  fixture.state.lockEvents = []
+  fixture.state.onUnlock = undefined
   vi.stubEnv('DATABASE_URL', 'postgres://localhost:5432/quackback_test')
+  // Unset: the CLI then owns its changes as this test process.
+  vi.stubEnv('E2E_PORTAL_AUTH_OWNER_PID', '')
   vi.spyOn(console, 'log').mockImplementation(() => {})
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(process, 'exit').mockImplementation((code) => {
@@ -156,11 +209,21 @@ async function run(action: string) {
   } finally {
     expect(fixture.connect).toHaveBeenCalledTimes(connections + 1)
     expect(fixture.connect).toHaveBeenLastCalledWith('postgres://localhost:5432/quackback_test')
+    // Every run, failed or not, leaves the advisory lock free for the next one.
+    expect(fixture.state.locked).toBe(false)
   }
 }
 
 function saved() {
   return fixture.state.snapshot === null ? null : JSON.parse(fixture.state.snapshot)
+}
+
+/** A snapshot of `columns` owned by `owner` (by default this test process). */
+function owned(
+  columns: { authConfig: string | null; portalConfig: string | null },
+  owner = process.pid
+) {
+  return { ...columns, owner }
 }
 
 function expectOriginal() {
@@ -192,10 +255,9 @@ describe('portal auth helper temporary magic-link restoration', () => {
     await run('restore')
     expect(fixture.state.row.auth_config).toBe(initial.authConfig)
     expect(fixture.state.row.portal_config).toBe(initial.portalConfig)
-    expect(snapshot).toEqual({
-      authConfig: initial.authConfig,
-      portalConfig: initial.portalConfig,
-    })
+    expect(snapshot).toEqual(
+      owned({ authConfig: initial.authConfig, portalConfig: initial.portalConfig })
+    )
     expect(fixture.state.snapshot).toBeNull()
     expect(fixture.state.calls.slice(-4)).toEqual([
       'update',
@@ -271,7 +333,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
     const snapshot = fixture.state.snapshot
     await run(second)
     expect(fixture.state.snapshot).toBe(snapshot)
-    expect(saved()).toEqual(original)
+    expect(saved()).toEqual(owned(original))
     await run('restore')
     expectOriginal()
     expect(fixture.state.snapshot).toBeNull()
@@ -321,7 +383,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
           ? 'Portal auth cache invalidation failed; retry the fixture action'
           : stage
       )
-      expect(saved()).toEqual(original)
+      expect(saved()).toEqual(owned(original))
       if (stage === 'update-before') expectOriginal()
       else expect(JSON.parse(fixture.state.row.auth_config!).oauth.magicLink).toBe(true)
       await run('restore')
@@ -336,7 +398,7 @@ describe('portal auth helper temporary magic-link restoration', () => {
       await run('enable-magic-link-temporarily')
       fixture.state.fault = stage
       await expect(run('restore')).rejects.toThrow('CLI exit 1')
-      expect(saved()).toEqual(original)
+      expect(saved()).toEqual(owned(original))
       await run('restore')
       expectOriginal()
       expect(fixture.state.snapshot).toBeNull()
@@ -429,5 +491,133 @@ describe('portal auth helper temporary magic-link restoration', () => {
     await run('restore')
     expectOriginal()
     expect(fixture.del).toHaveBeenCalledTimes(3)
+  })
+})
+
+// Parallel Playwright workers share the one settings row. Each worker passes its
+// PID (utils/access-helpers.ts), and the snapshot names the worker that owns the
+// temporary change, so the whole snapshot, change and restore lifecycle belongs
+// to one worker at a time.
+describe('portal auth helper ownership across parallel workers', () => {
+  const WORKER_A = 41001
+  const WORKER_B = 41002
+  let running: Set<number>
+
+  beforeEach(() => {
+    running = new Set([WORKER_A, WORKER_B])
+    vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+      if (signal !== 0) throw new Error('Only liveness probes are expected')
+      if (running.has(pid)) return true
+      throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' })
+    }) as typeof process.kill)
+  })
+
+  async function runAs(worker: number, action: string) {
+    vi.stubEnv('E2E_PORTAL_AUTH_OWNER_PID', String(worker))
+    await run(action)
+  }
+
+  it('records the worker that owns a temporary change', async () => {
+    await runAs(WORKER_A, 'disable')
+    expect(saved()).toEqual(owned(original, WORKER_A))
+    expect(fixture.state.lockEvents).toEqual(['lock', 'unlock'])
+    expect(fixture.lockSql.release).toHaveBeenCalledTimes(1)
+  })
+
+  it("leaves another running worker's change in place on restore", async () => {
+    await runAs(WORKER_A, 'disable')
+    const disabled = fixture.state.row.auth_config
+    const snapshot = fixture.state.snapshot
+
+    await runAs(WORKER_B, 'restore')
+    expect(console.log).toHaveBeenLastCalledWith(
+      JSON.stringify({ action: 'restore', restorationReadback: 'owned-by-another-process' })
+    )
+    expect(fixture.state.row.auth_config).toBe(disabled)
+    expect(fixture.state.snapshot).toBe(snapshot)
+
+    await runAs(WORKER_A, 'restore')
+    expectOriginal()
+    expect(fixture.state.snapshot).toBeNull()
+  })
+
+  it("waits for another running worker's restore before its own temporary change", async () => {
+    await runAs(WORKER_A, 'disable')
+    const updatesBefore = fixture.state.calls.filter((call) => call === 'update').length
+    // Worker A's test ends and its restore lands while worker B waits.
+    fixture.state.onUnlock = () => {
+      expect(fixture.state.calls.filter((call) => call === 'update')).toHaveLength(updatesBefore)
+      fixture.state.row.auth_config = original.authConfig
+      fixture.state.row.portal_config = original.portalConfig
+      fixture.state.snapshot = null
+    }
+
+    await runAs(WORKER_B, 'enable-magic-link-temporarily')
+    // B released the lock to wait, then took it again once A's change was gone.
+    expect(fixture.state.lockEvents.slice(-4)).toEqual(['lock', 'unlock', 'lock', 'unlock'])
+    // B read the row only after A restored it, so its snapshot holds the original.
+    expect(saved()).toEqual(owned(original, WORKER_B))
+    expect(JSON.parse(fixture.state.row.auth_config!).oauth.magicLink).toBe(true)
+
+    await runAs(WORKER_B, 'restore')
+    expectOriginal()
+  })
+
+  it('fails and names the owner when that worker never restores its change', async () => {
+    await runAs(WORKER_A, 'disable')
+    const disabled = fixture.state.row.auth_config
+    const snapshot = fixture.state.snapshot
+    const updates = fixture.state.calls.filter((call) => call === 'update').length
+    // Each clock read moves past the wait limit.
+    let now = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => (now += 46_000))
+
+    await expect(runAs(WORKER_B, 'disable')).rejects.toThrow(
+      `owned by process ${WORKER_A}, which did not restore it within 45s`
+    )
+    expect(fixture.state.row.auth_config).toBe(disabled)
+    expect(fixture.state.snapshot).toBe(snapshot)
+    expect(fixture.state.calls.filter((call) => call === 'update')).toHaveLength(updates)
+  })
+
+  it('takes over a change whose owner exited and keeps its original value', async () => {
+    await runAs(WORKER_A, 'disable')
+    running.delete(WORKER_A)
+
+    await runAs(WORKER_B, 'enable-magic-link-temporarily')
+    expect(saved()).toEqual(owned(original, WORKER_B))
+
+    // The change is now worker B's: a third running worker's restore leaves it.
+    const WORKER_C = 41003
+    running.add(WORKER_C)
+    await runAs(WORKER_C, 'restore')
+    expect(console.log).toHaveBeenLastCalledWith(
+      JSON.stringify({ action: 'restore', restorationReadback: 'owned-by-another-process' })
+    )
+    expect(saved()).toEqual(owned(original, WORKER_B))
+    await runAs(WORKER_B, 'restore')
+    expectOriginal()
+    expect(fixture.state.snapshot).toBeNull()
+  })
+
+  it('repairs a change whose owner exited on the next restore', async () => {
+    await runAs(WORKER_A, 'disable')
+    running.delete(WORKER_A)
+
+    await runAs(WORKER_B, 'restore')
+    expect(console.log).toHaveBeenLastCalledWith(
+      JSON.stringify({ action: 'restore', restorationReadback: 'matched' })
+    )
+    expectOriginal()
+    expect(fixture.state.snapshot).toBeNull()
+  })
+
+  it('treats a snapshot that names no owner as left behind', async () => {
+    fixture.state.row.auth_config = '{"oauth":{"password":false,"magicLink":false}}'
+    fixture.state.snapshot = JSON.stringify(original)
+
+    await runAs(WORKER_B, 'restore')
+    expectOriginal()
+    expect(fixture.state.snapshot).toBeNull()
   })
 })

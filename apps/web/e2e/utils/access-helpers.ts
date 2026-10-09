@@ -32,12 +32,14 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-function runScript(scriptRelPath: string, args: string[]): string {
+function runScript(scriptRelPath: string, args: string[], env?: Record<string, string>): string {
   const scriptPath = resolve(__dirname, scriptRelPath)
   // execFileSync (no shell) so test args can't be interpreted as shell syntax.
   return execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, ...args], {
     encoding: 'utf-8',
     cwd: resolve(__dirname, '../..'), // apps/web
+    // Extra variables are added to this worker's environment, not substituted for it.
+    env: env ? { ...process.env, ...env } : undefined,
     // `seedIdentityProvider` reaches here from a serial-mode `beforeAll`, which
     // Playwright re-runs on every retry. This is the exact call that wedged
     // shard 6 of main run 34102576840 for 87.5 minutes on its third attempt.
@@ -104,6 +106,11 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
  * `loginViaMagicLink`. `restore` with no snapshot is a no-op, which also makes
  * it safe to call defensively at the start of a suite to clear a snapshot a
  * crashed run left behind.
+ *
+ * Workers share the one settings row, so the script records this worker's PID
+ * as the owner of a temporary change. While this worker runs, another worker's
+ * `restore` leaves the change in place and another worker's temporary action
+ * waits for this worker's `restore` (see the script header).
  */
 export function setPortalAuthMethods(
   action:
@@ -113,7 +120,9 @@ export function setPortalAuthMethods(
     | 'enable-magic-link-temporarily'
     | 'enable-social-only-temporarily'
 ): void {
-  runScript('../scripts/set-portal-auth-methods.ts', [action])
+  runScript('../scripts/set-portal-auth-methods.ts', [action], {
+    E2E_PORTAL_AUTH_OWNER_PID: String(process.pid),
+  })
 }
 
 /**
