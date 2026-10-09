@@ -45,6 +45,11 @@ env:
 jobs:
   static_analysis:
     name: Static analysis
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -128,6 +133,11 @@ jobs:
 
   database_tests:
     name: Database migrations and tests
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -173,6 +183,11 @@ jobs:
 
   changed_paths:
     name: Changed-path filter
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # The reuse probe below reads workflow runs and jobs, the PR, and commit
@@ -492,6 +507,11 @@ jobs:
     # skipped changed_paths leaves e2e unset and this job does not run --
     # which portability_gate then treats as a failure, never a pass.
     if: needs.changed_paths.outputs.e2e == 'true' && needs.changed_paths.outputs.queue_reuse != 'true'
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     # A cancelled shard reports NOTHING -- no counts, no failure list -- so the
     # cap has to be comfortably above the slowest honest run, and the run has to
@@ -854,6 +874,11 @@ jobs:
             platform: linux/arm64
             alpine_arch: aarch64
             runner: ubuntu-24.04-arm
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     steps:
@@ -918,6 +943,11 @@ jobs:
     name: Signed-in render check
     needs: [changed_paths]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -1084,6 +1114,11 @@ jobs:
     if: ${{ always() }}
     needs:
       [static_analysis, database_tests, changed_paths, e2e_tests, runner_base, signed_in_render]
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
