@@ -303,6 +303,83 @@ function generateVoteCount(maxVoters: number): number {
   return Math.floor(Math.random() ** 2 * (maxVoters + 1))
 }
 
+/**
+ * Look up the demo user by email and create it, or its principal, when
+ * missing.
+ *
+ * The demo account is the documented local login and the author of the design
+ * fixture comment, so the seed needs it whatever else the database holds. A
+ * database that already has other users but not this one used to skip it and
+ * then fail at the fixture after the posts were written. Returns the demo
+ * principal and whether this run created it; an existing user, principal or
+ * credential is left as it is, so a rerun changes nothing.
+ */
+async function ensureDemoPrincipal(): Promise<{ id: PrincipalId; created: boolean }> {
+  const [existingUser] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.email, DEMO_USER.email))
+    .limit(1)
+
+  let demoUserId: UserId
+  if (existingUser) {
+    demoUserId = existingUser.id as UserId
+    const [existingPrincipal] = await db
+      .select({ id: principal.id })
+      .from(principal)
+      .where(eq(principal.userId, demoUserId))
+      .limit(1)
+    if (existingPrincipal) {
+      return { id: existingPrincipal.id as PrincipalId, created: false }
+    }
+    console.log(`Creating a principal for the existing demo user ${DEMO_USER.email}`)
+  } else {
+    demoUserId = generateId('user')
+    await db.insert(user).values({
+      id: demoUserId,
+      name: DEMO_USER.name,
+      email: DEMO_USER.email,
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    // Create credential account for password login
+    await db.insert(account).values({
+      id: crypto.randomUUID(),
+      accountId: demoUserId,
+      providerId: 'credential',
+      userId: demoUserId,
+      password: DEMO_PASSWORD_HASH,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    // Team identity rule (apps/web team-identity.ts): a team role takes effect
+    // only for a verified team-domain address with a linked Google or GitHub
+    // account. Local development and CI set VENTURI_TEAM_EMAIL_DOMAINS to
+    // example.com; this stand-in GitHub link lets the demo admin qualify.
+    await db.insert(account).values({
+      id: crypto.randomUUID(),
+      accountId: `seed-github-${demoUserId}`,
+      providerId: 'github',
+      userId: demoUserId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    console.log(`Created demo user ${DEMO_USER.email}`)
+  }
+
+  // Demo user (owner)
+  const demoPrincipalId: PrincipalId = generateId('principal')
+  await db.insert(principal).values({
+    id: demoPrincipalId,
+    userId: demoUserId,
+    role: 'admin',
+    displayName: DEMO_USER.name,
+    createdAt: new Date(),
+  })
+  return { id: demoPrincipalId, created: true }
+}
+
 async function seed() {
   console.log('Seeding database...\n')
 
@@ -360,49 +437,17 @@ async function seed() {
     name: m.name,
   }))
 
-  if (principals.length === 0) {
-    // Create demo user (owner)
-    const demoUserId: UserId = generateId('user')
-    const demoPrincipalId: PrincipalId = generateId('principal')
-    await db.insert(user).values({
-      id: demoUserId,
-      name: DEMO_USER.name,
-      email: DEMO_USER.email,
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    await db.insert(principal).values({
-      id: demoPrincipalId,
-      userId: demoUserId,
-      role: 'admin',
-      displayName: DEMO_USER.name,
-      createdAt: new Date(),
-    })
-    // Create credential account for password login
-    await db.insert(account).values({
-      id: crypto.randomUUID(),
-      accountId: demoUserId,
-      providerId: 'credential',
-      userId: demoUserId,
-      password: DEMO_PASSWORD_HASH,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    // Team identity rule (apps/web team-identity.ts): a team role takes effect
-    // only for a verified team-domain address with a linked Google or GitHub
-    // account. Local development and CI set VENTURI_TEAM_EMAIL_DOMAINS to
-    // example.com; this stand-in GitHub link lets the demo admin qualify.
-    await db.insert(account).values({
-      id: crypto.randomUUID(),
-      accountId: `seed-github-${demoUserId}`,
-      providerId: 'github',
-      userId: demoUserId,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    principals.push({ id: demoPrincipalId, name: DEMO_USER.name })
+  // Sample users are seeded only into a database with no user principals yet.
+  const seedSampleUsers = principals.length === 0
 
+  // The demo principal goes first: changelog authors come from the first four
+  // principals, which a fresh seed makes the admins.
+  const demoPrincipal = await ensureDemoPrincipal()
+  if (demoPrincipal.created) {
+    principals.unshift({ id: demoPrincipal.id, name: DEMO_USER.name })
+  }
+
+  if (seedSampleUsers) {
     // Create sample users
     for (let i = 0; i < CONFIG.users; i++) {
       const userId: UserId = generateId('user')
@@ -440,7 +485,7 @@ async function seed() {
     }
     console.log(`Created ${principals.length} users`)
   } else {
-    console.log(`Using ${principals.length} existing users`)
+    console.log(`Using ${existingPrincipals.length} existing users`)
   }
 
   // Create or get tags
@@ -631,16 +676,11 @@ async function seed() {
     console.log('Creating comments...')
     // Keep the public design fixture independent of random comment counts and authors.
     // The first unsuffixed title has a distinct full-text match in its later variants.
-    const [demoPrincipal] = await db
-      .select({ id: principal.id })
-      .from(principal)
-      .innerJoin(user, eq(principal.userId, user.id))
-      .where(eq(user.email, DEMO_USER.email))
-      .limit(1)
+    // ensureDemoPrincipal() above guarantees the demo principal that writes it.
     const designPost = postRecords[0]
     const relatedDesignPost = postRecords[postTitles.length]
-    if (!demoPrincipal || !designPost || !relatedDesignPost) {
-      throw new Error('Seed fixture requires the demo principal and a Related post pair')
+    if (!designPost || !relatedDesignPost) {
+      throw new Error('Seed fixture requires a Related post pair')
     }
 
     // This block only runs when creating posts, so reseeding cannot duplicate this comment.

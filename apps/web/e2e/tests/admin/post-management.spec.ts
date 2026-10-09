@@ -91,7 +91,7 @@ test.describe('Admin Post Management', () => {
       await page.keyboard.type('Submitted with keyboard shortcut')
 
       // Submit with Cmd/Ctrl+Enter
-      await page.keyboard.press('Meta+Enter')
+      await page.keyboard.press('ControlOrMeta+Enter')
 
       // Dialog should close
       await expect(page.getByRole('dialog')).toBeHidden({ timeout: 10000 })
@@ -386,7 +386,7 @@ test.describe('Admin Post Management', () => {
     await expect(commentEditor).toContainText('E2E test comment via keyboard')
 
     // Cmd+Enter should submit the comment, NOT save/close the post
-    await page.keyboard.press('Meta+Enter')
+    await page.keyboard.press('ControlOrMeta+Enter')
 
     // Modal must still be open (post was not saved/closed)
     await expect(modal).toBeVisible()
@@ -1102,7 +1102,7 @@ test.describe('Admin Post Management - Edit Flow', () => {
     await editor.click()
 
     // Select all existing content and replace it
-    await page.keyboard.press('Meta+a')
+    await page.keyboard.press('ControlOrMeta+a')
     const newBody = `E2E body update ${Date.now()}`
     await page.keyboard.type(newBody)
 
