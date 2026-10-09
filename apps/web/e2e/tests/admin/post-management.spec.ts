@@ -1019,9 +1019,10 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
 
     // Restored list should have at least as many posts as the filtered list
     expect(restoredCount).toBeGreaterThanOrEqual(filteredCount)
-    // And clearing the search must bring the whole baseline back. The suite
-    // runs one worker against one seeded tenant, so nothing removes posts
-    // between the two reads; a shorter list means the filter stuck.
+    // And clearing the search must bring the whole baseline back. The seed
+    // creates 500 posts and the inbox shows one 20-post page, so a post another
+    // worker deletes between the two reads is replaced by the next one; a
+    // shorter list means the filter stuck.
     expect(restoredCount).toBeGreaterThanOrEqual(baselineCount)
   })
 })

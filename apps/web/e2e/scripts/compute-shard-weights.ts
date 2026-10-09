@@ -62,10 +62,12 @@ for (const path of paths) {
     const file = suite.file ?? inherited
     for (const spec of suite.specs ?? []) {
       if (!file) continue
-      // One spec location is one Playwright test here, so one item below is
-      // one unit of filterForShard's count: the projects in playwright.config.ts
-      // partition spec files by directory and nothing sets repeatEach, so every
-      // spec carries exactly one `tests` entry. Playwright applies the weights
+      // One spec location is one Playwright test here: the projects in
+      // playwright.config.ts partition spec files by directory and nothing sets
+      // repeatEach, so every spec carries exactly one `tests` entry. The setup
+      // and cleanup dependency tests also land in `ordered`, although
+      // filterForShard detaches dependency suites before it counts, so they add
+      // a small constant to shard 1's share only. Playwright applies the weights
       // proportionally (floor(weight * total / sum)), so even a uniform
       // multiplicity would leave the cut points where this script drew them.
       // Sum every result: a retried test costs the shard its retries too, and
