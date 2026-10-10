@@ -32,12 +32,14 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-function runScript(scriptRelPath: string, args: string[]): string {
+function runScript(scriptRelPath: string, args: string[], env?: Record<string, string>): string {
   const scriptPath = resolve(__dirname, scriptRelPath)
   // execFileSync (no shell) so test args can't be interpreted as shell syntax.
   return execFileSync('dotenv', ['-e', '../../.env', '--', 'bun', scriptPath, ...args], {
     encoding: 'utf-8',
     cwd: resolve(__dirname, '../..'), // apps/web
+    // Extra variables are added to this worker's environment, not substituted for it.
+    env: env ? { ...process.env, ...env } : undefined,
     // `seedIdentityProvider` reaches here from a serial-mode `beforeAll`, which
     // Playwright re-runs on every retry. This is the exact call that wedged
     // shard 6 of main run 34102576840 for 87.5 minutes on its third attempt.
@@ -86,23 +88,41 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
 
 /**
  * Flip sign-in methods and drop the tenant-settings cache (the script does
- * both). All three actions write `settings.auth_config.oauth`, the one map the
+ * both). All actions write `settings.auth_config.oauth`, the one map the
  * request-time gate (`isAuthMethodAllowed`) and the sign-in dialog both read.
  *
  * `disable` is used by tests that need the team break-glass form to be the only
  * way in; always pair it with `setPortalAuthMethods('restore')` in a `finally`
  * block so subsequent tests/dev are not left with a broken portal.
  *
- * `restore` puts back the exact snapshot `disable` took — NOT the shipped
+ * `enable-magic-link-temporarily` also snapshots the original settings; pair it
+ * with `restore` after creating a temporary session. Permanent setup uses
+ * `enableMagicLinkSignIn` instead.
+ *
+ * `restore` puts back the exact snapshot the temporary action took — NOT the shipped
  * defaults. DEFAULT_AUTH_CONFIG.oauth carries no `magicLink` key and
  * `isSignInMethodEnabled` reads a missing key as off, so a reset-to-defaults
  * would silently switch magic link back off and break every later
  * `loginViaMagicLink`. `restore` with no snapshot is a no-op, which also makes
  * it safe to call defensively at the start of a suite to clear a snapshot a
  * crashed run left behind.
+ *
+ * Workers share the one settings row, so the script records this worker's PID
+ * as the owner of a temporary change. While this worker runs, another worker's
+ * `restore` leaves the change in place and another worker's temporary action
+ * waits for this worker's `restore` (see the script header).
  */
-export function setPortalAuthMethods(action: 'disable' | 'restore' | 'enable-magic-link'): void {
-  runScript('../scripts/set-portal-auth-methods.ts', [action])
+export function setPortalAuthMethods(
+  action:
+    | 'disable'
+    | 'restore'
+    | 'enable-magic-link'
+    | 'enable-magic-link-temporarily'
+    | 'enable-social-only-temporarily'
+): void {
+  runScript('../scripts/set-portal-auth-methods.ts', [action], {
+    E2E_PORTAL_AUTH_OWNER_PID: String(process.pid),
+  })
 }
 
 /**
@@ -114,7 +134,8 @@ export function setPortalAuthMethods(action: 'disable' | 'restore' | 'enable-mag
  * ships it off, and `bun run db:seed` leaves `settings.auth_config` NULL. So
  * the test infrastructure enables it for itself; the shipped default stays off.
  *
- * Idempotent — safe on every setup path and on every retry.
+ * Permanent and idempotent — safe on every setup path and on every retry.
+ * This action does not create or replace a temporary settings snapshot.
  */
 export function enableMagicLinkSignIn(): void {
   setPortalAuthMethods('enable-magic-link')
@@ -127,6 +148,11 @@ export function enableMagicLinkSignIn(): void {
  */
 export function flushMagicLinkRateLimit(): void {
   runScript('../scripts/flush-signin-rate-limit.ts', [])
+}
+
+/** Built-in social buttons for the guarded CI entry fixture; pair seed with remove. */
+export function setEntrySocialProviders(action: 'seed' | 'remove'): void {
+  runScript('../scripts/set-entry-social-providers.ts', [action])
 }
 
 /** Config for {@link seedIdentityProvider} (mirrors the seed script's input). */

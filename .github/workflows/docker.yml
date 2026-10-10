@@ -30,6 +30,11 @@ jobs:
     if: >-
       github.repository == 'venturi-systems/quackback' &&
       (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -164,6 +169,11 @@ jobs:
             runner: ubuntu-latest
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     environment: container-publish
@@ -246,6 +256,11 @@ jobs:
   # Assemble the multi-arch manifest list (OCI image index) from the per-arch
   # digests, apply the real tags, then keyless-sign the index digest.
   merge:
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     needs: [resolve-source, build]
     timeout-minutes: 20

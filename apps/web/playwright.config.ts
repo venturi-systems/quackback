@@ -1,9 +1,26 @@
 import { defineConfig, devices } from '@playwright/test'
 import { DEV_SERVER_READY, DEV_SERVER_URL } from './e2e/scripts/dev-server-ready'
-import { assertDesignFixtureEnvironmentSync } from './e2e/utils/design-fixture-guard'
+import {
+  assertDesignFixtureEnvironmentSync,
+  assertDesignFixtureImageServerSync,
+} from './e2e/utils/design-fixture-guard'
+
+// CI must never fall back to an unattested development server.
+if (process.env.CI && process.env.E2E_SERVER_MODE !== 'image') {
+  throw new Error('CI Playwright requires E2E_SERVER_MODE=image')
+}
 
 // Guard CI before webServer and setup fixtures are instantiated.
-if (process.env.CI) assertDesignFixtureEnvironmentSync()
+if (
+  process.env.CI ||
+  process.env.E2E_SERVER_MODE !== undefined ||
+  Object.keys(process.env).some(
+    (name) => name.startsWith('DESIGN_FIXTURE_APP_') || name === 'DESIGN_FIXTURE_SHARD'
+  )
+) {
+  assertDesignFixtureEnvironmentSync()
+  if (process.env.E2E_SERVER_MODE === 'image') assertDesignFixtureImageServerSync()
+}
 
 /**
  * Playwright configuration for Quackback E2E tests
@@ -126,13 +143,18 @@ export default defineConfig({
    * that way, because each of its attempts is bounded. `url` stays for
    * reuseExistingServer. A server that never answers still fails at this
    * timeout, and one that exits fails at once. */
-  webServer: {
-    command: 'bun e2e/scripts/dev-server.ts',
-    url: DEV_SERVER_URL,
-    wait: { stderr: DEV_SERVER_READY },
-    reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
-  },
+  // CI starts and attests its compiled development-mode image before collection.
+  // No independent URL-ready path can bypass that guard; local dev stays below.
+  webServer:
+    process.env.E2E_SERVER_MODE === 'image'
+      ? undefined
+      : {
+          command: 'bun e2e/scripts/dev-server.ts',
+          url: DEV_SERVER_URL,
+          wait: { stderr: DEV_SERVER_READY },
+          reuseExistingServer: !process.env.CI,
+          timeout: 120 * 1000,
+        },
 
   /* Timeout for each test */
   timeout: 30 * 1000,

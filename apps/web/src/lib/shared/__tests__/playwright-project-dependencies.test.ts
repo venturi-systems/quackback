@@ -4,10 +4,22 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // These tests inspect project declarations, not an executing E2E fixture.
-// Mock only this import boundary; the real Playwright config retains its guard.
-const { fixtureGuard } = vi.hoisted(() => ({ fixtureGuard: vi.fn() }))
+// Mock fixture guards and the config factory; no fixture or browser is started.
+const { fixtureGuard, imageGuard, configBoundary } = vi.hoisted(() => ({
+  fixtureGuard: vi.fn(),
+  imageGuard: vi.fn(),
+  configBoundary: vi.fn(),
+}))
 vi.mock('../../../../e2e/utils/design-fixture-guard', () => ({
   assertDesignFixtureEnvironmentSync: fixtureGuard,
+  assertDesignFixtureImageServerSync: imageGuard,
+}))
+vi.mock('@playwright/test', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@playwright/test')>()),
+  defineConfig: (config: unknown) => {
+    configBoundary()
+    return config
+  },
 }))
 
 /**
@@ -53,6 +65,9 @@ async function loadProjects(): Promise<PlaywrightProject[]> {
     fixtureGuard,
     'Configuration inspection must exercise the mocked CI fixture guard'
   ).toHaveBeenCalledTimes(1)
+  expect(imageGuard, 'CI configuration must inspect the image receipt').toHaveBeenCalledTimes(1)
+  expect(configBoundary).toHaveBeenCalledTimes(1)
+  expect(mod.default.webServer).toBeUndefined()
   const projects = (mod.default as { projects?: PlaywrightProject[] }).projects
   return projects ?? []
 }
@@ -81,12 +96,49 @@ function matches(testMatch: RegExp | string | undefined, file: string): boolean 
 describe('playwright project dependencies', () => {
   beforeEach(() => {
     vi.stubEnv('CI', 'true')
+    vi.stubEnv('E2E_SERVER_MODE', 'image')
     vi.resetModules()
     fixtureGuard.mockClear()
+    imageGuard.mockClear()
+    configBoundary.mockClear()
   })
 
   afterEach(() => {
     vi.unstubAllEnvs()
+  })
+
+  it.each([undefined, '', 'dev', 'development', 'IMAGE', 'image ', 'false'])(
+    'rejects CI mode %j before config or fixture construction',
+    async (mode) => {
+      vi.stubEnv('E2E_SERVER_MODE', mode)
+      await expect(
+        import(/* @vite-ignore */ join(WEB_ROOT, 'playwright.config.ts'))
+      ).rejects.toThrow('CI Playwright requires E2E_SERVER_MODE=image')
+      expect(configBoundary).not.toHaveBeenCalled()
+      expect(fixtureGuard).not.toHaveBeenCalled()
+      expect(imageGuard).not.toHaveBeenCalled()
+    }
+  )
+
+  it('preserves local development-server startup when CI and image mode are absent', async () => {
+    vi.stubEnv('CI', undefined)
+    vi.stubEnv('E2E_SERVER_MODE', undefined)
+    for (const name of Object.keys(process.env)) {
+      if (name.startsWith('DESIGN_FIXTURE_APP_') || name === 'DESIGN_FIXTURE_SHARD') {
+        vi.stubEnv(name, undefined)
+      }
+    }
+    const mod = await import(/* @vite-ignore */ join(WEB_ROOT, 'playwright.config.ts'))
+    expect(configBoundary).toHaveBeenCalledTimes(1)
+    expect(fixtureGuard).not.toHaveBeenCalled()
+    expect(imageGuard).not.toHaveBeenCalled()
+    expect(mod.default.webServer).toEqual({
+      command: 'bun e2e/scripts/dev-server.ts',
+      url: 'http://acme.localhost:3000',
+      wait: { stderr: /quackback e2e: dev server ready\b/ },
+      reuseExistingServer: true,
+      timeout: 120 * 1000,
+    })
   })
 
   it('declares setup as a dependency of every spec-running project', async () => {

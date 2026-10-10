@@ -10,7 +10,7 @@ import { config } from 'dotenv'
 config({ path: '../../.env', quiet: true })
 
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { generateId } from '@quackback/ids'
 import type {
@@ -256,22 +256,129 @@ const changelogPresets = [
 const statusSlugs = ['open', 'under_review', 'planned', 'in_progress', 'complete', 'closed']
 const statusWeights = [30, 20, 20, 15, 10, 5] // Weighted distribution
 
-function weightedStatus(): string {
-  const total = statusWeights.reduce((a, b) => a + b, 0)
-  let random = Math.random() * total
-  for (let i = 0; i < statusSlugs.length; i++) {
-    random -= statusWeights[i]
-    if (random <= 0) return statusSlugs[i]
+/**
+ * Pick a seeded post's status by weight, from the statuses that exist in this
+ * database. A workspace whose statuses were edited before seeding may lack a
+ * weighted slug: its weight is dropped rather than handed to a row that is not
+ * there, and when none of the weighted slugs exist any existing status is
+ * used. The slug and the id always name the same row, so the roadmap step
+ * files each post under the status it was actually given. Before this, a
+ * missing slug left `statusId` null while the roadmap step still treated the
+ * post as planned, in progress or complete.
+ */
+function pickStatus(statusMap: Map<string, StatusId>): { slug: string; id: StatusId } {
+  const weighted: Array<{ slug: string; weight: number; id: StatusId }> = []
+  statusSlugs.forEach((slug, i) => {
+    const id = statusMap.get(slug)
+    if (id) weighted.push({ slug, weight: statusWeights[i], id })
+  })
+  if (weighted.length === 0) {
+    const [slug, id] = pick(Array.from(statusMap.entries()))
+    return { slug, id }
   }
-  return 'open'
+  const total = weighted.reduce((sum, s) => sum + s.weight, 0)
+  let random = Math.random() * total
+  for (const s of weighted) {
+    random -= s.weight
+    if (random <= 0) return { slug: s.slug, id: s.id }
+  }
+  return { slug: weighted[0].slug, id: weighted[0].id }
 }
 
-function generateVoteCount(): number {
-  const roll = Math.random()
-  if (roll < 0.5) return Math.floor(Math.random() * 10) // 0-9
-  if (roll < 0.8) return 10 + Math.floor(Math.random() * 40) // 10-49
-  if (roll < 0.95) return 50 + Math.floor(Math.random() * 100) // 50-149
-  return 150 + Math.floor(Math.random() * 200) // 150-349
+/**
+ * Draw a post's vote total, from 0 through `maxVoters`.
+ *
+ * `posts.vote_count` is a denormalized count of the post's rows in `votes`,
+ * and a principal can vote on a post once (unique on post_id + principal_id).
+ * The seed inserts one vote row per counted vote, so the total is bounded by
+ * the principals that exist. Totals of up to 349 used to be drawn against
+ * about 31 principals: the inserted rows stopped at the principal count while
+ * the post kept the larger figure, and anything that recounts from `votes`
+ * (merging posts recalculates the canonical post's count) dropped it.
+ *
+ * Squaring the roll keeps the skew of a real board: about half the posts get
+ * a quarter of the possible votes or fewer, and a few get nearly all of them.
+ */
+function generateVoteCount(maxVoters: number): number {
+  return Math.floor(Math.random() ** 2 * (maxVoters + 1))
+}
+
+/**
+ * Look up the demo user by email and create it, or its principal, when
+ * missing.
+ *
+ * The demo account is the documented local login and the author of the design
+ * fixture comment. seed() calls this only when it will create posts or the
+ * database has no user principals. A database that already had other users
+ * but not this one, and no posts, used to skip it and then fail at the
+ * fixture after the posts were written. Returns the demo principal and
+ * whether this run created it; an existing user, principal or credential is
+ * left as it is, so a rerun changes nothing.
+ */
+async function ensureDemoPrincipal(): Promise<{ id: PrincipalId; created: boolean }> {
+  const [existingUser] = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(eq(user.email, DEMO_USER.email))
+    .limit(1)
+
+  let demoUserId: UserId
+  if (existingUser) {
+    demoUserId = existingUser.id as UserId
+    const [existingPrincipal] = await db
+      .select({ id: principal.id })
+      .from(principal)
+      .where(eq(principal.userId, demoUserId))
+      .limit(1)
+    if (existingPrincipal) {
+      return { id: existingPrincipal.id as PrincipalId, created: false }
+    }
+    console.log(`Creating a principal for the existing demo user ${DEMO_USER.email}`)
+  } else {
+    demoUserId = generateId('user')
+    await db.insert(user).values({
+      id: demoUserId,
+      name: DEMO_USER.name,
+      email: DEMO_USER.email,
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    // Create credential account for password login
+    await db.insert(account).values({
+      id: crypto.randomUUID(),
+      accountId: demoUserId,
+      providerId: 'credential',
+      userId: demoUserId,
+      password: DEMO_PASSWORD_HASH,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    // Team identity rule (apps/web team-identity.ts): a team role takes effect
+    // only for a verified team-domain address with a linked Google or GitHub
+    // account. Local development and CI set VENTURI_TEAM_EMAIL_DOMAINS to
+    // example.com; this stand-in GitHub link lets the demo admin qualify.
+    await db.insert(account).values({
+      id: crypto.randomUUID(),
+      accountId: `seed-github-${demoUserId}`,
+      providerId: 'github',
+      userId: demoUserId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    console.log(`Created demo user ${DEMO_USER.email}`)
+  }
+
+  // Demo user (owner)
+  const demoPrincipalId: PrincipalId = generateId('principal')
+  await db.insert(principal).values({
+    id: demoPrincipalId,
+    userId: demoUserId,
+    role: 'admin',
+    displayName: DEMO_USER.name,
+    createdAt: new Date(),
+  })
+  return { id: demoPrincipalId, created: true }
 }
 
 async function seed() {
@@ -331,49 +438,29 @@ async function seed() {
     name: m.name,
   }))
 
-  if (principals.length === 0) {
-    // Create demo user (owner)
-    const demoUserId: UserId = generateId('user')
-    const demoPrincipalId: PrincipalId = generateId('principal')
-    await db.insert(user).values({
-      id: demoUserId,
-      name: DEMO_USER.name,
-      email: DEMO_USER.email,
-      emailVerified: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    await db.insert(principal).values({
-      id: demoPrincipalId,
-      userId: demoUserId,
-      role: 'admin',
-      displayName: DEMO_USER.name,
-      createdAt: new Date(),
-    })
-    // Create credential account for password login
-    await db.insert(account).values({
-      id: crypto.randomUUID(),
-      accountId: demoUserId,
-      providerId: 'credential',
-      userId: demoUserId,
-      password: DEMO_PASSWORD_HASH,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    // Team identity rule (apps/web team-identity.ts): a team role takes effect
-    // only for a verified team-domain address with a linked Google or GitHub
-    // account. Local development and CI set VENTURI_TEAM_EMAIL_DOMAINS to
-    // example.com; this stand-in GitHub link lets the demo admin qualify.
-    await db.insert(account).values({
-      id: crypto.randomUUID(),
-      accountId: `seed-github-${demoUserId}`,
-      providerId: 'github',
-      userId: demoUserId,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })
-    principals.push({ id: demoPrincipalId, name: DEMO_USER.name })
+  // Sample users are seeded only into a database with no user principals yet.
+  const seedSampleUsers = principals.length === 0
 
+  // Posts are seeded only into an empty posts table, and only that path writes
+  // the design fixture comment that the demo principal authors.
+  const [existingPost] = await db.select({ id: posts.id }).from(posts).limit(1)
+  const createPosts = existingPost === undefined
+
+  // Ensure the demo principal only when this run creates posts or the database
+  // has no user principals, the two cases that need it. A database that
+  // already holds users and posts gains no account. The demo principal goes
+  // first: changelog authors come from the first four principals, which a
+  // fresh seed makes the admins.
+  let demoPrincipalId: PrincipalId | undefined
+  if (createPosts || seedSampleUsers) {
+    const demoPrincipal = await ensureDemoPrincipal()
+    demoPrincipalId = demoPrincipal.id
+    if (demoPrincipal.created) {
+      principals.unshift({ id: demoPrincipal.id, name: DEMO_USER.name })
+    }
+  }
+
+  if (seedSampleUsers) {
     // Create sample users
     for (let i = 0; i < CONFIG.users; i++) {
       const userId: UserId = generateId('user')
@@ -411,7 +498,7 @@ async function seed() {
     }
     console.log(`Created ${principals.length} users`)
   } else {
-    console.log(`Using ${principals.length} existing users`)
+    console.log(`Using ${existingPrincipals.length} existing users`)
   }
 
   // Create or get tags
@@ -433,11 +520,14 @@ async function seed() {
     console.log(`Created ${tagPresets.length} tags`)
   }
 
-  // Create or get boards
+  // Create or get boards. boardIdBySlug lets seed data that belongs to one
+  // preset board (the feedback signals below) find that board by slug.
   const boardIds: BoardId[] = []
+  const boardIdBySlug = new Map<string, BoardId>()
   const existingBoards = await db.select().from(boards)
   if (existingBoards.length > 0) {
     boardIds.push(...existingBoards.map((b) => b.id))
+    for (const b of existingBoards) boardIdBySlug.set(b.slug, b.id)
     console.log(`Using ${existingBoards.length} existing boards`)
   } else {
     for (const b of boardPresets) {
@@ -450,6 +540,7 @@ async function seed() {
         createdAt: randomDate(60),
       })
       boardIds.push(boardId)
+      boardIdBySlug.set(b.slug, boardId)
     }
     console.log(`Created ${boardPresets.length} boards`)
   }
@@ -478,10 +569,12 @@ async function seed() {
     console.log(`Created ${roadmapPresets.length} roadmaps`)
   }
 
-  // Check if posts already exist - skip post creation but continue to other sections
-  const existingPostCount = await db.select({ id: posts.id }).from(posts).limit(1)
-  if (existingPostCount.length > 0) {
+  // Posts already exist (checked above, and nothing since writes posts): skip
+  // post creation but continue to other sections
+  if (!createPosts) {
     console.log('Posts already exist, skipping post creation')
+  } else if (statusMap.size === 0) {
+    throw new Error('No post statuses exist; cannot seed posts')
   } else {
     // Create posts in batches
     console.log(`Creating ${CONFIG.posts} posts...`)
@@ -494,9 +587,8 @@ async function seed() {
       const postId = generateId('post')
       const boardId = pick(boardIds)
       const author = pick(principals)
-      const statusSlug = weightedStatus()
-      const statusId = statusMap.get(statusSlug) ?? null
-      const voteCount = generateVoteCount()
+      const status = pickStatus(statusMap)
+      const voteCount = generateVoteCount(principals.length)
       const title =
         postTitles[i % postTitles.length] +
         (i >= postTitles.length ? ` (${Math.floor(i / postTitles.length) + 1})` : '')
@@ -509,13 +601,13 @@ async function seed() {
         content,
         contentJson: textToTipTapJson(content),
         principalId: author.id,
-        statusId,
+        statusId: status.id,
         voteCount,
         createdAt: randomDate(180),
         updatedAt: new Date(),
       })
 
-      postRecords.push({ id: postId, voteCount, statusSlug })
+      postRecords.push({ id: postId, voteCount, statusSlug: status.slug })
 
       // Add 1-2 tags
       const numTags = 1 + Math.floor(Math.random() * 2)
@@ -577,12 +669,14 @@ async function seed() {
     console.log('Creating votes...')
     const voteInserts: (typeof votes.$inferInsert)[] = []
     for (const post of postRecords) {
-      const numVotes = Math.min(post.voteCount, principals.length) // Cap at number of principals
+      // One row per counted vote, each from a different principal, so the
+      // rows match the post's stored voteCount. generateVoteCount drew it no
+      // higher than principals.length.
       const shuffledPrincipals = [...principals].sort(() => Math.random() - 0.5)
-      for (let v = 0; v < numVotes; v++) {
+      for (let v = 0; v < post.voteCount; v++) {
         voteInserts.push({
           postId: post.id,
-          principalId: shuffledPrincipals[v % shuffledPrincipals.length].id,
+          principalId: shuffledPrincipals[v].id,
           createdAt: randomDate(60),
         })
       }
@@ -597,7 +691,28 @@ async function seed() {
 
     // Create comments
     console.log('Creating comments...')
-    const commentInserts: (typeof comments.$inferInsert)[] = []
+    // Keep the public design fixture independent of random comment counts and authors.
+    // The first unsuffixed title has a distinct full-text match in its later variants.
+    // ensureDemoPrincipal() ran above because this run creates posts.
+    const designPost = postRecords[0]
+    const relatedDesignPost = postRecords[postTitles.length]
+    if (!demoPrincipalId || !designPost || !relatedDesignPost) {
+      throw new Error('Seed fixture requires the demo principal and a Related post pair')
+    }
+
+    // This block only runs when creating posts, so reseeding cannot duplicate this comment.
+    const commentInserts: (typeof comments.$inferInsert)[] = [
+      {
+        postId: designPost.id,
+        principalId: demoPrincipalId,
+        content: commentContents[0],
+        parentId: null,
+        isPrivate: false,
+        moderationState: 'published',
+        isTeamMember: true,
+        createdAt: new Date(),
+      },
+    ]
     for (const post of postRecords) {
       const numComments = Math.floor(Math.random() * 5) // 0-4 comments per post
       for (let c = 0; c < numComments; c++) {
@@ -614,6 +729,22 @@ async function seed() {
     for (let i = 0; i < commentInserts.length; i += BATCH_SIZE) {
       await db.insert(comments).values(commentInserts.slice(i, i + BATCH_SIZE))
     }
+    // posts.comment_count is denormalized: the comment service adds one for
+    // each published, non-private comment (comment.service.ts), and the post
+    // list shows that number. These inserts bypass the service, so set the
+    // count from the rows just written, by the same rule. Without this, every
+    // seeded post listed no comments while its detail view showed up to five.
+    // Only seeded posts exist here: this block runs only when the table was
+    // empty.
+    await db.update(posts).set({
+      commentCount: sql`(
+        SELECT COUNT(*)::int FROM ${comments}
+        WHERE ${comments.postId} = ${posts.id}
+          AND ${comments.deletedAt} IS NULL
+          AND ${comments.isPrivate} = false
+          AND ${comments.moderationState} = 'published'
+      )`,
+    })
     console.log(`Created ${commentInserts.length} comments`)
 
     // Create changelog entries
@@ -968,11 +1099,15 @@ async function seed() {
     }
     console.log(`Created ${rawItemPresets.length} raw feedback items`)
 
-    // Create signals
+    // Create signals. Each one names the preset board its summary belongs to
+    // (boardPresets slugs). This branch also runs on a database that kept its
+    // own boards, which may number fewer than four, lack these slugs, or come
+    // back in any order, so a positional index could read past the end and
+    // leave the signal without a board, or land on an unrelated board.
     const signalPresets = [
       {
         rawItemIdx: 0,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'usability_issue',
         summary: 'Dashboard loading takes 8-10s for large accounts (>1000 posts)',
         implicitNeed: 'Faster query performance for high-volume accounts',
@@ -986,7 +1121,7 @@ async function seed() {
       },
       {
         rawItemIdx: 5,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'API rate limits too low for large-scale data sync',
         implicitNeed: 'Higher throughput for enterprise integrations',
@@ -997,7 +1132,7 @@ async function seed() {
       },
       {
         rawItemIdx: 8,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'usability_issue',
         summary: 'Admin dashboard unusable on tablets due to layout issues',
         implicitNeed: 'Responsive design for mobile/tablet admin usage',
@@ -1008,7 +1143,7 @@ async function seed() {
       },
       {
         rawItemIdx: 1,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Multi-select and bulk move/tag/status change for posts',
         implicitNeed: 'Efficient batch operations for managing large volumes of posts',
@@ -1022,7 +1157,7 @@ async function seed() {
       },
       {
         rawItemIdx: 7,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Merge duplicate posts with vote count aggregation',
         implicitNeed: 'Accurate representation of feature request popularity',
@@ -1036,7 +1171,7 @@ async function seed() {
       },
       {
         rawItemIdx: 8,
-        boardIdx: 1,
+        boardSlug: 'bugs',
         signalType: 'bug_report',
         summary: 'Admin dashboard layout broken on iPad - sidebar overlaps content',
         implicitNeed: 'Tablet-friendly admin interface for on-the-go PM workflows',
@@ -1050,7 +1185,7 @@ async function seed() {
       },
       {
         rawItemIdx: 3,
-        boardIdx: 3,
+        boardSlug: 'integrations',
         signalType: 'bug_report',
         summary: 'CSV export missing vote counts column',
         implicitNeed: 'Complete data export for reporting and analysis',
@@ -1061,7 +1196,7 @@ async function seed() {
       },
       {
         rawItemIdx: 5,
-        boardIdx: 3,
+        boardSlug: 'integrations',
         signalType: 'feature_request',
         summary: 'Need batch API endpoint for high-volume data sync',
         implicitNeed: 'Scalable API for enterprise data integration workflows',
@@ -1072,7 +1207,7 @@ async function seed() {
       },
       {
         rawItemIdx: 10,
-        boardIdx: 3,
+        boardSlug: 'integrations',
         signalType: 'usability_issue',
         summary: 'Webhook documentation missing payload examples for events',
         implicitNeed: 'Clear developer documentation with concrete examples',
@@ -1086,7 +1221,7 @@ async function seed() {
       },
       {
         rawItemIdx: 9,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Timeline/Gantt visualization for roadmaps with target dates',
         implicitNeed: 'Date-driven planning and stakeholder communication',
@@ -1100,7 +1235,7 @@ async function seed() {
       },
       {
         rawItemIdx: 11,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Email digest mode for daily/weekly notification summaries',
         implicitNeed: 'Manageable notification volume without missing important updates',
@@ -1111,7 +1246,7 @@ async function seed() {
       },
       {
         rawItemIdx: 4,
-        boardIdx: 0,
+        boardSlug: 'features',
         signalType: 'feature_request',
         summary: 'Widget dark mode with prefers-color-scheme detection',
         implicitNeed: 'Visual consistency between widget and host site theming',
@@ -1122,7 +1257,7 @@ async function seed() {
       },
       {
         rawItemIdx: 6,
-        boardIdx: 2,
+        boardSlug: 'feedback',
         signalType: 'praise',
         summary: 'Changelog feature and feedback-to-feature loop highly valued',
         implicitNeed: 'Continue investing in the feedback loop closure experience',
@@ -1145,7 +1280,10 @@ async function seed() {
         implicitNeed: preset.implicitNeed,
         sentiment: preset.sentiment,
         urgency: preset.urgency,
-        boardId: boardIds[preset.boardIdx],
+        // The named board when it exists, otherwise the first board this run
+        // has (boardIds is never empty: the seed creates the presets when
+        // the database has no boards), so every signal references a real board.
+        boardId: boardIdBySlug.get(preset.boardSlug) ?? boardIds[0],
         extractionConfidence: preset.confidence,
         interpretationConfidence: preset.confidence * 0.95,
         processingState: 'completed',

@@ -1,4 +1,5 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Route } from '@playwright/test'
+import { isServerFnId, serverFnExport } from '../../utils/server-fn-id'
 
 test.describe('Portal identity and exploration', () => {
   test.use({ storageState: 'e2e/.auth/admin.json' })
@@ -9,11 +10,14 @@ test.describe('Portal identity and exploration', () => {
     const headerReady = new Promise<void>((resolve) => {
       releaseHeader = resolve
     })
-    let headerRequested = false
-    // The CI fixture serves Vite modules. Hold the header module to exercise
-    // the server-rendered control before React can attach its click handler.
-    await page.route('**/src/components/public/portal-header.tsx*', async (route) => {
-      headerRequested = true
+    let scriptRequested = false
+    // Hold every script to exercise the server-rendered control before React
+    // can attach its click handler. Under Vite these are the source modules
+    // (portal-header.tsx among them); in the compiled image CI serves they are
+    // the bundle chunks, where the header has no file of its own.
+    await page.route('**/*', async (route) => {
+      if (route.request().resourceType() !== 'script') return route.continue()
+      scriptRequested = true
       await headerReady
       await route.continue()
     })
@@ -21,7 +25,7 @@ test.describe('Portal identity and exploration', () => {
     const menu = page.getByRole('button', { name: 'Menu', exact: true })
     try {
       await expect(menu).toBeVisible()
-      await expect.poll(() => headerRequested).toBe(true)
+      await expect.poll(() => scriptRequested).toBe(true)
       await expect(menu).toBeDisabled()
       await expect(menu).toHaveAttribute('aria-expanded', 'false')
     } finally {
@@ -69,6 +73,10 @@ test.describe('Portal identity and exploration', () => {
       await expect(page).toHaveURL(/\/roadmap/)
       await brand.click()
       await expect(page).toHaveURL((url) => url.pathname === '/' && !url.searchParams.has('sort'))
+      // The home page itself, not only its address. A roadmap still settling
+      // used to replace this navigation with itself (venturi-systems/feedback#369).
+      await expect(page.getByRole('heading', { name: 'Product ideas', exact: true })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Roadmap', exact: true })).toHaveCount(0)
       if (width < 640) {
         await expect(menu).toBeEnabled()
         await menu.click()
@@ -77,6 +85,58 @@ test.describe('Portal identity and exploration', () => {
       await expect(page).toHaveURL(/\/changelog/)
     })
   }
+  test('a roadmap still settling does not replace the way home', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 900 })
+    await page.goto('/')
+    const menu = page.getByRole('button', { name: 'Menu', exact: true })
+    await expect(menu).toBeEnabled()
+    // Every client navigation calls the root route's bootstrap server function
+    // before it commits. Let the Roadmap navigation's call through, then hold
+    // the rest: the roadmap's own address update and the way home both stay
+    // pending while the board is mounted. isServerFnId accepts the dev id
+    // (base64url JSON naming the export) and the compiled image's hashed id.
+    const held: Route[] = []
+    let bootstrapCalls = 0
+    let holding = true
+    await page.route('**/_serverFn/**', async (route) => {
+      const id = new URL(route.request().url()).pathname.split('/_serverFn/')[1] ?? ''
+      const bootstrap = isServerFnId(
+        id,
+        'src/lib/server/functions/bootstrap.ts',
+        serverFnExport('getBootstrapData')
+      )
+      if (holding && bootstrap && ++bootstrapCalls > 1) {
+        held.push(route)
+        return
+      }
+      await route.continue()
+    })
+    await menu.click()
+    const navigation = page.getByRole('navigation', {
+      name: 'Mobile portal navigation',
+      exact: true,
+    })
+    await navigation.getByRole('link', { name: 'Roadmap', exact: true }).click()
+    await expect(page.getByRole('heading', { name: 'Roadmap', exact: true })).toBeVisible()
+    // The board writes its default roadmap into the address once settled.
+    await expect(page).toHaveURL(/[?&]roadmap=roadmap_/)
+    await expect.poll(() => held.length).toBeGreaterThan(0)
+    const heldBeforeHome = held.length
+    await page.getByRole('link', { name: 'Venturi Feedback home', exact: true }).click()
+    await expect(page).toHaveURL((url) => url.pathname === '/')
+    await expect.poll(() => held.length).toBeGreaterThan(heldBeforeHome)
+    // Re-render the board while Home is pending, as a settling query or a
+    // scroll does. Its columns overflow at 320px.
+    await page.getByRole('button', { name: 'Scroll columns right', exact: true }).click()
+    await expect(
+      page.getByRole('button', { name: 'Scroll columns left', exact: true })
+    ).toBeVisible()
+    holding = false
+    for (const route of held.splice(0)) await route.continue()
+    await expect(page.getByRole('heading', { name: 'Product ideas', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Roadmap', exact: true })).toHaveCount(0)
+    await expect(page).toHaveURL((url) => url.pathname === '/' && !url.searchParams.has('roadmap'))
+  })
 })
 
 test.use({ storageState: { cookies: [], origins: [] } })

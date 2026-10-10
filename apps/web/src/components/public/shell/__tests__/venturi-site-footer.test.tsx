@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VenturiSiteFooter } from '../venturi-site-footer'
+
+afterEach(() => vi.unstubAllGlobals())
 
 // The footer mirrors the public website's contract (landing-page
 // src/content/site.ts legalLinks): the same five legal links, in the same
@@ -28,24 +30,36 @@ describe('VenturiSiteFooter', () => {
       within(product)
         .getAllByRole('link')
         .map((link) => link.textContent?.replace(' ↗', '').trim())
-    ).toEqual([
-      'Use Cases',
-      'How It Works',
-      'Platform',
-      'Documentation',
-      'Pricing',
-      'Product demo (opens in a new tab)',
-      'Login',
-    ])
+    ).toEqual(['Use Cases', 'How It Works', 'Platform', 'Documentation', 'Pricing', 'Login'])
     expect(screen.queryByRole('link', { name: 'Deployment' })).not.toBeInTheDocument()
-    const demo = screen.getByRole('link', { name: /Product demo/ })
-    expect(demo).toHaveAttribute('target', '_blank')
-    expect(demo).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(screen.queryByRole('link', { name: /Product demo/ })).not.toBeInTheDocument()
+    for (const link of screen.getAllByRole('link')) {
+      const path = new URL(link.getAttribute('href')!, 'https://feedback.venturi.systems').pathname
+      expect(path).not.toMatch(/^\/(?:investor\/)?demo(?:\/|$)/)
+    }
+    expect(
+      within(screen.getByRole('region', { name: 'Connect' }))
+        .getAllByRole('link')
+        .map((link) => link.textContent)
+    ).toEqual(['Contact', 'Careers', 'Feedback'])
     expect(screen.getByRole('link', { name: 'Legal' })).toHaveAttribute(
       'href',
       'https://venturi.systems/legal/'
     )
   })
+  it('offers the exact build source in Trust when the anonymous entry requests it', () => {
+    const commit = 'cef28adb3a25b25ef116534bb3673c68fcda7abd'
+    vi.stubGlobal('__GIT_COMMIT__', commit)
+    render(<VenturiSiteFooter showSourceCode />)
+    const trust = screen.getByRole('region', { name: 'Trust' })
+    expect(within(trust).getByRole('link', { name: 'Source code' })).toHaveAttribute(
+      'href',
+      `https://github.com/venturi-systems/quackback/tree/${commit}`
+    )
+    expect(within(trust).getByRole('link', { name: 'Software notices' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Source code' })).toHaveLength(1)
+  })
+
   it('keeps copyright and sitemap adjacent in the same compact legal list', () => {
     render(<VenturiSiteFooter />)
     const legal = screen.getByRole('navigation', { name: 'Legal and sitemap' })

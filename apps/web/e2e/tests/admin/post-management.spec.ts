@@ -15,57 +15,77 @@ test.describe('Admin Post Management', () => {
   })
 
   test('can open create post dialog', async ({ page }) => {
-    // Click the create post button (pen-square icon)
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
-    })
+    // The inbox header renders CreatePostDialog's default trigger, an icon
+    // button titled "Create new post" (create-post-dialog.tsx). Its icon is a
+    // Heroicons PencilSquareIcon with no `lucide-pen-square` class, so the old
+    // filter matched nothing and the `count() > 0` guard skipped the whole test
+    // body. Locate the trigger by its accessible name and require it, so a
+    // missing control fails instead of passing with no assertions.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
 
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
+    // Dialog should open
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
 
-      // Dialog should open
-      const dialog = page.getByRole('dialog')
-      await expect(dialog).toBeVisible()
+    // Should have title input (borderless style with placeholder)
+    await expect(dialog.getByPlaceholder("What's the feedback about?")).toBeVisible()
 
-      // Should have title input (borderless style with placeholder)
-      await expect(page.getByPlaceholder("What's the feedback about?")).toBeVisible()
-
-      // Close dialog
-      await page.keyboard.press('Escape')
-    }
+    // Escape closes the dialog
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
   })
 
   test('can create a new post', async ({ page }) => {
-    // Click the create post button
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
+    // The inbox header's create control is CreatePostDialog's default trigger:
+    // an icon button titled "Create new post" (create-post-dialog.tsx). Its icon
+    // is a Heroicons PencilSquareIcon, which has no `lucide-pen-square` class,
+    // so the old `svg.lucide-pen-square` filter matched nothing and this test
+    // skipped its whole body and passed. Creating a post is the behaviour under
+    // test, so a missing control must fail the test.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
+
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
+
+    // Fill the form
+    const testTitle = `Test Post ${Date.now()}`
+    const testBody = 'This is a test post description'
+    await dialog.getByPlaceholder("What's the feedback about?").fill(testTitle)
+
+    // Fill description (rich text editor)
+    await dialog.locator('.tiptap').click()
+    await page.keyboard.type(testBody)
+
+    // Submit the form
+    await dialog.getByRole('button', { name: 'Create post', exact: true }).click()
+
+    // Dialog should close
+    await expect(dialog).toBeHidden({ timeout: 10000 })
+
+    // A closed dialog does not prove the post was saved. useCreatePost adds
+    // nothing to the list optimistically; the inbox refetches it from the
+    // server, newest first by default, so the saved post heads the list.
+    const createdCard = page.locator('[data-post-id]').filter({
+      has: page.getByRole('heading', { name: testTitle, exact: true }),
     })
+    await expect(createdCard).toBeVisible({ timeout: 10000 })
 
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
+    // Reload so the list is a fresh server render, then reopen the post and
+    // check the stored title and body.
+    await page.reload({ waitUntil: 'networkidle' })
+    await expect(createdCard).toBeVisible()
+    await createdCard.click()
+    const modal = page.getByRole('dialog', { name: 'Edit post', exact: true })
+    await expect(modal).toBeVisible({ timeout: 10000 })
+    await expect(modal.getByPlaceholder("What's the feedback about?")).toHaveValue(testTitle)
+    await expect(postBodyEditor(modal)).toContainText(testBody)
 
-      // Wait for dialog
-      await expect(page.getByRole('dialog')).toBeVisible()
-
-      // Fill the form
-      const testTitle = `Test Post ${Date.now()}`
-      const titleInput = page.getByPlaceholder("What's the feedback about?")
-      await titleInput.fill(testTitle)
-
-      // Fill description (rich text editor)
-      const editor = page.locator('.tiptap')
-      await editor.click()
-      await page.keyboard.type('This is a test post description')
-
-      // Submit the form
-      await page.getByRole('button', { name: /create post/i }).click()
-
-      // Dialog should close
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 10000 })
-
-      // New post should appear in the list (page refreshes)
-      await page.waitForLoadState('networkidle')
-    }
+    // Close dialog
+    await page.keyboard.press('Escape')
   })
 
   test('can submit post with Cmd+Enter keyboard shortcut', async ({ page }) => {
@@ -91,7 +111,7 @@ test.describe('Admin Post Management', () => {
       await page.keyboard.type('Submitted with keyboard shortcut')
 
       // Submit with Cmd/Ctrl+Enter
-      await page.keyboard.press('Meta+Enter')
+      await page.keyboard.press('ControlOrMeta+Enter')
 
       // Dialog should close
       await expect(page.getByRole('dialog')).toBeHidden({ timeout: 10000 })
@@ -222,39 +242,34 @@ test.describe('Admin Post Management', () => {
     }
   })
 
-  test('can vote on a post in detail view', async ({ page }) => {
-    // First, select a post to view details
-    const postCards = page.locator('[class*="cursor-pointer"]').filter({
-      has: page.locator('h3'),
-    })
+  test('can add a voter from post detail and persist the vote', async ({ page }) => {
+    const firstPost = page.locator('h3').first()
+    await expect(firstPost).toBeVisible()
+    await firstPost.click()
+    const modal = page.getByRole('dialog', { name: 'Edit post', exact: true })
+    await expect(modal).toBeVisible()
+    await expect(page).toHaveURL(/[?&]post=[^&]+/)
 
-    if ((await postCards.count()) > 0) {
-      await postCards.first().click()
+    // Editors manage votes on behalf of users; the self-vote button belongs to
+    // the public post view. Measure the count in this post's metadata only.
+    const upvotes = modal.getByText('Upvotes', { exact: true }).locator('..').locator('..')
+    const voteCount = upvotes.locator('.tabular-nums')
+    await expect(voteCount).toHaveText(/^\d+$/)
+    const initialCount = Number(await voteCount.textContent())
 
-      // Wait for detail panel to load
-      await page.waitForLoadState('networkidle')
+    await modal.getByRole('button', { name: 'Add voter', exact: true }).click()
+    await page.getByRole('button', { name: 'Create new user', exact: true }).click()
+    const name = page.getByPlaceholder('Name', { exact: true })
+    await name.fill('Jordan Mercer ' + Date.now())
+    // A name-only portal user can receive a proxy vote. Team-domain identities
+    // are reserved for their owners signing in through Google or GitHub.
+    await page.getByRole('button', { name: 'Create & add vote', exact: true }).click()
+    await expect(name).toBeHidden()
+    await expect(voteCount).toHaveText(String(initialCount + 1))
 
-      // The post opens in a modal dialog
-      const modal = page.getByRole('dialog')
-      await expect(modal).toBeVisible({ timeout: 10000 })
-
-      // Look for the vote button in the detail panel
-      const voteButton = page.getByTestId('vote-button')
-
-      if ((await voteButton.count()) > 0) {
-        // Get initial vote count scoped to the modal to avoid strict-mode violation
-        const voteCount = modal.getByTestId('vote-count')
-        const initialCount = await voteCount.textContent()
-
-        // Click to vote
-        await voteButton.click()
-
-        // Vote count should change
-        await page.waitForTimeout(500)
-        const newCount = await voteCount.textContent()
-        expect(newCount).not.toBe(initialCount)
-      }
-    }
+    await page.reload({ waitUntil: 'networkidle' })
+    await expect(modal).toBeVisible()
+    await expect(voteCount).toHaveText(String(initialCount + 1))
   })
 
   test('can open edit dialog from post detail', async ({ page }) => {
@@ -391,7 +406,7 @@ test.describe('Admin Post Management', () => {
     await expect(commentEditor).toContainText('E2E test comment via keyboard')
 
     // Cmd+Enter should submit the comment, NOT save/close the post
-    await page.keyboard.press('Meta+Enter')
+    await page.keyboard.press('ControlOrMeta+Enter')
 
     // Modal must still be open (post was not saved/closed)
     await expect(modal).toBeVisible()
@@ -642,7 +657,7 @@ test.describe('Admin Post Management - Status Transitions', () => {
     await page.keyboard.press('Escape')
   })
 
-  test('status change shows a success toast', async ({ page }) => {
+  test('status change confirms the selected status in the badge', async ({ page }) => {
     const modal = await openFirstPostModal(page)
     if (!modal) {
       test.skip()
@@ -659,54 +674,43 @@ test.describe('Admin Post Management - Status Transitions', () => {
       return
     }
 
-    const initialStatusText = (await statusBadgeButton.textContent()) ?? ''
+    const initialStatusText = ((await statusBadgeButton.textContent()) ?? '').trim()
     await statusBadgeButton.click()
 
     const popover = page.locator('[data-radix-popper-content-wrapper]')
     await expect(popover).toBeVisible({ timeout: 5000 })
 
     const statusOptions = popover.locator('button')
-    let changed = false
+    let selectedStatusText = ''
     for (let i = 0; i < (await statusOptions.count()); i++) {
-      const optText = (await statusOptions.nth(i).textContent()) ?? ''
-      if (optText.trim() !== initialStatusText.trim()) {
+      const optText = ((await statusOptions.nth(i).textContent()) ?? '').trim()
+      if (optText !== initialStatusText) {
         await statusOptions.nth(i).click()
-        changed = true
+        selectedStatusText = optText
         break
       }
     }
 
-    if (!changed) {
+    if (!selectedStatusText) {
       await page.keyboard.press('Escape')
       test.skip()
       return
     }
 
-    // Confirm the change landed, by the toast OR by the badge -- whichever
-    // shows up first.
+    // The admin post modal confirms a status change through the badge alone.
+    // Neither the modal's handler (handleStatusChange in
+    // components/admin/feedback/post-modal.tsx) nor the mutation it awaits
+    // (useChangePostStatusId in lib/client/mutations/posts.ts) raises a toast.
+    // This case used to be named for a success toast and passed on ANY toast
+    // on the page, or on the badge merely leaving its old value, so it could
+    // not catch the confirmation going missing. It now asserts the confirmation
+    // the product gives: the badge names the exact status that was picked.
     //
-    // This used to branch on a single synchronous `toast.count()` sampled right
-    // after the click. Sonner had not mounted yet, so the sample was always 0
-    // and every run took the else branch, which then read the badge before
-    // React had re-rendered it. The status change itself was fine: across the
-    // three attempts of one CI job the initial status read "Under Review",
-    // then "Open", then "Under Review" -- attempt N+1 started from what
-    // attempt N had successfully written. Only the read was too early, and
-    // because the sample was deterministic the case failed all three times
-    // rather than flaking.
-    //
-    // Polling for either signal keeps the assertion real: it fails only if the
-    // status change produces NEITHER a toast nor an updated badge.
-    const toast = page.locator('[data-sonner-toast]')
-    await expect
-      .poll(
-        async () => {
-          if ((await toast.count()) > 0) return true
-          return ((await statusBadgeButton.textContent()) ?? '').trim() !== initialStatusText.trim()
-        },
-        { timeout: 10000 }
-      )
-      .toBe(true)
+    // toHaveText retries until React has re-rendered the badge. A one-shot read
+    // straight after the click raced that render and failed every CI attempt
+    // even though the status change itself had been saved. If the modal ever
+    // gains a success toast, assert it here alongside the badge.
+    await expect(statusBadgeButton).toHaveText(selectedStatusText, { timeout: 10000 })
 
     await page.keyboard.press('Escape')
   })
@@ -775,33 +779,51 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
     await page.keyboard.press('Escape')
   })
 
-  test('detail panel shows comment count', async ({ page }) => {
+  test('detail panel shows the comment count from the list card', async ({ page }) => {
     const postCards = page.locator('[data-post-id]')
     if ((await postCards.count()) === 0) {
       test.skip()
       return
     }
 
-    // Find a post that has a visible comment count in the list
-    for (let i = 0; i < Math.min(await postCards.count(), 5); i++) {
-      const card = postCards.nth(i)
-      // Comment icon + count is rendered via ChatBubbleLeftIcon + commentCount text
-      const commentText = card.locator('span').filter({ hasText: /^\d+$/ })
-      if ((await commentText.count()) > 0) {
-        break
-      }
+    // A list card shows its comment count as one span holding a chat-bubble
+    // icon and the number, and only when the count is above zero
+    // (components/public/post-card.tsx). The icon is what tells it apart from
+    // the vote count (data-testid="vote-count"), the card's other digit-only
+    // span. The old filter matched that vote count on every card, and the loop
+    // then opened the first card whatever it found. `has:` is rooted at the
+    // page because Playwright re-applies it relative to each candidate span.
+    const cardCommentCount = page.locator('span').filter({
+      has: page.locator('svg'),
+      hasText: /^\d+$/,
+    })
+    const cardWithComments = postCards.filter({ has: cardCommentCount }).first()
+    if ((await cardWithComments.count()) === 0) {
+      // No loaded post has a comment, so there is no count to compare; skip
+      test.skip()
+      return
     }
+    const listCount = Number(
+      ((await cardWithComments.locator(cardCommentCount).textContent()) ?? '').trim()
+    )
+    expect(listCount).toBeGreaterThan(0)
 
-    // Use first card regardless — the Comments tab in modal always exists
-    const firstCard = postCards.first()
-    await firstCard.click()
+    await cardWithComments.click()
     const modal = page.getByRole('dialog')
     await expect(modal).toBeVisible({ timeout: 10000 })
     await page.waitForLoadState('networkidle')
 
-    // The modal has a "Comments" tab that is always visible
+    // The Comments tab is open by default and heads the thread with the count,
+    // "1 Comment" or "3 Comments" (CommentsSection in
+    // components/public/post-detail/comments-section.tsx). That heading counts
+    // every live comment the panel loads. The list count leaves out internal
+    // notes and comments still held for moderation, so the two agree on any
+    // post without those, which includes every seeded post.
     const commentsTab = modal.getByRole('button', { name: /^comments$/i })
     await expect(commentsTab).toBeVisible()
+    await expect(
+      modal.getByRole('heading', { name: new RegExp(`^${listCount} comments?$`, 'i') })
+    ).toBeVisible()
 
     await page.keyboard.press('Escape')
   })
@@ -844,16 +866,22 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
       return
     }
 
-    // Prefer a card that shows a description preview (posts with content)
-    let targetCard = postCards.first()
+    // Pick a card that shows a description preview. PostCard renders that
+    // paragraph only when the post has content, so the modal it opens must
+    // show a body; every seed post carries one.
+    let targetCard: import('@playwright/test').Locator | null = null
     for (let i = 0; i < Math.min(await postCards.count(), 5); i++) {
       const card = postCards.nth(i)
-      // Description line: <p class="text-sm text-muted-foreground/60 line-clamp-1 mt-1">
+      // Description line: <p class="text-sm text-muted-foreground mt-1 break-words">
       const descLine = card.locator('p.text-sm')
       if ((await descLine.count()) > 0) {
         targetCard = card
         break
       }
+    }
+    if (!targetCard) {
+      test.skip(true, 'None of the first five posts shows a body preview')
+      return
     }
 
     await targetCard.click()
@@ -861,15 +889,12 @@ test.describe('Admin Post Management - Post Detail Panel Accuracy', () => {
     await expect(modal).toBeVisible({ timeout: 10000 })
     await page.waitForLoadState('networkidle')
 
-    // The TipTap editor is always present even if empty; for posts with content it has text
+    // The TipTap editor is mounted even for an empty body, so a Locator for
+    // it proves nothing (a Locator is always truthy). The body is shown only
+    // if the editor holds non-whitespace text; the placeholder is CSS, not text.
     const editor = postBodyEditor(modal)
     await expect(editor).toBeVisible({ timeout: 5000 })
-
-    // The editor content should not be completely empty (posts from seed data have bodies)
-    // We check that the editor exists and is rendered; content presence depends on seed data
-    // For seed posts with content the editor renders at least one <p> tag
-    // Accept either content present or editor visible — this test confirms the editor renders
-    expect(editor).toBeTruthy()
+    await expect(editor).toHaveText(/\S/, { timeout: 5000 })
 
     await page.keyboard.press('Escape')
   })
@@ -983,40 +1008,15 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
     }
   })
 
-  test('after search, all visible post titles contain the search term or empty state shown', async ({
-    page,
-  }) => {
+  test('searching an English stopword shows an empty result', async ({ page }) => {
     const searchInput = page.getByPlaceholder(/search/i)
-    if ((await searchInput.count()) === 0) {
-      test.skip()
-      return
-    }
+    await expect(searchInput).toBeVisible()
 
-    // Use a term that likely matches seed data
-    const searchTerm = 'a'
-    await searchInput.fill(searchTerm)
-    // Debounced search — wait for network
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(800)
-
-    const postCards = page.locator('[data-post-id]')
-    const emptyState = page.locator('text=/no posts|no results/i')
-
-    if ((await emptyState.count()) > 0) {
-      test.skip(true, 'Empty state is acceptable')
-      return
-    }
-
-    // Each visible post title should contain the search term (case-insensitive)
-    const cardCount = await postCards.count()
-    expect(cardCount).toBeGreaterThan(0)
-
-    for (let i = 0; i < Math.min(cardCount, 5); i++) {
-      const card = postCards.nth(i)
-      const titleEl = card.locator('h3').first()
-      const titleText = ((await titleEl.textContent()) ?? '').toLowerCase()
-      expect(titleText).toContain(searchTerm.toLowerCase())
-    }
+    // English full-text search ignores this stopword. Wait for its actual result,
+    // rather than allowing pre-search cards to satisfy an immediate count check.
+    await searchInput.fill('a')
+    await expect(page.getByText('No posts match your filters', { exact: true })).toBeVisible()
+    await expect(page.locator('[data-post-id]')).toHaveCount(0)
   })
 
   test('clearing search restores a list with count greater than or equal to filtered count', async ({
@@ -1046,8 +1046,11 @@ test.describe('Admin Post Management - Filter + Pagination Accuracy', () => {
 
     // Restored list should have at least as many posts as the filtered list
     expect(restoredCount).toBeGreaterThanOrEqual(filteredCount)
-    // And should be back to (or near) the baseline
-    expect(restoredCount).toBeGreaterThanOrEqual(Math.min(baselineCount, restoredCount))
+    // And clearing the search must bring the whole baseline back. The seed
+    // creates 500 posts and the inbox shows one 20-post page, so a post another
+    // worker deletes between the two reads is replaced by the next one; a
+    // shorter list means the filter stuck.
+    expect(restoredCount).toBeGreaterThanOrEqual(baselineCount)
   })
 })
 
@@ -1119,7 +1122,7 @@ test.describe('Admin Post Management - Edit Flow', () => {
     await editor.click()
 
     // Select all existing content and replace it
-    await page.keyboard.press('Meta+a')
+    await page.keyboard.press('ControlOrMeta+a')
     const newBody = `E2E body update ${Date.now()}`
     await page.keyboard.type(newBody)
 

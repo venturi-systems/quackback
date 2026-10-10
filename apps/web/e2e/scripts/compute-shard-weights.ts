@@ -12,8 +12,8 @@
  *
  * This reads the Playwright JSON reports from a full CI run (download the
  * `playwright-shard-*` artifacts), walks the tests in Playwright's own order,
- * and cuts when cumulative duration crosses the next 1/N. Print the vector
- * into the `PWTEST_SHARD_WEIGHTS` value in .github/workflows/ci.yml.
+ * and picks the N contiguous ranges whose slowest member is shortest. Print
+ * the vector into the `PWTEST_SHARD_WEIGHTS` value in .github/workflows/ci.yml.
  *
  * This only moves boundaries. filterForShard assigns every group to exactly
  * one shard for any weight vector, so no vector this emits can drop or
@@ -62,6 +62,14 @@ for (const path of paths) {
     const file = suite.file ?? inherited
     for (const spec of suite.specs ?? []) {
       if (!file) continue
+      // One spec location is one Playwright test here: the projects in
+      // playwright.config.ts partition spec files by directory and nothing sets
+      // repeatEach, so every spec carries exactly one `tests` entry. The setup
+      // and cleanup dependency tests also land in `ordered`, although
+      // filterForShard detaches dependency suites before it counts, so they add
+      // a small constant to shard 1's share only. Playwright applies the weights
+      // proportionally (floor(weight * total / sum)), so even a uniform
+      // multiplicity would leave the cut points where this script drew them.
       // Sum every result: a retried test costs the shard its retries too, and
       // the boundaries have to be drawn against what the shard actually pays.
       const duration = (spec.tests ?? [])
@@ -93,23 +101,79 @@ if (total <= 0) {
 }
 
 const target = total / SHARDS
-const weights: number[] = []
-let cut = 0
-let accumulated = 0
 
-ordered.forEach((test, index) => {
-  accumulated += test.duration
-  if (weights.length < SHARDS - 1 && accumulated >= target * (weights.length + 1)) {
-    weights.push(index + 1 - cut)
-    cut = index + 1
+// Cut where the slowest shard is as short as it can be.
+//
+// The first version cut the moment the running total crossed the next 1/N.
+// That overshoots whenever one spec is long: the shard that absorbs it
+// finishes late, and the next shard, cut early to catch up, finishes early.
+// On run 37513233008 it drew shards of 683 s and 288 s against a 507 s mean.
+// The contiguous split with the smallest maximum is found instead: binary
+// search the cap, fill shards greedily under it, and when that needs fewer
+// than N shards, split the slowest ones, which never raises the maximum.
+const partition = (cap: number): number[] => {
+  const counts: number[] = []
+  let count = 0
+  let sum = 0
+  for (const test of ordered) {
+    if (count > 0 && sum + test.duration > cap) {
+      counts.push(count)
+      count = 0
+      sum = 0
+    }
+    count += 1
+    sum += test.duration
   }
-})
-weights.push(ordered.length - cut)
+  counts.push(count)
+  return counts
+}
+
+let low = Math.max(...ordered.map((t) => t.duration))
+let high = total
+while (high - low > 1) {
+  const mid = (low + high) / 2
+  if (partition(mid).length <= SHARDS) high = mid
+  else low = mid
+}
+const weights = partition(high)
+
+const durationOf = (start: number, count: number): number =>
+  ordered.slice(start, start + count).reduce((sum, t) => sum + t.duration, 0)
+
+while (weights.length < SHARDS) {
+  let pick = -1
+  let pickStart = 0
+  let pickDuration = -1
+  let start = 0
+  for (const [index, weight] of weights.entries()) {
+    const duration = durationOf(start, weight)
+    if (weight > 1 && duration > pickDuration) {
+      pick = index
+      pickStart = start
+      pickDuration = duration
+    }
+    start += weight
+  }
+  if (pick < 0) break // fewer tests than shards; the guard below reports it
+  // Split the slowest shard at the point closest to half its duration.
+  let best = 1
+  let bestGap = Number.POSITIVE_INFINITY
+  let accumulated = 0
+  for (let k = 1; k < weights[pick]; k++) {
+    accumulated += ordered[pickStart + k - 1].duration
+    const gap = Math.abs(accumulated - pickDuration / 2)
+    if (gap < bestGap) {
+      bestGap = gap
+      best = k
+    }
+  }
+  weights.splice(pick, 1, best, weights[pick] - best)
+}
 
 // A zero weight would hand a shard no tests at all, and an empty shard cannot
 // prove anything. check-known-failures.ts would reject it, but emitting one at
 // all is a bug in this script, so stop here rather than shipping it.
-if (weights.some((w) => w <= 0)) {
+if (weights.length !== SHARDS || weights.some((w) => w <= 0)) {
   console.error(`FATAL: computed a non-positive weight (${weights.join(':')}); refusing to emit it`)
   process.exit(1)
 }

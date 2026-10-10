@@ -12,6 +12,7 @@
     "e2e/tests/auth/public-entry.spec.ts",
     "e2e/tests/public/design-accessibility-roles.spec.ts",
     "e2e/scripts/set-auth-acceptance-fixture.ts",
+    "e2e/scripts/image-server.ts",
     "e2e/utils/design-acceptance.ts",
     "e2e/utils/design-fixture-guard.ts",
     "e2e/utils/rendered-font-evidence.ts",

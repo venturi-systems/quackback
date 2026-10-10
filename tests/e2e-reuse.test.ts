@@ -36,8 +36,12 @@ function fixture() {
   const requiredSteps = [
     'Checkout tested source',
     'Record the actual tested checkout',
+    'Build exact E2E application image',
+    'Start attested E2E application image',
     'Collect the expected tests for this shard',
     'Run the Playwright suite',
+    'Capture and stop owned E2E application',
+    'Upload E2E application evidence',
     'Check the shard against the known-failure ratchet',
     'Verify the tested checkout is unchanged',
     'Upload tested checkout evidence',
@@ -58,10 +62,40 @@ function fixture() {
     commit: testedMerge,
     tree: testedTree,
   }))
+  const imageIdentity = receipts.map((receipt, index) => ({
+    schema: receipt.schema,
+    run_id: receipt.run_id,
+    run_attempt: receipt.run_attempt,
+    shard: receipt.shard,
+    commit: receipt.commit,
+    tree: receipt.tree,
+    image_id: 'sha256:' + '1'.repeat(64),
+    container_id: (index + 1).toString(16).repeat(64),
+    fixture_receipt: 'DESIGN_FIXTURE_ENVIRONMENT_OK:' + (index + 1).toString(16).repeat(64),
+    mode: 'development',
+  }))
+  const imageReady: Array<Record<string, unknown>> = imageIdentity.map((identity) => ({
+    ...identity,
+    ready: true,
+    inspected_before_start: true,
+    runtime_development_mode_verified: true,
+    process_identity: { pid: 1234, started_at: '2026-10-03T00:09:37.123456789Z', restart_count: 0 },
+    process_continuity_verified: true,
+    development_mode_probe: { requests: 4, elapsed_ms: 250, origin_rejected: true },
+  }))
+  const imageAfter: Array<Record<string, unknown>> = imageIdentity.map((identity) => ({
+    ...identity,
+    configuration_verified: true,
+    source_unchanged: true,
+    running_before_stop: true,
+    stopped: true,
+  }))
   return {
     run,
     jobs,
     receipts,
+    imageReady,
+    imageAfter,
     queueTree: testedTree,
     commitTree: testedTree,
     parents: [{ sha: prHead }],
@@ -72,25 +106,62 @@ function fixture() {
     badJson: false,
     wrongProducer: false,
     failDownload: false,
+    omitImageReady: false,
+    omitImageAfter: false,
+    badImageReadyJson: false,
+    badImageAfterJson: false,
+    oversizedEvidence: false,
+    invalidSize: false,
   }
 }
 
 async function probe(f = fixture()) {
   const outputs: Record<string, string> = {}
-  const archives = f.receipts.map((receipt) =>
+  const archiveFiles = f.receipts.map((receipt, index) => {
+    const files: Record<string, string> = {
+      'tested-tree.json': f.badJson ? '{invalid' : JSON.stringify(receipt),
+    }
+    if (!f.omitImageReady) {
+      files['image-server-ready.json'] = f.badImageReadyJson
+        ? '{invalid'
+        : JSON.stringify(f.imageReady[index])
+    }
+    if (!f.omitImageAfter) {
+      files['image-server-after.json'] = f.badImageAfterJson
+        ? '{invalid'
+        : JSON.stringify(f.imageAfter[index])
+    }
+    return files
+  })
+  // Build the same eight independent ZIPs in one process. Starting Python for
+  // every shard dominates these repeated negative cases under shared CI load;
+  // batching removes startup work without changing evidence or its assertions.
+  const encodedArchives = JSON.parse(
     execFileSync(
       'python3',
       [
         '-c',
-        'import io,sys,zipfile; b=io.BytesIO(); z=zipfile.ZipFile(b,"w"); z.writestr("tested-tree.json",sys.stdin.buffer.read()); z.close(); sys.stdout.buffer.write(b.getvalue())',
+        [
+          'import base64, io, json, sys, zipfile',
+          'archives = []',
+          'for files in json.load(sys.stdin):',
+          '    buffer = io.BytesIO()',
+          '    with zipfile.ZipFile(buffer, "w") as archive:',
+          '        for name, data in files.items():',
+          '            archive.writestr(name, data)',
+          '    archives.append(base64.b64encode(buffer.getvalue()).decode("ascii"))',
+          'json.dump(archives, sys.stdout)',
+        ].join('\n'),
       ],
-      { input: f.badJson ? '{invalid' : JSON.stringify(receipt) }
+      { input: JSON.stringify(archiveFiles), encoding: 'utf8' }
     )
-  )
+  ) as string[]
+  const archives = encodedArchives.map((encoded) => Buffer.from(encoded, 'base64'))
   const artifacts = archives.map((bytes, i) => ({
     id: i + 100,
     name: `e2e-tested-tree-${f.run.id}-${f.run.run_attempt}-${i + 1}`,
     expired: f.expired,
+    size_in_bytes: f.invalidSize ? Number.NaN : f.oversizedEvidence ? 65537 : bytes.length,
     workflow_run: { id: f.wrongProducer ? 999 : f.run.id, head_sha: prHead },
     digest:
       'sha256:' +
@@ -162,6 +233,12 @@ describe('merge queue reuse checks the checkout that actually ran', () => {
     'badJson',
     'wrongProducer',
     'failDownload',
+    'omitImageReady',
+    'omitImageAfter',
+    'badImageReadyJson',
+    'badImageAfterJson',
+    'oversizedEvidence',
+    'invalidSize',
   ] as const)('fails closed for %s evidence', async (field) => {
     const f = fixture()
     f[field] = true
@@ -196,16 +273,254 @@ describe('merge queue reuse checks the checkout that actually ran', () => {
     expect((await probe(f)).reuse).toBe('false')
   })
   it.each([
+    'Build exact E2E application image',
+    'Start attested E2E application image',
     'Run the Playwright suite',
+    'Capture and stop owned E2E application',
+    'Upload E2E application evidence',
     'Check the shard against the known-failure ratchet',
     'Verify the tested checkout is unchanged',
-  ])('rejects skipped or failed %s even with retained receipts', async (name) => {
-    for (const conclusion of ['skipped', 'failure']) {
+  ])('rejects unsuccessful %s even with retained receipts', async (name) => {
+    for (const conclusion of ['skipped', 'failure', 'cancelled']) {
       const f = fixture()
       f.jobs[0].steps.find((step) => step.name === name)!.conclusion = conclusion
       expect((await probe(f)).reuse).toBe('false')
     }
   })
+  it.each([
+    'Build exact E2E application image',
+    'Start attested E2E application image',
+    'Capture and stop owned E2E application',
+    'Upload E2E application evidence',
+  ])('rejects missing, duplicate or unfinished %s', async (name) => {
+    const absent = fixture()
+    absent.jobs[0].steps = absent.jobs[0].steps.filter((step) => step.name !== name)
+    expect((await probe(absent)).reuse).toBe('false')
+    const duplicate = fixture()
+    duplicate.jobs[0].steps.push({ name, status: 'completed', conclusion: 'success' })
+    expect((await probe(duplicate)).reuse).toBe('false')
+    const unfinished = fixture()
+    unfinished.jobs[0].steps.find((step) => step.name === name)!.status = 'in_progress'
+    expect((await probe(unfinished)).reuse).toBe('false')
+  })
+
+  it.each(['schema', 'run_id', 'run_attempt', 'shard', 'commit', 'tree'] as const)(
+    'binds matching image receipts to the tested checkout field %s',
+    async (field) => {
+      const f = fixture()
+      const current = f.imageReady[3][field]
+      const forged = typeof current === 'number' ? current + 1 : '9'.repeat(40)
+      f.imageReady[3][field] = forged
+      f.imageAfter[3][field] = forged
+      expect((await probe(f)).reuse).toBe('false')
+    }
+  )
+
+  it.each([
+    'image_id',
+    'container_id',
+    'fixture_receipt',
+    'mode',
+    'ready',
+    'inspected_before_start',
+    'runtime_development_mode_verified',
+    'process_identity',
+    'process_continuity_verified',
+    'development_mode_probe',
+  ])('rejects missing image readiness field %s', async (field) => {
+    const f = fixture()
+    delete f.imageReady[3][field]
+    expect((await probe(f)).reuse).toBe('false')
+  })
+
+  it.each([
+    ['image_id', 'sha256:' + 'a'.repeat(63)],
+    ['image_id', 'sha256:' + 'A'.repeat(64)],
+    ['image_id', ['sha256:' + '1'.repeat(64)]],
+    ['container_id', 'a'.repeat(63)],
+    ['container_id', ['a'.repeat(64)]],
+    ['fixture_receipt', 'DESIGN_FIXTURE_ENVIRONMENT_OK:' + 'g'.repeat(64)],
+    ['fixture_receipt', ['DESIGN_FIXTURE_ENVIRONMENT_OK:' + '1'.repeat(64)]],
+    ['mode', 'production'],
+    ['mode', 'test'],
+    ['ready', false],
+    ['ready', 'true'],
+    ['inspected_before_start', false],
+    ['runtime_development_mode_verified', false],
+    ['runtime_development_mode_verified', 'true'],
+    ['process_continuity_verified', false],
+    ['process_continuity_verified', 'true'],
+    ['process_continuity_verified', 1],
+    ['process_continuity_verified', null],
+  ] as const)('rejects malformed image readiness %s: %j', async (field, value) => {
+    const f = fixture()
+    f.imageReady[3][field] = value
+    expect((await probe(f)).reuse).toBe('false')
+  })
+
+  it.each([
+    { identity: null },
+    { identity: [] },
+    { identity: 'process' },
+    { identity: 1234 },
+    { identity: {} },
+  ])('rejects missing process identity members: $identity', async ({ identity }) => {
+    const f = fixture()
+    f.imageReady[3].process_identity = identity
+    expect((await probe(f)).reuse).toBe('false')
+  })
+
+  it.each(['pid', 'started_at', 'restart_count'])(
+    'requires process identity member %s',
+    async (field) => {
+      const f = fixture()
+      delete (f.imageReady[3].process_identity as Record<string, unknown>)[field]
+      expect((await probe(f)).reuse).toBe('false')
+    }
+  )
+
+  it.each([
+    ['pid', 0],
+    ['pid', -1],
+    ['pid', 1.5],
+    ['pid', '1234'],
+    ['pid', true],
+    ['pid', null],
+    ['pid', Number.MAX_SAFE_INTEGER + 1],
+    ['restart_count', -1],
+    ['restart_count', 0.5],
+    ['restart_count', '0'],
+    ['restart_count', false],
+    ['restart_count', null],
+    ['restart_count', Number.MAX_SAFE_INTEGER + 1],
+    ['started_at', null],
+    ['started_at', 1790986177000],
+    ['started_at', ''],
+    ['started_at', 'not-a-date'],
+    ['started_at', '0001-01-01T00:00:00Z'],
+    ['started_at', '0001-01-01T00:00:00.000000000Z'],
+    ['started_at', '2026-10-03'],
+    ['started_at', '2026-10-03T00:09:37'],
+    ['started_at', '2026-10-03T00:09:37+00:00'],
+    ['started_at', '2026-10-03T00:09:37.1234567890Z'],
+    ['started_at', '2026-02-30T00:09:37Z'],
+    ['started_at', '2026-10-03T24:00:00Z'],
+    ['started_at', '2026-13-03T00:09:37Z'],
+  ] as const)('rejects malformed process identity %s: %j', async (field, value) => {
+    const f = fixture()
+    const identity = f.imageReady[3].process_identity as Record<string, unknown>
+    identity[field] = value
+    expect((await probe(f)).reuse).toBe('false')
+  })
+
+  it.each([
+    '2026-10-03T00:09:37Z',
+    '2026-10-03T00:09:37.1Z',
+    '2026-10-03T00:09:37.123Z',
+    '2026-10-03T00:09:37.123456789Z',
+    '2024-02-29T00:09:37Z',
+  ])('accepts valid Docker process start timestamps: %s', async (startedAt) => {
+    const f = fixture()
+    f.imageReady[3].process_identity = { pid: 1, started_at: startedAt, restart_count: 2 }
+    expect((await probe(f)).reuse).toBe('true')
+  })
+
+  it.each([
+    { requests: 3, elapsed_ms: 250, origin_rejected: true },
+    { requests: 5, elapsed_ms: 250, origin_rejected: true },
+    { requests: '4', elapsed_ms: 250, origin_rejected: true },
+    { elapsed_ms: 250, origin_rejected: true },
+    { requests: 4, origin_rejected: true },
+    { requests: 4, elapsed_ms: -1, origin_rejected: true },
+    { requests: 4, elapsed_ms: 60000, origin_rejected: true },
+    { requests: 4, elapsed_ms: 60001, origin_rejected: true },
+    { requests: 4, elapsed_ms: Number.NaN, origin_rejected: true },
+    { requests: 4, elapsed_ms: Number.POSITIVE_INFINITY, origin_rejected: true },
+    { requests: 4, elapsed_ms: null, origin_rejected: true },
+    { requests: 4, elapsed_ms: '250', origin_rejected: true },
+    { requests: 4, elapsed_ms: 250 },
+    { requests: 4, elapsed_ms: 250, origin_rejected: false },
+    { requests: 4, elapsed_ms: 250, origin_rejected: 'true' },
+  ])('rejects incomplete or out-of-window runtime development-mode proof: %j', async (proof) => {
+    const f = fixture()
+    f.imageReady[3].development_mode_probe = proof
+    expect((await probe(f)).reuse).toBe('false')
+  })
+
+  it.each([0, 59999.999])(
+    'accepts complete development-mode proof within the window: %s',
+    async (elapsed) => {
+      const f = fixture()
+      f.imageReady[3].development_mode_probe = {
+        requests: 4,
+        elapsed_ms: elapsed,
+        origin_rejected: true,
+      }
+      expect((await probe(f)).reuse).toBe('true')
+    }
+  )
+
+  it('allows independently built shard images when each lifecycle identity matches', async () => {
+    const f = fixture()
+    f.imageReady[3].image_id = 'sha256:' + '9'.repeat(64)
+    f.imageAfter[3].image_id = f.imageReady[3].image_id
+    expect((await probe(f)).reuse).toBe('true')
+  })
+
+  it.each(['production', 'test'])(
+    'rejects matching %s-mode receipts despite a claimed development-mode probe',
+    async (mode) => {
+      const f = fixture()
+      f.imageReady[3].mode = mode
+      f.imageAfter[3].mode = mode
+      expect((await probe(f)).reuse).toBe('false')
+    }
+  )
+
+  it.each([
+    'schema',
+    'run_id',
+    'run_attempt',
+    'shard',
+    'commit',
+    'tree',
+    'image_id',
+    'container_id',
+    'fixture_receipt',
+    'mode',
+  ])('rejects changed or missing shutdown identity %s', async (field) => {
+    const changed = fixture()
+    const replacements: Record<string, unknown> = {
+      schema: 2,
+      run_id: 124,
+      run_attempt: 3,
+      shard: 5,
+      commit: '9'.repeat(40),
+      tree: '9'.repeat(40),
+      image_id: 'sha256:' + '9'.repeat(64),
+      container_id: '9'.repeat(64),
+      fixture_receipt: 'DESIGN_FIXTURE_ENVIRONMENT_OK:' + '9'.repeat(64),
+      mode: 'production',
+    }
+    changed.imageAfter[3][field] = replacements[field]
+    expect((await probe(changed)).reuse).toBe('false')
+    const missing = fixture()
+    delete missing.imageAfter[3][field]
+    expect((await probe(missing)).reuse).toBe('false')
+  })
+
+  it.each(['configuration_verified', 'source_unchanged', 'running_before_stop', 'stopped'])(
+    'requires actual shutdown attestation %s',
+    async (field) => {
+      for (const value of [false, 'true', 1, null, undefined]) {
+        const f = fixture()
+        if (value === undefined) delete f.imageAfter[3][field]
+        else f.imageAfter[3][field] = value
+        expect((await probe(f)).reuse).toBe('false')
+      }
+    }
+  )
+
   it('rejects a setup-only successful shard', async () => {
     const f = fixture()
     f.jobs[0].steps = f.jobs[0].steps.slice(0, 2)
@@ -290,13 +605,21 @@ esac
       .split('      - name: Upload tested checkout evidence')[0]
     const upload = e2e
       .split('      - name: Upload tested checkout evidence')[1]
-      .split('      - name: Upload the Playwright artifacts')[0]
+      .split(/\n {6}- /, 1)[0]
     expect(record).toContain('id: tested_checkout')
     expect(verify).toContain("if: ${{ always() && steps.tested_checkout.outcome == 'success' }}")
     expect(upload).toContain(
       "if: ${{ always() && github.event_name == 'pull_request' && steps.tested_checkout.outcome == 'success' }}"
     )
-    expect(upload).toContain('path: ${{ runner.temp }}/e2e-evidence/tested-tree*.json')
+    expect(upload).toContain('path: |')
+    for (const name of [
+      'tested-tree*.json',
+      'image-server-ready.json',
+      'image-server-after.json',
+    ]) {
+      expect(upload).toContain('${{ runner.temp }}/e2e-evidence/' + name)
+    }
+    expect(upload).not.toMatch(/image-server-build\.log|image-server\*|inspect/)
     expect(upload).toContain('if-no-files-found: error')
   })
 })

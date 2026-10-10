@@ -34,6 +34,7 @@ import { PublicPageFrame } from '@/components/public/shell/public-page-frame'
 import { VenturiSiteFooter } from '@/components/public/shell/venturi-site-footer'
 import { AuthNotice } from '@/components/auth/auth-notice'
 import { DEFAULT_LOCALE } from '@/lib/shared/i18n'
+import { cssForStyleElement } from '@/lib/shared/style-element-css'
 import type { PortalAccessGateError } from '@/lib/shared/types/portal-gate-error'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -93,16 +94,17 @@ function GateCard({
   const [signingIn, setSigningIn] = useState(false)
 
   // The 2FA-abandon revoke (below) reads these from a cleanup that runs once on
-  // unmount, so it needs the latest values mirrored into refs that don't
-  // re-subscribe the effect.
+  // unmount, so it needs the latest values in refs that don't re-subscribe the
+  // effect. The step is mirrored by an effect. signingInRef is set by the
+  // success handler in the same call that latches signingIn: the router
+  // invalidation it starts can unmount the gate in a render that never commits
+  // that state update, and a mirroring effect would then not have run before
+  // the cleanup revoked the session that just signed in.
   const stepRef = useRef<AuthFormStep>('credentials')
   const signingInRef = useRef(false)
   useEffect(() => {
     stepRef.current = stepCtx.step
   }, [stepCtx.step])
-  useEffect(() => {
-    signingInRef.current = signingIn
-  }, [signingIn])
 
   // Parity with the auth dialog's abandon path: a required-2FA visitor who signs
   // in with a password has a live session before completing the second factor.
@@ -124,6 +126,7 @@ function GateCard({
   // fires on a real sign-in, so `reason` always moves off 'unauthenticated'.
   useAuthBroadcast({
     onSuccess: () => {
+      signingInRef.current = true
       setSigningIn(true)
       if (safeCallback) {
         // Team surfaces full-navigate (re-bootstrap the admin shell); a
@@ -291,12 +294,16 @@ export function PortalAccessGate({
     // <FormattedMessage> has no context and crashes. No SSR catalog here;
     // useIntlSetup fetches it client-side, well before the form needs it.
     <PortalIntlProvider locale={locale ?? DEFAULT_LOCALE}>
-      {/* Keep the sign-in page visually consistent with the portal. */}
-      {themeStyles && <style dangerouslySetInnerHTML={{ __html: themeStyles }} />}
-      {customCss && <style dangerouslySetInnerHTML={{ __html: customCss }} />}
+      {/* Keep the sign-in page visually consistent with the portal. Both
+          sheets carry workspace-controlled text, so a `</style` in either must
+          not end its element (cssForStyleElement). */}
+      {themeStyles && (
+        <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(themeStyles) }} />
+      )}
+      {customCss && <style dangerouslySetInnerHTML={{ __html: cssForStyleElement(customCss) }} />}
       <PublicPageFrame
         className={reason === 'unauthenticated' ? 'portal-gate portal-gate--entry' : 'portal-gate'}
-        footer={reason === 'unauthenticated' ? <VenturiSiteFooter /> : undefined}
+        footer={reason === 'unauthenticated' ? <VenturiSiteFooter showSourceCode /> : undefined}
       >
         <GateCard
           reason={reason}

@@ -144,13 +144,38 @@ async function recordHeaderControls(page: Page, testInfo: TestInfo, route: Route
   if (width < 640) await toggle.click()
 }
 
+async function waitForRouteAnimations(page: Page, route: Route, relatedExpected = true) {
+  if (route === 'post' && relatedExpected) {
+    // The design caller requires a distinct public complete-title match.
+    // Preserve the metadata contract for other callers, then require visible
+    // content before enumerating animations; hydration can follow network idle.
+    const heading = page.getByRole('heading', { level: 3, name: 'Related', exact: true })
+    await expect(heading, 'The seeded post must render its Related section').toBeVisible()
+    const related = heading.locator('..').locator('..')
+    await expect(
+      related.getByRole('link').first(),
+      'The selected fixture must expose a related post link'
+    ).toBeVisible()
+  }
+  await page.evaluate(async () => {
+    const finite = document
+      .getAnimations()
+      .filter(
+        (animation) =>
+          animation.playState === 'running' &&
+          Number.isFinite(Number(animation.effect?.getComputedTiming().endTime))
+      )
+    await Promise.all(finite.map((animation) => animation.finished))
+  })
+}
+
 async function openRoute(page: Page, route: Route, revealParticipation = true) {
-  const path =
-    route === 'post'
-      ? (await getPostWithOwnComment(TEST_ADMIN.email)).path
-      : route === 'feed'
-        ? '/'
-        : `/${route}`
+  const ownCommentPost =
+    route === 'post' ? getPostWithOwnComment(TEST_ADMIN.email, { requireRelated: true }) : null
+  if (ownCommentPost) {
+    expect(ownCommentPost.hasRelated, 'The design fixture must contain Related content').toBe(true)
+  }
+  const path = ownCommentPost !== null ? ownCommentPost.path : route === 'feed' ? '/' : `/${route}`
   const response = await page.goto(path)
   expect(response, 'Required route must return a document response').not.toBeNull()
   expect(response!.status()).toBe(200)
@@ -217,16 +242,7 @@ async function openRoute(page: Page, route: Route, revealParticipation = true) {
     }
   }
   await page.evaluate(() => document.fonts.ready.then(() => undefined))
-  await page.evaluate(async () => {
-    const finite = document
-      .getAnimations()
-      .filter(
-        (animation) =>
-          animation.playState === 'running' &&
-          Number.isFinite(Number(animation.effect?.getComputedTiming().endTime))
-      )
-    await Promise.all(finite.map((animation) => animation.finished))
-  })
+  await waitForRouteAnimations(page, route, ownCommentPost?.hasRelated ?? true)
 }
 
 function feedRegions(
@@ -342,6 +358,62 @@ async function recordAuthoredFeedTypography(page: Page, testInfo: TestInfo, stat
   ).toBe(true)
   expect(scopedAcceptance).toBe(true)
 }
+
+test('A01 post readiness waits for late Related content and its entrance animation', async ({
+  page,
+}) => {
+  // Reproduce the recorded ordering with real browser animation state. Related
+  // content is deliberately absent when readiness begins, then mounts later.
+  await page.setContent(`
+    <style>
+      @keyframes related-entrance {
+        from { opacity: 0; transform: translateY(2px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      #related { animation: related-entrance 150ms linear; }
+      #related a { display: inline-flex; min-height: 44px; align-items: center; }
+    </style>
+    <main id="portal-main"><div id="post-content"></div></main>
+  `)
+  let settled = false
+  const readiness = waitForRouteAnimations(page, 'post').then(() => {
+    settled = true
+  })
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+  const settledBeforeInsertion = settled
+  await page.locator('#post-content').evaluate((element) => {
+    element.innerHTML =
+      '<div id="related"><div><h3>Related</h3></div><div><a href="/related-post">Related request</a></div></div>'
+  })
+  await readiness
+  const transformAtReadiness = await page
+    .locator('#related')
+    .evaluate((element) => getComputedStyle(element).transform)
+  expect(settledBeforeInsertion, 'Readiness cannot finish before Related content mounts').toBe(
+    false
+  )
+  expect(transformAtReadiness, 'Readiness must settle the mounted entrance animation').toBe('none')
+  const scope = [{ selector: '#portal-main', expectInteractive: true }]
+  const evidence = await measureReflow(page, scope, {
+    artifactRevision: SOURCE,
+    state: 'late-related-animation-settled',
+  })
+  expect(evidence.issues).toEqual([])
+
+  // A persistent transform must still require review after the same readiness
+  // helper. Waiting for a finite animation never exempts transformed geometry.
+  await page.locator('#related').evaluate((element) => {
+    element.style.transform = 'translateX(1px)'
+  })
+  await waitForRouteAnimations(page, 'post')
+  const transformed = await measureReflow(page, scope, {
+    artifactRevision: SOURCE,
+    state: 'persistent-related-transform',
+  })
+  expect(
+    transformed.issues.some((issue) => issue.kind === 'transformed-coordinate-frame-needs-review')
+  ).toBe(true)
+})
 
 for (const width of WIDTHS) {
   for (const route of ROUTES) {

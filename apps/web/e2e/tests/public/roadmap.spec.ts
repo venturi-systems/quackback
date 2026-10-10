@@ -220,29 +220,25 @@ test.describe('Public Roadmap', () => {
   })
 
   test('URL search param ?roadmap= selects the corresponding roadmap', async ({ page }) => {
-    // Navigate fresh without beforeEach interference
-    await page.goto('/roadmap')
-    await page.waitForLoadState('networkidle')
+    const tabs = page.getByRole('tablist', { name: 'Roadmaps' }).getByRole('tab')
+    await expect(tabs.nth(1)).toBeVisible()
+    const target = tabs.nth(1)
+    const name = (await target.innerText()).trim()
+    expect(name).not.toBe('')
+    await target.click()
+    await expect(target).toHaveAttribute('aria-selected', 'true')
+    await expect(page).toHaveURL(/[?&]roadmap=/)
+    const roadmapId = new URL(page.url()).searchParams.get('roadmap')
+    expect(roadmapId).toBeTruthy()
 
-    const tabList = page.locator('[role="tablist"]')
-    if ((await tabList.count()) === 0) {
-      test.skip()
-      return
-    }
-
-    // Get the value of the first tab to use as the roadmap param
-    const firstTab = tabList.first().locator('[role="tab"]').first()
-    const roadmapId = await firstTab.getAttribute('data-value')
-
-    if (!roadmapId) {
-      test.skip()
-      return
-    }
-
-    await page.goto(`/roadmap?roadmap=${roadmapId}`)
-    await page.waitForLoadState('networkidle')
-
-    await expect(firstTab).toHaveAttribute('data-state', 'active')
+    // Derive the real identifier from navigation; the tabs have no data-value.
+    await page.goto(`/roadmap?roadmap=${encodeURIComponent(roadmapId!)}`)
+    await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    await expect(page.getByRole('tab', { selected: true })).toHaveCount(1)
+    expect(new URL(page.url()).searchParams.get('roadmap')).toBe(roadmapId)
   })
 
   test('filter bar is rendered on the roadmap page', async ({ page }) => {

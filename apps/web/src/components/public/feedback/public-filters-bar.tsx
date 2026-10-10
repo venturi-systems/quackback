@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FormattedMessage, useIntl } from 'react-intl'
 import {
   Squares2X2Icon,
@@ -162,8 +162,15 @@ function AddFilterButton({
   variant = 'pill',
 }: AddFilterButtonProps) {
   const intl = useIntl()
+  const [mounted, setMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [activeCategory, setActiveCategory] = useState<FilterCategory | null>(null)
+
+  // Server-rendered triggers cannot open a popover before React attaches
+  // their handlers. Keep both variants unavailable until hydration completes.
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const closePopover = () => {
     setOpen(false)
@@ -256,6 +263,7 @@ function AddFilterButton({
             variant="outline"
             size="sm"
             className="gap-1.5"
+            disabled={!mounted}
             aria-label={intl.formatMessage({
               id: 'portal.feedback.toolbar.filter',
               defaultMessage: 'Filter',
@@ -269,12 +277,14 @@ function AddFilterButton({
         ) : (
           <button
             type="button"
+            disabled={!mounted}
             className={cn(
               'inline-flex items-center gap-1 px-2 py-0.5',
               'rounded-full text-xs',
               'border border-dashed border-border/50',
               'text-muted-foreground hover:text-foreground',
               'hover:border-border hover:bg-muted/30',
+              'disabled:pointer-events-none disabled:opacity-50',
               'transition-colors'
             )}
           >

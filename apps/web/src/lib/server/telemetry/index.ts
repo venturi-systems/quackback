@@ -1,8 +1,8 @@
-// Telemetry module -- anonymous, privacy-respecting phone-home pings.
+// Optional usage reporting, disabled unless explicitly enabled.
 //
 // - Lives under server/telemetry/ (infrastructure, not a business domain)
 // - Uses setInterval (not BullMQ) to avoid Redis dependency for an optional feature
-// - Entire module is dynamically imported from bootstrap.ts so it has zero cost when disabled
+// - Startup returns before collecting or scheduling anything when disabled
 // - Silent failure throughout -- telemetry must never affect application functionality
 
 import { isTelemetryEnabled } from './config'
@@ -27,7 +27,9 @@ export async function startTelemetry(): Promise<void> {
   try {
     if (!isTelemetryEnabled()) return
 
-    log.info('anonymous usage statistics enabled; disable with DISABLE_TELEMETRY=true')
+    log.info(
+      'optional usage reporting enabled by ENABLE_TELEMETRY=true; disable with DISABLE_TELEMETRY=true'
+    )
 
     await sendPing()
     setInterval(() => void sendPing(), ONE_DAY)

@@ -109,4 +109,18 @@ describe('PortalAccessGate — 2FA abandon', () => {
     })
     expect(signOut).not.toHaveBeenCalled()
   })
+
+  it('does NOT revoke when the gate unmounts before the signed-in render commits', async () => {
+    // Access can be granted, and the gate unmounted, by a render that never
+    // commits the signing-in state the success broadcast queued: the unmount
+    // here is a synchronous render that runs ahead of that update, as a router
+    // store update can be. The unmount cleanup must still see the sign-in.
+    stepToReport = 'two-factor-challenge'
+    const { unmount } = render(<PortalAccessGate {...baseProps} />)
+    await act(async () => {
+      broadcastOnSuccess?.()
+      unmount()
+    })
+    expect(signOut).not.toHaveBeenCalled()
+  })
 })

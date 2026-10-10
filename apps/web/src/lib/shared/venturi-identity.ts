@@ -35,7 +35,6 @@ export const VENTURI_FOOTER_GROUPS = [
       { label: 'Platform', href: 'https://venturi.systems/platform/' },
       { label: 'Documentation', href: VENTURI_DOCS_URL },
       { label: 'Pricing', href: 'https://venturi.systems/pricing/' },
-      { label: 'Product demo', href: 'https://venturi.systems/investor/demo/', newTab: true },
       { label: 'Login', href: 'https://app.venturi.systems/' },
     ],
   },

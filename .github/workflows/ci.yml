@@ -45,6 +45,11 @@ env:
 jobs:
   static_analysis:
     name: Static analysis
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -128,6 +133,11 @@ jobs:
 
   database_tests:
     name: Database migrations and tests
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -164,10 +174,20 @@ jobs:
       - name: Apply and verify online performance indexes
         timeout-minutes: 5
         run: bun run db:indexes
-      - run: bun run test --run
+      - name: Run unit and PostgreSQL contract tests
+        env:
+          # These transaction and semantic-guard cases must use this job's
+          # disposable, migrated database instead of silently opting out.
+          FEATURE_PIPELINE_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: bun run test --run
 
   changed_paths:
     name: Changed-path filter
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # The reuse probe below reads workflow runs and jobs, the PR, and commit
@@ -340,7 +360,9 @@ jobs:
               }
               const requiredSteps = [
                 'Checkout tested source', 'Record the actual tested checkout',
+                'Build exact E2E application image', 'Start attested E2E application image',
                 'Collect the expected tests for this shard', 'Run the Playwright suite',
+                'Capture and stop owned E2E application', 'Upload E2E application evidence',
                 'Check the shard against the known-failure ratchet',
                 'Verify the tested checkout is unchanged', 'Upload tested checkout evidence',
               ];
@@ -369,7 +391,11 @@ jobs:
               try {
                 for (let shard = 1; shard <= 8; shard++) {
                   const matches = evidence.filter(a => a.name === prefix + shard);
-                  if (matches.length !== 1 || matches[0].expired || matches[0].size_in_bytes > 65536) throw new Error('invalid shard evidence');
+                  if (matches.length !== 1 || matches[0].expired ||
+                      !Number.isSafeInteger(matches[0].size_in_bytes) ||
+                      matches[0].size_in_bytes <= 0 || matches[0].size_in_bytes > 65536) {
+                    throw new Error('invalid shard evidence');
+                  }
                   const artifact = matches[0];
                   if (artifact.workflow_run?.id !== successful.id ||
                       artifact.workflow_run?.head_sha !== prHeadSha ||
@@ -380,6 +406,9 @@ jobs:
                     owner, repo, artifact_id: artifact.id, archive_format: 'zip'
                   });
                   const bytes = Buffer.from(download.data);
+                  if (bytes.length > 65536) {
+                    throw new Error('shard evidence archive exceeds size limit');
+                  }
                   const digest = 'sha256:' + crypto.createHash('sha256').update(bytes).digest('hex');
                   if (digest !== artifact.digest) throw new Error('artifact digest mismatch');
                   const archive = path.join(tmp, `shard-${shard}.zip`);
@@ -393,6 +422,53 @@ jobs:
                       !/^[0-9a-f]{40}$/.test(receipt.commit || '') ||
                       !/^[0-9a-f]{40}$/.test(receipt.tree || '')) {
                     throw new Error('malformed or mismatched tested-tree receipt');
+                  }
+                  const readImageReceipt = (name) => JSON.parse(execFileSync(
+                    'unzip', ['-p', archive, name], { encoding: 'utf8', maxBuffer: 65536 }
+                  ));
+                  const ready = readImageReceipt('image-server-ready.json');
+                  const after = readImageReceipt('image-server-after.json');
+                  const processIdentity = ready?.process_identity;
+                  const startedAt = typeof processIdentity?.started_at === 'string'
+                    ? processIdentity.started_at.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/)
+                    : null;
+                  // Docker emits UTC RFC3339Nano. Round-trip milliseconds to reject
+                  // normalized invalid dates, while preserving valid nanoseconds.
+                  const normalizedStart = startedAt
+                    ? `${startedAt[1]}.${(startedAt[2] || '').padEnd(3, '0').slice(0, 3)}Z`
+                    : '';
+                  const startMillis = Date.parse(normalizedStart);
+                  const validStart = startedAt && startedAt[1] !== '0001-01-01T00:00:00' &&
+                    Number.isFinite(startMillis) && new Date(startMillis).toISOString() === normalizedStart;
+                  if (ready?.schema !== 1 ||
+                      !['run_id', 'run_attempt', 'shard', 'commit', 'tree'].every(
+                        field => ready[field] === receipt[field]
+                      ) ||
+                      typeof ready.image_id !== 'string' ||
+                      !/^sha256:[0-9a-f]{64}$/.test(ready.image_id) ||
+                      typeof ready.container_id !== 'string' ||
+                      !/^[0-9a-f]{64}$/.test(ready.container_id) ||
+                      typeof ready.fixture_receipt !== 'string' ||
+                      !/^DESIGN_FIXTURE_ENVIRONMENT_OK:[0-9a-f]{64}$/.test(ready.fixture_receipt) ||
+                      ready.mode !== 'development' || ready.runtime_development_mode_verified !== true ||
+                      !Number.isSafeInteger(processIdentity?.pid) || processIdentity.pid <= 0 ||
+                      !Number.isSafeInteger(processIdentity?.restart_count) || processIdentity.restart_count < 0 ||
+                      !validStart || ready.process_continuity_verified !== true ||
+                      ready.development_mode_probe?.requests !== 4 ||
+                      ready.development_mode_probe.origin_rejected !== true ||
+                      !Number.isFinite(ready.development_mode_probe?.elapsed_ms) ||
+                      ready.development_mode_probe.elapsed_ms < 0 || ready.development_mode_probe.elapsed_ms >= 60000 ||
+                      ready.ready !== true || ready.inspected_before_start !== true) {
+                    throw new Error('malformed or mismatched image readiness receipt');
+                  }
+                  const imageIdentity = [
+                    'schema', 'run_id', 'run_attempt', 'shard', 'commit', 'tree',
+                    'image_id', 'container_id', 'fixture_receipt', 'mode',
+                  ];
+                  if (!after || !imageIdentity.every(field => after[field] === ready[field]) ||
+                      after.configuration_verified !== true || after.source_unchanged !== true ||
+                      after.running_before_stop !== true || after.stopped !== true) {
+                    throw new Error('malformed or mismatched image shutdown receipt');
                   }
                   receipts.push(receipt);
                 }
@@ -431,6 +507,11 @@ jobs:
     # skipped changed_paths leaves e2e unset and this job does not run --
     # which portability_gate then treats as a failure, never a pass.
     if: needs.changed_paths.outputs.e2e == 'true' && needs.changed_paths.outputs.queue_reuse != 'true'
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     # A cancelled shard reports NOTHING -- no counts, no failure list -- so the
     # cap has to be comfortably above the slowest honest run, and the run has to
@@ -509,11 +590,16 @@ jobs:
       # PWTEST_SHARD_WEIGHTS moves the cut points. Each weight is that shard's
       # share of the total test count, so a shard full of slow tests is given
       # fewer of them. The numbers below were derived from the measured
-      # per-test durations of that run: walk the tests in Playwright's own
-      # order, cut when cumulative duration crosses the next eighth. They sum
-      # to 803, the current test count, which makes the split exact rather
-      # than rounded -- but nothing depends on that, because Playwright uses
-      # the weights proportionally.
+      # per-test durations of run 37833749533 (#245, 2026-10-08): walk the
+      # tests in Playwright's own order and take the eight contiguous ranges
+      # whose slowest is shortest, which on that run is 3.4 minutes against a
+      # 3.3 minute mean. The previous vector came from run 37513233008 two
+      # days earlier, when the suite measured 67.6 minutes of tests; it
+      # measures 26.6 now, with a different shape, so on this run that vector
+      # ran 4.9, 2.7, 4.9, 5.1, 1.3, 1.0, 2.0 and 4.7 minutes. They sum to
+      # 808, the current test count, which makes the split exact rather than
+      # rounded -- but nothing depends on that, because Playwright uses the
+      # weights proportionally.
       #
       # Regenerate after a significant change in the suite's shape:
       #   bun apps/web/e2e/scripts/compute-shard-weights.ts <results...>
@@ -533,7 +619,7 @@ jobs:
       # One that rejects it fails loudly in CI. Weights that drift as tests
       # are added degrade toward that same equal-count baseline; they cannot
       # drop a test.
-      PWTEST_SHARD_WEIGHTS: '124:80:157:78:80:92:89:103'
+      PWTEST_SHARD_WEIGHTS: '114:84:144:133:109:23:85:116'
     steps:
       - name: Checkout tested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -577,10 +663,9 @@ jobs:
         # database helpers go through getaddrinfo.
         run: echo '127.0.0.1 acme.localhost' | sudo tee -a /etc/hosts
 
-      - name: Write the .env the dev server and the e2e helpers read
-        # Workflow-level env is not enough. apps/web `dev` runs
-        # `bun --env-file=../../.env vite dev`, and e2e/utils/db-helpers.ts
-        # shells out through `dotenv -e ../../.env`; both read this file.
+      - name: Write the .env the application and the e2e helpers read
+        # Host-side fixture and database helpers still load this file through
+        # dotenv-cli; the image launcher supplies the inspected application env.
         run: |
           cat > .env <<EOF
           DATABASE_URL=$DATABASE_URL
@@ -613,6 +698,23 @@ jobs:
 
       - run: bun run --filter @quackback/widget build
 
+      # Same eight jobs: existing production build/start measurements of 44-52s
+      # imply 5.9-6.9 gross runner-minutes/run; net change is unmeasured.
+      # Replaces the Vite server without disabling HMR or adding a job/matrix/schedule.
+      - name: Build exact E2E application image
+        id: image_build
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code HEAD --
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          mkdir -p "$RUNNER_TEMP/e2e-evidence"
+          docker --host unix:///var/run/docker.sock build --file apps/web/Dockerfile \
+            --build-arg "SOURCE_COMMIT=$SOURCE_COMMIT" \
+            --iidfile "$RUNNER_TEMP/e2e-evidence/image-server-image.id" . 2>&1 \
+            | tee "$RUNNER_TEMP/e2e-evidence/image-server-build.log"
+
       # The database setup steps each get their own cap. The job cap alone
       # (90 minutes) let a hung step hold the runner for an hour: on run
       # 35980940017, shard 8 attempt 1, `bun run db:migrate` printed its
@@ -639,6 +741,14 @@ jobs:
         working-directory: apps/web
         run: bunx playwright install --with-deps chromium
 
+      - name: Start attested E2E application image
+        id: image_server
+        working-directory: apps/web
+        timeout-minutes: 5
+        env:
+          E2E_IMAGE_SHARD: ${{ matrix.shard }}
+        run: bun e2e/scripts/image-server.ts start "$RUNNER_TEMP/e2e-evidence/image-server-image.id"
+
       - name: Collect the expected tests for this shard
         working-directory: apps/web
         # Collect independently before execution: a partial JSON report must
@@ -646,12 +756,12 @@ jobs:
         run: bunx playwright test --list --reporter=json --shard=${{ matrix.shard }}/8 > e2e-plan.json
 
       - name: Run the Playwright suite
+        id: playwright_suite
         working-directory: apps/web
-        # playwright.config.ts starts the dev server itself (webServer) and,
-        # because CI is set, forbids test.only, retries twice and uses one
-        # worker per shard.
+        # The inspected image is already ready; Playwright does not start Vite.
+        # CI still forbids test.only, retries twice and uses one worker per shard.
         #
-        # `|| true` on purpose: the NEXT step is the gate. Playwright exits
+        # `|| true` on purpose: the independent ratchet below is the gate. Playwright exits
         # non-zero for a failure that is already on e2e/known-failures.json,
         # and that must not redden the shard while the entry stands. Everything
         # a swallowed exit code could hide -- a missing or truncated report, a
@@ -665,7 +775,17 @@ jobs:
         timeout-minutes: 5
         run: bun e2e/scripts/set-auth-acceptance-fixture.ts restore
 
+      - name: Capture and stop owned E2E application
+        if: ${{ always() && (steps.image_server.outcome == 'success' || steps.image_server.outcome == 'failure' || steps.image_server.outcome == 'cancelled') }}
+        working-directory: apps/web
+        timeout-minutes: 5
+        env:
+          E2E_IMAGE_SHARD: ${{ matrix.shard }}
+        run: bun e2e/scripts/image-server.ts finish
+
       - name: Check the shard against the known-failure ratchet
+        # Teardown errors remain job failures and cannot suppress the result gate.
+        if: ${{ always() && (steps.playwright_suite.outcome == 'success' || steps.playwright_suite.outcome == 'failure' || steps.playwright_suite.outcome == 'cancelled') }}
         working-directory: apps/web
         run: bun e2e/scripts/check-known-failures.ts e2e-results.json e2e/known-failures.json e2e-plan.json
 
@@ -694,12 +814,24 @@ jobs:
       - name: Upload tested checkout evidence
         # Failure archives are diagnostic only: queue reuse still requires every
         # shard, ratchet and checkout verification step to have succeeded.
-        # No new job or test execution; one small post-checkout JSON per shard.
+        # Compact checkout and image lifecycle receipts only; logs are separate.
         if: ${{ always() && github.event_name == 'pull_request' && steps.tested_checkout.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-tested-tree-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
-          path: ${{ runner.temp }}/e2e-evidence/tested-tree*.json
+          path: |
+            ${{ runner.temp }}/e2e-evidence/tested-tree*.json
+            ${{ runner.temp }}/e2e-evidence/image-server-ready.json
+            ${{ runner.temp }}/e2e-evidence/image-server-after.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload E2E application evidence
+        if: ${{ always() && (steps.image_build.outcome == 'success' || steps.image_build.outcome == 'failure' || steps.image_build.outcome == 'cancelled') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/e2e-evidence/image-server*
           retention-days: 7
           if-no-files-found: error
 
@@ -742,6 +874,11 @@ jobs:
             platform: linux/arm64
             alpine_arch: aarch64
             runner: ubuntu-24.04-arm
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 5
     steps:
@@ -806,6 +943,11 @@ jobs:
     name: Signed-in render check
     needs: [changed_paths]
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:
@@ -972,6 +1114,11 @@ jobs:
     if: ${{ always() }}
     needs:
       [static_analysis, database_tests, changed_paths, e2e_tests, runner_base, signed_in_render]
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

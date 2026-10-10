@@ -17,13 +17,19 @@ function SoftwareNotices() {
   return (
     <div className="software-notices min-h-screen flex flex-col bg-background text-foreground">
       <VenturiSiteHeader />
-      <main id="main-content" className="portal-shell flex-1 py-10">
+      <main
+        id="main-content"
+        className="portal-shell flex-1 py-10 [&_h1]:text-balance [&_p]:text-balance [&_a]:text-balance"
+      >
         <div className="max-w-3xl space-y-6">
           <h1 className="text-3xl font-semibold">Software notices</h1>
           <p>
             Venturi Feedback includes Quackback, licensed under the GNU Affero General Public
             License, version 3. You can inspect and download the corresponding source for the
-            software running this portal, including Venturi modifications, at no charge.
+            software running this portal,{' '}
+            <span className="inline-block max-w-full text-balance">
+              including Venturi modifications, at no charge.
+            </span>
           </p>
           <p>
             <a
