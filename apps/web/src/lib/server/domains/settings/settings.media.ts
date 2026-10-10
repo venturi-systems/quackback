@@ -1,6 +1,7 @@
 import { db, eq, settings } from '@/lib/server/db'
 import { deleteObject } from '@/lib/server/storage/s3'
 import { ValidationError } from '@/lib/shared/errors'
+import { containsStyleEndTag } from '@/lib/shared/style-element-css'
 import { assertNotManaged } from '@/lib/server/config-file/managed-guard'
 import { logger } from '@/lib/server/logger'
 import type { BrandingConfig } from './settings.types'
@@ -76,6 +77,16 @@ export async function getCustomCss(): Promise<string> {
 
 export async function updateCustomCss(css: string): Promise<string> {
   log.info('update custom css')
+  // The stylesheet is served as the text of a <style> element, which a
+  // `</style` sequence would end. Rendering neutralises it (cssForStyleElement)
+  // for rows already stored; a new value carrying it is refused here so the
+  // caller learns why instead of the page silently rewriting it.
+  if (containsStyleEndTag(css)) {
+    throw new ValidationError(
+      'INVALID_CUSTOM_CSS',
+      'Custom CSS cannot contain "</style". Remove that sequence and save again.'
+    )
+  }
   try {
     // Clearing CSS (empty string) is always allowed so a workspace whose
     // tier just stopped including custom CSS can wipe it without being

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { render, screen, act } from '@testing-library/react'
+import { renderToString } from 'react-dom/server'
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 
 const navigate = vi.fn()
@@ -40,6 +41,7 @@ vi.mock('@/lib/client/post-auth-navigation', () => ({ navigateAfterAuth: vi.fn()
 import { PortalAccessGate } from '../portal-access-gate'
 import { navigateAfterAuth } from '@/lib/client/post-auth-navigation'
 import { SIGN_IN_FAILED_MESSAGE } from '@/lib/server/auth/redirect-errors'
+import { cssForStyleElement } from '@/lib/shared/style-element-css'
 
 const baseProps = {
   reason: 'unauthenticated' as const,
@@ -254,5 +256,37 @@ describe('PortalAccessGate — refused sign-in notice', () => {
   it('shows nothing when there is no code', () => {
     render(<PortalAccessGate {...baseProps} />)
     expect(screen.queryByTestId('auth-notice')).not.toBeInTheDocument()
+  })
+})
+
+describe('PortalAccessGate — workspace CSS', () => {
+  // The gate is public: anyone can load it. Its theme and custom CSS are
+  // workspace-controlled text rendered into <style> elements, and the server
+  // HTML is what a browser parses, so a `</style` in either must not end the
+  // element and turn the rest of the value into markup.
+  it('keeps a </style in stored CSS from closing its element in the server HTML', () => {
+    const themeStyles =
+      ':root { --primary: red</style><script>window.__gateInjected = "theme"</script><style> }'
+    const customCss = '.x { color: red }</STYLE ><script>window.__gateInjected = "custom"</script>'
+    const html = renderToString(
+      <PortalAccessGate {...baseProps} themeStyles={themeStyles} customCss={customCss} />
+    )
+    const doc = new DOMParser().parseFromString(
+      `<!doctype html><html><head></head><body>${html}</body></html>`,
+      'text/html'
+    )
+
+    const scripts = [...doc.querySelectorAll('script')].map((el) => el.textContent ?? '')
+    expect(scripts.some((text) => text.includes('__gateInjected'))).toBe(false)
+    const styles = [...doc.querySelectorAll('style')].map((el) => el.textContent)
+    expect(styles).toEqual([cssForStyleElement(themeStyles), cssForStyleElement(customCss)])
+  })
+
+  it('renders CSS without a </style sequence unchanged', () => {
+    const customCss = '@media (width < 600px) { .portal-gate { padding: 0 } }'
+    const { container } = render(<PortalAccessGate {...baseProps} customCss={customCss} />)
+    expect([...container.querySelectorAll('style')].map((el) => el.textContent)).toEqual([
+      customCss,
+    ])
   })
 })

@@ -15,24 +15,26 @@ test.describe('Admin Post Management', () => {
   })
 
   test('can open create post dialog', async ({ page }) => {
-    // Click the create post button (pen-square icon)
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
-    })
+    // The inbox header renders CreatePostDialog's default trigger, an icon
+    // button titled "Create new post" (create-post-dialog.tsx). Its icon is a
+    // Heroicons PencilSquareIcon with no `lucide-pen-square` class, so the old
+    // filter matched nothing and the `count() > 0` guard skipped the whole test
+    // body. Locate the trigger by its accessible name and require it, so a
+    // missing control fails instead of passing with no assertions.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
 
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
+    // Dialog should open
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
 
-      // Dialog should open
-      const dialog = page.getByRole('dialog')
-      await expect(dialog).toBeVisible()
+    // Should have title input (borderless style with placeholder)
+    await expect(dialog.getByPlaceholder("What's the feedback about?")).toBeVisible()
 
-      // Should have title input (borderless style with placeholder)
-      await expect(page.getByPlaceholder("What's the feedback about?")).toBeVisible()
-
-      // Close dialog
-      await page.keyboard.press('Escape')
-    }
+    // Escape closes the dialog
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
   })
 
   test('can create a new post', async ({ page }) => {
