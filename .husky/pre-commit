@@ -1,3 +1,0 @@
-#!/bin/sh
-export PATH="$HOME/.local/share/mise/shims:/opt/homebrew/bin:$PATH"
-npx lint-staged
