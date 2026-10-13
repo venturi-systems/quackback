@@ -172,6 +172,10 @@ for (const { width, height = 844, textScale } of [
         if (!expanded) await page.keyboard.press('Space')
         await expect(help.getByRole('link', { name: 'Reload this page' })).toBeVisible()
         await expect(help.getByRole('link', { name: 'Venturi home' })).toBeVisible()
+        // Once a pre-hydration recovery interaction ends, the ready form must
+        // have no help disclosure, including no hidden keyboard tab stop.
+        await readiness.locator('fieldset button:enabled, fieldset input:enabled').first().focus()
+        await expect(help).toBeHidden()
         expect(pageErrors).toEqual([])
       } finally {
         releaseScripts()

@@ -23,6 +23,12 @@
  * `serverFnDecodeGuardMiddleware` answers it `400 Bad Request` with no
  * detail and no stack.
  *
+ * TanStack 1.169.39 constructs fresh call arguments using optional property
+ * access, so a decoded primitive now reaches function middleware. Capture
+ * a JSON POST clone before framework handling, then inspect its envelope root
+ * lazily at the first function marker. The explicit rejection flag converts its serialized
+ * error to plain 400 while preserving earlier ID and method responses.
+ *
  * Everything else passes through untouched:
  *   - page and API routes (`handlerType === 'router'`);
  *   - successful calls;
@@ -160,6 +166,46 @@ export function serverFnNotFound(): Response {
 
 interface DispatchProbe {
   dispatched: boolean
+  jsonPayloadRequest?: Request
+  rejectedCallRoot: boolean
+}
+
+/**
+ * The RPC client wraps data/context in a record before serializing it. Seroval
+ * encodes ordinary and null-prototype record roots as 10 and 11. Inspect only
+ * that root metadata; nested plugin values remain the framework's concern.
+ * TanStack 1.169.39 reads payload?.data instead of mutating the decoded root,
+ * so primitives no longer fail decoding by themselves.
+ *
+ * A missing payload and FormData retain their separate transport semantics.
+ * Malformed JSON/envelopes still use the framework's existing decode-error
+ * path. The JSON POST clone is captured before the framework can consume the
+ * original body, but read only when the first function middleware is reached.
+ */
+async function hasInvalidCallRoot(
+  request: Request,
+  jsonPayloadRequest?: Request
+): Promise<boolean> {
+  let envelope: unknown
+  try {
+    if (request.method === 'GET') {
+      const payload = new URL(request.url).searchParams.get('payload')
+      // Preserve the framework's own GET size limit and missing-payload path.
+      if (!payload || payload.length > 1_000_000) return false
+      envelope = JSON.parse(payload)
+    } else if (jsonPayloadRequest) {
+      envelope = await jsonPayloadRequest.json()
+    } else {
+      return false
+    }
+  } catch {
+    return false
+  }
+  if (!envelope || typeof envelope !== 'object') return false
+  const root = (envelope as { t?: unknown }).t
+  if (!root || typeof root !== 'object') return false
+  const kind = (root as { t?: unknown }).t
+  return typeof kind === 'number' && kind !== 10 && kind !== 11
 }
 
 /**
@@ -170,11 +216,16 @@ interface DispatchProbe {
  */
 const inFlight = new WeakMap<Request, DispatchProbe>()
 
-/** Records that the server function for `request` has started. */
-export function markServerFnDispatched(request: Request | undefined): void {
+/** Reject invalid call roots at dispatch, before application middleware runs. */
+export async function markServerFnDispatched(request: Request | undefined): Promise<void> {
   if (!request) return
   const probe = inFlight.get(request)
-  if (probe) probe.dispatched = true
+  if (!probe || probe.dispatched) return
+  if (probe.rejectedCallRoot || (await hasInvalidCallRoot(request, probe.jsonPayloadRequest))) {
+    probe.rejectedCallRoot = true
+    throw new Error('Invalid server-function call root')
+  }
+  probe.dispatched = true
 }
 
 /**
@@ -232,20 +283,43 @@ export async function guardServerFnDecode<T extends NextResult>({
   // inherited member and fail with a 500 (see the file header).
   if (isPrototypeMemberServerFnId(serverFnId)) return serverFnNotFound()
 
-  const probe: DispatchProbe = { dispatched: false }
+  const probe: DispatchProbe = { dispatched: false, rejectedCallRoot: false }
+  if (
+    request.method === 'POST' &&
+    request.headers.get('content-type')?.includes('application/json')
+  ) {
+    try {
+      // Capture the body before framework parsing, but leave it unread until
+      // dispatch so an unknown ID or wrong method can respond immediately.
+      probe.jsonPayloadRequest = request.clone()
+    } catch {
+      // A body already consumed or locked remains the framework's error.
+    }
+  }
   inFlight.set(request, probe)
   let result: T
   try {
     result = await next()
   } catch (error) {
+    if (probe.rejectedCallRoot) return serverFnBadRequest()
     if (!probe.dispatched && isUnknownServerFnError(error, serverFnId)) {
       return serverFnNotFound()
     }
     throw error
   } finally {
     inFlight.delete(request)
+    const clonedBody = probe.jsonPayloadRequest?.body
+    if (clonedBody && !probe.jsonPayloadRequest?.bodyUsed) {
+      // A skipped function leaves the cloned tee branch unused. Cancel it
+      // without waiting: cancellation waits for the original branch too,
+      // which an early 404/405 deliberately does not read.
+      void clonedBody.cancel().catch(() => {})
+    }
   }
 
+  // Rejection happens only at the function marker, preserving earlier
+  // unknown-id, wrong-method and CSRF responses. Handler errors stay intact.
+  if (probe.rejectedCallRoot) return serverFnBadRequest()
   const { response } = result
   if (response instanceof Response && isUndecodedServerFnFailure(response, probe.dispatched)) {
     // Returning a new Response replaces the framework's; the pipeline
@@ -273,17 +347,19 @@ export const serverFnDecodeGuardMiddleware = createMiddleware().server(
 
 /**
  * Global function middleware: marks the current server-function request as
- * started. Register it first in `functionMiddleware`. It adds no context and
- * never changes the call; outside a server request (no h3 event) it does
- * nothing.
+ * started. Register it first in `functionMiddleware`, so an invalid envelope
+ * is rejected before application middleware or the handler runs. Valid calls
+ * add no context; outside a server request (no h3 event) it does nothing.
  */
-export const serverFnDispatchMarker = createMiddleware({ type: 'function' }).server(({ next }) => {
-  let request: Request | undefined
-  try {
-    request = getRequest()
-  } catch {
-    request = undefined
+export const serverFnDispatchMarker = createMiddleware({ type: 'function' }).server(
+  async ({ next }) => {
+    let request: Request | undefined
+    try {
+      request = getRequest()
+    } catch {
+      request = undefined
+    }
+    await markServerFnDispatched(request)
+    return next()
   }
-  markServerFnDispatched(request)
-  return next()
-})
+)
