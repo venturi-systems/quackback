@@ -2,7 +2,7 @@
  * Tests for the server-function decode guard (DEF-59).
  *
  * `frameworkTerminal` below stands in for TanStack Start's
- * `handleServerAction` (@tanstack/start-server-core 1.169.37) at the level
+ * `handleServerAction` (@tanstack/start-server-core 1.169.39) at the level
  * the guard depends on:
  *   - the payload is decoded (`JSON.parse` / `request.json()`, then seroval
  *     `fromJSON`) inside the `try` that runs the function;
@@ -117,16 +117,17 @@ function frameworkTerminal(request: Request, opts: TerminalOptions = {}) {
           contentType?.includes('application/json') ? fromJSON(await request.json()) : {}
         ) as Record<string, unknown>
       }
-      // Throws a TypeError when the payload decoded to a primitive.
-      payload.context = {}
-      payload.method = request.method
+      // Current TanStack builds fresh call arguments; primitive roots no
+      // longer throw when the framework attaches context and method.
+      const params = { data: payload?.data, context: {}, method: request.method }
 
-      // action(payload): the global function middleware runs first.
-      markServerFnDispatched(request)
-      handlerRan = true
+      // executeMiddleware captures marker and handler errors in the same
+      // serialized HTTP 200 result in the current framework.
       let res: { result?: unknown; error?: unknown }
       try {
-        res = { result: await (opts.handler ?? (() => ({ ok: true })))(payload) }
+        await markServerFnDispatched(request)
+        handlerRan = true
+        res = { result: await (opts.handler ?? (() => ({ ok: true })))(params) }
       } catch (error) {
         res = {
           error: { message: error instanceof Error ? error.message : 'Non-Error value thrown' },
@@ -204,7 +205,7 @@ describe('guardServerFnDecode: payloads that cannot be decoded answer 400', () =
     expect(handlerRan).toBe(false)
   })
 
-  it('an envelope whose root is a primitive the framework cannot attach context to', async () => {
+  it('a primitive root is rejected before the current framework invokes the handler', async () => {
     const { result, handlerRan } = await runGuard(
       getRequest(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE))
     )
@@ -229,6 +230,160 @@ describe('guardServerFnDecode: payloads that cannot be decoded answer 400', () =
     const { result, handlerRan } = await runGuard(postRequest(''))
     await expectBadRequest(result, /JSON|Unexpected|end/i)
     expect(handlerRan).toBe(false)
+  })
+})
+
+describe('guardServerFnDecode: serialized call root validation', () => {
+  it('replaces the framework serialized 200 rejection with a plain 400', async () => {
+    const request = getRequest(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE))
+    const terminal = frameworkTerminal(request)
+    let frameworkStatus: number | undefined
+    const result = await guardServerFnDecode({
+      request,
+      handlerType: 'serverFn',
+      next: async () => {
+        const response = await terminal.next()
+        frameworkStatus = response.response.status
+        return response
+      },
+    })
+    expect(frameworkStatus).toBe(200)
+    expect(terminal.handlerRan()).toBe(false)
+    await expectBadRequest(result, /Invalid server-function|root/i)
+  })
+
+  it('also masks the private rejection when the framework throws it directly', async () => {
+    const request = getRequest(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE))
+    const result = await guardServerFnDecode({
+      request,
+      handlerType: 'serverFn',
+      next: async () => {
+        await markServerFnDispatched(request)
+        return { response: serialized({ result: 'unreachable' }) }
+      },
+    })
+    await expectBadRequest(result, /Invalid server-function|root/i)
+  })
+
+  it('allows an omitted GET call envelope', async () => {
+    const { result, handlerRan } = await runGuard(getRequest())
+    expect(handlerRan).toBe(true)
+    expect((result as { response: Response }).response.status).toBe(200)
+  })
+
+  it('rejects a primitive JSON POST without consuming the original body', async () => {
+    const request = postRequest(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE))
+    const { result, handlerRan } = await runGuard(request)
+    await expectBadRequest(result, /Invalid server-function|root/i)
+    expect(handlerRan).toBe(false)
+  })
+
+  it('preserves the wrong-method response before dispatch for a primitive root', async () => {
+    const original = new Response('Method Not Allowed', { status: 405 })
+    const result = await guardServerFnDecode({
+      request: getRequest(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE)),
+      handlerType: 'serverFn',
+      next: async () => ({ response: original }),
+    })
+    expect((result as { response: Response }).response).toBe(original)
+  })
+
+  it('preserves unknown-id resolution before dispatch for a primitive root', async () => {
+    const result = await guardServerFnDecode({
+      request: getRequest(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE)),
+      handlerType: 'serverFn',
+      next: async () => {
+        throw new Error('Server function info not found for 0123abcd')
+      },
+    })
+    expect((result as Response).status).toBe(404)
+  })
+
+  it.each([404, 405])(
+    'answers an early %s before an unfinished JSON POST body completes',
+    async (status) => {
+      let controller!: ReadableStreamDefaultController<Uint8Array>
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) {
+          controller = stream
+          stream.enqueue(new TextEncoder().encode(JSON.stringify(PRIMITIVE_ROOT_ENVELOPE)))
+          // The complete JSON has arrived, but the client has not ended its
+          // request body. An early framework response must not await EOF.
+        },
+      })
+      const request = new Request(FN_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' })
+      let nextCalled = false
+      const pending = guardServerFnDecode({
+        request,
+        handlerType: 'serverFn',
+        next: async () => {
+          nextCalled = true
+          if (status === 404) throw new Error('Server function info not found for 0123abcd')
+          return { response: new Response('Method Not Allowed', { status: 405 }) }
+        },
+      })
+      let timeout: ReturnType<typeof setTimeout> | undefined
+      try {
+        expect(nextCalled).toBe(true)
+        const result = await Promise.race([
+          pending,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(() => reject(new Error('Early response awaited the body')), 1_000)
+          }),
+        ])
+        const response = result instanceof Response ? result : result.response
+        expect(response.status).toBe(status)
+        expect(request.bodyUsed).toBe(false)
+      } finally {
+        clearTimeout(timeout)
+        controller.close()
+        await request.body?.cancel()
+        await pending
+      }
+    }
+  )
+
+  it.each([10, 11])('leaves record root %s and nested plugin data opaque', async (kind) => {
+    const envelope = {
+      t: { t: kind, p: { k: ['data'], v: [{ t: 25, c: 'plugin' }] } },
+      f: 127,
+      m: [],
+    }
+    const body = JSON.stringify(envelope)
+    const request = postRequest(body)
+    const original = serialized({ result: 'valid' })
+    const result = await guardServerFnDecode({
+      request,
+      handlerType: 'serverFn',
+      next: async () => {
+        expect(await request.text()).toBe(body)
+        await markServerFnDispatched(request)
+        return { response: original }
+      },
+    })
+    expect((result as { response: Response }).response).toBe(original)
+  })
+
+  it('does not inspect a FormData transport body', async () => {
+    const form = new FormData()
+    form.set('value', 'kept')
+    const request = new Request(FN_URL, { method: 'POST', body: form })
+    const original = serialized({ result: 'valid' })
+    const result = await guardServerFnDecode({
+      request,
+      handlerType: 'serverFn',
+      next: async () => {
+        expect((await request.formData()).get('value')).toBe('kept')
+        await markServerFnDispatched(request)
+        return { response: original }
+      },
+    })
+    expect((result as { response: Response }).response).toBe(original)
   })
 })
 
@@ -412,7 +567,7 @@ describe('guardServerFnDecode: an id that names no function answers 404', () => 
         request,
         handlerType: 'serverFn',
         next: async () => {
-          markServerFnDispatched(request)
+          await markServerFnDispatched(request)
           throw error
         },
       })
@@ -616,18 +771,21 @@ describe('guardServerFnDecode: per-request bookkeeping', () => {
     expect((goodResult.result as { response: Response }).response.status).toBe(200)
   })
 
-  it('forgets a request once its call settles', async () => {
-    const request = getRequest('garbage')
-    await runGuard(request)
-    // A late mark for a settled request is a no-op, and so is marking an
-    // unknown request or none at all.
-    expect(() => markServerFnDispatched(request)).not.toThrow()
-    expect(() => markServerFnDispatched(new Request(FN_URL))).not.toThrow()
-    expect(() => markServerFnDispatched(undefined)).not.toThrow()
-    // The same request object can be guarded again and is judged afresh.
-    const again = await runGuard(request)
-    expect((again.result as Response).status).toBe(400)
-  })
+  it.each(['garbage', JSON.stringify(PRIMITIVE_ROOT_ENVELOPE)])(
+    'forgets a request once its call settles: %s',
+    async (payload) => {
+      const request = getRequest(payload)
+      await runGuard(request)
+      // A late mark for a settled request is a no-op, and so is marking an
+      // unknown request or none at all.
+      await expect(markServerFnDispatched(request)).resolves.toBeUndefined()
+      await expect(markServerFnDispatched(new Request(FN_URL))).resolves.toBeUndefined()
+      await expect(markServerFnDispatched(undefined)).resolves.toBeUndefined()
+      // The same request object can be guarded again and is judged afresh.
+      const again = await runGuard(request)
+      expect((again.result as Response).status).toBe(400)
+    }
+  )
 })
 
 describe('isUndecodedServerFnFailure', () => {

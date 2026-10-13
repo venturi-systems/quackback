@@ -362,6 +362,12 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
             page.getByRole('region', { name, exact: true }).getByRole('list')
           ).toHaveCount(1)
         }
+        if ([390, 1440].includes(width)) {
+          await testInfo.attach(`entry-social-${width}`, {
+            body: await page.screenshot({ fullPage: true }),
+            contentType: 'image/png',
+          })
+        }
       }
     } finally {
       // Setup may commit before a subprocess reports an error. Cleanup targets
