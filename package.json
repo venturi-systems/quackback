@@ -32,9 +32,9 @@
     "jose": "6.2.12",
     "@noble/ciphers": "2.0.0",
     "@codemirror/state": "6.6.0",
-    "@tiptap/core": "3.31.3",
-    "@tiptap/pm": "3.31.3",
-    "@tiptap/suggestion": "3.31.3",
+    "@tiptap/core": "3.31.4",
+    "@tiptap/pm": "3.31.4",
+    "@tiptap/suggestion": "3.31.4",
     "prosemirror-model": "1.25.11",
     "prosemirror-view": "1.42.3"
   },

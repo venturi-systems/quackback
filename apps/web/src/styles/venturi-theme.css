@@ -949,3 +949,12 @@
 .portal-gate--entry [data-public-sign-in-help] > div > p:first-child {
   text-wrap: balance;
 }
+
+/* The ready form has no help dropdown or reserved space beneath it. Keep an
+   interaction begun before hydration visible until focus leaves recovery;
+   failed or disabled scripts keep native recovery available. */
+.portal-gate--entry
+  [data-public-sign-in-ready='true']
+  [data-public-sign-in-help]:not(:focus-within) {
+  display: none;
+}

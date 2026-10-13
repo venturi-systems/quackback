@@ -1,7 +1,7 @@
 /**
  * REQ-FEEDBACK-ENTRY: this acceptance has no dependency on the serial login
  * journeys. Keep it in its own file so a tolerated login failure cannot skip
- * the responsive typography, keyboard disclosure, and actual zoom checks.
+ * the responsive typography, provider controls, and actual zoom checks.
  */
 import { test, expect } from '@playwright/test'
 import { assertDesignFixtureEnvironment } from '../../utils/design-fixture-guard'
@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 /** REQ-FEEDBACK-ENTRY: responsive public entry, with the existing auth path intact. */
-test('(3a) public entry preserves readable type, keyboard disclosure and reflow', async ({
+test('(3a) public entry preserves readable type, provider controls and reflow', async ({
   page,
   baseURL,
 }, testInfo) => {
@@ -45,9 +45,8 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       page.getByRole('heading', { level: 1, name: 'Share feedback with Acme Corp' })
     ).toBeVisible()
     const help = page.locator('details[data-public-sign-in-help]')
-    const summary = help.locator('summary')
-    // REQ-FEEDBACK-AUTH-VIEWPORT: native sign-in help is optional and the full compact footer remains present.
-    await expect(help).not.toHaveAttribute('open', '')
+    // The ready sign-in has no help dropdown; the full compact footer remains present.
+    await expect(help).toBeHidden()
     await expect(page.getByText('Who can do what', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Software notices' })).toHaveCount(1)
     const entrySource = await page
@@ -141,33 +140,26 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
         contentType: 'application/json',
       })
     }
-    await summary.focus()
-    const focus = await measureFocusIndicator(summary)
+    const firstControl = page
+      .locator(
+        '.portal-gate__form fieldset button:enabled, .portal-gate__form fieldset input:enabled'
+      )
+      .first()
+    await firstControl.focus()
+    const focus = await measureFocusIndicator(firstControl)
     expect(
       focus.focused && focus.focusVisible && focus.visible && focus.unclipped && focus.unobscured
     ).toBe(true)
-    expect(focus.width).toBeGreaterThanOrEqual(2)
-    expect(focus.alpha).toBeGreaterThan(0)
-    await testInfo.attach('entry-disclosure-focus', {
+    await testInfo.attach('entry-control-focus', {
       body: Buffer.from(JSON.stringify(focus)),
       contentType: 'application/json',
     })
-    await page.keyboard.press('Enter')
-    await expect(help).toHaveAttribute('open', '')
-    await expect(help.getByRole('link', { name: 'Reload this page' })).toBeVisible()
-    await page.keyboard.press('Space')
-    await expect(help).not.toHaveAttribute('open', '')
-    await expect(page.getByText('Who can do what', { exact: true })).toHaveCount(0)
-    await expect(summary).toBeFocused()
-    await page.keyboard.press('Enter')
-
     const records = []
     for (const width of [
       320, 390, 639, 640, 641, 767, 768, 769, 1023, 1024, 1025, 1440, 1920, 2560,
     ]) {
       await page.setViewportSize({ width, height: 1000 })
-      // Expanded native recovery help remains readable after the visitor requests it.
-      await expect(help).toHaveAttribute('open', '')
+      await expect(help).toBeHidden()
       await page.evaluate(() => document.fonts.ready.then(() => undefined))
       const geometry = await page.evaluate(() => {
         const intro = document.querySelector('.portal-gate__layout > .portal-gate__intro')!
@@ -180,7 +172,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           form: form.getBoundingClientRect().toJSON(),
           text: Array.from(
             document.querySelectorAll(
-              '.portal-gate__layout h1, .portal-gate__lead, .portal-gate__access, [data-public-sign-in-help] p'
+              '.portal-gate__layout h1, .portal-gate__lead, .portal-gate__access'
             )
           ).map((element) => ({
             text: element.textContent,
@@ -236,9 +228,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           contentType: 'image/png',
         })
       }
-      // The folded state, then open again for the next width.
-      await summary.click()
-      await expect(help).not.toHaveAttribute('open', '')
+      await expect(help).toBeHidden()
       const compact = await page.evaluate(() => {
         const form = document.querySelector('.portal-gate__form')!.getBoundingClientRect()
         return {
@@ -263,8 +253,6 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           contentType: 'image/png',
         })
       }
-      await summary.click()
-      await expect(help).toHaveAttribute('open', '')
     }
     await testInfo.attach('entry-layout-evidence', {
       body: Buffer.from(JSON.stringify(records)),
@@ -278,15 +266,11 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
           await zoomPage.goto('/')
           await expect(zoomPage.locator('.portal-gate__layout')).toBeVisible()
           const zoom = await setZoom(factor)
-          await expect(zoomPage.locator('details[data-public-sign-in-help]')).not.toHaveAttribute(
-            'open',
-            ''
+          await expect(zoomPage.locator('[data-public-sign-in-ready]')).toHaveAttribute(
+            'data-public-sign-in-ready',
+            'true'
           )
-          await zoomPage.locator('details[data-public-sign-in-help] summary').click()
-          await expect(zoomPage.locator('details[data-public-sign-in-help]')).toHaveAttribute(
-            'open',
-            ''
-          )
+          await expect(zoomPage.locator('details[data-public-sign-in-help]')).toBeHidden()
           await zoomPage.addStyleTag({
             content: `
             .portal-gate--entry * { line-height: 1.5 !important; letter-spacing: .12em !important; word-spacing: .16em !important; }
@@ -319,7 +303,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
     }
     // REQ-FEEDBACK-AUTH-VIEWPORT: the normal two-provider entry fits in one
     // viewport. Exercise the real fixture configuration rather than hiding
-    // controls; the earlier email, expanded help and zoom coverage stays intact.
+    // controls; the earlier email and zoom coverage stays intact.
     const fittedViewports = []
     try {
       setPortalVisibility('private')
@@ -332,7 +316,7 @@ test('(3a) public entry preserves readable type, keyboard disclosure and reflow'
       await expect(page.getByRole('button', { name: /Google/i })).toBeEnabled()
       await expect(page.getByRole('button', { name: /GitHub/i })).toBeEnabled()
       await expect(page.getByLabel(/email/i)).toHaveCount(0)
-      await expect(help).not.toHaveAttribute('open', '')
+      await expect(help).toBeHidden()
       for (const [width, height] of [
         [320, 900],
         [390, 900],

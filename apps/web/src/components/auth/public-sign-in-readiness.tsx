@@ -7,13 +7,13 @@ const clientReady = () => true
 const serverReady = () => false
 
 /** Keep server-rendered controls inert until their handlers are attached.
- * Native help remains available without scripts and after a failed sign-in.
- * Its compact summary keeps the same geometry through hydration.
+ * Native recovery remains available if scripts cannot initialize sign-in.
+ * Once controls are ready, the public entry contains only the sign-in form.
  */
 export function PublicSignInReadiness({ children }: { children: ReactNode }) {
   const ready = useSyncExternalStore(subscribe, clientReady, serverReady)
   return (
-    <div className="space-y-4" data-public-sign-in-ready={ready}>
+    <div className="flex flex-col gap-4" data-public-sign-in-ready={ready}>
       <fieldset disabled={!ready} className="m-0 min-w-0 border-0 p-0">
         {children}
       </fieldset>
