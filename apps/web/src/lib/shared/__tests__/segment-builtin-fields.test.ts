@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, expectTypeOf } from 'vitest'
 import {
   BUILTIN_FIELDS,
   BUILTIN_FIELD_MAP,
@@ -174,19 +174,41 @@ describe('BUILTIN_FIELD_MAP', () => {
   })
 })
 
-describe('type-level: every registry key is a valid SegmentRuleAttribute', () => {
-  // This test enforces that the registry keys are kept in sync with the
-  // SegmentRuleAttribute union. If a key is added to the registry but not
-  // the union, TypeScript will catch it at compile time.
-  it('can assign each registry key to SegmentRuleAttribute without assertion', () => {
+describe('every registry key is a valid SegmentRuleAttribute', () => {
+  // The SegmentRuleAttribute union written out as data. `satisfies` makes the
+  // type checker reject a member missing from this object and a key the union
+  // does not have, so the object and the union cannot drift apart.
+  const SEGMENT_RULE_ATTRIBUTES = {
+    email: true,
+    email_verified: true,
+    created_at_days_ago: true,
+    post_count: true,
+    vote_count: true,
+    comment_count: true,
+    plan: true,
+    metadata_key: true,
+    name: true,
+    locale: true,
+    country: true,
+    last_active_days_ago: true,
+    signup_source: true,
+    principal_type: true,
+  } as const satisfies Record<SegmentRuleAttribute, true>
+
+  it('every registry key is a SegmentRuleAttribute', () => {
+    // Compile time, checked by `tsc` (the web typecheck covers this file): a
+    // registry key outside the union is a type error here. Do not cast the key
+    // with `as SegmentRuleAttribute` instead; that compiles for any key while
+    // one other key overlaps the union.
+    expectTypeOf<(typeof BUILTIN_FIELDS)[number]['key']>().toExtend<SegmentRuleAttribute>()
+
+    // Run time, so the vitest run reports the same mismatch.
+    const attributes = Object.keys(SEGMENT_RULE_ATTRIBUTES)
     for (const field of BUILTIN_FIELDS) {
-      // The type cast below will fail at compile time if field.key is not
-      // a subtype of SegmentRuleAttribute.
-      const _: SegmentRuleAttribute = field.key as SegmentRuleAttribute
-      void _
+      expect(attributes, `registry key "${field.key}" is not a SegmentRuleAttribute`).toContain(
+        field.key
+      )
     }
-    // If we reach here the compile-time check passed.
-    expect(true).toBe(true)
   })
 })
 
