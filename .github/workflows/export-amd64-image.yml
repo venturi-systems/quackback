@@ -26,7 +26,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6

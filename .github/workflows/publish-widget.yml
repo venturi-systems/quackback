@@ -30,7 +30,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -129,7 +129,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: npm-publish
     permissions:

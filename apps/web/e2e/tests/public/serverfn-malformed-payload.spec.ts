@@ -167,6 +167,7 @@ test.describe('Server-function payloads that cannot be decoded (DEF-59)', () => 
   const postCases: Array<[string, string]> = [
     ['malformed JSON', '{not json'],
     ['an empty body', ''],
+    ['an envelope whose root is a primitive', JSON.stringify(PRIMITIVE_ROOT)],
     ['JSON that is not a seroval envelope', '{"t":99}'],
     [
       'an oversized (1.5 MB) body that is not a seroval envelope',

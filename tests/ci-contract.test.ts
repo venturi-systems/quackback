@@ -13,7 +13,47 @@ function workflowFiles(): string[] {
     .sort()
 }
 
+// Dependabot bumps every actions/upload-artifact reference in one pull request,
+// so the upload steps below are held to the one pin all workflows share. A SHA
+// literal here would fail every such bump until someone edited it by hand.
+function uploadArtifactPins(): Map<string, string[]> {
+  const pins = new Map<string, string[]>()
+  for (const name of workflowFiles()) {
+    const text = readFileSync(join(workflowDir, name), 'utf8')
+    for (const match of text.matchAll(/actions\/upload-artifact@([^\s'"#]+)/g)) {
+      pins.set(match[1], [...(pins.get(match[1]) ?? []), name])
+    }
+  }
+  return pins
+}
+
+function sharedUploadArtifactPin(): string {
+  const pins = uploadArtifactPins()
+  expect(
+    [...pins.keys()],
+    `workflows disagree on actions/upload-artifact: ${JSON.stringify([...pins])}`
+  ).toHaveLength(1)
+  const [pin] = [...pins.keys()]
+  expect(pin).toMatch(/^[0-9a-f]{40}$/)
+  return pin
+}
+
 describe('QB-CI-001 consolidated validation contract', () => {
+  it('pins every actions/upload-artifact reference to one full commit SHA', () => {
+    const pin = sharedUploadArtifactPin()
+    expect(uploadArtifactPins().get(pin)).toEqual(expect.arrayContaining(['ci.yml']))
+  })
+
+  it('pins every GitHub-hosted Linux runner to an explicit image', () => {
+    // ubuntu-latest moves to a new major release on GitHub's schedule
+    // (actions/runner-images#14748). A named image changes only in a reviewed
+    // pull request.
+    for (const name of workflowFiles()) {
+      const text = readFileSync(join(workflowDir, name), 'utf8')
+      expect(text, name).not.toContain('ubuntu-latest')
+    }
+  })
+
   it('splits independent lanes behind one pull-request and merge-queue context', () => {
     const workflows = workflowFiles()
     const contents = new Map(
@@ -53,7 +93,7 @@ describe('QB-CI-001 consolidated validation contract', () => {
     expect(ci.replace(/\s+/g, ' ')).toContain(
       'needs: [static_analysis, database_tests, changed_paths, e2e_tests, runner_base, signed_in_render]'
     )
-    expect(ci).toContain('runs-on: ubuntu-latest')
+    expect(ci).toContain('runs-on: ubuntu-24.04\n')
     expect(ci).toContain('services:\n      postgres:')
     expect(ci).toContain('docker run --rm --read-only --network none')
     expect(ci).toContain(
@@ -133,7 +173,7 @@ describe('QB-CI-004 Playwright failure evidence', () => {
     expect(job.slice(0, uploadAt)).not.toMatch(/\brm\s+[^\n]*(?:blob-report|test-results)/)
     const upload = job.slice(uploadAt).split(/\n {6}- /, 1)[0]
     expect(upload).toContain('        if: ${{ !cancelled() }}\n')
-    expect(upload).toMatch(/uses: actions\/upload-artifact@[0-9a-f]{40}\b/)
+    expect(upload).toContain(`uses: actions/upload-artifact@${sharedUploadArtifactPin()} `)
     expect(upload).toContain('          retention-days: 7\n')
     for (const artifact of ['blob-report', 'test-results', 'e2e-results.json', 'e2e-plan.json']) {
       expect(upload).toContain(`            apps/web/${artifact}\n`)
@@ -351,10 +391,9 @@ describe('QB-CI-006 attested E2E image lifecycle', () => {
       'name: e2e-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}'
     )
     expect(upload).toContain('path: ${{ runner.temp }}/e2e-evidence/image-server*')
+    const pin = sharedUploadArtifactPin()
     for (const part of [upload, compact]) {
-      expect(part).toContain(
-        'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
-      )
+      expect(part).toContain(`uses: actions/upload-artifact@${pin} `)
       expect(part).toContain('retention-days: 7')
       expect(part).toContain('if-no-files-found: error')
     }
@@ -379,8 +418,8 @@ describe('QB-CI-003 offline package lane', () => {
     expect(job).toContain("if: needs.changed_paths.outputs.runner_base == 'true'")
     expect(job).toContain('platform: linux/amd64')
     expect(job).toContain('platform: linux/arm64')
-    expect(job).toContain('runner: ubuntu-latest')
-    expect(job).toContain('runner: ubuntu-24.04-arm')
+    expect(job).toContain('runner: ubuntu-24.04\n')
+    expect(job).toContain('runner: ubuntu-24.04-arm\n')
     expect(job).toContain('--target runner-base')
     expect(job).toContain('docker run --rm --network none')
   })
@@ -455,7 +494,7 @@ describe('QB-CI-002 signed-in render lane', () => {
     expect(job).toContain(
       "if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && needs.changed_paths.outputs.render == 'true')"
     )
-    expect(job).toContain('runs-on: ubuntu-latest')
+    expect(job).toContain('runs-on: ubuntu-24.04\n')
     expect(job).toContain('timeout-minutes: 45')
     // The checker runs unmodified: the job refuses any bytes but the pinned ones.
     expect(job).toContain('sha256sum --check --strict')

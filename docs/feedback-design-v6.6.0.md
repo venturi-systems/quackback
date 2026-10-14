@@ -31,7 +31,10 @@ A portal that requires sign-in to read shows an open, unboxed sign-in page, not 
 card. By the owner's 2026-10-07 direction its short statement and social sign-in
 buttons share one centered column at every width, the short-statement variant
 the design system's layout guidance allows; the page still starts at the top
-rather than centering vertically. The signed-in no-access page keeps the
+rather than centering vertically. By the owner's 2026-10-09 direction, the ready
+sign-in form has no help dropdown. Native recovery remains available when scripts
+cannot initialize the form; a recovery interaction begun before initialization
+keeps its focus until the visitor leaves it. The signed-in no-access page keeps the
 reading-start layout. It says what the portal is, who can read it (from the portal's
 real posture), and who can do what: contributors read, post, vote and comment;
 team members also review posts, set status, move roadmap items, merge
