@@ -35,7 +35,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
@@ -166,7 +166,7 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
     # Runner exception (C): GitHub-hosted on purpose. This repository is public,
@@ -261,7 +261,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [resolve-source, build]
     timeout-minutes: 20
     environment: container-publish

@@ -50,7 +50,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -138,7 +138,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -188,7 +188,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     # The reuse probe below reads workflow runs and jobs, the PR, and commit
     # trees. Read-only, and scoped to this job so the heavy lanes inherit
@@ -512,7 +512,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A cancelled shard reports NOTHING -- no counts, no failure list -- so the
     # cap has to be comfortably above the slowest honest run, and the run has to
     # be short enough that it is.
@@ -869,7 +869,7 @@ jobs:
           - arch: amd64
             platform: linux/amd64
             alpine_arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             platform: linux/arm64
             alpine_arch: aarch64
@@ -948,7 +948,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
       postgres:
@@ -1119,7 +1119,7 @@ jobs:
     # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
     # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
     # A self-hosted label here would queue and never start.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require every independent lane
