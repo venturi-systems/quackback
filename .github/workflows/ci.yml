@@ -816,7 +816,7 @@ jobs:
         # shard, ratchet and checkout verification step to have succeeded.
         # Compact checkout and image lifecycle receipts only; logs are separate.
         if: ${{ always() && github.event_name == 'pull_request' && steps.tested_checkout.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-tested-tree-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: |
@@ -828,7 +828,7 @@ jobs:
 
       - name: Upload E2E application evidence
         if: ${{ always() && (steps.image_build.outcome == 'success' || steps.image_build.outcome == 'failure' || steps.image_build.outcome == 'cancelled') }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-application-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/e2e-evidence/image-server*
@@ -840,7 +840,7 @@ jobs:
         # Retain Playwright failure/retry artifacts even when the ratchet passes.
         # No new job/matrix/schedule or additional test execution is introduced.
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-shard-${{ matrix.shard }}
           path: |
@@ -1102,7 +1102,7 @@ jobs:
 
       - name: Upload the render reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signed-in-render-reports
           path: ${{ runner.temp }}/render
