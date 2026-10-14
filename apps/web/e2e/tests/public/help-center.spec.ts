@@ -14,8 +14,10 @@ test.describe.configure({ mode: 'serial' })
  * execution. A disabled-feature 404 must never stand in for the help-center UI.
  * db:seed creates no help-center content, so the suite also creates its own
  * categories and articles (e2e/scripts/set-help-center-content.ts) and removes
- * them afterwards. Every page these tests open therefore exists, and a missing
- * element is a failure rather than a reason to skip.
+ * them afterwards. Every page these tests open therefore exists, and no test
+ * skips because content is missing. Some tests still check count() before an
+ * assertion and pass when the element is absent; making those assertions
+ * unconditional is follow-up work.
  */
 
 test.beforeAll(() => {
