@@ -87,6 +87,14 @@ export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
 }
 
 /**
+ * Create the `e2e-hc-*` help-center categories and articles, or remove exactly
+ * those rows. `db:seed` creates no help-center content.
+ */
+export function setHelpCenterContent(action: 'create' | 'remove'): void {
+  runScript('../scripts/set-help-center-content.ts', [action])
+}
+
+/**
  * Flip sign-in methods and drop the tenant-settings cache (the script does
  * both). All actions write `settings.auth_config.oauth`, the one map the
  * request-time gate (`isAuthMethodAllowed`) and the sign-in dialog both read.

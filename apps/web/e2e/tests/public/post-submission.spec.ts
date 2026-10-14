@@ -645,31 +645,27 @@ test.describe('Board Selector', () => {
       .locator('aside button')
       .filter({ hasNotText: /view all/i })
 
-    // Get the second board button (to ensure we're switching from default)
+    // Get the second board button (to ensure we're switching from default).
+    // db:seed creates four public boards, so the sidebar always lists a second
+    // one; a missing button is a failure, not a pass.
     const secondBoardButton = sidebarBoardButtons.nth(1)
+    await expect(secondBoardButton).toBeVisible()
 
-    if (await secondBoardButton.isVisible()) {
-      // Get the board name before clicking
-      const boardName = await secondBoardButton.textContent()
+    // Get the board name before clicking, without any count badge
+    const boardName = (await secondBoardButton.textContent()) ?? ''
+    const expectedBoardName = boardName.split(/\d/)[0].trim()
+    expect(expectedBoardName, `second sidebar button "${boardName}" has no board name`).not.toBe('')
 
-      // Click the board filter
-      await secondBoardButton.click()
-      await globalPage.waitForLoadState('networkidle')
+    // Click the board filter
+    await secondBoardButton.click()
+    await globalPage.waitForLoadState('networkidle')
 
-      // Open dialog
-      await globalPage.getByPlaceholder("What's your idea?").click()
-      await expect(globalPage.getByPlaceholder("What's your idea?")).toBeVisible({ timeout: 5000 })
+    // Open dialog
+    await globalPage.getByPlaceholder("What's your idea?").click()
+    await expect(globalPage.getByPlaceholder("What's your idea?")).toBeVisible({ timeout: 5000 })
 
-      // Board selector should show the clicked board's name
-      // Extract just the board name (remove any count badges)
-      const expectedBoardName = boardName?.split(/\d/)[0].trim()
-      if (expectedBoardName) {
-        await expect(boardSelector).toContainText(expectedBoardName)
-      }
-    } else {
-      // No second board visible in sidebar - test passes trivially
-      expect(true).toBe(true)
-    }
+    // Board selector should show the clicked board's name
+    await expect(boardSelector).toContainText(expectedBoardName)
   })
 })
 

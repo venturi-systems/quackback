@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { setHelpCenterEnabled } from '../../utils/access-helpers'
+import { test, expect, type Page } from '@playwright/test'
+import { setHelpCenterContent, setHelpCenterEnabled } from '../../utils/access-helpers'
 
 // The flags are workspace-wide. One worker must own their enable/restore pair.
 test.describe.configure({ mode: 'serial' })
@@ -12,11 +12,55 @@ test.describe.configure({ mode: 'serial' })
  *
  * The suite explicitly enables both help-center flags and restores them after
  * execution. A disabled-feature 404 must never stand in for the help-center UI.
- * Assertions that require articles or categories still depend on seeded content.
+ * db:seed creates no help-center content, so the suite also creates its own
+ * categories and articles (e2e/scripts/set-help-center-content.ts) and removes
+ * them afterwards. Every page these tests open therefore exists, and a missing
+ * element is a failure rather than a reason to skip.
  */
 
-test.beforeAll(() => setHelpCenterEnabled('enable'))
-test.afterAll(() => setHelpCenterEnabled('restore'))
+test.beforeAll(() => {
+  setHelpCenterEnabled('enable')
+  setHelpCenterContent('create')
+})
+test.afterAll(() => {
+  try {
+    setHelpCenterContent('remove')
+  } finally {
+    setHelpCenterEnabled('restore')
+  }
+})
+
+/**
+ * Assert that the page shows the help-center landing page. A heading alone does
+ * not prove it, because the not-found page renders an h1 ("Page not found") as
+ * well; only the landing page has the article search.
+ */
+async function expectLandingPage(page: Page) {
+  await expect(page.locator('h1').first()).toBeVisible()
+  await expect(page.getByPlaceholder('Search articles...')).toBeVisible()
+}
+
+/**
+ * Type `query` into the hero search and wait for the request it sends. Returns
+ * false when that request got the widget-off answer: the hero search calls
+ * /api/widget/kb-search, every widget route answers 404 "Not found" while the
+ * widget is disabled (src/lib/server/widget/widget-enabled.ts), and db:seed
+ * leaves it disabled. Any other answer returns true, so the caller's
+ * assertions decide.
+ */
+async function searchHelpCenter(page: Page, query: string): Promise<boolean> {
+  const answered = page.waitForResponse((response) =>
+    response.url().includes('/api/widget/kb-search')
+  )
+  await page.getByPlaceholder('Search articles...').fill(query)
+  const response = await answered
+  if (response.status() !== 404) return true
+  const body = (await response.json()) as { error?: { message?: string } }
+  return body.error?.message !== 'Not found'
+}
+
+const WIDGET_OFF_REASON =
+  'the hero search is off: /api/widget/kb-search answers 404 while the widget is disabled'
 
 test.describe('Public Help Center', () => {
   test.beforeEach(async ({ page }) => {
@@ -29,23 +73,12 @@ test.describe('Public Help Center', () => {
   // -------------------------------------------------------------------------
 
   test('page loads and shows help center content', async ({ page }) => {
-    // Either the hero heading is shown or the page redirected to 404 (flag off).
-    // When the flag is enabled, the landing page renders a prominent h1.
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'help center disabled in seed')
-      return
-    }
-
-    await expect(heading).toBeVisible()
+    // beforeAll enabled both flags, so /hc must be the landing page, not a 404.
+    await expectLandingPage(page)
   })
 
   test('shows the search bar on the landing page', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     // Hero search renders an <input type="search"> with placeholder "Search articles..."
     const searchInput = page.getByPlaceholder('Search articles...')
@@ -53,35 +86,20 @@ test.describe('Public Help Center', () => {
   })
 
   test('shows categories list when categories exist in seed data', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
-    // Category cards link to /hc/categories/<slug>
+    // Category cards link to /hc/categories/<slug>. The fixture always creates
+    // categories, so the "No categories yet" empty state is asserted by
+    // src/components/help-center/__tests__/help-center-category-grid.test.tsx.
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      // No categories yet — empty state message should be shown
-      await expect(page.getByText('No categories yet')).toBeVisible()
-      return
-    }
-
     await expect(categoryCards.first()).toBeVisible()
   })
 
   test('each category card shows name and article count', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     const firstCard = categoryCards.first()
 
@@ -95,17 +113,9 @@ test.describe('Public Help Center', () => {
   })
 
   test('each category card shows description when present', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
 
     // At least verify cards are rendered; descriptions are optional per category
     await expect(categoryCards.first()).toBeVisible()
@@ -116,17 +126,10 @@ test.describe('Public Help Center', () => {
   // -------------------------------------------------------------------------
 
   test('can navigate into a category', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -135,17 +138,10 @@ test.describe('Public Help Center', () => {
   })
 
   test('category page shows category name as heading', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     // Capture category name from the card before navigating
     const categoryNameText = await categoryCards.first().locator('h3').textContent()
@@ -161,29 +157,18 @@ test.describe('Public Help Center', () => {
   })
 
   test('category page shows articles list', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
-    // Article rows link to /hc/articles/<categorySlug>/<articleSlug>
+    // Article rows link to /hc/articles/<categorySlug>/<articleSlug>. Waiting on
+    // the locator rather than reading count() once covers the client-side
+    // navigation, which can still be rendering when the network goes idle.
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      // Category exists but has no articles yet
-      await expect(page.getByText(/No articles in this category yet|No articles yet/)).toBeVisible()
-      return
-    }
-
     await expect(articleLinks.first()).toBeVisible()
   })
 
@@ -192,27 +177,17 @@ test.describe('Public Help Center', () => {
   // -------------------------------------------------------------------------
 
   test('can navigate into an article', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     // Navigate to a category first
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -221,26 +196,16 @@ test.describe('Public Help Center', () => {
   })
 
   test('article page shows title', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -250,56 +215,37 @@ test.describe('Public Help Center', () => {
   })
 
   test('article page shows content area', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
 
-    // Rich text content renders inside .prose
-    const contentArea = page.locator('.prose')
+    // Rich text content renders inside .prose. The article wraps the rich-text
+    // renderer, which has its own .prose, so take the outer one.
+    const contentArea = page.locator('.prose').first()
     await expect(contentArea).toBeVisible()
   })
 
   test('article page shows "Was this helpful?" feedback widget', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -310,26 +256,16 @@ test.describe('Public Help Center', () => {
   })
 
   test('article page shows table of contents when headings exist', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -342,26 +278,16 @@ test.describe('Public Help Center', () => {
   })
 
   test('article page shows author and last-updated metadata when present', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -384,17 +310,10 @@ test.describe('Public Help Center', () => {
   // -------------------------------------------------------------------------
 
   test('breadcrumb navigation works on category page', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -413,26 +332,16 @@ test.describe('Public Help Center', () => {
   })
 
   test('breadcrumb navigation works on article page', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -452,17 +361,10 @@ test.describe('Public Help Center', () => {
   })
 
   test('"All categories" back link on category page navigates to /hc', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -482,50 +384,34 @@ test.describe('Public Help Center', () => {
   // -------------------------------------------------------------------------
 
   test('search input is present and accepts text', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) {
-      test.skip(true, 'no search input on the page')
-      return
-    }
+    await expect(searchInput).toBeVisible()
 
     await searchInput.fill('getting started')
     await expect(searchInput).toHaveValue('getting started')
   })
 
   test('typing in search shows results dropdown when articles match', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) {
-      test.skip(true, 'no search input on the page')
+    await expect(searchInput).toBeVisible()
+
+    // A fixture article is titled "Update your billing details". (The old
+    // query, 'a', is a stop word that full-text search drops, so it matched
+    // nothing and the dropdown check below never ran.)
+    if (!(await searchHelpCenter(page, 'billing'))) {
+      test.skip(true, WIDGET_OFF_REASON)
       return
     }
-
-    // Type a broad term; results depend on seed data
-    await searchInput.fill('a')
-
-    // Wait briefly for the 300ms debounce
-    await page.waitForTimeout(600)
 
     // Results dropdown is a <ul> inside the search container
     const resultsDropdown = page
       .locator('ul')
       .filter({ has: page.locator('button[type="button"]') })
-    // If there are results, the dropdown should be visible; if not, that is fine too
-    const dropdownVisible = (await resultsDropdown.count()) > 0
-    if (dropdownVisible) {
-      await expect(resultsDropdown.first()).toBeVisible()
-    }
+    await expect(resultsDropdown.first()).toBeVisible()
   })
 
   // -------------------------------------------------------------------------
@@ -533,23 +419,13 @@ test.describe('Public Help Center', () => {
   // -------------------------------------------------------------------------
 
   test('old /$categorySlug URL redirects to /hc/categories/$categorySlug', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
-    const firstHref = await categoryCards.first().getAttribute('href')
-    if (!firstHref) {
-      test.skip(true, 'no first href')
-      return
-    }
+    const firstHref = (await categoryCards.first().getAttribute('href')) ?? ''
+    expect(firstHref).toMatch(/^\/hc\/categories\/[^/]+\/?$/)
 
     // Extract slug from /hc/categories/<slug>
     const slug = firstHref.replace('/hc/categories/', '').replace(/\/$/, '')
@@ -568,36 +444,26 @@ test.describe('Public Help Center', () => {
   test('prev/next navigation renders on article page when sibling articles exist', async ({
     page,
   }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) < 2) {
-      test.skip(true, 'need at least 2 articles for prev/next')
-      return
-    }
+    // The first fixture category holds three articles.
+    await expect(articleLinks.nth(1)).toBeVisible()
 
     // Navigate to the second article so there's a "Previous" link
     await articleLinks.nth(1).click()
     await page.waitForLoadState('networkidle')
 
-    // Previous / Next links contain the arrow characters rendered by the component
-    const prevLink = page.getByText(/← Previous/i)
-    if ((await prevLink.count()) > 0) {
-      await expect(prevLink).toBeVisible()
-    }
+    // Previous / Next links contain the arrow characters rendered by the
+    // component. The second of three fixture articles has a sibling on each side.
+    await expect(page.getByText(/← Previous/i)).toBeVisible()
+    await expect(page.getByText(/Next →/i)).toBeVisible()
   })
 })
 
@@ -612,38 +478,28 @@ test.describe('Help Center - Search Accuracy', () => {
   })
 
   test('search results all contain the query term in title or category name', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) {
-      test.skip(true, 'no search input on the page')
+    await expect(searchInput).toBeVisible()
+
+    // A fixture article and its category are both named for billing. (The old
+    // query, 'a', is an English stop word that full-text search drops, so it
+    // matched nothing and this test always skipped.)
+    const query = 'billing'
+    if (!(await searchHelpCenter(page, query))) {
+      test.skip(true, WIDGET_OFF_REASON)
       return
     }
-
-    // Use a short, common term likely to return results from any seed
-    const query = 'a'
-    await searchInput.fill(query)
-    // Wait for the 300 ms debounce + network round-trip
-    await page.waitForTimeout(700)
 
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
-    if ((await resultsDropdown.count()) === 0) {
-      test.skip(true, 'no results — nothing to verify')
-      return
-    }
+    await expect(resultsDropdown.first()).toBeVisible()
 
     const resultButtons = resultsDropdown.first().locator('button[type="button"]')
     const count = await resultButtons.count()
-    if (count === 0) {
-      test.skip(true, 'count is 0')
-      return
-    }
+    expect(count).toBeGreaterThan(0)
 
     // Every visible result title or category name must include the query (case-insensitive)
     for (let i = 0; i < count; i++) {
@@ -665,17 +521,10 @@ test.describe('Help Center - Search Accuracy', () => {
   })
 
   test('searching a non-existent term shows empty state with helpful message', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) {
-      test.skip(true, 'no search input on the page')
-      return
-    }
+    await expect(searchInput).toBeVisible()
 
     // A nonsense string guaranteed not to match any article
     await searchInput.fill('zzzznonexistentterm9999')
@@ -695,34 +544,26 @@ test.describe('Help Center - Search Accuracy', () => {
   })
 
   test('clearing search hides the results dropdown', async ({ page }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) {
-      test.skip(true, 'no search input on the page')
+    await expect(searchInput).toBeVisible()
+
+    // Type a fixture term so the dropdown opens. (The old query, 'a', is a stop
+    // word that matched nothing, so there was never a dropdown to clear.)
+    if (!(await searchHelpCenter(page, 'billing'))) {
+      test.skip(true, WIDGET_OFF_REASON)
       return
     }
-
-    // Type to get results
-    await searchInput.fill('a')
-    await page.waitForTimeout(700)
-
-    // Now clear the input
-    await searchInput.fill('')
-    await page.waitForTimeout(400)
-
-    // Dropdown must be gone after clearing
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
-    const dropdownCount = await resultsDropdown.count()
-    if (dropdownCount > 0) {
-      await expect(resultsDropdown.first()).not.toBeVisible()
-    }
+    await expect(resultsDropdown.first()).toBeVisible()
+
+    // Now clear the input. The component closes the dropdown after its 300 ms
+    // debounce without sending a request, so wait on the dropdown itself.
+    await searchInput.fill('')
+    await expect(resultsDropdown).toHaveCount(0)
 
     // Input value is empty
     await expect(searchInput).toHaveValue('')
@@ -731,39 +572,28 @@ test.describe('Help Center - Search Accuracy', () => {
   test('search is case-insensitive — lowercase query matches mixed-case titles', async ({
     page,
   }) => {
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const searchInput = page.getByPlaceholder('Search articles...')
-    if ((await searchInput.count()) === 0) {
-      test.skip(true, 'no search input on the page')
+    await expect(searchInput).toBeVisible()
+
+    // Search uppercase first to discover an existing title. A fixture article
+    // is titled "Update your billing details".
+    if (!(await searchHelpCenter(page, 'Billing'))) {
+      test.skip(true, WIDGET_OFF_REASON)
       return
     }
-
-    // Search uppercase first to discover an existing title
-    await searchInput.fill('A')
-    await page.waitForTimeout(700)
 
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
-    if ((await resultsDropdown.count()) === 0) {
-      test.skip(true, 'no results dropdown on the page')
-      return
-    }
+    await expect(resultsDropdown.first()).toBeVisible()
 
     const countUpper = await resultsDropdown.first().locator('button[type="button"]').count()
-    if (countUpper === 0) {
-      test.skip(true, 'count upper is 0')
-      return
-    }
+    expect(countUpper).toBeGreaterThan(0)
 
     // Now search with lowercase — should return at least as many results
-    await searchInput.fill('a')
-    await page.waitForTimeout(700)
+    await searchHelpCenter(page, 'billing')
 
     const countLower = await resultsDropdown.first().locator('button[type="button"]').count()
     // Results must be non-zero when an uppercase search found results
@@ -777,52 +607,38 @@ test.describe('Help Center - Search Accuracy', () => {
 
 test.describe('Help Center - Article Content Verification', () => {
   // Navigate to the first available article before each test
-  async function navigateToFirstArticle(page: import('@playwright/test').Page): Promise<boolean> {
+  async function navigateToFirstArticle(page: Page): Promise<void> {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
-
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return false
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return false
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return false
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
-
-    return true
   }
 
   test('article h1 title matches the title shown in the category listing', async ({ page }) => {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
 
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     // Capture the title text from the category listing row before navigating
     const listingTitle = await articleLinks
@@ -841,13 +657,9 @@ test.describe('Help Center - Article Content Verification', () => {
   })
 
   test('article prose content is non-empty', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
-    const prose = page.locator('.prose')
+    const prose = page.locator('.prose').first()
     await expect(prose).toBeVisible()
 
     // The prose element must contain at least some text
@@ -856,44 +668,27 @@ test.describe('Help Center - Article Content Verification', () => {
   })
 
   test('article page has paragraph text or list items beyond the heading', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     // Any <p>, <li>, or <ul> inside the prose area means the article has body content
     const bodyContent = page.locator('.prose p, .prose li, .prose ul, .prose ol').first()
-    if ((await bodyContent.count()) === 0) {
-      test.skip(true, 'Article has content but not as standard block elements')
-      return
-    }
     await expect(bodyContent).toBeVisible()
   })
 
   test('h2/h3 headings in the article appear in the Table of Contents', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     // TOC is only rendered on xl viewports; use a wide viewport for this test
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.waitForLoadState('networkidle')
 
+    // The first fixture article has h2 and h3 headings.
     const tocLabel = page.getByText('On this page')
-    if ((await tocLabel.count()) === 0) {
-      test.skip(true, 'no headings in this article')
-      return
-    }
-
     await expect(tocLabel).toBeVisible()
 
     // Collect h2/h3 headings from the prose
     const proseHeadings = page.locator('.prose h2, .prose h3')
-    const headingCount = await proseHeadings.count()
-    if (headingCount === 0) return
+    await expect(proseHeadings.first()).toBeVisible()
 
     // The TOC nav must contain links for these headings
     const tocLinks = page.locator('aside nav a[href^="#"]')
@@ -910,45 +705,30 @@ test.describe('Help Center - Article Content Verification', () => {
     }
   })
 
-  test('clicking a ToC link updates the URL hash to the heading id', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+  test('clicking a ToC link scrolls its heading into view', async ({ page }) => {
+    await navigateToFirstArticle(page)
 
-    await page.setViewportSize({ width: 1440, height: 900 })
+    // The TOC renders on xl viewports only. A short viewport keeps the last
+    // heading of the first fixture article below the fold until the click.
+    await page.setViewportSize({ width: 1440, height: 500 })
     await page.waitForLoadState('networkidle')
 
     const tocLabel = page.getByText('On this page')
-    if ((await tocLabel.count()) === 0) {
-      test.skip(true, 'no toc label on the page')
-      return
-    }
+    await expect(tocLabel).toBeVisible()
 
     const tocLinks = page.locator('aside nav a[href^="#"]')
-    if ((await tocLinks.count()) === 0) {
-      test.skip(true, 'no toc links on the page')
-      return
-    }
+    await expect(tocLinks.first()).toBeVisible()
 
-    const firstLink = tocLinks.first()
-    const expectedHash = await firstLink.getAttribute('href') // e.g. "#my-heading"
-    if (!expectedHash) {
-      test.skip(true, 'no expected hash')
-      return
-    }
+    const lastLink = tocLinks.last()
+    const targetHash = (await lastLink.getAttribute('href')) ?? '' // e.g. "#my-heading"
+    expect(targetHash).toMatch(/^#./)
+    const target = page.locator(`[id="${targetHash.slice(1)}"]`)
+    await expect(target).not.toBeInViewport()
 
-    // The TOC onClick does e.preventDefault() and scrolls via JS —
-    // it also calls setActiveId. The URL hash only changes when the component
-    // sets it via the anchor href attribute. We click and wait briefly.
-    await firstLink.click()
-    await page.waitForTimeout(300)
-
-    // The URL should now contain the heading hash (escape regex metacharacters
-    // since heading slugs may contain them)
-    const escapedHash = expectedHash.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    await expect(page).toHaveURL(new RegExp(escapedHash))
+    // help-center-toc.tsx prevents the default jump and calls scrollIntoView, so
+    // the URL keeps no hash; the click has to bring the heading into view.
+    await lastLink.click()
+    await expect(target).toBeInViewport()
   })
 })
 
@@ -957,36 +737,28 @@ test.describe('Help Center - Article Content Verification', () => {
 // =============================================================================
 
 test.describe('Help Center - Article Feedback Widget', () => {
-  async function navigateToFirstArticle(page: import('@playwright/test').Page): Promise<boolean> {
+  async function navigateToFirstArticle(page: Page): Promise<void> {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
-
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) return false
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) return false
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) return false
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
-
-    return true
   }
 
   test('article page shows "Was this helpful?" widget with thumbs-up and thumbs-down buttons', async ({
     page,
   }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     await expect(page.getByText('Was this helpful?')).toBeVisible()
 
@@ -998,17 +770,10 @@ test.describe('Help Center - Article Feedback Widget', () => {
   })
 
   test('clicking thumbs-up shows a confirmation message', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     const yesBtn = page.getByRole('button', { name: /yes/i })
-    if ((await yesBtn.count()) === 0) {
-      test.skip(true, 'no yes button on the page')
-      return
-    }
+    await expect(yesBtn).toBeVisible()
 
     await yesBtn.click()
 
@@ -1017,17 +782,10 @@ test.describe('Help Center - Article Feedback Widget', () => {
   })
 
   test('clicking thumbs-down shows a confirmation message', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     const noBtn = page.getByRole('button', { name: /no/i })
-    if ((await noBtn.count()) === 0) {
-      test.skip(true, 'no no button on the page')
-      return
-    }
+    await expect(noBtn).toBeVisible()
 
     await noBtn.click()
 
@@ -1038,17 +796,10 @@ test.describe('Help Center - Article Feedback Widget', () => {
   })
 
   test('after voting helpful the thumbs-up button shows selected styling', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     const yesBtn = page.getByRole('button', { name: /yes/i })
-    if ((await yesBtn.count()) === 0) {
-      test.skip(true, 'no yes button on the page')
-      return
-    }
+    await expect(yesBtn).toBeVisible()
 
     await yesBtn.click()
     // Wait for state to settle
@@ -1061,17 +812,10 @@ test.describe('Help Center - Article Feedback Widget', () => {
   })
 
   test('clicking the same vote button twice does not change state back', async ({ page }) => {
-    const ok = await navigateToFirstArticle(page)
-    if (!ok) {
-      test.skip(true, 'navigateToFirstArticle() found nothing to test')
-      return
-    }
+    await navigateToFirstArticle(page)
 
     const yesBtn = page.getByRole('button', { name: /yes/i })
-    if ((await yesBtn.count()) === 0) {
-      test.skip(true, 'no yes button on the page')
-      return
-    }
+    await expect(yesBtn).toBeVisible()
 
     // First click — registers vote
     await yesBtn.click()
@@ -1081,9 +825,10 @@ test.describe('Help Center - Article Feedback Widget', () => {
     await yesBtn.click()
     // Confirmation copy must still be visible (vote was not reversed)
     await expect(page.getByText('Thanks — glad it landed.')).toBeVisible()
-    // And the "Was this helpful?" prompt text should be gone (replaced by the confirmation)
-    const subtitleEl = page.locator('p.text-xs.text-muted-foreground')
-    await expect(subtitleEl).not.toHaveText('Your feedback shapes what we write next.')
+    // And the prompt's subtitle should be gone (replaced by the confirmation). The
+    // text is matched directly: the class selector used here before also matched
+    // the table of contents label, "On this page".
+    await expect(page.getByText('Your feedback shapes what we write next.')).toHaveCount(0)
   })
 })
 
@@ -1096,17 +841,10 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
 
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     const categoryName = await categoryCards.first().locator('h3').textContent()
 
@@ -1133,17 +871,10 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
 
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     const categoryName = await categoryCards.first().locator('h3').textContent()
 
@@ -1151,10 +882,7 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
@@ -1179,27 +907,17 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
 
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
     const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' })
     const helpCenterLink = breadcrumb.getByRole('link', { name: /Help Center/i })
-    if ((await helpCenterLink.count()) === 0) {
-      test.skip(true, 'no help center link on the page')
-      return
-    }
+    await expect(helpCenterLink).toBeVisible()
 
     await helpCenterLink.click()
     await page.waitForLoadState('networkidle')
@@ -1213,17 +931,10 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.goto('/hc')
     await page.waitForLoadState('networkidle')
 
-    const heading = page.locator('h1').first()
-    if ((await heading.count()) === 0) {
-      test.skip(true, 'no heading on the page')
-      return
-    }
+    await expectLandingPage(page)
 
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    if ((await categoryCards.count()) === 0) {
-      test.skip(true, 'no category cards on the page')
-      return
-    }
+    await expect(categoryCards.first()).toBeVisible()
 
     const categoryHref = await categoryCards.first().getAttribute('href')
     const categoryName = await categoryCards.first().locator('h3').textContent()
@@ -1232,19 +943,20 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await page.waitForLoadState('networkidle')
 
     const articleLinks = page.locator('a[href*="/hc/articles/"]')
-    if ((await articleLinks.count()) === 0) {
-      test.skip(true, 'no article links on the page')
-      return
-    }
+    await expect(articleLinks.first()).toBeVisible()
 
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
 
     const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' })
     if (categoryName) {
+      // The article page renders `breadcrumbs.slice(0, -1)`, so the category is
+      // the last crumb and HelpCenterBreadcrumbs prints it as text, not a link.
+      // Whether it should link is an open product decision; until then this
+      // test reports a skip rather than a failure or a pass.
       const categoryLink = breadcrumb.getByRole('link', { name: categoryName.trim() })
       if ((await categoryLink.count()) === 0) {
-        test.skip(true, 'no category link on the page')
+        test.skip(true, 'the article breadcrumb shows the category as text, not a link')
         return
       }
 
