@@ -357,4 +357,39 @@ describe('malformed help-center snapshots', () => {
     expect(await run('enable')).toBe(1)
     expect(fixture.state.row).toEqual(before)
   })
+
+  /** The parser's own message for text that is not JSON, in this runtime. */
+  function parseFailure(text: string) {
+    try {
+      JSON.parse(text)
+    } catch (error) {
+      return (error as Error).message
+    }
+    throw new Error('Expected text that is not JSON')
+  }
+
+  it.each([
+    // What a run killed between creating the snapshot and writing it leaves.
+    { name: 'an empty file', text: '' },
+    { name: 'a truncated file', text: JSON.stringify(original).slice(0, 40) },
+  ])('name the snapshot path for $name', async ({ text }) => {
+    fixture.state.files.set(SNAPSHOT_PATH, text)
+    fixture.state.modes.set(SNAPSHOT_PATH, 0o600)
+    const message = `Malformed help-center snapshot: ${SNAPSHOT_PATH} (${parseFailure(text)})`
+    const before = { ...fixture.state.row }
+
+    expect(await run('restore')).toBe(1)
+    expect(console.error).toHaveBeenCalledWith(message)
+    // The file is read, and nothing else happens.
+    expect(fixture.state.calls).toEqual(['snapshot-read'])
+    expect(fixture.state.row).toEqual(before)
+    expect(fixture.state.files.get(SNAPSHOT_PATH)).toBe(text)
+
+    expect(await run('enable')).toBe(1)
+    expect(console.error).toHaveBeenCalledWith(message)
+    // The existing file stops enable before its UPDATE.
+    expect(fixture.state.calls).toEqual(['select', 'snapshot-write', 'snapshot-read'])
+    expect(fixture.state.row).toEqual(before)
+    expect(fixture.state.files.get(SNAPSHOT_PATH)).toBe(text)
+  })
 })

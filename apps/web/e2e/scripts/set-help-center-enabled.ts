@@ -36,9 +36,10 @@ function isColumn(value: unknown): value is string | null {
 }
 
 /**
- * Read the snapshot, or null when there is none. A malformed file fails here,
- * before any value from it reaches a query: postgres.js rejects an undefined
- * parameter, and a restore that fails leaves the fixture enabled.
+ * Read the snapshot, or null when there is none. A malformed file, whether it
+ * is not JSON or not a snapshot, fails here with its path, before any value
+ * from it reaches a query: postgres.js rejects an undefined parameter, and a
+ * restore that fails leaves the fixture enabled.
  */
 function readSnapshot(): StoredSnapshot | null {
   let text: string
@@ -48,7 +49,14 @@ function readSnapshot(): StoredSnapshot | null {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
   }
-  const value: unknown = JSON.parse(text)
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch (error) {
+    // An empty or truncated file, such as one left by a run killed between
+    // creating the snapshot and writing it, must name the file to remove.
+    throw new Error(`Malformed help-center snapshot: ${snapshotPath}`, { cause: error })
+  }
   const stored = (typeof value === 'object' && value !== null ? value : {}) as Record<
     string,
     unknown
@@ -139,6 +147,9 @@ async function main() {
 
 // Awaited so the module settles only after the fixture action has finished.
 await main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error))
+  // A wrapped error keeps the underlying reason, such as the JSON parser's, as its cause.
+  const reason =
+    error instanceof Error && error.cause instanceof Error ? ` (${error.cause.message})` : ''
+  console.error((error instanceof Error ? error.message : String(error)) + reason)
   process.exitCode = 1
 })
