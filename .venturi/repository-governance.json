@@ -33,6 +33,7 @@
       "bun run --filter @quackback/widget test",
       "SKIP_ENV_VALIDATION=true bun run build",
       "bun run --filter @quackback/web typecheck",
+      "bun run --filter @quackback/db typecheck",
       "bun run test --run",
       "bun run test:e2e"
     ]

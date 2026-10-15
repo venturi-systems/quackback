@@ -130,6 +130,11 @@ jobs:
       - run: bun run --filter @quackback/web typecheck
       - name: Typecheck design acceptance and its fixture dependencies
         run: bunx tsc --noEmit -p apps/web/tsconfig.design-acceptance.json
+      # vitest runs with typecheck disabled, so an expectTypeOf assertion in
+      # packages/db (types.test.ts) can fail only here. The package tsconfig
+      # includes src/**/*, which covers src/__tests__ and the seed scripts.
+      - name: Typecheck the database package and its type-level tests
+        run: bun run --filter @quackback/db typecheck
 
   database_tests:
     name: Database migrations and tests

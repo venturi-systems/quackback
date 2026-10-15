@@ -950,3 +950,35 @@ describe('QB-CI-003 database setup steps fail fast', () => {
     }
   })
 })
+
+describe('QB-CI-007 database package type-level tests', () => {
+  // vitest.config.ts runs with typecheck disabled, so every expectTypeOf call
+  // in packages/db/src/__tests__/types.test.ts passes at run time whatever the
+  // types are. Only tsc can fail those assertions, and before this contract no
+  // CI step ran tsc over packages/db: the file drifted to 11 compile errors
+  // while all of its tests stayed green (venturi-systems/feedback#452).
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+  const dbDir = join(process.cwd(), 'packages', 'db')
+
+  it('runs the database package typecheck in the static analysis lane', () => {
+    const staticAnalysis = ci.split('\n  static_analysis:\n')[1]?.split('\n  database_tests:\n')[0]
+    expect(staticAnalysis).toContain('run: bun run --filter @quackback/db typecheck')
+  })
+
+  it('type-checks the whole package source tree, tests included', () => {
+    const pkg = JSON.parse(readFileSync(join(dbDir, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+    expect(pkg.scripts?.typecheck).toBe('tsc --noEmit')
+
+    const tsconfig = JSON.parse(readFileSync(join(dbDir, 'tsconfig.json'), 'utf8')) as {
+      include?: string[]
+      exclude?: string[]
+    }
+    expect(tsconfig.include).toContain('src/**/*')
+    for (const pattern of tsconfig.exclude ?? []) {
+      expect(pattern, 'the db tsconfig must not exclude test files').not.toMatch(/test/)
+    }
+    expect(existsSync(join(dbDir, 'src', '__tests__', 'types.test.ts'))).toBe(true)
+  })
+})

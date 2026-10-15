@@ -23,7 +23,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "bun src/seed.ts",
     "db:reset": "bun src/reset.ts",
-    "db:sync-counts": "bun src/sync-counts.ts"
+    "db:sync-counts": "bun src/sync-counts.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@quackback/ids": "workspace:*",
