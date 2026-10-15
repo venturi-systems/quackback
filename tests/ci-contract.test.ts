@@ -855,9 +855,12 @@ describe('QB-CI-002 e2e shard balance contract', () => {
 
   /**
    * The number of tests each shard is given out of `total` under `vector`,
-   * computed the way Playwright's filterForShard does (checked against the
-   * 1.61.1 and 1.63.0 sources): floor(weight * total / sum) per shard, then one
-   * more test for each of the first `remainder` shards.
+   * computed the way filterForShard does in Playwright 1.64.0, the version
+   * bun.lock resolves (checked against its lib/runner/index.js):
+   * floor(weight * total / sum) per shard, then one more test for each of the
+   * first `remainder` shards. The total that Playwright shards is the count
+   * of tests whose expectedStatus is not 'skipped' (every test only when none
+   * is active); the caller passes the planned count ci.yml records instead.
    */
   function shardSizes(vector: number[], total: number): number[] {
     const sum = vector.reduce((a, b) => a + b, 0)
