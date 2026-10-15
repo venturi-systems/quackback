@@ -8,21 +8,29 @@ export interface BreadcrumbItem {
 
 interface HelpCenterBreadcrumbsProps {
   items: BreadcrumbItem[]
+  /**
+   * Whether the last item names the page the reader is on. When true (the
+   * default), the last item renders as emphasized text even if it has an href.
+   * Pass false when the page shows its own title elsewhere, as the article page
+   * does in its h1: the trail then ends at the parent category, which keeps
+   * its link so the reader can go back to it.
+   */
+  currentIsLast?: boolean
 }
 
-export function HelpCenterBreadcrumbs({ items }: HelpCenterBreadcrumbsProps) {
+export function HelpCenterBreadcrumbs({ items, currentIsLast = true }: HelpCenterBreadcrumbsProps) {
   return (
     <nav
       aria-label="Breadcrumb"
       className="flex items-center gap-1.5 text-sm text-muted-foreground"
     >
       {items.map((item, index) => {
-        const isLast = index === items.length - 1
+        const isCurrent = currentIsLast && index === items.length - 1
         return (
           <span key={item.label} className="flex items-center gap-1.5">
             {index > 0 && <ChevronRightIcon className="h-3.5 w-3.5 shrink-0" />}
-            {isLast || !item.href ? (
-              <span className={isLast ? 'text-foreground font-medium' : undefined}>
+            {isCurrent || !item.href ? (
+              <span className={isCurrent ? 'text-foreground font-medium' : undefined}>
                 {item.label}
               </span>
             ) : (
