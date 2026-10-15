@@ -10,7 +10,8 @@ test.describe.configure({ mode: 'serial' })
  * These tests cover the public-facing help center at /hc.
  * No authentication is required.
  *
- * The suite explicitly enables both help-center flags and restores them after
+ * The suite explicitly enables both help-center flags and the widget, whose
+ * kb-search route the hero search calls, and restores all three after
  * execution. A disabled-feature 404 must never stand in for the help-center UI.
  * db:seed creates no help-center content, so the suite also creates its own
  * categories and articles (e2e/scripts/set-help-center-content.ts) and removes
@@ -43,26 +44,20 @@ async function expectLandingPage(page: Page) {
 }
 
 /**
- * Type `query` into the hero search and wait for the request it sends. Returns
- * false when that request got the widget-off answer: the hero search calls
- * /api/widget/kb-search, every widget route answers 404 "Not found" while the
- * widget is disabled (src/lib/server/widget/widget-enabled.ts), and db:seed
- * leaves it disabled. Any other answer returns true, so the caller's
- * assertions decide.
+ * Type `query` into the hero search, wait for the request it sends and require
+ * a 200 answer. The hero search calls /api/widget/kb-search, and every widget
+ * route answers 404 while the widget is disabled
+ * (src/lib/server/widget/widget-enabled.ts). The suite enables the widget in
+ * beforeAll, so a 404 here is a failure, not a reason to skip.
  */
-async function searchHelpCenter(page: Page, query: string): Promise<boolean> {
+async function searchHelpCenter(page: Page, query: string): Promise<void> {
   const answered = page.waitForResponse((response) =>
     response.url().includes('/api/widget/kb-search')
   )
   await page.getByPlaceholder('Search articles...').fill(query)
   const response = await answered
-  if (response.status() !== 404) return true
-  const body = (await response.json()) as { error?: { message?: string } }
-  return body.error?.message !== 'Not found'
+  expect(response.status(), `kb-search for "${query}"`).toBe(200)
 }
-
-const WIDGET_OFF_REASON =
-  'the hero search is off: /api/widget/kb-search answers 404 while the widget is disabled'
 
 test.describe('Public Help Center', () => {
   test.beforeEach(async ({ page }) => {
@@ -404,10 +399,7 @@ test.describe('Public Help Center', () => {
     // A fixture article is titled "Update your billing details". (The old
     // query, 'a', is a stop word that full-text search drops, so it matched
     // nothing and the dropdown check below never ran.)
-    if (!(await searchHelpCenter(page, 'billing'))) {
-      test.skip(true, WIDGET_OFF_REASON)
-      return
-    }
+    await searchHelpCenter(page, 'billing')
 
     // Results dropdown is a <ul> inside the search container
     const resultsDropdown = page
@@ -489,10 +481,7 @@ test.describe('Help Center - Search Accuracy', () => {
     // query, 'a', is an English stop word that full-text search drops, so it
     // matched nothing and this test always skipped.)
     const query = 'billing'
-    if (!(await searchHelpCenter(page, query))) {
-      test.skip(true, WIDGET_OFF_REASON)
-      return
-    }
+    await searchHelpCenter(page, query)
 
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
@@ -553,10 +542,7 @@ test.describe('Help Center - Search Accuracy', () => {
 
     // Type a fixture term so the dropdown opens. (The old query, 'a', is a stop
     // word that matched nothing, so there was never a dropdown to clear.)
-    if (!(await searchHelpCenter(page, 'billing'))) {
-      test.skip(true, WIDGET_OFF_REASON)
-      return
-    }
+    await searchHelpCenter(page, 'billing')
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
@@ -581,10 +567,7 @@ test.describe('Help Center - Search Accuracy', () => {
 
     // Search uppercase first to discover an existing title. A fixture article
     // is titled "Update your billing details".
-    if (!(await searchHelpCenter(page, 'Billing'))) {
-      test.skip(true, WIDGET_OFF_REASON)
-      return
-    }
+    await searchHelpCenter(page, 'Billing')
 
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),

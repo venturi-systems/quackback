@@ -81,7 +81,10 @@ export function setWorkspaceAnon(enabled: boolean): void {
   runScript('../scripts/set-workspace-anon.ts', [String(enabled)])
 }
 
-/** Enable the help center for a suite, or restore its exact prior settings. */
+/**
+ * Enable the help center and the widget (the help-center search calls a widget
+ * route) for a suite, or restore their exact prior settings.
+ */
 export function setHelpCenterEnabled(action: 'enable' | 'restore'): void {
   runScript('../scripts/set-help-center-enabled.ts', [action])
 }

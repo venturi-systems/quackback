@@ -14,8 +14,10 @@
  * `remove` deletes those rows and nothing else (article feedback goes with its
  * article through ON DELETE CASCADE). The two categories take negative
  * positions so they list ahead of any category another spec creates; the first
- * one holds three articles, which the prev/next test needs, and every article
- * has h2 and h3 headings for the table of contents.
+ * one holds three articles, which the prev/next test needs. Every article has
+ * at least one h2 heading, so every article page renders a table of contents.
+ * Only the first two articles also have an h3; the table-of-contents tests open
+ * the first article, so they see both heading levels.
  */
 import postgres from 'postgres'
 import { generateId, toUuid } from '@quackback/ids'

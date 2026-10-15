@@ -1,4 +1,10 @@
-/** Enable the help-center fixture, then restore its exact prior settings. */
+/**
+ * Enable the help-center fixture, then restore its exact prior settings.
+ *
+ * The widget is enabled as well. The help-center hero search calls
+ * /api/widget/kb-search, every widget route answers 404 while the widget is off
+ * (src/lib/server/widget/widget-enabled.ts), and db:seed leaves it off.
+ */
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,14 +18,20 @@ if (action !== 'enable' && action !== 'restore') {
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required')
 const sql = postgres(process.env.DATABASE_URL)
 const snapshotPath = resolve(dirname(fileURLToPath(import.meta.url)), '../.auth/help-center.json')
-type Snapshot = { id: string; feature_flags: string | null; help_center_config: string | null }
+type Snapshot = {
+  id: string
+  feature_flags: string | null
+  help_center_config: string | null
+  widget_config: string | null
+}
 
 async function main() {
   let restored = false
   try {
     if (action === 'enable') {
       const [row] = await sql<Snapshot[]>`
-        SELECT id, feature_flags, help_center_config FROM settings ORDER BY created_at LIMIT 1
+        SELECT id, feature_flags, help_center_config, widget_config FROM settings
+        ORDER BY created_at LIMIT 1
       `
       if (!row) throw new Error('No settings row found')
       mkdirSync(dirname(snapshotPath), { recursive: true })
@@ -31,9 +43,11 @@ async function main() {
       }
       const flags = { ...JSON.parse(row.feature_flags ?? '{}'), helpCenter: true }
       const config = { ...JSON.parse(row.help_center_config ?? '{}'), enabled: true }
+      const widget = { ...JSON.parse(row.widget_config ?? '{}'), enabled: true }
       await sql`
         UPDATE settings SET feature_flags = ${JSON.stringify(flags)},
-          help_center_config = ${JSON.stringify(config)} WHERE id = ${row.id}
+          help_center_config = ${JSON.stringify(config)},
+          widget_config = ${JSON.stringify(widget)} WHERE id = ${row.id}
       `
     } else {
       let snapshot: Snapshot
@@ -45,7 +59,8 @@ async function main() {
       }
       await sql`
         UPDATE settings SET feature_flags = ${snapshot.feature_flags},
-          help_center_config = ${snapshot.help_center_config} WHERE id = ${snapshot.id}
+          help_center_config = ${snapshot.help_center_config},
+          widget_config = ${snapshot.widget_config} WHERE id = ${snapshot.id}
       `
       restored = true
     }

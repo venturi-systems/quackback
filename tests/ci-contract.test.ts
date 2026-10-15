@@ -853,6 +853,20 @@ describe('QB-CI-002 e2e shard balance contract', () => {
     return match![1].split(':').map(Number)
   }
 
+  /**
+   * The number of tests each shard is given out of `total` under `vector`,
+   * computed the way Playwright's filterForShard does (checked against the
+   * 1.61.1 and 1.63.0 sources): floor(weight * total / sum) per shard, then one
+   * more test for each of the first `remainder` shards.
+   */
+  function shardSizes(vector: number[], total: number): number[] {
+    const sum = vector.reduce((a, b) => a + b, 0)
+    const sizes = vector.map((n) => Math.floor((n * total) / sum))
+    const remainder = total - sizes.reduce((a, b) => a + b, 0)
+    for (let i = 0; i < remainder; i++) sizes[i % sizes.length]++
+    return sizes
+  }
+
   it('declares one weight per shard, and every weight is usable', () => {
     // Playwright throws when the count does not match the shard total, so a
     // mismatch here is a red lane rather than a silent fallback.
@@ -866,12 +880,18 @@ describe('QB-CI-002 e2e shard balance contract', () => {
     // enough to floor to zero hands a shard no tests, and an empty shard
     // proves nothing -- so keep every weight a meaningful share.
     expect(w.every((n) => Number.isInteger(n) && n > 0)).toBe(true)
-    const sum = w.reduce((a, b) => a + b, 0)
-    for (const n of w) {
-      expect(
-        Math.floor((n * sum) / sum),
-        `weight ${n} must not floor to an empty shard`
-      ).toBeGreaterThan(0)
+
+    // Size the shards against the planned test count ci.yml records, not
+    // against the weights' own sum: with the sum as the total, every shard's
+    // size equals its weight and the check could never fail.
+    const planned = ci.match(/\((\d+) distinct tests either way\)/)
+    expect(planned, 'ci.yml must record the planned test count').not.toBeNull()
+    const total = Number(planned![1])
+    expect(total).toBeGreaterThan(0)
+    const sizes = shardSizes(w, total)
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(total)
+    for (const [index, size] of sizes.entries()) {
+      expect(size, `shard ${index + 1} (weight ${w[index]}) gets no tests`).toBeGreaterThan(0)
     }
   })
 
