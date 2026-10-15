@@ -89,76 +89,81 @@ test.describe('Admin Post Management', () => {
   })
 
   test('can submit post with Cmd+Enter keyboard shortcut', async ({ page }) => {
-    // Click the create post button
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
+    // The create control is CreatePostDialog's default trigger, titled "Create
+    // new post". The old `svg.lucide-pen-square` filter matched nothing (the
+    // icon is a Heroicons PencilSquareIcon), so this test skipped its body and
+    // passed. Require the trigger, so a missing control fails the test.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
+
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
+
+    // Fill the form
+    const testTitle = `Keyboard Submit Post ${Date.now()}`
+    await dialog.getByPlaceholder("What's the feedback about?").fill(testTitle)
+
+    // Fill description
+    await dialog.locator('.tiptap').click()
+    await page.keyboard.type('Submitted with keyboard shortcut')
+
+    // Submit with Cmd/Ctrl+Enter (useKeyboardSubmit on the dialog content)
+    await page.keyboard.press('ControlOrMeta+Enter')
+
+    // Dialog should close
+    await expect(dialog).toBeHidden({ timeout: 10000 })
+
+    // A closed dialog does not prove the post was saved: the shortcut must
+    // have created it, so the refetched inbox lists it.
+    const createdCard = page.locator('[data-post-id]').filter({
+      has: page.getByRole('heading', { name: testTitle, exact: true }),
     })
-
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
-
-      // Wait for dialog
-      await expect(page.getByRole('dialog')).toBeVisible()
-
-      // Fill the form
-      const testTitle = `Keyboard Submit Post ${Date.now()}`
-      const titleInput = page.getByPlaceholder("What's the feedback about?")
-      await titleInput.fill(testTitle)
-
-      // Fill description
-      const editor = page.locator('.tiptap')
-      await editor.click()
-      await page.keyboard.type('Submitted with keyboard shortcut')
-
-      // Submit with Cmd/Ctrl+Enter
-      await page.keyboard.press('ControlOrMeta+Enter')
-
-      // Dialog should close
-      await expect(page.getByRole('dialog')).toBeHidden({ timeout: 10000 })
-    }
+    await expect(createdCard).toBeVisible({ timeout: 10000 })
   })
 
-  test('create dialog shows board and status selectors in header', async ({ page }) => {
-    // Click the create post button
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
-    })
+  test('create dialog shows board and status selectors', async ({ page }) => {
+    // Locate the create control by its accessible name and require it; the old
+    // `svg.lucide-pen-square` filter matched nothing, so this test skipped.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
 
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
 
-      // Wait for dialog
-      await expect(page.getByRole('dialog')).toBeVisible()
+    // At this project's 1920 px viewport the selectors sit in the dialog's
+    // metadata sidebar (lg and wider), under the labels "Board" and "Status".
+    // The labels carry no colon, so the old `Board:` / `Status:` text would
+    // have failed had the test body ever run.
+    const sidebar = dialog.locator('aside')
+    await expect(sidebar.getByText('Board', { exact: true })).toBeVisible()
+    await expect(sidebar.getByText('Status', { exact: true })).toBeVisible()
+    // The board and status selects are the sidebar's two comboboxes; the
+    // author picker beside them is a plain button.
+    await expect(sidebar.getByRole('combobox')).toHaveCount(2)
 
-      // Board selector should be visible with label
-      await expect(page.getByText('Board:')).toBeVisible()
-
-      // Status selector should be visible with label
-      await expect(page.getByText('Status:')).toBeVisible()
-
-      // Close dialog
-      await page.keyboard.press('Escape')
-    }
+    // Close dialog
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
   })
 
   test('create dialog has keyboard shortcut hint in footer', async ({ page }) => {
-    // Click the create post button
-    const createButton = page.locator('button').filter({
-      has: page.locator('svg.lucide-pen-square'),
-    })
+    // Locate the create control by its accessible name and require it; the old
+    // `svg.lucide-pen-square` filter matched nothing, so this test skipped.
+    const createButton = page.getByRole('button', { name: 'Create new post', exact: true })
+    await expect(createButton).toBeVisible()
+    await createButton.click()
 
-    if ((await createButton.count()) > 0) {
-      await createButton.first().click()
+    const dialog = page.getByRole('dialog', { name: 'Create new post', exact: true })
+    await expect(dialog).toBeVisible()
 
-      // Wait for dialog
-      await expect(page.getByRole('dialog')).toBeVisible()
+    // ModalFooter renders the Cmd + Enter hint with the dialog's action text.
+    await expect(dialog.getByText('to create', { exact: true })).toBeVisible()
 
-      // Should show keyboard shortcut hint
-      await expect(page.getByText('to create')).toBeVisible()
-
-      // Close dialog
-      await page.keyboard.press('Escape')
-    }
+    // Close dialog
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
   })
 
   test('can select a post to view details', async ({ page }) => {

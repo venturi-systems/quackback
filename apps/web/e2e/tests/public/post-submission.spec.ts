@@ -79,6 +79,12 @@ test.beforeAll(async ({ browser }) => {
   // run can send more codes to TEST_EMAIL than the sign-in limiter allows
   // (3 per 15 minutes); that 429 used to fail every later test in the file.
   // Clear the limiter's counters for this run first; product limits stay.
+  // The OTP send is counted in the magic-link buckets this flush clears:
+  // inferProvider (src/lib/server/auth/hooks.ts) maps
+  // /email-otp/send-verification-otp to 'magic-link', whose limiter is
+  // checkMagicLinkSendRateLimit (signin:magiclink:* keys). Better Auth's own
+  // per-path limiter keeps its counts in the server's memory (no
+  // secondaryStorage is configured), so no Redis flush can reach it.
   flushMagicLinkRateLimit()
   globalContext = await browser.newContext()
   globalPage = await globalContext.newPage()
@@ -711,32 +717,38 @@ async function startListFromSlashMenu(
   }
   globalPage.on('pageerror', onPageError)
   globalPage.on('console', onConsole)
-  await editor.click()
-  await editor.type(query)
-  const item = globalPage.getByRole('button', { name: itemName })
-  await expect(item).toBeVisible()
-  await snapshot(`${listTag}-1-menu-open`)
-  await item.click()
-  await globalPage.waitForTimeout(300)
-  await snapshot(`${listTag}-2-after-click`)
-  await testInfo.attach(`${listTag}-errors-after-click`, {
-    body: JSON.stringify(errors, null, 2),
-    contentType: 'application/json',
-  })
-  if ((await editor.locator(listTag).count()) === 0) {
+  // globalPage is shared by every test in the file, so the listeners come off
+  // in `finally`: a failed step must not leave them collecting the next test's
+  // errors. The error list is attached either way, failure included.
+  try {
     await editor.click()
     await editor.type(query)
+    const item = globalPage.getByRole('button', { name: itemName })
     await expect(item).toBeVisible()
-    await globalPage.keyboard.press('Enter')
+    await snapshot(`${listTag}-1-menu-open`)
+    await item.click()
     await globalPage.waitForTimeout(300)
-    await snapshot(`${listTag}-3-after-enter`)
+    await snapshot(`${listTag}-2-after-click`)
+    await testInfo.attach(`${listTag}-errors-after-click`, {
+      body: JSON.stringify(errors, null, 2),
+      contentType: 'application/json',
+    })
+    if ((await editor.locator(listTag).count()) === 0) {
+      await editor.click()
+      await editor.type(query)
+      await expect(item).toBeVisible()
+      await globalPage.keyboard.press('Enter')
+      await globalPage.waitForTimeout(300)
+      await snapshot(`${listTag}-3-after-enter`)
+    }
+  } finally {
+    globalPage.off('pageerror', onPageError)
+    globalPage.off('console', onConsole)
+    await testInfo.attach(`${listTag}-errors`, {
+      body: JSON.stringify(errors, null, 2),
+      contentType: 'application/json',
+    })
   }
-  globalPage.off('pageerror', onPageError)
-  globalPage.off('console', onConsole)
-  await testInfo.attach(`${listTag}-errors`, {
-    body: JSON.stringify(errors, null, 2),
-    contentType: 'application/json',
-  })
 }
 
 test.describe('Rich Text Editor', () => {
