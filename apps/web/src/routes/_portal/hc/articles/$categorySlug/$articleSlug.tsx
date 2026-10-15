@@ -173,7 +173,9 @@ function ArticleDetailPage() {
 
           {/* Center: article */}
           <article className="min-w-0 max-w-2xl flex-1 py-10">
-            <HelpCenterBreadcrumbs items={breadcrumbs.slice(0, -1)} />
+            {/* The h1 below names the article, so the trail stops at its category
+                and keeps that category as a link back to the category page. */}
+            <HelpCenterBreadcrumbs items={breadcrumbs.slice(0, -1)} currentIsLast={false} />
 
             <h1 className="mt-6 text-3xl sm:text-4xl font-bold leading-tight tracking-tight">
               {article.title}

@@ -334,6 +334,9 @@ test.describe('Public Help Center', () => {
     const categoryCards = page.locator('a[href*="/hc/categories/"]')
     await expect(categoryCards.first()).toBeVisible()
 
+    const categoryHref = await categoryCards.first().getAttribute('href')
+    if (!categoryHref) throw new Error('the first category card has no href')
+
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
@@ -346,15 +349,15 @@ test.describe('Public Help Center', () => {
     const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' })
     await expect(breadcrumb).toBeVisible()
 
-    // In the article breadcrumb the category is rendered as a non-link <span>
-    // (the last item in HelpCenterBreadcrumbs is always a span, not a Link).
-    // The only <a> present is the "Help Center" root link.
-    const breadcrumbLink = breadcrumb.locator('a').last()
-    if ((await breadcrumbLink.count()) > 0) {
-      await breadcrumbLink.click()
-      await page.waitForLoadState('networkidle')
-      await expect(page).toHaveURL(/\/hc/)
-    }
+    // The article page shows its title in the h1, so its breadcrumb ends at the
+    // category, and that last crumb links back to the category page
+    // (venturi-systems/feedback#451).
+    const categoryCrumb = breadcrumb.getByRole('link').last()
+    await expect(categoryCrumb).toHaveAttribute('href', categoryHref)
+
+    await categoryCrumb.click()
+    await page.waitForLoadState('networkidle')
+    await expect(page).toHaveURL(categoryHref)
   })
 
   test('"All categories" back link on category page navigates to /hc', async ({ page }) => {
@@ -879,13 +882,18 @@ test.describe('Help Center - Navigation Accuracy', () => {
     const helpCenterCrumb = breadcrumb.getByRole('link', { name: /Help Center/i })
     await expect(helpCenterCrumb).toBeVisible()
 
-    // The category name appears as a link (the article page renders it with href)
-    if (categoryName) {
-      const categoryLink = breadcrumb.getByRole('link', { name: categoryName.trim() })
-      if ((await categoryLink.count()) > 0) {
-        await expect(categoryLink.first()).toBeVisible()
-      }
-    }
+    // Second crumb: the category, as a link back to the category page
+    const categoryLabel = categoryName?.trim()
+    if (!categoryLabel) throw new Error('the first category card has no name')
+    const categoryLink = breadcrumb.getByRole('link', { name: categoryLabel })
+    await expect(categoryLink.first()).toBeVisible()
+
+    // The article title is the article's h1, not a crumb
+    const articleTitle = page.locator('article > h1')
+    await expect(articleTitle).toBeVisible()
+    const title = (await articleTitle.textContent())?.trim()
+    if (!title) throw new Error('the article page has an empty h1')
+    await expect(breadcrumb).not.toContainText(title)
   })
 
   test('"Help Center" breadcrumb link navigates back to /hc', async ({ page }) => {
@@ -922,7 +930,9 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await expect(categoryCards.first()).toBeVisible()
 
     const categoryHref = await categoryCards.first().getAttribute('href')
-    const categoryName = await categoryCards.first().locator('h3').textContent()
+    const categoryName = (await categoryCards.first().locator('h3').textContent())?.trim()
+    if (!categoryHref) throw new Error('the first category card has no href')
+    if (!categoryName) throw new Error('the first category card has no name')
 
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
@@ -933,27 +943,17 @@ test.describe('Help Center - Navigation Accuracy', () => {
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
 
+    // The article page ends its breadcrumb at the category and passes
+    // `currentIsLast={false}`, so the category crumb is a link
+    // (venturi-systems/feedback#451).
     const breadcrumb = page.getByRole('navigation', { name: 'Breadcrumb' })
-    if (categoryName) {
-      // The article page renders `breadcrumbs.slice(0, -1)`, so the category is
-      // the last crumb and HelpCenterBreadcrumbs prints it as text, not a link.
-      // Whether it should link is an open product decision; until then this
-      // test reports a skip rather than a failure or a pass.
-      const categoryLink = breadcrumb.getByRole('link', { name: categoryName.trim() })
-      if ((await categoryLink.count()) === 0) {
-        test.skip(true, 'the article breadcrumb shows the category as text, not a link')
-        return
-      }
+    const categoryLink = breadcrumb.getByRole('link', { name: categoryName })
+    await expect(categoryLink.first()).toHaveAttribute('href', categoryHref)
 
-      await categoryLink.first().click()
-      await page.waitForLoadState('networkidle')
+    await categoryLink.first().click()
+    await page.waitForLoadState('networkidle')
 
-      // Should land on the category page
-      if (categoryHref) {
-        await expect(page).toHaveURL(categoryHref)
-      } else {
-        await expect(page).toHaveURL(/\/hc\/categories\//)
-      }
-    }
+    // Should land on the category page
+    await expect(page).toHaveURL(categoryHref)
   })
 })
