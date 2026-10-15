@@ -1,15 +1,17 @@
 import { describe, it, expectTypeOf } from 'vitest'
+import type { InferInsertModel, InferSelectModel } from 'drizzle-orm'
+import type { postTags } from '../schema/posts'
 import type {
   Board,
   NewBoard,
+  BoardAccess,
+  BoardSettings,
   Roadmap,
   NewRoadmap,
   Tag,
   NewTag,
   Post,
   NewPost,
-  PostTag,
-  NewPostTag,
   PostRoadmap,
   NewPostRoadmap,
   Vote,
@@ -23,13 +25,15 @@ import type {
   IntegrationStatus,
   ChangelogEntry,
   NewChangelogEntry,
-  PostWithTags,
-  PostWithRoadmaps,
   CommentWithReplies,
   PostWithDetails,
-  RoadmapWithPosts,
-  BoardWithRoadmaps,
+  PostListItem,
 } from '../types'
+
+// types.ts exports no alias for the post_tags junction table, so these tests
+// infer the row types from the table itself, as types.ts does for the others.
+type PostTag = InferSelectModel<typeof postTags>
+type NewPostTag = InferInsertModel<typeof postTags>
 
 describe('Type definitions', () => {
   describe('Board types', () => {
@@ -38,7 +42,7 @@ describe('Type definitions', () => {
       expectTypeOf<Board>().toHaveProperty('slug')
       expectTypeOf<Board>().toHaveProperty('name')
       expectTypeOf<Board>().toHaveProperty('description')
-      expectTypeOf<Board>().toHaveProperty('isPublic')
+      expectTypeOf<Board>().toHaveProperty('access')
       expectTypeOf<Board>().toHaveProperty('settings')
       expectTypeOf<Board>().toHaveProperty('createdAt')
       expectTypeOf<Board>().toHaveProperty('updatedAt')
@@ -53,8 +57,15 @@ describe('Type definitions', () => {
       expectTypeOf<Board['id']>().toBeString()
     })
 
-    it('Board.isPublic is a boolean', () => {
-      expectTypeOf<Board['isPublic']>().toBeBoolean()
+    it('Board.access is a BoardAccess, and the legacy isPublic flag is gone', () => {
+      // The per-action access matrix replaced the audience column (dropped in
+      // migration 0080), which itself replaced the is_public boolean.
+      expectTypeOf<Board['access']>().toEqualTypeOf<BoardAccess>()
+      expectTypeOf<Board>().not.toHaveProperty('isPublic')
+    })
+
+    it('Board.settings is a BoardSettings', () => {
+      expectTypeOf<Board['settings']>().toEqualTypeOf<BoardSettings>()
     })
 
     it('Board.createdAt is a Date', () => {
@@ -202,16 +213,22 @@ describe('Type definitions', () => {
   describe('ChangelogEntry types', () => {
     it('ChangelogEntry has correct shape', () => {
       expectTypeOf<ChangelogEntry>().toHaveProperty('id')
-      expectTypeOf<ChangelogEntry>().toHaveProperty('boardId')
+      expectTypeOf<ChangelogEntry>().toHaveProperty('principalId')
       expectTypeOf<ChangelogEntry>().toHaveProperty('title')
       expectTypeOf<ChangelogEntry>().toHaveProperty('content')
       expectTypeOf<ChangelogEntry>().toHaveProperty('publishedAt')
     })
 
     it('NewChangelogEntry has required fields', () => {
-      expectTypeOf<NewChangelogEntry>().toHaveProperty('boardId')
       expectTypeOf<NewChangelogEntry>().toHaveProperty('title')
       expectTypeOf<NewChangelogEntry>().toHaveProperty('content')
+    })
+
+    it('ChangelogEntry belongs to no board', () => {
+      // Changelog entries are workspace-wide; they link to shipped posts
+      // through changelog_entry_posts instead of carrying a board id.
+      expectTypeOf<ChangelogEntry>().not.toHaveProperty('boardId')
+      expectTypeOf<NewChangelogEntry>().not.toHaveProperty('boardId')
     })
 
     it('ChangelogEntry.publishedAt can be null', () => {
@@ -220,24 +237,13 @@ describe('Type definitions', () => {
   })
 
   describe('Composite types', () => {
-    it('PostWithTags extends Post with tags array', () => {
-      expectTypeOf<PostWithTags>().toHaveProperty('id')
-      expectTypeOf<PostWithTags>().toHaveProperty('title')
-      expectTypeOf<PostWithTags>().toHaveProperty('tags')
-      expectTypeOf<PostWithTags['tags']>().toEqualTypeOf<Tag[]>()
-    })
-
-    it('PostWithRoadmaps extends Post with roadmaps array', () => {
-      expectTypeOf<PostWithRoadmaps>().toHaveProperty('id')
-      expectTypeOf<PostWithRoadmaps>().toHaveProperty('roadmaps')
-      expectTypeOf<PostWithRoadmaps['roadmaps']>().toEqualTypeOf<Roadmap[]>()
-    })
-
     it('CommentWithReplies has recursive replies', () => {
       expectTypeOf<CommentWithReplies>().toHaveProperty('id')
       expectTypeOf<CommentWithReplies>().toHaveProperty('content')
       expectTypeOf<CommentWithReplies>().toHaveProperty('replies')
       expectTypeOf<CommentWithReplies>().toHaveProperty('reactions')
+      expectTypeOf<CommentWithReplies['replies']>().toEqualTypeOf<CommentWithReplies[]>()
+      expectTypeOf<CommentWithReplies['reactions']>().toEqualTypeOf<CommentReaction[]>()
     })
 
     it('PostWithDetails has all relations', () => {
@@ -253,16 +259,20 @@ describe('Type definitions', () => {
       expectTypeOf<PostWithDetails['board']>().toEqualTypeOf<Board>()
     })
 
-    it('RoadmapWithPosts extends Roadmap with posts array', () => {
-      expectTypeOf<RoadmapWithPosts>().toHaveProperty('id')
-      expectTypeOf<RoadmapWithPosts>().toHaveProperty('posts')
-      expectTypeOf<RoadmapWithPosts['posts']>().toEqualTypeOf<Post[]>()
+    it('PostWithDetails carries typed relation arrays', () => {
+      expectTypeOf<PostWithDetails['tags']>().toEqualTypeOf<Tag[]>()
+      expectTypeOf<PostWithDetails['roadmaps']>().toEqualTypeOf<Roadmap[]>()
+      expectTypeOf<PostWithDetails['comments']>().toEqualTypeOf<CommentWithReplies[]>()
+      expectTypeOf<PostWithDetails['votes']>().toEqualTypeOf<Vote[]>()
     })
 
-    it('BoardWithRoadmaps extends Board with roadmaps array', () => {
-      expectTypeOf<BoardWithRoadmaps>().toHaveProperty('id')
-      expectTypeOf<BoardWithRoadmaps>().toHaveProperty('roadmaps')
-      expectTypeOf<BoardWithRoadmaps['roadmaps']>().toEqualTypeOf<Roadmap[]>()
+    it('PostListItem extends Post with a board summary, tags and counts', () => {
+      expectTypeOf<PostListItem>().toHaveProperty('id')
+      expectTypeOf<PostListItem>().toHaveProperty('title')
+      expectTypeOf<PostListItem['board']>().toEqualTypeOf<Pick<Board, 'id' | 'name' | 'slug'>>()
+      expectTypeOf<PostListItem['tags']>().toEqualTypeOf<Pick<Tag, 'id' | 'name' | 'color'>[]>()
+      expectTypeOf<PostListItem['commentCount']>().toBeNumber()
+      expectTypeOf<PostListItem['authorName']>().toEqualTypeOf<string | null>()
     })
   })
 })

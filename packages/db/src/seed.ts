@@ -346,7 +346,7 @@ async function ensureDemoPrincipal(): Promise<{ id: PrincipalId; created: boolea
     })
     // Create credential account for password login
     await db.insert(account).values({
-      id: crypto.randomUUID(),
+      id: generateId('account'),
       accountId: demoUserId,
       providerId: 'credential',
       userId: demoUserId,
@@ -359,7 +359,7 @@ async function ensureDemoPrincipal(): Promise<{ id: PrincipalId; created: boolea
     // account. Local development and CI set VENTURI_TEAM_EMAIL_DOMAINS to
     // example.com; this stand-in GitHub link lets the demo admin qualify.
     await db.insert(account).values({
-      id: crypto.randomUUID(),
+      id: generateId('account'),
       accountId: `seed-github-${demoUserId}`,
       providerId: 'github',
       userId: demoUserId,
@@ -486,7 +486,7 @@ async function seed() {
       if (i < 3) {
         // Stand-in GitHub link so the sample admins satisfy the team identity rule.
         await db.insert(account).values({
-          id: crypto.randomUUID(),
+          id: generateId('account'),
           accountId: `seed-github-${userId}`,
           providerId: 'github',
           userId,

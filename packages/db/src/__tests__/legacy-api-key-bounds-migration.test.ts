@@ -41,7 +41,9 @@ afterAll(async () => {
 
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
 
-interface KeyState {
+// A type alias, not an interface: tx.execute<T> requires T to extend
+// Record<string, unknown>, and only an alias gets the implicit index signature.
+type KeyState = {
   name: string
   scopes: string | null
   expires_in: string | null
