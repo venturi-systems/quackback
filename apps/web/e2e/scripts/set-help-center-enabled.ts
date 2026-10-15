@@ -5,7 +5,7 @@
  * /api/widget/kb-search, every widget route answers 404 while the widget is off
  * (src/lib/server/widget/widget-enabled.ts), and db:seed leaves it off.
  */
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import postgres from 'postgres'
@@ -24,6 +24,64 @@ type Snapshot = {
   help_center_config: string | null
   widget_config: string | null
 }
+/**
+ * The snapshot as stored. One written before this script captured the widget
+ * has no widget_config key; JSON keeps a null column as null, so only that
+ * older shape reads back as undefined.
+ */
+type StoredSnapshot = Omit<Snapshot, 'widget_config'> & { widget_config?: string | null }
+
+function isColumn(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+/**
+ * Read the snapshot, or null when there is none. A malformed file fails here,
+ * before any value from it reaches a query: postgres.js rejects an undefined
+ * parameter, and a restore that fails leaves the fixture enabled.
+ */
+function readSnapshot(): StoredSnapshot | null {
+  let text: string
+  try {
+    text = readFileSync(snapshotPath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  const value: unknown = JSON.parse(text)
+  const stored = (typeof value === 'object' && value !== null ? value : {}) as Record<
+    string,
+    unknown
+  >
+  if (
+    typeof stored.id !== 'string' ||
+    !isColumn(stored.feature_flags) ||
+    !isColumn(stored.help_center_config) ||
+    (stored.widget_config !== undefined && !isColumn(stored.widget_config))
+  ) {
+    throw new Error(`Malformed help-center snapshot: ${snapshotPath}`)
+  }
+  return stored as StoredSnapshot
+}
+
+/**
+ * Add the widget column to a snapshot written before this script captured it.
+ * That older script never changed widget_config, so the row still holds the
+ * value it had before the fixture, and the snapshot records it before this
+ * run enables the widget. The file is replaced by rename, so an interrupted
+ * write cannot destroy the original snapshot.
+ */
+function upgradeLegacySnapshot(row: Snapshot) {
+  const snapshot = readSnapshot()
+  if (snapshot === null || snapshot.widget_config !== undefined) return
+  if (snapshot.id !== row.id) {
+    throw new Error(`Help-center snapshot names another settings row: ${snapshotPath}`)
+  }
+  const upgraded: Snapshot = { ...snapshot, widget_config: row.widget_config }
+  const temporaryPath = `${snapshotPath}.tmp`
+  writeFileSync(temporaryPath, JSON.stringify(upgraded), { flag: 'w', mode: 0o600 })
+  renameSync(temporaryPath, snapshotPath)
+}
 
 async function main() {
   let restored = false
@@ -40,6 +98,7 @@ async function main() {
         writeFileSync(snapshotPath, JSON.stringify(row), { flag: 'wx', mode: 0o600 })
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        upgradeLegacySnapshot(row)
       }
       const flags = { ...JSON.parse(row.feature_flags ?? '{}'), helpCenter: true }
       const config = { ...JSON.parse(row.help_center_config ?? '{}'), enabled: true }
@@ -50,18 +109,23 @@ async function main() {
           widget_config = ${JSON.stringify(widget)} WHERE id = ${row.id}
       `
     } else {
-      let snapshot: Snapshot
-      try {
-        snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8')) as Snapshot
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-        throw error
+      const snapshot = readSnapshot()
+      if (snapshot === null) return
+      if (snapshot.widget_config === undefined) {
+        // No enable since the older script wrote this snapshot has changed
+        // widget_config: enable upgrades the snapshot before it enables the
+        // widget. Restore the two columns it holds and leave the widget as is.
+        await sql`
+          UPDATE settings SET feature_flags = ${snapshot.feature_flags},
+            help_center_config = ${snapshot.help_center_config} WHERE id = ${snapshot.id}
+        `
+      } else {
+        await sql`
+          UPDATE settings SET feature_flags = ${snapshot.feature_flags},
+            help_center_config = ${snapshot.help_center_config},
+            widget_config = ${snapshot.widget_config} WHERE id = ${snapshot.id}
+        `
       }
-      await sql`
-        UPDATE settings SET feature_flags = ${snapshot.feature_flags},
-          help_center_config = ${snapshot.help_center_config},
-          widget_config = ${snapshot.widget_config} WHERE id = ${snapshot.id}
-      `
       restored = true
     }
     await getRedis().del(CACHE_KEYS.TENANT_SETTINGS)
@@ -73,7 +137,8 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+// Awaited so the module settles only after the fixture action has finished.
+await main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
 })
