@@ -2,5 +2,36 @@
   "attribution": {
     "commit": "",
     "pr": ""
+  },
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "/"
+    ]
+  },
+  "enableAllProjectMcpServers": true,
+  "sandbox": {
+    "enabled": false
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
   }
 }
