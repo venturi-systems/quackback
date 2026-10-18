@@ -1,1 +1,0 @@
-ALTER TABLE "comments" ADD COLUMN "is_private" boolean DEFAULT false NOT NULL;
