@@ -32,6 +32,8 @@ updates:
   # that actually exists.
   - package-ecosystem: 'bun'
     directory: '/'
+    labels:
+      - unblock
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 3
@@ -299,6 +301,8 @@ updates:
   # at all. List the directories that actually hold a Dockerfile.
   - package-ecosystem: 'github-actions'
     directory: '/'
+    labels:
+      - unblock
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 2
@@ -333,6 +337,8 @@ updates:
     directories:
       - '/apps/web'
       - '/docker/postgres'
+    labels:
+      - unblock
     schedule:
       interval: 'weekly'
     open-pull-requests-limit: 2
