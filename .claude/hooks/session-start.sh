@@ -117,12 +117,33 @@ if [ -n "${VIRTUAL_ENV:-}" ]; then
     BASE_PATH="$(strip_path "$BASE_PATH" "$VIRTUAL_ENV/bin")"
 fi
 
+# A resumed or cleared session still carries every name an earlier manifest
+# published. Stop exporting them before any helper runs, so a retired
+# PYTHONPATH or PIP_* value cannot reach the engine's own python3 or pip.
+# Only the export attribute goes: a manifest name may coincide with one of
+# this script's own variables, and steps get the current values through
+# STEP_ENV. What the engine exports itself is exported again further down.
+if [ -f "$ENV_NAMES" ]; then
+    while IFS= read -r name; do
+        case "$name" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*|PATH|HOME|SHELL|USER) continue ;; esac
+        # shellcheck disable=SC2163 # the variable that $name names, by design
+        export -n "$name" 2>/dev/null || true
+    done <"$ENV_NAMES"
+fi
+
 # A checkout whose manifest was removed still carries, in a resumed or cleared
 # session, what the last manifest published. Clear it before saying there is
 # nothing to do: the PATH entries, the virtualenv variables and every name the
-# state file recorded.
+# state file recorded. Without state files only a VIRTUAL_ENV under $ROOT is
+# this engine's; any other belongs to the user and is left alone.
 if [ ! -f "$MANIFEST" ]; then
-    if [ -n "${CLAUDE_ENV_FILE:-}" ] && { [ -f "$ENV_NAMES" ] || [ -f "$STATE" ] || [ -n "${VIRTUAL_ENV:-}" ]; }; then
+    published=0
+    if [ -f "$ENV_NAMES" ] || [ -f "$STATE" ]; then
+        published=1
+    else
+        case "${VIRTUAL_ENV:-}" in "$ROOT"/*) published=1 ;; esac
+    fi
+    if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$published" = 1 ]; then
         {
             printf 'export PATH=%q\n' "$BASE_PATH"
             printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
@@ -147,6 +168,9 @@ STEP_ENV=()
 # Names an earlier manifest published and this one dropped: a resumed session
 # still carries them, so every step runs with them removed (`env -u`).
 STEP_UNSET=()
+# Set when a virtualenv this engine did not create needed a rebuild: it is
+# used as it is, but a run over it is never cached as an exact match.
+FOREIGN_STALE=0
 export DEBIAN_FRONTEND=noninteractive CI=1 npm_config_yes=true PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_NO_PROGRESS=1 PIP_PROGRESS_BAR=off \
     UV_CACHE_DIR="$CACHE_DIR/uv" PIP_CACHE_DIR="$CACHE_DIR/pip" npm_config_cache="$CACHE_DIR/npm" \
@@ -206,7 +230,7 @@ fi
 # A manifest that does not parse, or names a schema this engine does not know,
 # is reported and never cached: every later lookup would otherwise read as
 # "absent" and the run would look complete.
-if ! manifest_error="$(python3 - "$MANIFEST" <<'PY' 2>&1
+if ! manifest_error="$(python3 -I - "$MANIFEST" <<'PY' 2>&1
 import json, sys
 try:
     doc = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -228,6 +252,10 @@ import re
 def strings(value, where):
     if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
         sys.exit(f"{where} must be a list of non-empty strings")
+    # The engine reads each list back one entry per line.
+    for v in value:
+        if any(c in v for c in "\n\r\0"):
+            sys.exit(f"{where} entry {v!r} must be a single line")
 py = doc.get("python", {})
 for key in ("requirements", "packages", "install", "probe"):
     if key in py:
@@ -269,12 +297,18 @@ if node:
     for key in ("args", "post"):
         if key in node:
             strings(node[key], f"node.{key}")
+    # The install is frozen by design; an argument may not undo that.
+    for arg in node.get("args") or []:
+        opt = arg.split("=", 1)[0]
+        if opt in ("--no-frozen-lockfile", "--no-lockfile", "--no-package-lock") \
+                or (opt in ("--frozen-lockfile", "--package-lock") and arg.endswith(("=false", "=0"))):
+            sys.exit(f"node.args entry {arg!r} would undo the frozen install")
 for key in ("apt", "post", "cache_inputs", "outputs"):
     if key in doc:
         strings(doc[key], key)
 # Names the engine itself publishes, or that would change who the session is,
 # cannot come from a manifest.
-reserved = {"PATH", "HOME", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "SHELL", "USER"}
+reserved = {"PATH", "HOME", "VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "SHELL", "USER", "PYTHONHOME"}
 for name, value in doc.get("env", {}).items():
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         sys.exit(f"env name {name!r} is not a valid variable name")
@@ -342,10 +376,14 @@ for spec in doc.get("binaries", []):
     names.add(spec["name"])
 # A post step's output in bin/ is on PATH ahead of the base PATH too, so it
 # may not take an engine command's name either.
+# It must be one plain file name: "{bin}/./git" would dodge this check and
+# "{bin}/../x" would let the cleanup of retired outputs delete outside bin/.
 for out in doc.get("outputs") or []:
-    if out.startswith("{bin}/"):
+    if out.startswith("{bin}"):
         name = out[len("{bin}/"):]
-        if "/" not in name and (name in ENGINE_COMMANDS or re.fullmatch(r"python[0-9.]*", name)):
+        if not out.startswith("{bin}/") or not re.fullmatch(r"[A-Za-z0-9_+-][A-Za-z0-9._+-]*", name):
+            sys.exit(f"output {out!r} must name one file directly in {{bin}}")
+        if name in ENGINE_COMMANDS or re.fullmatch(r"python[0-9.]*", name):
             sys.exit(f"output {out!r} would shadow a command the engine runs")
 # A local project installed without -e is a copy that the next source change
 # leaves stale while the cache still reads as current. Local files (a wheel)
@@ -366,6 +404,9 @@ for where, entries in (("python.packages", py.get("packages") or []),
         i = 0
         while i < len(tokens):
             tok = tokens[i]
+            # Every install lands in the session virtualenv, never beside it.
+            if tok.split("=", 1)[0] in ("--target", "-t", "--prefix", "--root", "--user", "--system", "--python", "-p"):
+                sys.exit(f"{where} entry {entry!r} may not choose its own install location ({tok.split('=', 1)[0]})")
             if tok in ("-e", "--editable") or (tok in VALUE_OPTS and "=" not in tok):
                 i += 2
                 continue
@@ -383,7 +424,7 @@ PY
     say "ready repo=$REPO missing=manifest log=$LOG"
     exit 0
 fi
-STEP_TIMEOUT="$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("timeout_seconds", 900)))' "$MANIFEST" 2>/dev/null || echo 900)"
+STEP_TIMEOUT="$(python3 -I -c 'import json,sys; print(int(json.load(open(sys.argv[1])).get("timeout_seconds", 900)))' "$MANIFEST" 2>/dev/null || echo 900)"
 run() {
     local left=$(( DEADLINE - $(date +%s) ))
     if [ "$left" -le 0 ]; then
@@ -401,7 +442,7 @@ run() {
 # mf KEY [SUBKEY]: print one manifest value per line (arrays expand; scalars
 # print once; objects print nothing). Absent keys print nothing.
 mf() {
-    python3 - "$MANIFEST" "$@" <<'PY'
+    python3 -I - "$MANIFEST" "$@" <<'PY'
 import json, sys
 node = json.load(open(sys.argv[1]))
 for key in sys.argv[2:]:
@@ -423,7 +464,7 @@ PY
 }
 # mf_has KEY [SUBKEY]: succeed when the key path exists in the manifest.
 mf_has() {
-    python3 - "$MANIFEST" "$@" <<'PY'
+    python3 -I - "$MANIFEST" "$@" <<'PY'
 import json, sys
 node = json.load(open(sys.argv[1]))
 for key in sys.argv[2:]:
@@ -434,7 +475,7 @@ sys.exit(0)
 PY
 }
 # jf JSON FIELD [DEFAULT]: one field of a JSON object passed as text.
-jf() { python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], sys.argv[3]))' "$1" "$2" "${3:-}"; }
+jf() { python3 -I -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2], sys.argv[3]))' "$1" "$2" "${3:-}"; }
 
 # fingerprint: sha256 over the engine, the manifest and every dependency input
 # the manifest names, so a pulled lockfile or requirements change re-provisions
@@ -442,8 +483,8 @@ jf() { python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2
 # `fingerprint python` covers only the Python section and its inputs; the
 # engine keys its virtualenv on it.
 fingerprint() {
-    python3 - "$ENGINE" "$MANIFEST" "$PROJECT_DIR" "${1:-all}" <<'PY'
-import glob, hashlib, json, os, re, shlex, sys
+    python3 -I - "$ENGINE" "$MANIFEST" "$PROJECT_DIR" "${1:-all}" <<'PY'
+import glob, hashlib, json, os, re, shlex, subprocess, sys
 engine, manifest, root, scope = sys.argv[1:5]
 doc = json.load(open(manifest, encoding="utf-8"))
 py = doc.get("python") or {}
@@ -455,6 +496,30 @@ for name in ("pyproject.toml", "setup.py", "setup.cfg"):
 if "uv_sync" in py:
     inputs.add("uv.lock")
 INCLUDE_FLAGS = ("-r", "--requirement", "-c", "--constraint")
+def pnpm_members(path):
+    """The `packages` globs of a pnpm-workspace.yaml, read without a YAML
+    library: a block list (`- 'apps/*'`) or a flow list (`[a, b]`)."""
+    try:
+        lines = open(path, encoding="utf-8").read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    found, inside = [], False
+    for line in lines:
+        text = line.split("#", 1)[0].rstrip()
+        if not text.strip():
+            continue
+        if not line[:1].isspace():
+            key, _, rest = text.partition(":")
+            inside = key.strip() == "packages"
+            rest = rest.strip()
+            if inside and rest.startswith("["):
+                found += [m.strip().strip("'\"") for m in rest.strip("[]").split(",")]
+                inside = False
+        elif inside and text.strip().startswith("-"):
+            found.append(text.strip()[1:].strip().strip("'\""))
+    return [m for m in found if m]
+
+
 def includes(tokens, base):
     def path(value):
         return os.path.normpath(os.path.join(base, value))
@@ -514,7 +579,12 @@ while pending:
         for line in text.splitlines():
             line = line.split("#", 1)[0].strip()
             if line.startswith(("-r", "-c", "--requirement", "--constraint")):
-                pending.extend(includes(shlex.split(line), os.path.dirname(rel)))
+                try:
+                    pending.extend(includes(shlex.split(line), os.path.dirname(rel)))
+                except ValueError:
+                    # A dangling "-r \" at the end of the file: the installer
+                    # rejects it too, and the file itself is already hashed.
+                    pass
                 continue
             # A local wheel, sdist or editable project named in the file is
             # part of what gets installed, like one named in the manifest.
@@ -539,9 +609,15 @@ while pending:
                 full_cand = os.path.join(root, cand)
                 if os.path.isfile(full_cand):
                     local_files.append(cand)
-                elif os.path.isdir(full_cand):
+                elif os.path.isdir(full_cand) and editable:
                     for name in ("pyproject.toml", "setup.py", "setup.cfg"):
                         local_files.append(os.path.normpath(os.path.join(cand, name)))
+                elif os.path.isdir(full_cand):
+                    # Without -e the installer copies the whole project, so
+                    # every tracked file under it decides what is installed.
+                    listed = subprocess.run(["git", "-C", root, "ls-files", "-z", "--", cand],
+                                            capture_output=True, check=False).stdout
+                    local_files.extend(os.path.normpath(f) for f in listed.decode().split("\0") if f)
 inputs.update(local_files)
 for directory in (node.get("dirs") or ["."]) if node and scope == "all" else []:
     for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json",
@@ -555,9 +631,11 @@ for directory in (node.get("dirs") or ["."]) if node and scope == "all" else []:
         workspaces = []
     if isinstance(workspaces, dict):
         workspaces = workspaces.get("packages") or []
-    for member in workspaces if isinstance(workspaces, list) else []:
-        if isinstance(member, str):
-            for path in glob.glob(os.path.join(root, directory, member, "package.json")):
+    workspaces = list(workspaces) if isinstance(workspaces, list) else []
+    workspaces += pnpm_members(os.path.join(root, directory, "pnpm-workspace.yaml"))
+    for member in workspaces:
+        if isinstance(member, str) and not member.startswith("!"):
+            for path in glob.glob(os.path.join(root, directory, member, "package.json"), recursive=True):
                 inputs.add(os.path.relpath(path, root))
     for patch in glob.glob(os.path.join(root, directory, "patches", "**"), recursive=True):
         if os.path.isfile(patch):
@@ -575,7 +653,9 @@ for pattern in doc.get("cache_inputs") or []:
         inputs.add(pattern)
 digest = hashlib.sha256()
 if scope == "python":
-    digest.update(json.dumps(py, sort_keys=True).encode())
+    # The manifest env reaches every installer (PIP_INDEX_URL, UV_INDEX), so
+    # a change to it is a change to what gets installed.
+    digest.update(json.dumps([py, doc.get("env") or {}], sort_keys=True).encode())
 else:
     for path in [engine, manifest]:
         digest.update(open(path, "rb").read())
@@ -691,10 +771,10 @@ while IFS= read -r name; do
             fi ;;
     esac
     STEP_ENV+=("$name=$value")
-done < <(python3 -c 'import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get("env",{})]' "$MANIFEST")
+done < <(python3 -I -c 'import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get("env",{})]' "$MANIFEST")
 # A name an earlier manifest published and this one dropped is unset, so a
 # resumed or cleared session does not keep the old value.
-env_names="$(python3 -c 'import json,sys; [print(k) for k in sorted(json.load(open(sys.argv[1])).get("env",{}))]' "$MANIFEST")"
+env_names="$(python3 -I -c 'import json,sys; [print(k) for k in sorted(json.load(open(sys.argv[1])).get("env",{}))]' "$MANIFEST")"
 if [ -f "$ENV_NAMES" ]; then
     while IFS= read -r name; do
         [ -n "$name" ] || continue
@@ -758,9 +838,10 @@ probe_python() {
 # node_deps_declared DIR: package.json in DIR lists any dependency; a package
 # with none never creates node_modules/ and is still provisioned.
 node_deps_declared() {
-    python3 -c 'import json,sys
+    python3 -I -c 'import json,sys
 d=json.load(open(sys.argv[1]))
-sys.exit(0 if any(d.get(k) for k in ("dependencies","devDependencies","optionalDependencies","peerDependencies","workspaces")) else 1)' "$PROJECT_DIR/$1/package.json" 2>/dev/null
+sys.exit(0 if any(d.get(k) for k in ("dependencies","devDependencies","optionalDependencies","peerDependencies","workspaces")) else 1)' "$PROJECT_DIR/$1/package.json" 2>/dev/null \
+        || [ -f "$PROJECT_DIR/$1/pnpm-workspace.yaml" ]
 }
 node_dirs() { mf node dirs | grep . || echo .; }
 probe_node() {
@@ -831,7 +912,7 @@ rm -f "$STATE"
 current_outputs="$(mf outputs | while IFS= read -r out; do [ -n "$out" ] && expand "$out" && echo; done)"
 if [ -f "$OUTPUTS_STATE" ]; then
     while IFS= read -r old; do
-        case "$old" in "$BIN"/*) ;; *) continue ;; esac
+        case "$old" in "$BIN"/*/*|"$BIN"/.*) continue ;; "$BIN"/*) ;; *) continue ;; esac
         printf '%s\n' "$current_outputs" | grep -qxF "$old" && continue
         rm -f "$old" && say "removed undeclared output $old"
     done <"$OUTPUTS_STATE"
@@ -905,7 +986,7 @@ while IFS= read -r spec; do
         # status decides, not the file's presence alone.
         extracted=1
         case "$archive" in
-            zip) run python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' "$tmp/download" "$member" "$tmp" || extracted=0 ;;
+            zip) run python3 -I -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' "$tmp/download" "$member" "$tmp" || extracted=0 ;;
             tar.gz|tgz) run tar -xzf "$tmp/download" -C "$tmp" "$member" || extracted=0 ;;
             none) mv "$tmp/download" "$tmp/$member" || extracted=0 ;;
         esac
@@ -976,14 +1057,20 @@ if [ "$WANT_PYTHON" = 1 ]; then
     [ -f "$VENV/$OWNER_MARK" ] && venv_owned=1
     if [ -n "$rebuild_reason" ] && [ "$venv_owned" = 0 ] && [ -f "$VENV/pyvenv.cfg" ] \
         && [ "$rebuild_reason" != "version or system_site_packages" ]; then
-        say "skipped rebuilding $VENV ($rebuild_reason): this engine did not create it, so it is used as it is"
+        say "skipped rebuilding $VENV ($rebuild_reason): this engine did not create it, so it is used as it is and this run is not cached"
         rebuild_reason=""
+        FOREIGN_STALE=1
     fi
     if [ -n "$rebuild_reason" ]; then
         # Only a virtualenv (it has pyvenv.cfg) that this engine created is
-        # removed; anything else at that path is reported, never deleted.
+        # removed; anything else at that path is reported, never deleted. The
+        # default location under the session root is the engine's own, so a
+        # directory there that an interrupted run left without pyvenv.cfg is
+        # removed too, or every later run would refuse it.
+        venv_default=0
+        [ "$VENV" = "$ROOT/venv/$SLOT" ] && venv_default=1
         if [ "$VENV" = "/" ] || [ "$VENV" = "$PROJECT_DIR" ] || [ "$VENV" = "$HOME" ] \
-            || [ ! -f "$VENV/pyvenv.cfg" ] || [ "$venv_owned" = 0 ]; then
+            || { [ ! -f "$VENV/pyvenv.cfg" ] && [ "$venv_default" = 0 ]; } || [ "$venv_owned" = 0 ]; then
             say "FAILED refusing to rebuild $VENV ($rebuild_reason): it is not a virtualenv this engine created"
             MISSING+=("python-venv")
             WANT_PYTHON=refused
@@ -1045,7 +1132,9 @@ if [ "$WANT_PYTHON" = 1 ]; then
         py_rc=0
         if mf_has python uv_sync; then
             if command -v uv >/dev/null 2>&1; then
-                args=(sync)
+                # --python pins the virtualenv's own interpreter, so an
+                # inherited UV_PYTHON cannot make sync replace the venv.
+                args=(sync --python "$VENV/bin/python")
                 # Never let sync rewrite uv.lock: frozen installs the lock as is,
                 # and frozen=false still refuses a lock that is out of date.
                 if [ "$(mf python uv_sync frozen)" = "false" ]; then args+=(--locked); else args+=(--frozen); fi
@@ -1096,7 +1185,7 @@ if [ "$WANT_PYTHON" = 1 ]; then
             # installer as written.
             entry=()
             while IFS= read -r -d '' arg; do entry+=("$arg"); done < <(
-                python3 -c 'import shlex,sys; sys.stdout.write("".join(a+"\0" for a in shlex.split(sys.argv[1])))' "$spec")
+                python3 -I -c 'import shlex,sys; sys.stdout.write("".join(a+"\0" for a in shlex.split(sys.argv[1])))' "$spec")
             if ! pip_install "${entry[@]}"; then
                 if [ "$optional" = 1 ]; then
                     say "optional install entry failed, continuing: $spec"
@@ -1107,7 +1196,7 @@ if [ "$WANT_PYTHON" = 1 ]; then
         done < <(mf python install)
         if probe_python && [ "$py_rc" = 0 ]; then
             say "python ok $("$VENV/bin/python" --version 2>&1) venv=$VENV"
-            [ -n "$python_fingerprint" ] && printf '%s\n' "$python_fingerprint" >"$PY_STATE"
+            [ -n "$python_fingerprint" ] && [ "$FOREIGN_STALE" = 0 ] && printf '%s\n' "$python_fingerprint" >"$PY_STATE"
         else
             rm -f "$PY_STATE"
             say "FAILED python deps (rc=$py_rc; probe=$(mf python probe | tr '\n' ' ')) see $LOG"
@@ -1209,7 +1298,7 @@ if [ "$ENV_FILE_OK" = 0 ] && [[ " ${MISSING[*]} " != *" env-file "* ]]; then
     say "FAILED could not write the session environment to CLAUDE_ENV_FILE=$CLAUDE_ENV_FILE"
     MISSING+=("env-file")
 fi
-if [ "${#MISSING[@]}" -eq 0 ] && [ -n "$CURRENT_FINGERPRINT" ]; then
+if [ "${#MISSING[@]}" -eq 0 ] && [ -n "$CURRENT_FINGERPRINT" ] && [ "$FOREIGN_STALE" = 0 ]; then
     printf '%s\n' "$CURRENT_FINGERPRINT" >"$STATE"
 fi
 printf '%s\n' "$current_outputs" >"$OUTPUTS_STATE"
