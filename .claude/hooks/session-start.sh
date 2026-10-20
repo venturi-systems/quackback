@@ -82,11 +82,6 @@ fi
 PROJECT_DIR="$(pwd -P)"
 
 MANIFEST="$PROJECT_DIR/.claude/session-bootstrap.json"
-if [ ! -f "$MANIFEST" ]; then
-    echo "session-start: no manifest at .claude/session-bootstrap.json; nothing to provision"
-    exit 0
-fi
-
 REPO="$(basename "$PROJECT_DIR")"
 # Two checkouts with the same directory name (a worktree, a second clone) must
 # not share a virtualenv or a state marker, so per-checkout paths carry a short
@@ -100,9 +95,10 @@ LOG="$ROOT/logs/$SLOT.log"
 STATE="$ROOT/state/$SLOT.fingerprint"
 ENV_NAMES="$ROOT/state/$SLOT.env-names"
 PY_STATE="$ROOT/state/$SLOT.python"
+OUTPUTS_STATE="$ROOT/state/$SLOT.outputs"
+OWNER_MARK=".session-bootstrap-owned"
 LOCK="$ROOT/state/$SLOT.lock"
 CACHE_DIR="$ROOT/cache"
-mkdir -p "$BIN" "$TOOLS_DIR" "$ROOT/venv" "$ROOT/logs" "$ROOT/state" "$CACHE_DIR"
 # strip_path PATH PREFIX: PATH without the entries equal to or under PREFIX. A
 # resumed or cleared session inherits the PATH an earlier run published, so its
 # bin and virtualenv entries are removed before this run publishes its own.
@@ -115,11 +111,42 @@ strip_path() {
     printf '%s' "$out"
 }
 BASE_PATH="$(strip_path "$PATH" "$ROOT")"
+# An in-tree virtualenv an earlier run published lies outside $ROOT, and the
+# manifest may since have moved env_dir; strip it by the VIRTUAL_ENV it set.
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+    BASE_PATH="$(strip_path "$BASE_PATH" "$VIRTUAL_ENV/bin")"
+fi
+
+# A checkout whose manifest was removed still carries, in a resumed or cleared
+# session, what the last manifest published. Clear it before saying there is
+# nothing to do: the PATH entries, the virtualenv variables and every name the
+# state file recorded.
+if [ ! -f "$MANIFEST" ]; then
+    if [ -n "${CLAUDE_ENV_FILE:-}" ] && { [ -f "$ENV_NAMES" ] || [ -f "$STATE" ] || [ -n "${VIRTUAL_ENV:-}" ]; }; then
+        {
+            printf 'export PATH=%q\n' "$BASE_PATH"
+            printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
+            if [ -f "$ENV_NAMES" ]; then
+                while IFS= read -r name; do
+                    [ -n "$name" ] && printf 'unset %s\n' "$name"
+                done <"$ENV_NAMES"
+            fi
+        } >>"$CLAUDE_ENV_FILE" && rm -f "$ENV_NAMES" "$STATE" "$PY_STATE"
+        echo "session-start: no manifest at .claude/session-bootstrap.json; cleared what an earlier manifest published"
+    else
+        echo "session-start: no manifest at .claude/session-bootstrap.json; nothing to provision"
+    fi
+    exit 0
+fi
+mkdir -p "$BIN" "$TOOLS_DIR" "$ROOT/venv" "$ROOT/logs" "$ROOT/state" "$CACHE_DIR"
 export PATH="$BIN:$BASE_PATH"
 # The manifest's env entries reach the session and every step this engine
 # runs, never this shell: a name such as VENV or WANT_PYTHON must not be able
 # to change what the engine itself does.
 STEP_ENV=()
+# Names an earlier manifest published and this one dropped: a resumed session
+# still carries them, so every step runs with them removed (`env -u`).
+STEP_UNSET=()
 export DEBIAN_FRONTEND=noninteractive CI=1 npm_config_yes=true PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_NO_PROGRESS=1 PIP_PROGRESS_BAR=off \
     UV_CACHE_DIR="$CACHE_DIR/uv" PIP_CACHE_DIR="$CACHE_DIR/pip" npm_config_cache="$CACHE_DIR/npm" \
@@ -137,18 +164,28 @@ if [ -f "$LOG" ] && [ "$(wc -c <"$LOG")" -gt 5242880 ]; then
     mv -f "$LOG" "$LOG.1"
 fi
 # SessionStart stdout is added to the model's context, so it carries only
-# failures, skips and the final summary, each line capped, at most 20 lines.
-# Everything goes to the log in full.
-SAID=0
+# failures, skips and the final summary. Each line is capped at 300 bytes and
+# the lines before the summary at 1200 bytes in all, so a run that fails
+# everywhere still costs the session well under 2 KB of context. Everything
+# goes to the log in full.
+SAID_BYTES=0
+SAID_CAPPED=0
 say() {
     printf '%s session-start: %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"
     case "$*" in
         ready*|FAILED*|skipped*|ignored*|optional*) ;;
         *) return 0 ;;
     esac
-    if [ "$SAID" -lt 20 ] || [ "${1#ready}" != "$1" ]; then
-        printf 'session-start: %.300s\n' "$*"
-        SAID=$((SAID + 1))
+    local line
+    printf -v line 'session-start: %.300s' "$*"
+    if [ "${1#ready}" != "$1" ]; then
+        printf '%s\n' "$line"
+    elif [ $(( SAID_BYTES + ${#line} + 1 )) -le 1200 ]; then
+        printf '%s\n' "$line"
+        SAID_BYTES=$(( SAID_BYTES + ${#line} + 1 ))
+    elif [ "$SAID_CAPPED" = 0 ]; then
+        printf 'session-start: further messages omitted; see %s\n' "$LOG"
+        SAID_CAPPED=1
     fi
 }
 
@@ -198,6 +235,19 @@ for key in ("requirements", "packages", "install", "probe"):
 for key in ("version", "env_dir"):
     if key in py and not (isinstance(py[key], str) and py[key].strip()):
         sys.exit(f"python.{key} must be a non-empty string")
+# The engine compares major.minor with the virtualenv's interpreter, so a
+# patch pin such as 3.12.3 could never match and would never cache.
+if "version" in py and not re.fullmatch(r"[0-9]+\.[0-9]+", py["version"]):
+    sys.exit(f"python.version {py['version']!r} must be major.minor, such as 3.12")
+# Without a version the venv would be built with whatever interpreter the
+# image happens to provide, which a cloud-image update can change silently.
+if "python" in doc and "version" not in py:
+    sys.exit("python.version is required (major.minor, matching CI)")
+# A probe is pasted into `python -c "import ..."`, so each entry must be a
+# dotted module name; anything else is a manifest mistake, reported here.
+for mod in py.get("probe") or []:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", mod):
+        sys.exit(f"python.probe entry {mod!r} is not a dotted module name")
 if "system_site_packages" in py and not isinstance(py["system_site_packages"], bool):
     sys.exit("python.system_site_packages must be true or false")
 if "uv_sync" in py:
@@ -214,7 +264,8 @@ node = doc.get("node", {})
 if node:
     if node.get("manager") not in ("npm", "pnpm", "bun"):
         sys.exit("node.manager must be npm, pnpm or bun")
-    strings(node.get("dirs", []) or ["."], "node.dirs")
+    if "dirs" in node:
+        strings(node["dirs"], "node.dirs")
     for key in ("args", "post"):
         if key in node:
             strings(node[key], f"node.{key}")
@@ -231,6 +282,8 @@ for name, value in doc.get("env", {}).items():
         sys.exit(f"env name {name} is reserved")
     if not isinstance(value, str):
         sys.exit(f"env.{name} must be a string")
+    if "{venv}" in value and "python" not in doc:
+        sys.exit(f"env.{name} names {{venv}}, but the manifest declares no python section")
 for spec in doc.get("binaries", []):
     if not isinstance(spec, dict):
         sys.exit("a binaries entry is not an object")
@@ -243,7 +296,15 @@ for spec in doc.get("binaries", []):
         sys.exit(f"binaries entry {spec['name']!r} has an unsafe name or version")
     if spec.get("archive", "none") not in ("zip", "tar.gz", "tgz", "none"):
         sys.exit(f"binaries entry {spec['name']!r} archive must be zip, tar.gz, tgz or none")
-if "timeout_seconds" in doc and not (isinstance(doc["timeout_seconds"], int) and doc["timeout_seconds"] > 0):
+    # member names a file inside the download; it is extracted under a fresh
+    # temporary directory, so it must stay a relative path inside it.
+    if "member" in spec:
+        member = spec["member"]
+        if not (isinstance(member, str) and member.strip()) or member.startswith("/") \
+                or ".." in member.split("/"):
+            sys.exit(f"binaries entry {spec['name']!r} member must be a relative path inside the archive")
+if "timeout_seconds" in doc and (isinstance(doc["timeout_seconds"], bool)
+                                or not (isinstance(doc["timeout_seconds"], int) and doc["timeout_seconds"] > 0)):
     sys.exit("timeout_seconds must be a positive integer")
 # A misspelt key would otherwise be ignored and the run would still look
 # complete, so every object accepts only the keys this engine reads.
@@ -279,6 +340,13 @@ for spec in doc.get("binaries", []):
     if spec["name"] in names:
         sys.exit(f"binaries entry {spec['name']!r} is declared twice")
     names.add(spec["name"])
+# A post step's output in bin/ is on PATH ahead of the base PATH too, so it
+# may not take an engine command's name either.
+for out in doc.get("outputs") or []:
+    if out.startswith("{bin}/"):
+        name = out[len("{bin}/"):]
+        if "/" not in name and (name in ENGINE_COMMANDS or re.fullmatch(r"python[0-9.]*", name)):
+            sys.exit(f"output {out!r} would shadow a command the engine runs")
 # A local project installed without -e is a copy that the next source change
 # leaves stale while the cache still reads as current. Local files (a wheel)
 # are fingerprinted instead.
@@ -291,7 +359,10 @@ VALUE_OPTS = {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url",
 for where, entries in (("python.packages", py.get("packages") or []),
                        ("python.install", py.get("install") or [])):
     for entry in entries:
-        tokens = shlex.split(entry.lstrip("?"))
+        try:
+            tokens = shlex.split(entry.lstrip("?")) if where == "python.install" else [entry]
+        except ValueError as exc:
+            sys.exit(f"{where} entry {entry!r} does not parse: {exc}")
         i = 0
         while i < len(tokens):
             tok = tokens[i]
@@ -322,7 +393,9 @@ run() {
     [ "$left" -lt "$STEP_TIMEOUT" ] || left="$STEP_TIMEOUT"
     # No step reads the manifest loops' input, and none keeps the lock: a
     # background process a step leaves behind must not hold fd 9 after exit.
-    timeout "$left" env "${STEP_ENV[@]}" "$@" </dev/null >>"$LOG" 2>&1 9>&-
+    # -k: a step that ignores SIGTERM is killed 10 s later, so it cannot
+    # outlive the overall budget the hook timeout depends on.
+    timeout -k 10 "$left" env "${STEP_UNSET[@]}" "${STEP_ENV[@]}" "$@" </dev/null >>"$LOG" 2>&1 9>&-
 }
 
 # mf KEY [SUBKEY]: print one manifest value per line (arrays expand; scalars
@@ -383,22 +456,50 @@ if "uv_sync" in py:
     inputs.add("uv.lock")
 INCLUDE_FLAGS = ("-r", "--requirement", "-c", "--constraint")
 def includes(tokens, base):
+    def path(value):
+        return os.path.normpath(os.path.join(base, value))
     for flag, value in zip(tokens, tokens[1:] + [""]):
-        if flag in INCLUDE_FLAGS and value:
-            yield os.path.normpath(os.path.join(base, value))
-        for prefix in ("--requirement=", "--constraint="):
-            if flag.startswith(prefix):
-                yield os.path.normpath(os.path.join(base, flag[len(prefix):]))
+        if flag in INCLUDE_FLAGS:
+            if value:
+                yield path(value)
+        elif flag.startswith(("--requirement=", "--constraint=")):
+            yield path(flag.split("=", 1)[1])
+        elif flag[:2] in ("-r", "-c") and len(flag) > 2:
+            # The compact form pip and uv both accept: -rFILE, -cFILE.
+            yield path(flag[2:])
 pending = list(py.get("requirements") or [])
-for entry in (py.get("install") or []) + (py.get("packages") or []):
-    tokens = shlex.split(entry.lstrip("?"))
+# `install` entries are split with shell rules; each `packages` entry is one
+# installer argument, exactly as the engine passes them.
+local_files = []
+VALUE_OPTS = {"-r", "--requirement", "-c", "--constraint", "-e", "--editable", "-i",
+              "--index-url", "--extra-index-url", "-f", "--find-links"}
+for tokens in [shlex.split(e.lstrip("?")) for e in py.get("install") or []] + \
+              [[e] for e in py.get("packages") or []]:
     pending.extend(includes(tokens, ""))
-    # A local wheel or sdist is part of what gets installed.
+    # A local wheel or sdist is part of what gets installed. Option values
+    # (a requirements file after -r) are not targets: they are followed as
+    # includes below.
+    skip = False
     for tok in tokens:
+        if skip or tok.startswith("-"):
+            skip = not skip and tok in VALUE_OPTS
+            continue
         target = tok.split("[", 1)[0]
         target = target[len("file:"):] if target.startswith("file:") else target
-        if not tok.startswith("-") and "://" not in target and os.path.isfile(os.path.join(root, target)):
-            inputs.add(os.path.normpath(target))
+        if "://" not in target and os.path.isfile(os.path.join(root, target)):
+            local_files.append(os.path.normpath(target))
+    # An editable subproject's packaging metadata decides its dependencies
+    # and entry points, like the root project's does.
+    for flag, value in zip(tokens, tokens[1:] + [""]):
+        if flag.startswith("--editable="):
+            value = flag[len("--editable="):]
+        elif flag not in ("-e", "--editable"):
+            continue
+        value = value.split("[", 1)[0]
+        value = value[len("file:"):] if value.startswith("file:") else value
+        if value and "://" not in value and os.path.isdir(os.path.join(root, value)):
+            for name in ("pyproject.toml", "setup.py", "setup.cfg"):
+                local_files.append(os.path.normpath(os.path.join(value, name)))
 # Requirement files may include others (-r/-c); follow them so a change to
 # a nested lock invalidates the cache too.
 while pending:
@@ -414,17 +515,62 @@ while pending:
             line = line.split("#", 1)[0].strip()
             if line.startswith(("-r", "-c", "--requirement", "--constraint")):
                 pending.extend(includes(shlex.split(line), os.path.dirname(rel)))
+                continue
+            # A local wheel, sdist or editable project named in the file is
+            # part of what gets installed, like one named in the manifest.
+            # pip resolves such paths against the working directory, and
+            # some tools against the file's own directory; both are hashed.
+            editable = line.startswith(("-e ", "--editable ", "--editable="))
+            if line.startswith("-") and not editable:
+                continue
+            try:
+                words = shlex.split(line.replace("--editable=", "--editable ", 1))
+            except ValueError:
+                continue
+            if not words:
+                continue
+            target = words[1] if editable and len(words) > 1 else words[0]
+            target = target.split(";", 1)[0].split("[", 1)[0]
+            target = target[len("file:"):] if target.startswith("file:") else target
+            if not target or "://" in target:
+                continue
+            for base in ("", os.path.dirname(rel)):
+                cand = os.path.normpath(os.path.join(base, target))
+                full_cand = os.path.join(root, cand)
+                if os.path.isfile(full_cand):
+                    local_files.append(cand)
+                elif os.path.isdir(full_cand):
+                    for name in ("pyproject.toml", "setup.py", "setup.cfg"):
+                        local_files.append(os.path.normpath(os.path.join(cand, name)))
+inputs.update(local_files)
 for directory in (node.get("dirs") or ["."]) if node and scope == "all" else []:
     for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json",
                  "pnpm-lock.yaml", "pnpm-workspace.yaml", ".pnpmfile.cjs", "bun.lock",
                  "bun.lockb", "bunfig.toml", ".npmrc"):
         inputs.add(os.path.normpath(os.path.join(directory, name)))
+    # npm and bun workspaces: each member's package.json is a dependency input.
+    try:
+        workspaces = json.load(open(os.path.join(root, directory, "package.json"))).get("workspaces") or []
+    except (OSError, ValueError):
+        workspaces = []
+    if isinstance(workspaces, dict):
+        workspaces = workspaces.get("packages") or []
+    for member in workspaces if isinstance(workspaces, list) else []:
+        if isinstance(member, str):
+            for path in glob.glob(os.path.join(root, directory, member, "package.json")):
+                inputs.add(os.path.relpath(path, root))
     for patch in glob.glob(os.path.join(root, directory, "patches", "**"), recursive=True):
         if os.path.isfile(patch):
             inputs.add(os.path.relpath(patch, root))
-for pattern in doc.get("cache_inputs") or [] if scope == "all" else []:
+# cache_inputs join the Python key too: a nested project's pyproject.toml
+# listed there changes what the installers resolve.
+for pattern in doc.get("cache_inputs") or []:
     matches = glob.glob(os.path.join(root, pattern), recursive=True)
-    inputs.update(os.path.relpath(m, root) for m in matches if os.path.isfile(m))
+    for m in matches:
+        # A directory stands for every file beneath it.
+        files = [m] if os.path.isfile(m) else [
+            os.path.join(d, f) for d, _, fs in os.walk(m) for f in fs] if os.path.isdir(m) else []
+        inputs.update(os.path.relpath(f, root) for f in files)
     if not matches:
         inputs.add(pattern)
 digest = hashlib.sha256()
@@ -480,6 +626,7 @@ export SESSION_BOOTSTRAP_ROOT="$ROOT" SESSION_BOOTSTRAP_BIN="$BIN" SESSION_BOOTS
 BASE_PATH="$(strip_path "$BASE_PATH" "$VENV/bin")"
 export PATH="$BIN:$BASE_PATH"
 
+VENV_ENV=()
 # ---------------------------------------------------------------- environment
 # Exported first so a cached run still re-publishes PATH into the new session.
 # The virtualenv is published only once it exists and runs (publish_python),
@@ -489,18 +636,34 @@ export PATH="$BIN:$BASE_PATH"
 env_export PATH "$BIN:$BASE_PATH"
 # unpublish_python: clear what an earlier session published for Python.
 unpublish_python() {
+    local pair
     if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
         printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n' >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+        for pair in "${VENV_ENV[@]}"; do
+            printf 'unset %s\n' "${pair%%=*}" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+        done
     fi
     unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT
 }
 # publish_python: put a working virtualenv on the session PATH, or clear it.
 publish_python() {
-    [ "$WANT_PYTHON" = 1 ] || return 0
+    # WANT_PYTHON=0 was cleared at the start; a refused virtualenv (wrong
+    # interpreter, not this engine's to rebuild) is never published.
+    case "$WANT_PYTHON" in
+        0) return 0 ;;
+        1) ;;
+        *) unpublish_python; return 0 ;;
+    esac
     if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c '' >/dev/null 2>&1; then
         env_export PATH "$BIN:$VENV/bin:$BASE_PATH"
         env_export VIRTUAL_ENV "$VENV"
         env_export UV_PROJECT_ENVIRONMENT "$VENV"
+        local pair
+        for pair in "${VENV_ENV[@]}"; do
+            if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+                printf 'export %s=%q\n' "${pair%%=*}" "${pair#*=}" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+            fi
+        done
     else
         unpublish_python
     fi
@@ -512,26 +675,42 @@ if [ "$WANT_PYTHON" != 1 ]; then
     [ -d "$ROOT/venv/$SLOT" ] && rm -rf "${ROOT:?}/venv/${SLOT:?}"
     rm -f "$PY_STATE"
 fi
+# A value that names the virtualenv ({venv}) reaches the session only with
+# the virtualenv itself (publish_python), so a failed build never leaves the
+# session pointing at a missing interpreter.
+VENV_ENV=()
 while IFS= read -r name; do
     [ -n "$name" ] || continue
-    value="$(expand "$(mf env "$name")")"
-    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-        printf 'export %s=%q\n' "$name" "$value" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
-    fi
+    raw="$(mf env "$name")"
+    value="$(expand "$raw")"
+    case "$raw" in
+        *'{venv}'*) VENV_ENV+=("$name=$value") ;;
+        *)
+            if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+                printf 'export %s=%q\n' "$name" "$value" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+            fi ;;
+    esac
     STEP_ENV+=("$name=$value")
 done < <(python3 -c 'import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get("env",{})]' "$MANIFEST")
 # A name an earlier manifest published and this one dropped is unset, so a
 # resumed or cleared session does not keep the old value.
 env_names="$(python3 -c 'import json,sys; [print(k) for k in sorted(json.load(open(sys.argv[1])).get("env",{}))]' "$MANIFEST")"
-if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -f "$ENV_NAMES" ]; then
+if [ -f "$ENV_NAMES" ]; then
     while IFS= read -r name; do
         [ -n "$name" ] || continue
         printf '%s\n' "$env_names" | grep -qxF "$name" && continue
-        printf 'unset %s\n' "$name" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+        STEP_UNSET+=(-u "$name")
+        if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+            printf 'unset %s\n' "$name" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+        fi
     done <"$ENV_NAMES"
 fi
+# The state keeps every name any run published, not only this manifest's:
+# another session of the same checkout may still carry a name an older
+# manifest gave it, and unsetting a name that is not set is harmless.
 if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$ENV_FILE_OK" = 1 ]; then
-    printf '%s\n' "$env_names" >"$ENV_NAMES"
+    { printf '%s\n' "$env_names"; if [ -f "$ENV_NAMES" ]; then cat "$ENV_NAMES"; fi; } \
+        | { grep . || true; } | sort -u >"$ENV_NAMES.tmp" && mv -f "$ENV_NAMES.tmp" "$ENV_NAMES"
 fi
 # The session only sees PATH and the manifest's variables through
 # CLAUDE_ENV_FILE; an install it cannot publish is not ready.
@@ -571,14 +750,17 @@ probe_python() {
     local mods
     mods="$(mf python probe | tr '\n' ' ')"
     [ -n "$mods" ] || return 0
-    "$VENV/bin/python" -c "import $(echo "$mods" | sed 's/ *$//; s/ /, /g')" >/dev/null 2>&1
+    # Through run: bounded by the step timeout and the overall deadline, and
+    # with the manifest's env, which an import may need. A probe writes no
+    # bytecode, so importing an in-tree module leaves the checkout clean.
+    PYTHONDONTWRITEBYTECODE=1 run "$VENV/bin/python" -c "import $(echo "$mods" | sed 's/ *$//; s/ /, /g')"
 }
 # node_deps_declared DIR: package.json in DIR lists any dependency; a package
 # with none never creates node_modules/ and is still provisioned.
 node_deps_declared() {
     python3 -c 'import json,sys
 d=json.load(open(sys.argv[1]))
-sys.exit(0 if any(d.get(k) for k in ("dependencies","devDependencies","optionalDependencies")) else 1)' "$PROJECT_DIR/$1/package.json" 2>/dev/null
+sys.exit(0 if any(d.get(k) for k in ("dependencies","devDependencies","optionalDependencies","peerDependencies","workspaces")) else 1)' "$PROJECT_DIR/$1/package.json" 2>/dev/null
 }
 node_dirs() { mf node dirs | grep . || echo .; }
 probe_node() {
@@ -592,16 +774,20 @@ probe_node() {
     return 0
 }
 # The verified artifact for a binary lives at
-# tools/<name>/<version>-<sha256 of the download>/<name>, and bin/<slot>/<name>
-# links to it. A different version already on PATH, a sibling repository's pin,
-# or the same version with another checksum never satisfies this manifest.
-binary_target() { printf '%s/%s/%s-%s/%s' "$TOOLS_DIR" "$1" "$2" "$3" "$1"; }
+# tools/<name>/<version>-<sha256 of the download>-<digest of the member>/<name>,
+# and bin/<slot>/<name> links to it. A different version already on PATH, a
+# sibling repository's pin, the same version with another checksum, or another
+# file taken from the same archive never satisfies this manifest.
+binary_target() {
+    printf '%s/%s/%s-%s-%s/%s' "$TOOLS_DIR" "$1" "$2" "$3" \
+        "$(printf '%s' "$4" | sha256sum | cut -c1-12)" "$1"
+}
 probe_binaries() {
     local spec name target
     while IFS= read -r spec; do
         [ -n "$spec" ] || continue
         name="$(jf "$spec" name)"
-        target="$(binary_target "$name" "$(jf "$spec" version)" "$(jf "$spec" sha256)")"
+        target="$(binary_target "$name" "$(jf "$spec" version)" "$(jf "$spec" sha256)" "$(jf "$spec" member "$name")")"
         [ -x "$target" ] && [ "$(readlink "$BIN/$name" 2>/dev/null)" = "$target" ] || return 1
     done < <(mf binaries)
     return 0
@@ -640,10 +826,26 @@ if [ "${#MISSING[@]}" -eq 0 ] && [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$CURR
     MISSING+=("env-file")
 fi
 rm -f "$STATE"
+# A file an earlier manifest declared as an output in the session bin/, and
+# the current one no longer declares, is removed so it leaves PATH.
+current_outputs="$(mf outputs | while IFS= read -r out; do [ -n "$out" ] && expand "$out" && echo; done)"
+if [ -f "$OUTPUTS_STATE" ]; then
+    while IFS= read -r old; do
+        case "$old" in "$BIN"/*) ;; *) continue ;; esac
+        printf '%s\n' "$current_outputs" | grep -qxF "$old" && continue
+        rm -f "$old" && say "removed undeclared output $old"
+    done <"$OUTPUTS_STATE"
+fi
 # Every write is meant to land out of tree or under a gitignored path. The
 # status before and after shows any install or post step that broke that (a
 # nested workspace whose install writes the root node_modules/, say).
-tree_status() { git -C "$PROJECT_DIR" status --porcelain -uall 2>/dev/null | sort; }
+# Each dirty path carries the hash of its content, so a step that rewrites a
+# file that was already modified is caught, not only a change in its status.
+tree_status() {
+    git -C "$PROJECT_DIR" status --porcelain -uall 2>/dev/null | while IFS= read -r line; do
+        printf '%s\t%s\n' "$line" "$(git -C "$PROJECT_DIR" hash-object -- "${line:3}" 2>/dev/null || echo -)"
+    done | sort
+}
 TREE_BEFORE="$(tree_status)"
 
 # ---------------------------------------------------------------------- apt
@@ -671,6 +873,76 @@ if [ "${#apt_pkgs[@]}" -gt 0 ]; then
     fi
 fi
 
+# ----------------------------------------------------------------- binaries
+# Pinned binaries come before Python and Node, so a manifest that pins uv
+# gets that uv for the virtualenv and uv_sync on the same run.
+while IFS= read -r spec; do
+    [ -n "$spec" ] || continue
+    name="$(jf "$spec" name)"
+    version="$(jf "$spec" version)"
+    url="$(jf "$spec" url)"
+    sha="$(jf "$spec" sha256)"
+    archive="$(jf "$spec" archive none)"
+    member="$(jf "$spec" member "$name")"
+    target="$(binary_target "$name" "$version" "$sha" "$member")"
+    if [ ! -x "$target" ]; then
+        # Drop a link to another version first, so a failed install leaves
+        # nothing on PATH that looks like the pinned tool.
+        rm -f "$BIN/$name"
+        if ! tmp="$(mktemp -d)" || [ -z "$tmp" ]; then
+            say "FAILED could not create a temporary directory for $name"
+            MISSING+=("$name"); continue
+        fi
+        if ! run curl -fsSL --retry 3 -o "$tmp/download" "$url"; then
+            say "FAILED download $name $version from $url"
+            MISSING+=("$name"); rm -rf "$tmp"; continue
+        fi
+        if [ "$(sha256sum "$tmp/download" | cut -d' ' -f1)" != "$sha" ]; then
+            say "FAILED sha256 mismatch for $name $version; refusing to install"
+            MISSING+=("$name"); rm -rf "$tmp"; continue
+        fi
+        # A failed extraction can leave a partial member behind, so the exit
+        # status decides, not the file's presence alone.
+        extracted=1
+        case "$archive" in
+            zip) run python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' "$tmp/download" "$member" "$tmp" || extracted=0 ;;
+            tar.gz|tgz) run tar -xzf "$tmp/download" -C "$tmp" "$member" || extracted=0 ;;
+            none) mv "$tmp/download" "$tmp/$member" || extracted=0 ;;
+        esac
+        if [ "$extracted" = 0 ] || [ ! -f "$tmp/$member" ]; then
+            say "FAILED extract $name ($archive member=$member)"
+            MISSING+=("$name"); rm -rf "$tmp"; continue
+        fi
+        # tools/ is shared by every checkout, so each install writes its own
+        # temporary file and publishes it with one atomic rename.
+        partial=""
+        if ! { mkdir -p "$(dirname "$target")" && partial="$(mktemp "$target.partial.XXXXXX")" \
+                && install -m 0755 "$tmp/$member" "$partial" && mv -f "$partial" "$target"; } >>"$LOG" 2>&1; then
+            [ -n "$partial" ] && rm -f "$partial"
+            say "FAILED install $name $version into $target"
+            MISSING+=("$name"); rm -rf "$tmp"; continue
+        fi
+        rm -rf "$tmp"
+    fi
+    # -T: a directory already at $BIN/$name is an error, never a place to
+    # put the link.
+    if ln -sfnT "$target" "$BIN/$name" 2>>"$LOG"; then
+        say "binary ok $name $version"
+        TOOLS+=("$name")
+    else
+        say "FAILED link $BIN/$name -> $target"
+        MISSING+=("$name")
+    fi
+done < <(mf binaries)
+# Drop links to pinned tools the manifest no longer declares, so a removed
+# binary does not stay on PATH. Links a post step made elsewhere are kept.
+declared=" $(mf binaries | while IFS= read -r spec; do jf "$spec" name; done | tr '\n' ' ') "
+for link in "$BIN"/*; do
+    [ -L "$link" ] || continue
+    case "$(readlink "$link")" in "$TOOLS_DIR"/*) ;; *) continue ;; esac
+    case "$declared" in *" $(basename "$link") "*) ;; *) rm -f "$link"; say "removed undeclared tool link $(basename "$link")" ;; esac
+done
+
 # -------------------------------------------------------------------- python
 # A miss on the fingerprint re-runs every declared installer; the probe only
 # checks the result. Installers are idempotent, so an unchanged environment
@@ -687,13 +959,32 @@ if [ "$WANT_PYTHON" = 1 ]; then
             rebuild_reason="version or system_site_packages"
         elif [ "$(cat "$PY_STATE" 2>/dev/null)" != "$python_fingerprint" ]; then
             rebuild_reason="its Python dependency inputs changed"
+        elif ! probe_python; then
+            # The inputs are those of the last good install, yet an import
+            # fails: a deleted or corrupted package that pip would still call
+            # satisfied. Rebuild once; a probe that fails again (an in-tree
+            # module with an error, say) is reported, and PY_STATE is cleared
+            # so the next run does not rebuild again.
+            rebuild_reason="its probe failed although its inputs are unchanged"
         fi
     fi
+    # The engine deletes only a virtualenv it created: one under the session
+    # root, or an in-tree python.env_dir that carries its ownership marker. A
+    # developer's own environment at env_dir is used as it is, or reported.
+    venv_owned=0
+    case "$VENV" in "$ROOT"/*) venv_owned=1 ;; esac
+    [ -f "$VENV/$OWNER_MARK" ] && venv_owned=1
+    if [ -n "$rebuild_reason" ] && [ "$venv_owned" = 0 ] && [ -f "$VENV/pyvenv.cfg" ] \
+        && [ "$rebuild_reason" != "version or system_site_packages" ]; then
+        say "skipped rebuilding $VENV ($rebuild_reason): this engine did not create it, so it is used as it is"
+        rebuild_reason=""
+    fi
     if [ -n "$rebuild_reason" ]; then
-        # Only a directory that is a virtualenv (it has pyvenv.cfg) is removed;
-        # anything else at that path is reported, never deleted.
-        if [ "$VENV" = "/" ] || [ "$VENV" = "$PROJECT_DIR" ] || [ "$VENV" = "$HOME" ] || [ ! -f "$VENV/pyvenv.cfg" ]; then
-            say "FAILED refusing to rebuild $VENV: it is not a virtualenv this engine created"
+        # Only a virtualenv (it has pyvenv.cfg) that this engine created is
+        # removed; anything else at that path is reported, never deleted.
+        if [ "$VENV" = "/" ] || [ "$VENV" = "$PROJECT_DIR" ] || [ "$VENV" = "$HOME" ] \
+            || [ ! -f "$VENV/pyvenv.cfg" ] || [ "$venv_owned" = 0 ]; then
+            say "FAILED refusing to rebuild $VENV ($rebuild_reason): it is not a virtualenv this engine created"
             MISSING+=("python-venv")
             WANT_PYTHON=refused
         else
@@ -704,11 +995,16 @@ if [ "$WANT_PYTHON" = 1 ]; then
     fi
     if [ "$WANT_PYTHON" = 1 ] && [ ! -x "$VENV/bin/python" ]; then
         interpreter=""
-        if [ -n "$want_ver" ]; then
-            for cand in "python$want_ver" "/usr/bin/python$want_ver" "/usr/local/bin/python$want_ver"; do
-                if command -v "$cand" >/dev/null 2>&1; then interpreter="$cand"; break; fi
-            done
-        fi
+        candidates=("python$want_ver" "/usr/bin/python$want_ver" "/usr/local/bin/python$want_ver")
+        # Distro packages (python3-gi, say) live in the distro interpreter's
+        # dist-packages, which only a venv built from that interpreter sees.
+        [ "$(mf python system_site_packages)" = "true" ] \
+            && candidates=("/usr/bin/python$want_ver" "python$want_ver" "/usr/local/bin/python$want_ver")
+        for cand in "${candidates[@]}"; do
+            if command -v "$cand" >/dev/null 2>&1; then interpreter="$cand"; break; fi
+        done
+        venv_new=0
+        [ -e "$VENV" ] || venv_new=1
         venv_flags=()
         if [ "$(mf python system_site_packages)" = "true" ]; then
             venv_flags+=(--system-site-packages)
@@ -731,10 +1027,18 @@ if [ "$WANT_PYTHON" = 1 ]; then
         # pip, say) can still leave bin/python behind: the exit status
         # decides, and the partial environment this run created is removed so
         # the next run rebuilds it rather than trusting it.
+        if [ "$venv_rc" = 0 ] && [ -x "$VENV/bin/python" ]; then
+            : >"$VENV/$OWNER_MARK"
+        fi
         if [ "$venv_rc" -ne 0 ] || [ ! -x "$VENV/bin/python" ]; then
             say "FAILED python venv at $VENV (see $LOG)"
             MISSING+=("python-venv")
-            [ -f "$VENV/pyvenv.cfg" ] && rm -rf "${VENV:?}"
+            # A directory this run created is removed even without
+            # pyvenv.cfg (creation died before writing it); one that existed
+            # before is removed only when it is a virtualenv.
+            if [ "$venv_new" = 1 ] || [ -f "$VENV/pyvenv.cfg" ]; then
+                [ -n "$VENV" ] && [ "$VENV" != "/" ] && [ "$VENV" != "$PROJECT_DIR" ] && rm -rf "${VENV:?}"
+            fi
         fi
     fi
     if [ "$WANT_PYTHON" = 1 ] && [ -x "$VENV/bin/python" ]; then
@@ -812,63 +1116,17 @@ if [ "$WANT_PYTHON" = 1 ]; then
     fi
 fi
 
-# ----------------------------------------------------------------- binaries
-while IFS= read -r spec; do
-    [ -n "$spec" ] || continue
-    name="$(jf "$spec" name)"
-    version="$(jf "$spec" version)"
-    url="$(jf "$spec" url)"
-    sha="$(jf "$spec" sha256)"
-    archive="$(jf "$spec" archive none)"
-    member="$(jf "$spec" member "$name")"
-    target="$(binary_target "$name" "$version" "$sha")"
-    if [ ! -x "$target" ]; then
-        # Drop a link to another version first, so a failed install leaves
-        # nothing on PATH that looks like the pinned tool.
-        rm -f "$BIN/$name"
-        tmp="$(mktemp -d)"
-        if ! run curl -fsSL --retry 3 -o "$tmp/download" "$url"; then
-            say "FAILED download $name $version from $url"
-            MISSING+=("$name"); rm -rf "$tmp"; continue
-        fi
-        if [ "$(sha256sum "$tmp/download" | cut -d' ' -f1)" != "$sha" ]; then
-            say "FAILED sha256 mismatch for $name $version; refusing to install"
-            MISSING+=("$name"); rm -rf "$tmp"; continue
-        fi
-        # A failed extraction can leave a partial member behind, so the exit
-        # status decides, not the file's presence alone.
-        extracted=1
-        case "$archive" in
-            zip) run python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' "$tmp/download" "$member" "$tmp" || extracted=0 ;;
-            tar.gz|tgz) run tar -xzf "$tmp/download" -C "$tmp" "$member" || extracted=0 ;;
-            none) mv "$tmp/download" "$tmp/$member" || extracted=0 ;;
-        esac
-        if [ "$extracted" = 0 ] || [ ! -f "$tmp/$member" ]; then
-            say "FAILED extract $name ($archive member=$member)"
-            MISSING+=("$name"); rm -rf "$tmp"; continue
-        fi
-        if ! { mkdir -p "$(dirname "$target")" && install -m 0755 "$tmp/$member" "$target.partial" && mv -f "$target.partial" "$target"; } >>"$LOG" 2>&1; then
-            say "FAILED install $name $version into $target"
-            MISSING+=("$name"); rm -rf "$tmp"; continue
-        fi
-        rm -rf "$tmp"
-    fi
-    if ln -sfn "$target" "$BIN/$name" 2>>"$LOG"; then
-        say "binary ok $name $version"
-        TOOLS+=("$name")
-    else
-        say "FAILED link $BIN/$name -> $target"
-        MISSING+=("$name")
-    fi
-done < <(mf binaries)
-# Drop links to pinned tools the manifest no longer declares, so a removed
-# binary does not stay on PATH. Links a post step made elsewhere are kept.
-declared=" $(mf binaries | while IFS= read -r spec; do jf "$spec" name; done | tr '\n' ' ') "
-for link in "$BIN"/*; do
-    [ -L "$link" ] || continue
-    case "$(readlink "$link")" in "$TOOLS_DIR"/*) ;; *) continue ;; esac
-    case "$declared" in *" $(basename "$link") "*) ;; *) rm -f "$link"; say "removed undeclared tool link $(basename "$link")" ;; esac
-done
+# Node installs, node.post and post run with the PATH the session gets:
+# bin/ first, then a virtualenv that exists and runs, then the base PATH.
+# They also get the virtualenv variables the session gets, so a step that
+# calls `uv` or reads VIRTUAL_ENV targets the same environment.
+step_path="$BIN:$BASE_PATH"
+if [ "$WANT_PYTHON" = 1 ] && "$VENV/bin/python" -c '' >/dev/null 2>&1; then
+    step_path="$BIN:$VENV/bin:$BASE_PATH"
+    STEP_ENV+=("VIRTUAL_ENV=$VENV" "UV_PROJECT_ENVIRONMENT=$VENV")
+else
+    unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT
+fi
 
 # --------------------------------------------------------------------- node
 # Like Python, a fingerprint miss always re-runs the frozen install, so a
@@ -886,9 +1144,9 @@ if [ -n "$manager" ]; then
         fi
         rc=0
         case "$manager" in
-            npm)  (cd "$PROJECT_DIR/$dir" && run npm ci --no-audit --no-fund "${node_args[@]}") || rc=$? ;;
-            pnpm) (cd "$PROJECT_DIR/$dir" && run pnpm install --frozen-lockfile "${node_args[@]}") || rc=$? ;;
-            bun)  (cd "$PROJECT_DIR/$dir" && run bun install --frozen-lockfile "${node_args[@]}") || rc=$? ;;
+            npm)  (cd "$PROJECT_DIR/$dir" && PATH="$step_path" run npm ci --no-audit --no-fund "${node_args[@]}") || rc=$? ;;
+            pnpm) (cd "$PROJECT_DIR/$dir" && PATH="$step_path" run pnpm install --frozen-lockfile "${node_args[@]}") || rc=$? ;;
+            bun)  (cd "$PROJECT_DIR/$dir" && PATH="$step_path" run bun install --frozen-lockfile "${node_args[@]}") || rc=$? ;;
             *)    say "skipped node: unknown manager $manager"; rc=1 ;;
         esac
         if [ "$rc" = 0 ]; then
@@ -902,7 +1160,7 @@ if [ -n "$manager" ]; then
         [ -n "$cmd" ] || continue
         optional=0
         case "$cmd" in "?"*) optional=1; cmd="${cmd#\?}" ;; esac
-        if run bash -c "$cmd"; then
+        if PATH="$step_path" run bash -c "$cmd"; then
             say "node post ok: $cmd"
         elif [ "$optional" = 1 ]; then
             say "optional node post failed, continuing: $cmd (see $LOG)"
@@ -916,13 +1174,11 @@ fi
 # A step that starts with `?` is optional, like an optional install entry:
 # its failure is reported and does not hold the run back from being cached
 # (a browser download the network policy may not allow, say).
-post_path="$PATH"
-[ "$WANT_PYTHON" = 1 ] && post_path="$VENV/bin:$PATH"
 while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
     optional=0
     case "$cmd" in "?"*) optional=1; cmd="${cmd#\?}" ;; esac
-    if PATH="$post_path" run bash -c "$cmd"; then
+    if PATH="$step_path" run bash -c "$cmd"; then
         say "post ok: $cmd"
     elif [ "$optional" = 1 ]; then
         say "optional post failed, continuing: $cmd (see $LOG)"
@@ -932,7 +1188,8 @@ while IFS= read -r cmd; do
 done < <(mf post)
 
 # ------------------------------------------------------------------ summary
-dirtied="$(comm -13 <(printf '%s\n' "$TREE_BEFORE") <(tree_status) | grep . | cut -c4- | head -5 | tr '\n' ' ')"
+# Symmetric: a step that adds, removes or restores a path all count.
+dirtied="$(comm -3 <(printf '%s\n' "$TREE_BEFORE") <(tree_status) | sed 's/^\t//' | grep . | cut -c4- | cut -f1 | sort -u | head -5 | tr '\n' ' ')"
 if [ -n "$dirtied" ]; then
     say "FAILED provisioning changed the working tree: $dirtied"
     MISSING+=("tree")
@@ -940,6 +1197,12 @@ fi
 if [ "${#MISSING[@]}" -eq 0 ] && ! probe_outputs; then
     say "FAILED a declared output is missing after provisioning: $(mf outputs | tr '\n' ' ')"
     MISSING+=("outputs")
+fi
+# Every probe a cached run would use must pass now too, so a post step that
+# broke an earlier resource is caught before this run is cached.
+if [ "${#MISSING[@]}" -eq 0 ] && ! { probe_apt && probe_python && probe_node && probe_binaries; }; then
+    say "FAILED a provisioned resource no longer passes its probe after the post steps (see $LOG)"
+    MISSING+=("probe")
 fi
 publish_python
 if [ "$ENV_FILE_OK" = 0 ] && [[ " ${MISSING[*]} " != *" env-file "* ]]; then
@@ -949,6 +1212,7 @@ fi
 if [ "${#MISSING[@]}" -eq 0 ] && [ -n "$CURRENT_FINGERPRINT" ]; then
     printf '%s\n' "$CURRENT_FINGERPRINT" >"$STATE"
 fi
+printf '%s\n' "$current_outputs" >"$OUTPUTS_STATE"
 py_ver="none"
 [ "$WANT_PYTHON" = 1 ] && [ -x "$VENV/bin/python" ] && py_ver="$("$VENV/bin/python" --version 2>&1 | cut -d' ' -f2)"
 node_ver="$(command -v node >/dev/null 2>&1 && node --version || echo none)"
