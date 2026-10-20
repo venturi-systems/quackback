@@ -30,13 +30,15 @@
 #      ok, cached, skipped or FAILED, and the last line names what is missing.
 #      A malformed manifest is reported as missing, never cached as ready.
 #      Verbose installer output goes to the log, not into session context.
+#      A provisioning step that changes `git status` is reported, never cached.
 #   5. Non-interactive. No prompts, no sudo, no credentials, nothing secret in
 #      the env file. Downloaded binaries must carry a pinned version and sha256.
 #
 # The fleet contract is docs/session-bootstrap.md in the organization's .github
 # repository.
 #
-# Manifest schema (JSON, schema_version 1), all other keys optional:
+# Manifest schema (JSON, schema_version 1), all other keys optional; any key
+# not listed here is rejected:
 #   python:   { "version": "3.12", "system_site_packages": false,
 #               "env_dir": "<gitignored relative dir; default is out of tree>",
 #               "uv_sync": {"frozen": true, "extras": [..],
@@ -51,7 +53,8 @@
 #                "url": "https://..", "sha256": "..", "archive": "zip|tar.gz|none",
 #                "member": "terraform" }]
 #   env:      { "NAME": "value", .. }  ({root}, {bin}, {venv} and {repo} expand)
-#   post:     ["command run from the repository root after provisioning", ..]
+#   post:     ["command run from the repository root after provisioning",
+#              "? optional command whose failure is reported, not missing", ..]
 #   cache_inputs: ["path/or/glob", ..]  (extra files whose change re-provisions)
 #   outputs:  ["{bin}/tool", ..]  (paths a post step creates; a cached run
 #                                 re-provisions when one is missing)
@@ -95,6 +98,8 @@ BIN="$ROOT/bin/$SLOT"
 TOOLS_DIR="$ROOT/tools"
 LOG="$ROOT/logs/$SLOT.log"
 STATE="$ROOT/state/$SLOT.fingerprint"
+ENV_NAMES="$ROOT/state/$SLOT.env-names"
+PY_STATE="$ROOT/state/$SLOT.python"
 LOCK="$ROOT/state/$SLOT.lock"
 CACHE_DIR="$ROOT/cache"
 mkdir -p "$BIN" "$TOOLS_DIR" "$ROOT/venv" "$ROOT/logs" "$ROOT/state" "$CACHE_DIR"
@@ -240,6 +245,66 @@ for spec in doc.get("binaries", []):
         sys.exit(f"binaries entry {spec['name']!r} archive must be zip, tar.gz, tgz or none")
 if "timeout_seconds" in doc and not (isinstance(doc["timeout_seconds"], int) and doc["timeout_seconds"] > 0):
     sys.exit("timeout_seconds must be a positive integer")
+# A misspelt key would otherwise be ignored and the run would still look
+# complete, so every object accepts only the keys this engine reads.
+ALLOWED = {
+    "top level": {"schema_version", "python", "node", "apt", "binaries", "post",
+                  "cache_inputs", "outputs", "env", "timeout_seconds"},
+    "python": {"version", "system_site_packages", "env_dir", "uv_sync",
+               "requirements", "packages", "install", "probe"},
+    "python.uv_sync": {"frozen", "extras", "all_extras", "groups"},
+    "node": {"manager", "dirs", "args", "post"},
+    "binaries entry": {"name", "version", "url", "sha256", "archive", "member"},
+}
+def known(obj, where):
+    extra = sorted(set(obj) - ALLOWED[where])
+    if extra:
+        sys.exit(f"{where} has unknown key(s): {', '.join(extra)}")
+known(doc, "top level")
+known(py, "python")
+known(py.get("uv_sync") or {}, "python.uv_sync")
+known(node, "node")
+# bin/<slot> comes first on PATH for the session and for this engine, so a
+# pinned binary may not take the name of a command the engine runs, and two
+# entries may not share one link.
+ENGINE_COMMANDS = {"apt-get", "awk", "basename", "bash", "cat", "comm", "curl", "cut", "date",
+                   "dirname", "dpkg-query", "env", "flock", "git", "grep", "head",
+                   "id", "install", "ln", "mkdir", "mktemp", "mv", "printf", "readlink",
+                   "rm", "sed", "sh", "sha256sum", "sort", "tar", "timeout", "tr", "wc"}
+names = set()
+for spec in doc.get("binaries", []):
+    known(spec, "binaries entry")
+    if spec["name"] in ENGINE_COMMANDS or re.fullmatch(r"python[0-9.]*", spec["name"]):
+        sys.exit(f"binaries entry {spec['name']!r} would shadow a command the engine runs")
+    if spec["name"] in names:
+        sys.exit(f"binaries entry {spec['name']!r} is declared twice")
+    names.add(spec["name"])
+# A local project installed without -e is a copy that the next source change
+# leaves stale while the cache still reads as current. Local files (a wheel)
+# are fingerprinted instead.
+import os, shlex
+root = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[1])))
+VALUE_OPTS = {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url",
+              "--extra-index-url", "-f", "--find-links", "--index-strategy", "-p",
+              "--python", "--only-binary", "--no-binary", "--target", "--prefix",
+              "--config-settings", "-C", "--trusted-host", "--upgrade-strategy"}
+for where, entries in (("python.packages", py.get("packages") or []),
+                       ("python.install", py.get("install") or [])):
+    for entry in entries:
+        tokens = shlex.split(entry.lstrip("?"))
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok in ("-e", "--editable") or (tok in VALUE_OPTS and "=" not in tok):
+                i += 2
+                continue
+            i += 1
+            if tok.startswith("-"):
+                continue
+            target = tok.split("[", 1)[0]
+            target = target[len("file:"):] if target.startswith("file:") else target
+            if "://" not in target and os.path.isdir(os.path.join(root, target)):
+                sys.exit(f"{where} entry {entry!r} installs the local project {target!r} without -e")
 PY
 )"; then
     rm -f "$STATE"
@@ -301,10 +366,12 @@ jf() { python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2
 # fingerprint: sha256 over the engine, the manifest and every dependency input
 # the manifest names, so a pulled lockfile or requirements change re-provisions
 # even when the manifest itself is unchanged.
+# `fingerprint python` covers only the Python section and its inputs; the
+# engine keys its virtualenv on it.
 fingerprint() {
-    python3 - "$ENGINE" "$MANIFEST" "$PROJECT_DIR" <<'PY'
-import glob, hashlib, json, os, shlex, sys
-engine, manifest, root = sys.argv[1:4]
+    python3 - "$ENGINE" "$MANIFEST" "$PROJECT_DIR" "${1:-all}" <<'PY'
+import glob, hashlib, json, os, re, shlex, sys
+engine, manifest, root, scope = sys.argv[1:5]
 doc = json.load(open(manifest, encoding="utf-8"))
 py = doc.get("python") or {}
 node = doc.get("node") or {}
@@ -323,8 +390,15 @@ def includes(tokens, base):
             if flag.startswith(prefix):
                 yield os.path.normpath(os.path.join(base, flag[len(prefix):]))
 pending = list(py.get("requirements") or [])
-for entry in py.get("install") or []:
-    pending.extend(includes(shlex.split(entry.lstrip("?")), ""))
+for entry in (py.get("install") or []) + (py.get("packages") or []):
+    tokens = shlex.split(entry.lstrip("?"))
+    pending.extend(includes(tokens, ""))
+    # A local wheel or sdist is part of what gets installed.
+    for tok in tokens:
+        target = tok.split("[", 1)[0]
+        target = target[len("file:"):] if target.startswith("file:") else target
+        if not tok.startswith("-") and "://" not in target and os.path.isfile(os.path.join(root, target)):
+            inputs.add(os.path.normpath(target))
 # Requirement files may include others (-r/-c); follow them so a change to
 # a nested lock invalidates the cache too.
 while pending:
@@ -334,25 +408,31 @@ while pending:
     inputs.add(rel)
     full = os.path.join(root, rel)
     if os.path.isfile(full):
-        for line in open(full, encoding="utf-8", errors="replace"):
+        # pip joins a line that ends in a backslash with the next one.
+        text = re.sub(r"\\\r?\n", " ", open(full, encoding="utf-8", errors="replace").read())
+        for line in text.splitlines():
             line = line.split("#", 1)[0].strip()
             if line.startswith(("-r", "-c", "--requirement", "--constraint")):
                 pending.extend(includes(shlex.split(line), os.path.dirname(rel)))
-for directory in (node.get("dirs") or ["."]) if node else []:
+for directory in (node.get("dirs") or ["."]) if node and scope == "all" else []:
     for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json",
-                 "pnpm-lock.yaml", "pnpm-workspace.yaml", "bun.lock", "bun.lockb", ".npmrc"):
+                 "pnpm-lock.yaml", "pnpm-workspace.yaml", ".pnpmfile.cjs", "bun.lock",
+                 "bun.lockb", "bunfig.toml", ".npmrc"):
         inputs.add(os.path.normpath(os.path.join(directory, name)))
     for patch in glob.glob(os.path.join(root, directory, "patches", "**"), recursive=True):
         if os.path.isfile(patch):
             inputs.add(os.path.relpath(patch, root))
-for pattern in doc.get("cache_inputs") or []:
+for pattern in doc.get("cache_inputs") or [] if scope == "all" else []:
     matches = glob.glob(os.path.join(root, pattern), recursive=True)
     inputs.update(os.path.relpath(m, root) for m in matches if os.path.isfile(m))
     if not matches:
         inputs.add(pattern)
 digest = hashlib.sha256()
-for path in [engine, manifest]:
-    digest.update(open(path, "rb").read())
+if scope == "python":
+    digest.update(json.dumps(py, sort_keys=True).encode())
+else:
+    for path in [engine, manifest]:
+        digest.update(open(path, "rb").read())
 for rel in sorted(inputs):
     full = os.path.join(root, rel)
     digest.update(rel.encode() + b"\0")
@@ -430,6 +510,7 @@ if [ "$WANT_PYTHON" != 1 ]; then
     # remove its out-of-tree environment.
     unpublish_python
     [ -d "$ROOT/venv/$SLOT" ] && rm -rf "${ROOT:?}/venv/${SLOT:?}"
+    rm -f "$PY_STATE"
 fi
 while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -439,6 +520,19 @@ while IFS= read -r name; do
     fi
     STEP_ENV+=("$name=$value")
 done < <(python3 -c 'import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get("env",{})]' "$MANIFEST")
+# A name an earlier manifest published and this one dropped is unset, so a
+# resumed or cleared session does not keep the old value.
+env_names="$(python3 -c 'import json,sys; [print(k) for k in sorted(json.load(open(sys.argv[1])).get("env",{}))]' "$MANIFEST")"
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -f "$ENV_NAMES" ]; then
+    while IFS= read -r name; do
+        [ -n "$name" ] || continue
+        printf '%s\n' "$env_names" | grep -qxF "$name" && continue
+        printf 'unset %s\n' "$name" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+    done <"$ENV_NAMES"
+fi
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$ENV_FILE_OK" = 1 ]; then
+    printf '%s\n' "$env_names" >"$ENV_NAMES"
+fi
 # The session only sees PATH and the manifest's variables through
 # CLAUDE_ENV_FILE; an install it cannot publish is not ready.
 if [ "$ENV_FILE_OK" = 0 ]; then
@@ -546,6 +640,11 @@ if [ "${#MISSING[@]}" -eq 0 ] && [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$CURR
     MISSING+=("env-file")
 fi
 rm -f "$STATE"
+# Every write is meant to land out of tree or under a gitignored path. The
+# status before and after shows any install or post step that broke that (a
+# nested workspace whose install writes the root node_modules/, say).
+tree_status() { git -C "$PROJECT_DIR" status --porcelain -uall 2>/dev/null | sort; }
+TREE_BEFORE="$(tree_status)"
 
 # ---------------------------------------------------------------------- apt
 # System packages come first: a Python probe may import a distro module
@@ -578,7 +677,19 @@ fi
 # costs a resolve, while a changed pin or lockfile is always applied.
 if [ "$WANT_PYTHON" = 1 ]; then
     want_ver="$(mf python version)"
-    if [ -e "$VENV" ] && ! venv_matches; then
+    # pip and uv pip only add: a requirement the manifest drops would stay
+    # installed and keep imports passing that CI would fail. So the venv is
+    # keyed on the Python section and its inputs, and rebuilt when they change.
+    python_fingerprint="$(fingerprint python 2>>"$LOG")"
+    rebuild_reason=""
+    if [ -e "$VENV" ]; then
+        if ! venv_matches; then
+            rebuild_reason="version or system_site_packages"
+        elif [ "$(cat "$PY_STATE" 2>/dev/null)" != "$python_fingerprint" ]; then
+            rebuild_reason="its Python dependency inputs changed"
+        fi
+    fi
+    if [ -n "$rebuild_reason" ]; then
         # Only a directory that is a virtualenv (it has pyvenv.cfg) is removed;
         # anything else at that path is reported, never deleted.
         if [ "$VENV" = "/" ] || [ "$VENV" = "$PROJECT_DIR" ] || [ "$VENV" = "$HOME" ] || [ ! -f "$VENV/pyvenv.cfg" ]; then
@@ -586,8 +697,9 @@ if [ "$WANT_PYTHON" = 1 ]; then
             MISSING+=("python-venv")
             WANT_PYTHON=refused
         else
-            say "python venv at $VENV does not match the manifest (version or system_site_packages); rebuilding"
+            say "python venv at $VENV does not match the manifest ($rebuild_reason); rebuilding"
             rm -rf "$VENV"
+            rm -f "$PY_STATE"
         fi
     fi
     if [ "$WANT_PYTHON" = 1 ] && [ ! -x "$VENV/bin/python" ]; then
@@ -691,7 +803,9 @@ if [ "$WANT_PYTHON" = 1 ]; then
         done < <(mf python install)
         if probe_python && [ "$py_rc" = 0 ]; then
             say "python ok $("$VENV/bin/python" --version 2>&1) venv=$VENV"
+            [ -n "$python_fingerprint" ] && printf '%s\n' "$python_fingerprint" >"$PY_STATE"
         else
+            rm -f "$PY_STATE"
             say "FAILED python deps (rc=$py_rc; probe=$(mf python probe | tr '\n' ' ')) see $LOG"
             MISSING+=("python-deps")
         fi
@@ -786,19 +900,43 @@ if [ -n "$manager" ]; then
     done < <(node_dirs)
     while IFS= read -r cmd; do
         [ -n "$cmd" ] || continue
-        if run bash -c "$cmd"; then say "node post ok: $cmd"; else say "FAILED node post: $cmd (see $LOG)"; MISSING+=("node-post"); fi
+        optional=0
+        case "$cmd" in "?"*) optional=1; cmd="${cmd#\?}" ;; esac
+        if run bash -c "$cmd"; then
+            say "node post ok: $cmd"
+        elif [ "$optional" = 1 ]; then
+            say "optional node post failed, continuing: $cmd (see $LOG)"
+        else
+            say "FAILED node post: $cmd (see $LOG)"; MISSING+=("node-post")
+        fi
     done < <(mf node post)
 fi
 
 # --------------------------------------------------------------------- post
+# A step that starts with `?` is optional, like an optional install entry:
+# its failure is reported and does not hold the run back from being cached
+# (a browser download the network policy may not allow, say).
 post_path="$PATH"
 [ "$WANT_PYTHON" = 1 ] && post_path="$VENV/bin:$PATH"
 while IFS= read -r cmd; do
     [ -n "$cmd" ] || continue
-    if PATH="$post_path" run bash -c "$cmd"; then say "post ok: $cmd"; else say "FAILED post: $cmd (see $LOG)"; MISSING+=("post"); fi
+    optional=0
+    case "$cmd" in "?"*) optional=1; cmd="${cmd#\?}" ;; esac
+    if PATH="$post_path" run bash -c "$cmd"; then
+        say "post ok: $cmd"
+    elif [ "$optional" = 1 ]; then
+        say "optional post failed, continuing: $cmd (see $LOG)"
+    else
+        say "FAILED post: $cmd (see $LOG)"; MISSING+=("post")
+    fi
 done < <(mf post)
 
 # ------------------------------------------------------------------ summary
+dirtied="$(comm -13 <(printf '%s\n' "$TREE_BEFORE") <(tree_status) | grep . | cut -c4- | head -5 | tr '\n' ' ')"
+if [ -n "$dirtied" ]; then
+    say "FAILED provisioning changed the working tree: $dirtied"
+    MISSING+=("tree")
+fi
 if [ "${#MISSING[@]}" -eq 0 ] && ! probe_outputs; then
     say "FAILED a declared output is missing after provisioning: $(mf outputs | tr '\n' ' ')"
     MISSING+=("outputs")
