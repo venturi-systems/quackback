@@ -981,9 +981,14 @@ if [ "$WANT_PYTHON" = 1 ]; then
     fi
     if [ -n "$rebuild_reason" ]; then
         # Only a virtualenv (it has pyvenv.cfg) that this engine created is
-        # removed; anything else at that path is reported, never deleted.
+        # removed; anything else at that path is reported, never deleted. The
+        # default location under the session root is the engine's own, so a
+        # directory there that an interrupted run left without pyvenv.cfg is
+        # removed too, or every later run would refuse it.
+        venv_default=0
+        [ "$VENV" = "$ROOT/venv/$SLOT" ] && venv_default=1
         if [ "$VENV" = "/" ] || [ "$VENV" = "$PROJECT_DIR" ] || [ "$VENV" = "$HOME" ] \
-            || [ ! -f "$VENV/pyvenv.cfg" ] || [ "$venv_owned" = 0 ]; then
+            || { [ ! -f "$VENV/pyvenv.cfg" ] && [ "$venv_default" = 0 ]; } || [ "$venv_owned" = 0 ]; then
             say "FAILED refusing to rebuild $VENV ($rebuild_reason): it is not a virtualenv this engine created"
             MISSING+=("python-venv")
             WANT_PYTHON=refused
