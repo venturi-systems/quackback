@@ -88,6 +88,15 @@ REPO="$(basename "$PROJECT_DIR")"
 # digest of the canonical project path.
 SLOT="$REPO-$(printf '%s' "$PROJECT_DIR" | sha256sum | cut -c1-8)"
 ROOT="${SESSION_BOOTSTRAP_ROOT:-$HOME/.session-bootstrap}"
+# Every cache, log and tool lands under the root, so it must sit outside the
+# checkout: a relative root would resolve inside it after the cd above.
+case "$ROOT" in
+    /*) ;;
+    *) echo "session-start: SESSION_BOOTSTRAP_ROOT must be an absolute path, not $ROOT; nothing provisioned"; exit 0 ;;
+esac
+case "$ROOT/" in
+    "$PROJECT_DIR"/*) echo "session-start: SESSION_BOOTSTRAP_ROOT must lie outside the checkout; nothing provisioned"; exit 0 ;;
+esac
 VENV="$ROOT/venv/$SLOT"
 BIN="$ROOT/bin/$SLOT"
 TOOLS_DIR="$ROOT/tools"
@@ -131,28 +140,34 @@ if [ -f "$ENV_NAMES" ]; then
     done <"$ENV_NAMES"
 fi
 
-# A checkout whose manifest was removed still carries, in a resumed or cleared
-# session, what the last manifest published. Clear it before saying there is
-# nothing to do: the PATH entries, the virtualenv variables and every name the
-# state file recorded. Without state files only a VIRTUAL_ENV under $ROOT is
-# this engine's; any other belongs to the user and is left alone.
-if [ ! -f "$MANIFEST" ]; then
-    published=0
+# clear_published: a checkout whose manifest was removed, or no longer
+# parses, still carries in a resumed or cleared session what the last valid
+# manifest published. Clear it: the PATH entries, the virtualenv variables
+# and every name the state recorded. Without state files only a VIRTUAL_ENV
+# under $ROOT is this engine's; any other belongs to the user and is left
+# alone. The recorded names stay behind as tombstones, so every other session
+# of the checkout that still carries them can clear them too. Returns 1 when
+# there was nothing to clear.
+clear_published() {
+    local published=0 name
     if [ -f "$ENV_NAMES" ] || [ -f "$STATE" ]; then
         published=1
     else
         case "${VIRTUAL_ENV:-}" in "$ROOT"/*) published=1 ;; esac
     fi
-    if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$published" = 1 ]; then
-        {
-            printf 'export PATH=%q\n' "$BASE_PATH"
-            printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
-            if [ -f "$ENV_NAMES" ]; then
-                while IFS= read -r name; do
-                    [ -n "$name" ] && printf 'unset %s\n' "$name"
-                done <"$ENV_NAMES"
-            fi
-        } >>"$CLAUDE_ENV_FILE" && rm -f "$ENV_NAMES" "$STATE" "$PY_STATE"
+    [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$published" = 1 ] || return 1
+    {
+        printf 'export PATH=%q\n' "$BASE_PATH"
+        printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
+        if [ -f "$ENV_NAMES" ]; then
+            while IFS= read -r name; do
+                [ -n "$name" ] && printf 'unset %s\n' "$name"
+            done <"$ENV_NAMES"
+        fi
+    } >>"$CLAUDE_ENV_FILE" && rm -f "$STATE" "$PY_STATE"
+}
+if [ ! -f "$MANIFEST" ]; then
+    if clear_published; then
         echo "session-start: no manifest at .claude/session-bootstrap.json; cleared what an earlier manifest published"
     else
         echo "session-start: no manifest at .claude/session-bootstrap.json; nothing to provision"
@@ -218,9 +233,11 @@ echo "----- session-start: $(date -u +%FT%TZ) repo=$REPO -----" >>"$LOG"
 # One provisioning run per repository at a time. SessionStart fires again on
 # /clear and on resume while a first run may still be installing; the second
 # run waits here instead of writing into the same virtualenv concurrently.
+# The lock descriptor is allocated, never fixed: a launcher may already use
+# fd 9 for its own control pipe.
+exec {LOCK_FD}>"$LOCK"
 if command -v flock >/dev/null 2>&1; then
-    exec 9>"$LOCK"
-    if ! flock -w 1800 9; then
+    if ! flock -w 1800 "$LOCK_FD"; then
         say "FAILED another bootstrap for $REPO still holds $LOCK after 1800s; nothing provisioned"
         say "ready repo=$REPO missing=lock log=$LOG"
         exit 0
@@ -385,6 +402,10 @@ for out in doc.get("outputs") or []:
             sys.exit(f"output {out!r} must name one file directly in {{bin}}")
         if name in ENGINE_COMMANDS or re.fullmatch(r"python[0-9.]*", name):
             sys.exit(f"output {out!r} would shadow a command the engine runs")
+        # A binary's {bin} entry is a link into the shared tools/ store; a
+        # post step writing through it would corrupt the verified artifact.
+        if name in names:
+            sys.exit(f"output {out!r} has the name of a declared binary")
 # A local project installed without -e is a copy that the next source change
 # leaves stale while the cache still reads as current. Local files (a wheel)
 # are fingerprinted instead.
@@ -394,6 +415,13 @@ VALUE_OPTS = {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url",
               "--extra-index-url", "-f", "--find-links", "--index-strategy", "-p",
               "--python", "--only-binary", "--no-binary", "--target", "--prefix",
               "--config-settings", "-C", "--trusted-host", "--upgrade-strategy"}
+def direct_target(spec):
+    """The target of a PEP 508 direct reference ("pkg @ file:///x.whl"),
+    or the spec itself when it is not one."""
+    m = re.fullmatch(r"\s*[A-Za-z0-9][A-Za-z0-9._-]*(\[[^\]]*\])?\s*@\s*(\S[^;]*?)\s*(;.*)?", spec)
+    return m.group(2) if m else spec
+
+
 for where, entries in (("python.packages", py.get("packages") or []),
                        ("python.install", py.get("install") or [])):
     for entry in entries:
@@ -411,14 +439,17 @@ for where, entries in (("python.packages", py.get("packages") or []),
                 i += 2
                 continue
             i += 1
-            if tok.startswith("-"):
+            # "pkg @ target" splits into three words: skip the name and the @.
+            if tok.startswith("-") or tok == "@" or (i < len(tokens) and tokens[i] == "@"):
                 continue
-            target = tok.split("[", 1)[0]
+            target = direct_target(tok)
+            target = target.split("[", 1)[0] if target == tok else target
             target = target[len("file:"):] if target.startswith("file:") else target
             if "://" not in target and os.path.isdir(os.path.join(root, target)):
                 sys.exit(f"{where} entry {entry!r} installs the local project {target!r} without -e")
 PY
 )"; then
+    clear_published && say "cleared what an earlier manifest published, because this one is invalid"
     rm -f "$STATE"
     say "FAILED manifest .claude/session-bootstrap.json: $manifest_error"
     say "ready repo=$REPO missing=manifest log=$LOG"
@@ -433,10 +464,10 @@ run() {
     fi
     [ "$left" -lt "$STEP_TIMEOUT" ] || left="$STEP_TIMEOUT"
     # No step reads the manifest loops' input, and none keeps the lock: a
-    # background process a step leaves behind must not hold fd 9 after exit.
+    # background process a step leaves behind must not hold the lock after exit.
     # -k: a step that ignores SIGTERM is killed 10 s later, so it cannot
     # outlive the overall budget the hook timeout depends on.
-    timeout -k 10 "$left" env "${STEP_UNSET[@]}" "${STEP_ENV[@]}" "$@" </dev/null >>"$LOG" 2>&1 9>&-
+    timeout -k 10 "$left" env "${STEP_UNSET[@]}" "${STEP_ENV[@]}" "$@" </dev/null >>"$LOG" 2>&1 {LOCK_FD}>&-
 }
 
 # mf KEY [SUBKEY]: print one manifest value per line (arrays expand; scalars
@@ -520,6 +551,13 @@ def pnpm_members(path):
     return [m for m in found if m]
 
 
+def direct_target(spec):
+    """The target of a PEP 508 direct reference ("pkg @ file:///x.whl"),
+    or the spec itself when it is not one."""
+    m = re.fullmatch(r"\s*[A-Za-z0-9][A-Za-z0-9._-]*(\[[^\]]*\])?\s*@\s*(\S[^;]*?)\s*(;.*)?", spec)
+    return m.group(2) if m else spec
+
+
 def includes(tokens, base):
     def path(value):
         return os.path.normpath(os.path.join(base, value))
@@ -545,11 +583,14 @@ for tokens in [shlex.split(e.lstrip("?")) for e in py.get("install") or []] + \
     # (a requirements file after -r) are not targets: they are followed as
     # includes below.
     skip = False
-    for tok in tokens:
+    for n, tok in enumerate(tokens):
         if skip or tok.startswith("-"):
             skip = not skip and tok in VALUE_OPTS
             continue
-        target = tok.split("[", 1)[0]
+        if tok == "@" or tokens[n + 1:n + 2] == ["@"]:
+            continue
+        target = direct_target(tok)
+        target = target.split("[", 1)[0] if target == tok else target
         target = target[len("file:"):] if target.startswith("file:") else target
         if "://" not in target and os.path.isfile(os.path.join(root, target)):
             local_files.append(os.path.normpath(target))
@@ -558,6 +599,8 @@ for tokens in [shlex.split(e.lstrip("?")) for e in py.get("install") or []] + \
     for flag, value in zip(tokens, tokens[1:] + [""]):
         if flag.startswith("--editable="):
             value = flag[len("--editable="):]
+        elif flag.startswith("-e") and len(flag) > 2 and not flag.startswith("--"):
+            value = flag[2:]  # the compact form pip accepts: -ePATH
         elif flag not in ("-e", "--editable"):
             continue
         value = value.split("[", 1)[0]
@@ -590,6 +633,8 @@ while pending:
             # part of what gets installed, like one named in the manifest.
             # pip resolves such paths against the working directory, and
             # some tools against the file's own directory; both are hashed.
+            if re.match(r"-e[^\s-]", line):
+                line = "-e " + line[2:]  # the compact form: -ePATH
             editable = line.startswith(("-e ", "--editable ", "--editable="))
             if line.startswith("-") and not editable:
                 continue
@@ -599,7 +644,12 @@ while pending:
                 continue
             if not words:
                 continue
-            target = words[1] if editable and len(words) > 1 else words[0]
+            if editable:
+                target = words[1] if len(words) > 1 else ""
+            elif len(words) >= 3 and words[1] == "@":
+                target = words[2]  # a direct reference: pkg @ target
+            else:
+                target = direct_target(words[0])
             target = target.split(";", 1)[0].split("[", 1)[0]
             target = target[len("file:"):] if target.startswith("file:") else target
             if not target or "://" in target:
@@ -840,7 +890,9 @@ probe_python() {
 node_deps_declared() {
     python3 -I -c 'import json,sys
 d=json.load(open(sys.argv[1]))
-sys.exit(0 if any(d.get(k) for k in ("dependencies","devDependencies","optionalDependencies","peerDependencies","workspaces")) else 1)' "$PROJECT_DIR/$1/package.json" 2>/dev/null \
+meta=d.get("peerDependenciesMeta") or {}
+peers=[p for p in (d.get("peerDependencies") or {}) if not (isinstance(meta.get(p),dict) and meta[p].get("optional"))]
+sys.exit(0 if peers or any(d.get(k) for k in ("dependencies","devDependencies","optionalDependencies","workspaces")) else 1)' "$PROJECT_DIR/$1/package.json" 2>/dev/null \
         || [ -f "$PROJECT_DIR/$1/pnpm-workspace.yaml" ]
 }
 node_dirs() { mf node dirs | grep . || echo .; }
@@ -855,29 +907,33 @@ probe_node() {
     return 0
 }
 # The verified artifact for a binary lives at
-# tools/<name>/<version>-<sha256 of the download>-<digest of the member>/<name>,
+# tools/<name>/<version>-<sha256 of the download>-<digest of archive+member>/<name>,
 # and bin/<slot>/<name> links to it. A different version already on PATH, a
-# sibling repository's pin, the same version with another checksum, or another
-# file taken from the same archive never satisfies this manifest.
+# sibling repository's pin, the same version with another checksum, another
+# file taken from the same archive, or the same download read as another
+# archive type never satisfies this manifest.
 binary_target() {
     printf '%s/%s/%s-%s-%s/%s' "$TOOLS_DIR" "$1" "$2" "$3" \
-        "$(printf '%s' "$4" | sha256sum | cut -c1-12)" "$1"
+        "$(printf '%s\0%s' "$5" "$4" | sha256sum | cut -c1-12)" "$1"
 }
 probe_binaries() {
     local spec name target
     while IFS= read -r spec; do
         [ -n "$spec" ] || continue
         name="$(jf "$spec" name)"
-        target="$(binary_target "$name" "$(jf "$spec" version)" "$(jf "$spec" sha256)" "$(jf "$spec" member "$name")")"
+        target="$(binary_target "$name" "$(jf "$spec" version)" "$(jf "$spec" sha256)" "$(jf "$spec" member "$name")" "$(jf "$spec" archive none)")"
         [ -x "$target" ] && [ "$(readlink "$BIN/$name" 2>/dev/null)" = "$target" ] || return 1
     done < <(mf binaries)
     return 0
 }
 probe_outputs() {
-    local out
+    local out path
     while IFS= read -r out; do
         [ -n "$out" ] || continue
-        [ -e "$(expand "$out")" ] || return 1
+        path="$(expand "$out")"
+        [ -e "$path" ] || return 1
+        # A {bin} output is a command on PATH, so it must run.
+        case "$out" in '{bin}/'*) [ -f "$path" ] && [ -x "$path" ] || return 1 ;; esac
     done < <(mf outputs)
     return 0
 }
@@ -922,10 +978,19 @@ fi
 # nested workspace whose install writes the root node_modules/, say).
 # Each dirty path carries the hash of its content, so a step that rewrites a
 # file that was already modified is caught, not only a change in its status.
+# -z keeps a path with a space or a quote as written, where the display form
+# would quote it and the hash would read "absent" on both sides.
 tree_status() {
-    git -C "$PROJECT_DIR" status --porcelain -uall 2>/dev/null | while IFS= read -r line; do
-        printf '%s\t%s\n' "$line" "$(git -C "$PROJECT_DIR" hash-object -- "${line:3}" 2>/dev/null || echo -)"
-    done | sort
+    git -C "$PROJECT_DIR" status --porcelain -z -uall 2>/dev/null | {
+        local rec xy path
+        while IFS= read -r -d '' rec; do
+            xy="${rec:0:2}"
+            path="${rec:3}"
+            # A rename or copy is followed by its source path.
+            case "$xy" in R*|C*) IFS= read -r -d '' _ || true ;; esac
+            printf '%s %q\t%s\n' "$xy" "$path" "$(git -C "$PROJECT_DIR" hash-object -- "$path" 2>/dev/null || echo -)"
+        done
+    } | sort
 }
 TREE_BEFORE="$(tree_status)"
 
@@ -965,7 +1030,7 @@ while IFS= read -r spec; do
     sha="$(jf "$spec" sha256)"
     archive="$(jf "$spec" archive none)"
     member="$(jf "$spec" member "$name")"
-    target="$(binary_target "$name" "$version" "$sha" "$member")"
+    target="$(binary_target "$name" "$version" "$sha" "$member" "$archive")"
     if [ ! -x "$target" ]; then
         # Drop a link to another version first, so a failed install leaves
         # nothing on PATH that looks like the pinned tool.
@@ -1038,14 +1103,18 @@ if [ "$WANT_PYTHON" = 1 ]; then
     if [ -e "$VENV" ]; then
         if ! venv_matches; then
             rebuild_reason="version or system_site_packages"
+        elif [ "$(cat "$PY_STATE.probe-failed" 2>/dev/null)" = "$python_fingerprint" ]; then
+            # This fingerprint was installed and its probe failed: rebuilding
+            # again cannot help, so the run reinstalls and reports instead.
+            :
         elif [ "$(cat "$PY_STATE" 2>/dev/null)" != "$python_fingerprint" ]; then
             rebuild_reason="its Python dependency inputs changed"
         elif ! probe_python; then
             # The inputs are those of the last good install, yet an import
             # fails: a deleted or corrupted package that pip would still call
             # satisfied. Rebuild once; a probe that fails again (an in-tree
-            # module with an error, say) is reported, and PY_STATE is cleared
-            # so the next run does not rebuild again.
+            # module with an error, say) is reported, and the probe-failed
+            # marker keeps the next run from rebuilding again.
             rebuild_reason="its probe failed although its inputs are unchanged"
         fi
     fi
@@ -1197,8 +1266,12 @@ if [ "$WANT_PYTHON" = 1 ]; then
         if probe_python && [ "$py_rc" = 0 ]; then
             say "python ok $("$VENV/bin/python" --version 2>&1) venv=$VENV"
             [ -n "$python_fingerprint" ] && [ "$FOREIGN_STALE" = 0 ] && printf '%s\n' "$python_fingerprint" >"$PY_STATE"
+            rm -f "$PY_STATE.probe-failed"
         else
             rm -f "$PY_STATE"
+            if [ "$py_rc" = 0 ] && [ -n "$python_fingerprint" ]; then
+                printf '%s\n' "$python_fingerprint" >"$PY_STATE.probe-failed"
+            fi
             say "FAILED python deps (rc=$py_rc; probe=$(mf python probe | tr '\n' ' ')) see $LOG"
             MISSING+=("python-deps")
         fi
