@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "binaries": [
+    {
+      "name": "bun",
+      "version": "1.4.2",
+      "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip",
+      "sha256": "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913",
+      "archive": "zip",
+      "member": "bun-linux-x64/bun"
+    }
+  ],
+  "node": {
+    "manager": "bun",
+    "dirs": [
+      "."
+    ],
+    "post": [
+      "?cd apps/web && bun x playwright install --with-deps chromium"
+    ]
+  },
+  "timeout_seconds": 1800
+}
