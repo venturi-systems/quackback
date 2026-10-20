@@ -92,10 +92,20 @@ ROOT="${SESSION_BOOTSTRAP_ROOT:-$HOME/.session-bootstrap}"
 # checkout: a relative root would resolve inside it after the cd above.
 case "$ROOT" in
     /*) ;;
-    *) echo "session-start: SESSION_BOOTSTRAP_ROOT must be an absolute path, not $ROOT; nothing provisioned"; exit 0 ;;
+    *) echo "session-start: SESSION_BOOTSTRAP_ROOT must be an absolute path, not ${ROOT:0:200}; nothing provisioned"; exit 0 ;;
 esac
+# The comparison uses the resolved path: a `..` component or a symlink must
+# not lead the root back into the checkout.
+ROOT="$(realpath -m -- "$ROOT" 2>/dev/null || printf '%s' "$ROOT")"
 case "$ROOT/" in
     "$PROJECT_DIR"/*) echo "session-start: SESSION_BOOTSTRAP_ROOT must lie outside the checkout; nothing provisioned"; exit 0 ;;
+esac
+# A resumed or cleared session may still carry what an earlier run published
+# under another root (SESSION_BOOTSTRAP_ROOT changed in between). That root's
+# entries leave PATH and its recorded names are cleared with this root's.
+OLD_ROOT=""
+case "${SESSION_BOOTSTRAP_PUBLISHED_ROOT:-}" in
+    /*) [ "$SESSION_BOOTSTRAP_PUBLISHED_ROOT" != "$ROOT" ] && OLD_ROOT="$SESSION_BOOTSTRAP_PUBLISHED_ROOT" ;;
 esac
 VENV="$ROOT/venv/$SLOT"
 BIN="$ROOT/bin/$SLOT"
@@ -105,6 +115,8 @@ STATE="$ROOT/state/$SLOT.fingerprint"
 ENV_NAMES="$ROOT/state/$SLOT.env-names"
 PY_STATE="$ROOT/state/$SLOT.python"
 OUTPUTS_STATE="$ROOT/state/$SLOT.outputs"
+OUTPUT_DIGESTS="$ROOT/state/$SLOT.output-digests"
+DIRTIED_STATE="$ROOT/state/$SLOT.dirtied"
 OWNER_MARK=".session-bootstrap-owned"
 LOCK="$ROOT/state/$SLOT.lock"
 CACHE_DIR="$ROOT/cache"
@@ -120,6 +132,7 @@ strip_path() {
     printf '%s' "$out"
 }
 BASE_PATH="$(strip_path "$PATH" "$ROOT")"
+[ -n "$OLD_ROOT" ] && BASE_PATH="$(strip_path "$BASE_PATH" "$OLD_ROOT")"
 # An in-tree virtualenv an earlier run published lies outside $ROOT, and the
 # manifest may since have moved env_dir; strip it by the VIRTUAL_ENV it set.
 # Only a virtualenv this engine published is stripped: one under the root, one
@@ -128,6 +141,7 @@ BASE_PATH="$(strip_path "$PATH" "$ROOT")"
 INHERITED_VENV_OURS=0
 if [ -n "${VIRTUAL_ENV:-}" ]; then
     case "$VIRTUAL_ENV" in "$ROOT"/*) INHERITED_VENV_OURS=1 ;; esac
+    [ -n "$OLD_ROOT" ] && case "$VIRTUAL_ENV" in "$OLD_ROOT"/*) INHERITED_VENV_OURS=1 ;; esac
     [ -f "$VIRTUAL_ENV/.session-bootstrap-owned" ] && INHERITED_VENV_OURS=1
     [ -f "$ROOT/state/$SLOT.python" ] || [ -f "$ROOT/state/$SLOT.python.probe-failed" ] && INHERITED_VENV_OURS=1
 fi
@@ -135,6 +149,12 @@ if [ "$INHERITED_VENV_OURS" = 1 ]; then
     BASE_PATH="$(strip_path "$BASE_PATH" "$VIRTUAL_ENV/bin")"
 fi
 
+# The names an earlier run recorded under another root join this root's
+# record, so they are cleared and kept as tombstones here from now on.
+if [ -n "$OLD_ROOT" ] && [ -f "$OLD_ROOT/state/$SLOT.env-names" ] && mkdir -p "$ROOT/state" 2>/dev/null; then
+    { cat "$OLD_ROOT/state/$SLOT.env-names"; if [ -f "$ENV_NAMES" ]; then cat "$ENV_NAMES"; fi; } \
+        | sort -u >"$ENV_NAMES.tmp" 2>/dev/null && mv -f "$ENV_NAMES.tmp" "$ENV_NAMES"
+fi
 # A resumed or cleared session still carries every name an earlier manifest
 # published. Stop exporting them before any helper runs, so a retired
 # PYTHONPATH or PIP_* value cannot reach the engine's own python3 or pip.
@@ -183,7 +203,14 @@ if [ ! -f "$MANIFEST" ]; then
     esac
     exit 0
 fi
-mkdir -p "$BIN" "$TOOLS_DIR" "$ROOT/venv" "$ROOT/logs" "$ROOT/state" "$CACHE_DIR"
+# An unusable root (read-only, full, not a directory) is reported and the
+# hook still ends with its summary, so SessionStart stays fail-open.
+if ! mkdir -p "$BIN" "$TOOLS_DIR" "$ROOT/venv" "$ROOT/logs" "$ROOT/state" "$CACHE_DIR" 2>/dev/null \
+        || ! { : >>"$ROOT/state/.writable"; } 2>/dev/null; then
+    echo "session-start: FAILED SESSION_BOOTSTRAP_ROOT=${ROOT:0:200} is not a writable directory; nothing provisioned"
+    echo "session-start: ready repo=$REPO missing=root"
+    exit 0
+fi
 export PATH="$BIN:$BASE_PATH"
 # The manifest's env entries reach the session and every step this engine
 # runs, never this shell: a name such as VENV or WANT_PYTHON must not be able
@@ -205,7 +232,12 @@ export DEBIAN_FRONTEND=noninteractive CI=1 npm_config_yes=true PIP_DISABLE_PIP_V
     npm_config_store_dir="$CACHE_DIR/pnpm-store" BUN_INSTALL_CACHE_DIR="$CACHE_DIR/bun"
 # One overall budget below the 3600 s hook timeout in settings.json, so the
 # engine always reaches its summary before Claude Code would cancel it.
-DEADLINE=$(( $(date +%s) + ${SESSION_BOOTSTRAP_BUDGET_SECONDS:-3300} ))
+# The override is data: anything but a positive decimal integer would be
+# evaluated as a Bash arithmetic expression, which can run a command.
+BUDGET="${SESSION_BOOTSTRAP_BUDGET_SECONDS:-3300}"
+case "$BUDGET" in ''|*[!0-9]*) BUDGET=3300 ;; esac
+BUDGET=$((10#$BUDGET))
+DEADLINE=$(( $(date +%s) + BUDGET ))
 MISSING=()
 TOOLS=()
 
@@ -260,7 +292,14 @@ echo "----- session-start: $(date -u +%FT%TZ) repo=$REPO -----" >>"$LOG"
 # with the lock wait inside the budget that still ends before the 3600 s
 # hook timeout.
 exec {LOCK_FD}>"$LOCK"
-if command -v flock >/dev/null 2>&1 && ! flock -n "$LOCK_FD"; then
+# Without flock two runs could install into the same virtualenv at once, so
+# the run reports the lock missing instead of provisioning unlocked.
+if ! command -v flock >/dev/null 2>&1; then
+    say "FAILED flock is not installed, so this run cannot hold the provisioning lock; nothing provisioned"
+    say "ready repo=$REPO missing=lock log=$LOG"
+    exit 0
+fi
+if ! flock -n "$LOCK_FD"; then
     lock_wait=$(( DEADLINE - $(date +%s) ))
     [ "$lock_wait" -gt 0 ] || lock_wait=1
     if ! flock -w "$lock_wait" "$LOCK_FD"; then
@@ -347,11 +386,19 @@ if node:
     # separate value (`--frozen-lockfile false`) or an abbreviation that the
     # manager expands would undo it as surely as `=false`.
     LOCK_OPTS = ("--frozen-lockfile", "--no-frozen-lockfile", "--prefer-frozen-lockfile",
-                 "--package-lock", "--no-package-lock", "--lockfile", "--no-lockfile", "--frozen")
+                 "--package-lock", "--no-package-lock", "--lockfile", "--no-lockfile", "--frozen",
+                 "--lockfile-only", "--dry-run")
+    # Nor may it move the install: the ignore check, fingerprint and probe all
+    # look at the declared directory.
+    PLACE_OPTS = ("--dir", "--cwd", "--prefix", "--global", "--location", "--workspace-root",
+                  "--global-dir", "--modules-dir", "--virtual-store-dir", "--lockfile-dir")
     for arg in node.get("args") or []:
         opt = arg.split("=", 1)[0]
         if opt.startswith("--") and len(opt) > 4 and any(o.startswith(opt) for o in LOCK_OPTS):
             sys.exit(f"node.args entry {arg!r} names a lockfile option; the engine keeps the install frozen")
+        if (opt.startswith("--") and len(opt) > 3 and any(o.startswith(opt) for o in PLACE_OPTS)) \
+                or (not opt.startswith("--") and opt[:2] in ("-C", "-g", "-w")):
+            sys.exit(f"node.args entry {arg!r} would move the install out of node.dirs")
 for key in ("apt", "post", "cache_inputs", "outputs"):
     if key in doc:
         strings(doc[key], key)
@@ -359,7 +406,9 @@ for key in ("apt", "post", "cache_inputs", "outputs"):
 # optional architecture and an optional exact version (`bash=5.2.21-2`);
 # apt-get's release (`pkg/noble`) and glob forms have no dpkg answer.
 for pkg in doc.get("apt") or []:
-    if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*(:[a-z0-9-]+)?(=[A-Za-z0-9.+~:-]+)?", pkg):
+    # A trailing `-` asks apt-get to remove the package, so it is refused.
+    if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*(:[a-z0-9-]+)?(=[A-Za-z0-9.+~:-]+)?", pkg) \
+            or pkg.split("=", 1)[0].split(":", 1)[0].endswith("-"):
         sys.exit(f"apt entry {pkg!r} must be a package name, optionally :arch and =version")
 # Names the engine itself publishes, or that would change who the session is,
 # cannot come from a manifest.
@@ -376,6 +425,13 @@ for name, value in doc.get("env", {}).items():
         sys.exit(f"env name {name} is reserved")
     if not isinstance(value, str):
         sys.exit(f"env.{name} must be a string")
+    # An environment string cannot hold NUL; Bash would drop it silently.
+    if "\0" in value:
+        sys.exit(f"env.{name} contains a NUL byte")
+    # The engine reads values back through command substitution, which drops
+    # trailing newlines, so such a value would arrive changed.
+    if value.endswith(("\n", "\r")):
+        sys.exit(f"env.{name} ends with a newline")
     if "{venv}" in value and "python" not in doc:
         sys.exit(f"env.{name} names {{venv}}, but the manifest declares no python section")
 for spec in doc.get("binaries", []):
@@ -386,7 +442,7 @@ for spec in doc.get("binaries", []):
             sys.exit(f"binaries entry {spec.get('name', '?')!r} has no {field}")
     if not re.fullmatch(r"[0-9a-f]{64}", spec["sha256"]):
         sys.exit(f"binaries entry {spec['name']!r} sha256 is not 64 lowercase hex digits")
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", spec["name"]) or not re.fullmatch(r"[A-Za-z0-9._+-]+", spec["version"]):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", spec["name"]) or not re.fullmatch(r"[A-Za-z0-9._+-]+", spec["version"]):
         sys.exit(f"binaries entry {spec['name']!r} has an unsafe name or version")
     if spec.get("archive", "none") not in ("zip", "tar.gz", "tgz", "none"):
         sys.exit(f"binaries entry {spec['name']!r} archive must be zip, tar.gz, tgz or none")
@@ -425,7 +481,8 @@ known(node, "node")
 ENGINE_COMMANDS = {"apt-get", "awk", "basename", "bash", "cat", "comm", "curl", "cut", "date",
                    "dirname", "dpkg-query", "env", "flock", "git", "grep", "head",
                    "id", "install", "ln", "mkdir", "mktemp", "mv", "printf", "readlink",
-                   "rm", "sed", "sh", "sha256sum", "sort", "tar", "timeout", "tr", "wc"}
+                   "realpath", "rm", "sed", "sh", "sha256sum", "sort", "stat", "tar", "timeout",
+                   "tr", "wc"}
 names = set()
 for spec in doc.get("binaries", []):
     known(spec, "binaries entry")
@@ -459,6 +516,15 @@ VALUE_OPTS = {"-r", "--requirement", "-c", "--constraint", "-i", "--index-url",
               "--python", "--only-binary", "--no-binary", "--target", "--prefix",
               "--config-settings", "-C", "--trusted-host", "--upgrade-strategy"}
 LOCATION_OPTS = ("--target", "--prefix", "--root", "--user", "--system", "--python")
+def file_path(target):
+    """A file: URL as the filesystem path pip installs from (percent-escapes
+    decoded, file:///abs as /abs); anything else unchanged."""
+    if not target.startswith("file:"):
+        return target
+    from urllib.parse import unquote, urlparse
+    return unquote(urlparse(target).path)
+
+
 def direct_target(spec):
     """The target of a PEP 508 direct reference ("pkg @ file:///x.whl"),
     or the spec itself when it is not one."""
@@ -494,7 +560,7 @@ for where, entries in (("python.packages", py.get("packages") or []),
                 continue
             target = direct_target(tok)
             target = target.split("[", 1)[0] if target == tok else target
-            target = target[len("file:"):] if target.startswith("file:") else target
+            target = file_path(target)
             if "://" not in target and os.path.isdir(os.path.join(root, target)):
                 sys.exit(f"{where} entry {entry!r} installs the local project {target!r} without -e")
 PY
@@ -602,6 +668,28 @@ if "uv_sync" in py:
                 if member not in excluded and os.path.isfile(os.path.join(member, "pyproject.toml")):
                     inputs.add(os.path.relpath(os.path.join(member, "pyproject.toml"), root))
 INCLUDE_FLAGS = ("-r", "--requirement", "-c", "--constraint")
+def flow_items(text):
+    """The entries of a YAML flow list (`[a, 'b/{c,d}']`), split on the
+    commas outside quotes and braces."""
+    items, cur, depth, quote = [], "", 0, ""
+    for ch in text.strip().strip("[]"):
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            items.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    items.append(cur)
+    return [i.strip().strip("'\"") for i in items]
+
+
 def pnpm_members(path):
     """The `packages` globs of a pnpm-workspace.yaml, read without a YAML
     library: a block list (`- 'apps/*'`) or a flow list (`[a, b]`)."""
@@ -609,21 +697,50 @@ def pnpm_members(path):
         lines = open(path, encoding="utf-8").read().splitlines()
     except (OSError, UnicodeDecodeError):
         return []
-    found, inside = [], False
+    found, inside, flow = [], False, None
     for line in lines:
         text = line.split("#", 1)[0].rstrip()
         if not text.strip():
+            continue
+        if flow is not None:
+            # A flow list may continue over several lines until its `]`.
+            flow += " " + text.strip()
+            if "]" in text:
+                found += flow_items(flow)
+                flow = None
             continue
         if not line[:1].isspace():
             key, _, rest = text.partition(":")
             inside = key.strip() == "packages"
             rest = rest.strip()
             if inside and rest.startswith("["):
-                found += [m.strip().strip("'\"") for m in rest.strip("[]").split(",")]
+                if "]" in rest:
+                    found += flow_items(rest)
+                else:
+                    flow = rest
                 inside = False
         elif inside and text.strip().startswith("-"):
             found.append(text.strip()[1:].strip().strip("'\""))
     return [m for m in found if m]
+
+
+def braces(pattern):
+    """Expand {a,b} alternatives, which pnpm's globbing accepts and Python's
+    glob does not."""
+    m = re.search(r"\{([^{}]*)\}", pattern)
+    if not m:
+        return [pattern]
+    return [x for alt in m.group(1).split(",")
+            for x in braces(pattern[:m.start()] + alt + pattern[m.end():])]
+
+
+def file_path(target):
+    """A file: URL as the filesystem path pip installs from (percent-escapes
+    decoded, file:///abs as /abs); anything else unchanged."""
+    if not target.startswith("file:"):
+        return target
+    from urllib.parse import unquote, urlparse
+    return unquote(urlparse(target).path)
 
 
 def direct_target(spec):
@@ -666,7 +783,7 @@ for tokens in [shlex.split(e.lstrip("?")) for e in py.get("install") or []] + \
             continue
         target = direct_target(tok)
         target = target.split("[", 1)[0] if target == tok else target
-        target = target[len("file:"):] if target.startswith("file:") else target
+        target = file_path(target)
         if "://" not in target and os.path.isfile(os.path.join(root, target)):
             local_files.append(os.path.normpath(target))
     # An editable subproject's packaging metadata decides its dependencies
@@ -679,7 +796,7 @@ for tokens in [shlex.split(e.lstrip("?")) for e in py.get("install") or []] + \
         elif flag not in ("-e", "--editable"):
             continue
         value = value.split("[", 1)[0]
-        value = value[len("file:"):] if value.startswith("file:") else value
+        value = file_path(value)
         if value and "://" not in value and os.path.isdir(os.path.join(root, value)):
             for name in ("pyproject.toml", "setup.py", "setup.cfg"):
                 local_files.append(os.path.normpath(os.path.join(value, name)))
@@ -726,7 +843,7 @@ while pending:
             else:
                 target = direct_target(words[0])
             target = target.split(";", 1)[0].split("[", 1)[0]
-            target = target[len("file:"):] if target.startswith("file:") else target
+            target = file_path(target)
             if not target or "://" in target:
                 continue
             for base in ("", os.path.dirname(rel)):
@@ -745,7 +862,21 @@ while pending:
                     local_files.extend(os.path.normpath(f) for f in listed.decode().split("\0") if f)
 inputs.update(local_files)
 members = set()
-for directory in (node.get("dirs") or ["."]) if node and scope in ("all", "members") else []:
+node_dirs = list(node.get("dirs") or ["."]) if node and scope in ("all", "members") else []
+# pnpm installs a whole workspace from its root, so a node directory inside
+# a pnpm workspace brings the enclosing root's lockfile and members along.
+if node.get("manager") == "pnpm":
+    for directory in list(node_dirs):
+        up = os.path.normpath(directory)
+        while up not in (".", ""):
+            up = os.path.dirname(up) or "."
+            if os.path.isfile(os.path.join(root, up, "pnpm-workspace.yaml")):
+                if up not in node_dirs:
+                    node_dirs.append(up)
+                break
+            if up == ".":
+                break
+for directory in node_dirs:
     for name in ("package.json", "package-lock.json", "npm-shrinkwrap.json",
                  "pnpm-lock.yaml", "pnpm-workspace.yaml", ".pnpmfile.cjs", "bun.lock",
                  "bun.lockb", "bunfig.toml", ".npmrc"):
@@ -759,8 +890,8 @@ for directory in (node.get("dirs") or ["."]) if node and scope in ("all", "membe
         workspaces = workspaces.get("packages") or []
     workspaces = list(workspaces) if isinstance(workspaces, list) else []
     workspaces += pnpm_members(os.path.join(root, directory, "pnpm-workspace.yaml"))
-    for member in workspaces:
-        if isinstance(member, str) and not member.startswith("!"):
+    for member in (m for pattern in workspaces if isinstance(pattern, str) for m in braces(pattern)):
+        if not member.startswith("!"):
             for path in glob.glob(os.path.join(root, directory, member, "package.json"), recursive=True):
                 inputs.add(os.path.relpath(path, root))
                 members.add(os.path.relpath(os.path.dirname(path), root))
@@ -791,6 +922,14 @@ if scope == "python":
     # apt joins it as well: a newly installed system library or header lets
     # pip build a package differently than in the old virtualenv.
     digest.update(json.dumps([py, doc.get("env") or {}, doc.get("apt") or []], sort_keys=True).encode())
+    # Installer settings the session inherits (an image-wide PIP_INDEX_URL,
+    # say) change what gets installed too. Names the engine sets itself or
+    # publishes from the manifest are left out: their value is the same on
+    # every run, but they reach a resumed session and not a fresh one.
+    own = {"UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "PIP_CACHE_DIR", "UV_PYTHON_INSTALL_DIR",
+           "UV_NO_PROGRESS", "PIP_PROGRESS_BAR", "PIP_DISABLE_PIP_VERSION_CHECK"} | set(doc.get("env") or {})
+    digest.update(json.dumps(sorted((k, v) for k, v in os.environ.items()
+                                    if k.startswith(("PIP_", "UV_")) and k not in own)).encode())
 else:
     for path in [engine, manifest]:
         digest.update(open(path, "rb").read())
@@ -798,7 +937,9 @@ for rel in sorted(inputs):
     full = os.path.join(root, rel)
     digest.update(rel.encode() + b"\0")
     digest.update(open(full, "rb").read() if os.path.isfile(full) else b"<absent>")
-    digest.update(b"\0")
+    # The mode joins the content: a post step that runs an input script
+    # behaves differently once its executable bit changes.
+    digest.update(b"\0" + (oct(os.stat(full).st_mode).encode() if os.path.exists(full) else b"-") + b"\0")
 print(digest.hexdigest())
 PY
 }
@@ -852,6 +993,9 @@ VENV_ENV=()
 # half-built venv's python3, and a venv left behind by an earlier manifest
 # cannot shadow the base interpreter.
 env_export PATH "$BIN:$BASE_PATH"
+# The next run of this checkout learns which root this one published under,
+# so a changed SESSION_BOOTSTRAP_ROOT can still clear it.
+env_export SESSION_BOOTSTRAP_PUBLISHED_ROOT "$ROOT"
 # unpublish_python: clear what an earlier session published for Python.
 unpublish_python() {
     local pair
@@ -1034,14 +1178,23 @@ probe_binaries() {
     done < <(mf binaries)
     return 0
 }
+# probe_outputs [cached]: every declared output exists, and a {bin} output
+# is an executable file. A cached run also needs each {bin} output to have
+# the content the last good run recorded, so a command a later session
+# replaced is rebuilt by its post step instead of staying on PATH.
 probe_outputs() {
     local out path
     while IFS= read -r out; do
         [ -n "$out" ] || continue
         path="$(expand "$out")"
         [ -e "$path" ] || return 1
-        # A {bin} output is a command on PATH, so it must run.
-        case "$out" in '{bin}/'*) [ -f "$path" ] && [ -x "$path" ] || return 1 ;; esac
+        case "$out" in
+            '{bin}/'*)
+                [ -f "$path" ] && [ -x "$path" ] || return 1
+                if [ "${1:-}" = cached ]; then
+                    grep -qxF "$(sha256sum <"$path" | cut -d' ' -f1) $path" "$OUTPUT_DIGESTS" 2>/dev/null || return 1
+                fi ;;
+        esac
     done < <(mf outputs)
     return 0
 }
@@ -1053,6 +1206,31 @@ probe_apt() {
     done < <(mf apt)
     return 0
 }
+# Every write is meant to land out of tree or under a gitignored path. The
+# status before and after shows any install or post step that broke that (a
+# nested workspace whose install writes the root node_modules/, say).
+# Each dirty path carries the hash of its content, so a step that rewrites a
+# file that was already modified is caught, not only a change in its status.
+# -z keeps a path with a space or a quote as written, where the display form
+# would quote it and the hash would read "absent" on both sides.
+tree_status() {
+    git -C "$PROJECT_DIR" status --porcelain -z -uall 2>/dev/null | {
+        local rec xy path
+        while IFS= read -r -d '' rec; do
+            xy="${rec:0:2}"
+            path="${rec:3}"
+            # A rename or copy is followed by its source path.
+            case "$xy" in R*|C*) IFS= read -r -d '' _ || true ;; esac
+            # The mode joins the hash, so a step that only flips the
+            # executable bit of an already modified file is caught too.
+            printf '%s %q\t%s %s\n' "$xy" "$path" "$(git -C "$PROJECT_DIR" hash-object -- "$path" 2>/dev/null || echo -)" \
+                "$(stat -c %a -- "$PROJECT_DIR/$path" 2>/dev/null || echo -)"
+        done
+    } | sort
+}
+# Taken before the cached probes too: a probe that imports a module with
+# side effects in the checkout must not leave a cached run behind.
+TREE_BEFORE="$(tree_status)"
 # A fingerprint that cannot be computed (an unreadable input, say) is a
 # failure: it is reported and never written as a valid cache key.
 if ! CURRENT_FINGERPRINT="$(fingerprint 2>>"$LOG")" || [ ${#CURRENT_FINGERPRINT} -ne 64 ]; then
@@ -1061,7 +1239,8 @@ if ! CURRENT_FINGERPRINT="$(fingerprint 2>>"$LOG")" || [ ${#CURRENT_FINGERPRINT}
     CURRENT_FINGERPRINT=""
 fi
 if [ "${#MISSING[@]}" -eq 0 ] && [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$CURRENT_FINGERPRINT" ] \
-    && probe_apt && probe_python && probe_node && probe_binaries && probe_outputs; then
+    && probe_apt && probe_python && probe_node && probe_binaries && probe_outputs cached \
+    && [ "$(tree_status)" = "$TREE_BEFORE" ]; then
     publish_python
     if [ "$ENV_FILE_OK" = 1 ]; then
         say "ready (cached) repo=$REPO python=$([ "$WANT_PYTHON" = 1 ] && vpy --version 2>&1 | cut -d' ' -f2 || echo none) log=$LOG"
@@ -1081,26 +1260,6 @@ if [ -f "$OUTPUTS_STATE" ]; then
         rm -f "$old" && say "removed undeclared output $old"
     done <"$OUTPUTS_STATE"
 fi
-# Every write is meant to land out of tree or under a gitignored path. The
-# status before and after shows any install or post step that broke that (a
-# nested workspace whose install writes the root node_modules/, say).
-# Each dirty path carries the hash of its content, so a step that rewrites a
-# file that was already modified is caught, not only a change in its status.
-# -z keeps a path with a space or a quote as written, where the display form
-# would quote it and the hash would read "absent" on both sides.
-tree_status() {
-    git -C "$PROJECT_DIR" status --porcelain -z -uall 2>/dev/null | {
-        local rec xy path
-        while IFS= read -r -d '' rec; do
-            xy="${rec:0:2}"
-            path="${rec:3}"
-            # A rename or copy is followed by its source path.
-            case "$xy" in R*|C*) IFS= read -r -d '' _ || true ;; esac
-            printf '%s %q\t%s\n' "$xy" "$path" "$(git -C "$PROJECT_DIR" hash-object -- "$path" 2>/dev/null || echo -)"
-        done
-    } | sort
-}
-TREE_BEFORE="$(tree_status)"
 
 # ---------------------------------------------------------------------- apt
 # System packages come first: a Python probe may import a distro module
@@ -1198,7 +1357,7 @@ done < <(mf binaries)
 # Drop links to pinned tools the manifest no longer declares, so a removed
 # binary does not stay on PATH. Links a post step made elsewhere are kept.
 declared=" $(mf binaries | while IFS= read -r spec; do jf "$spec" name; done | tr '\n' ' ') "
-for link in "$BIN"/*; do
+for link in "$BIN"/* "$BIN"/.[!.]*; do
     [ -L "$link" ] || continue
     case "$(readlink "$link")" in "$TOOLS_DIR"/*) ;; *) continue ;; esac
     case "$declared" in *" $(basename "$link") "*) ;; *) rm -f "$link"; say "removed undeclared tool link $(basename "$link")" ;; esac
@@ -1479,10 +1638,19 @@ done < <(mf post)
 
 # ------------------------------------------------------------------ summary
 # Symmetric: a step that adds, removes or restores a path all count.
-dirtied="$(comm -3 <(printf '%s\n' "$TREE_BEFORE") <(tree_status) | sed 's/^\t//' | grep . | cut -c4- | cut -f1 | sort -u | head -5 | tr '\n' ' ')"
+TREE_AFTER="$(tree_status)"
+dirtied="$(comm -3 <(printf '%s\n' "$TREE_BEFORE") <(printf '%s\n' "$TREE_AFTER") | sed 's/^\t//' | grep . | cut -c4- | cut -f1 | sort -u | head -5 | tr '\n' ' ')"
 if [ -n "$dirtied" ]; then
     say "FAILED provisioning changed the working tree: $dirtied"
     MISSING+=("tree")
+    # Remember what this run left dirty: the next run would otherwise take it
+    # as its baseline and cache over it.
+    comm -13 <(printf '%s\n' "$TREE_BEFORE") <(printf '%s\n' "$TREE_AFTER") | grep . >"$DIRTIED_STATE"
+elif [ -s "$DIRTIED_STATE" ] && grep -qxFf "$DIRTIED_STATE" <(printf '%s\n' "$TREE_AFTER"); then
+    say "FAILED an earlier provisioning run changed the working tree and the change is still there: $(cut -c4- "$DIRTIED_STATE" | cut -f1 | head -5 | tr '\n' ' ')"
+    MISSING+=("tree")
+else
+    rm -f "$DIRTIED_STATE"
 fi
 if [ "${#MISSING[@]}" -eq 0 ] && ! probe_outputs; then
     say "FAILED a declared output is missing after provisioning: $(mf outputs | tr '\n' ' ')"
@@ -1501,6 +1669,9 @@ if [ "$ENV_FILE_OK" = 0 ] && [[ " ${MISSING[*]} " != *" env-file "* ]]; then
 fi
 if [ "${#MISSING[@]}" -eq 0 ] && [ -n "$CURRENT_FINGERPRINT" ] && [ "$FOREIGN_STALE" = 0 ]; then
     printf '%s\n' "$CURRENT_FINGERPRINT" >"$STATE"
+    mf outputs | while IFS= read -r out; do
+        case "$out" in '{bin}/'*) path="$(expand "$out")"; printf '%s %s\n' "$(sha256sum <"$path" | cut -d' ' -f1)" "$path" ;; esac
+    done >"$OUTPUT_DIGESTS"
 fi
 printf '%s\n' "$current_outputs" >"$OUTPUTS_STATE"
 py_ver="none"
