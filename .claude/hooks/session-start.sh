@@ -962,7 +962,15 @@ expand() {
 ENV_FILE_OK=1
 # vpy ARGS: the virtualenv's interpreter, bounded. A .pth file or
 # sitecustomize that blocks would otherwise hang the engine past its deadline.
-vpy() { timeout -k 5 60 "$VENV/bin/python" "$@"; }
+# Each call gets at most 60 s and no more than the budget left, with a 5 s
+# floor so a healthy interpreter still answers once the budget is spent;
+# several blocked calls must not outlast the hook timeout together.
+vpy() {
+    local left=$(( DEADLINE - $(date +%s) ))
+    [ "$left" -le 60 ] || left=60
+    [ "$left" -ge 5 ] || left=5
+    timeout -k 5 "$left" "$VENV/bin/python" "$@"
+}
 env_export() {
     if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
         printf 'export %s=%q\n' "$1" "$2" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
