@@ -179,15 +179,28 @@ fi
 # alone. The recorded names stay behind as tombstones, so every other session
 # of the checkout that still carries them can clear them too. Returns 1 when
 # there was nothing to clear and 2 when CLAUDE_ENV_FILE could not be written.
+# venv_value_ours VALUE: VALUE is empty or names a virtualenv this engine
+# published, by the same tests that decide INHERITED_VENV_OURS.
+venv_value_ours() {
+    [ -n "$1" ] || return 0
+    case "$1" in "$ROOT"/*) return 0 ;; esac
+    if [ -n "$OLD_ROOT" ]; then case "$1" in "$OLD_ROOT"/*) return 0 ;; esac; fi
+    [ -f "$1/$OWNER_MARK" ] && return 0
+    [ "$(cat "$ROOT/state/$SLOT.venv-path" 2>/dev/null)" = "$1" ]
+}
 clear_published() {
-    local published=0 name
+    local published=0 name unsets=""
     if [ -f "$ENV_NAMES" ] || [ -f "$STATE" ] || [ "$INHERITED_VENV_OURS" = 1 ]; then
         published=1
     fi
     [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$published" = 1 ] || return 1
+    # A virtualenv the user activated after an earlier run keeps its
+    # variables; only values this engine published are unset.
+    venv_value_ours "${VIRTUAL_ENV:-}" && unsets="VIRTUAL_ENV"
+    venv_value_ours "${UV_PROJECT_ENVIRONMENT:-}" && unsets="${unsets:+$unsets }UV_PROJECT_ENVIRONMENT"
     {
         printf 'export PATH=%q\n' "$BASE_PATH"
-        printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n'
+        [ -z "$unsets" ] || printf 'unset %s\n' "$unsets"
         if [ -f "$ENV_NAMES" ]; then
             while IFS= read -r name; do
                 [ -n "$name" ] && printf 'unset %s\n' "$name"
