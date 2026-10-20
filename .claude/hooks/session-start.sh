@@ -143,7 +143,9 @@ if [ -n "${VIRTUAL_ENV:-}" ]; then
     case "$VIRTUAL_ENV" in "$ROOT"/*) INHERITED_VENV_OURS=1 ;; esac
     [ -n "$OLD_ROOT" ] && case "$VIRTUAL_ENV" in "$OLD_ROOT"/*) INHERITED_VENV_OURS=1 ;; esac
     [ -f "$VIRTUAL_ENV/.session-bootstrap-owned" ] && INHERITED_VENV_OURS=1
-    [ -f "$ROOT/state/$SLOT.python" ] || [ -f "$ROOT/state/$SLOT.python.probe-failed" ] && INHERITED_VENV_OURS=1
+    # The state records which virtualenv a run published, so one the user
+    # activated afterwards is never mistaken for it.
+    [ "$(cat "$ROOT/state/$SLOT.venv-path" 2>/dev/null)" = "$VIRTUAL_ENV" ] && INHERITED_VENV_OURS=1
 fi
 if [ "$INHERITED_VENV_OURS" = 1 ]; then
     BASE_PATH="$(strip_path "$BASE_PATH" "$VIRTUAL_ENV/bin")"
@@ -890,9 +892,15 @@ for directory in node_dirs:
         workspaces = workspaces.get("packages") or []
     workspaces = list(workspaces) if isinstance(workspaces, list) else []
     workspaces += pnpm_members(os.path.join(root, directory, "pnpm-workspace.yaml"))
-    for member in (m for pattern in workspaces if isinstance(pattern, str) for m in braces(pattern)):
+    # A `!pattern` excludes what the other patterns matched, as in pnpm.
+    patterns = [m for pattern in workspaces if isinstance(pattern, str) for m in braces(pattern)]
+    excluded = {os.path.normpath(path) for pattern in patterns if pattern.startswith("!")
+                for path in glob.glob(os.path.join(root, directory, pattern[1:], "package.json"), recursive=True)}
+    for member in patterns:
         if not member.startswith("!"):
             for path in glob.glob(os.path.join(root, directory, member, "package.json"), recursive=True):
+                if os.path.normpath(path) in excluded:
+                    continue
                 inputs.add(os.path.relpath(path, root))
                 members.add(os.path.relpath(os.path.dirname(path), root))
     for patch in glob.glob(os.path.join(root, directory, "patches", "**"), recursive=True):
@@ -1019,6 +1027,7 @@ publish_python() {
     if [ -x "$VENV/bin/python" ] && vpy -c '' >/dev/null 2>&1; then
         env_export PATH "$BIN:$VENV/bin:$BASE_PATH"
         env_export VIRTUAL_ENV "$VENV"
+        printf '%s\n' "$VENV" >"$ROOT/state/$SLOT.venv-path"
         env_export UV_PROJECT_ENVIRONMENT "$VENV"
         local pair
         for pair in "${VENV_ENV[@]}"; do
@@ -1322,7 +1331,9 @@ while IFS= read -r spec; do
             tar.gz|tgz) run tar -xzf "$tmp/download" -C "$tmp" "$member" || extracted=0 ;;
             none) mv "$tmp/download" "$tmp/$member" || extracted=0 ;;
         esac
-        if [ "$extracted" = 0 ] || [ ! -f "$tmp/$member" ]; then
+        # A symlink member would bring in host bytes the checksum never
+        # covered, so the member must be a regular file inside the archive.
+        if [ "$extracted" = 0 ] || [ ! -f "$tmp/$member" ] || [ -L "$tmp/$member" ]; then
             say "FAILED extract $name ($archive member=$member)"
             MISSING+=("$name"); rm -rf "$tmp"; continue
         fi
