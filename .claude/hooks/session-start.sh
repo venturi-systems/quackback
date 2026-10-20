@@ -98,8 +98,23 @@ STATE="$ROOT/state/$SLOT.fingerprint"
 LOCK="$ROOT/state/$SLOT.lock"
 CACHE_DIR="$ROOT/cache"
 mkdir -p "$BIN" "$TOOLS_DIR" "$ROOT/venv" "$ROOT/logs" "$ROOT/state" "$CACHE_DIR"
-BASE_PATH="$PATH"
+# strip_path PATH PREFIX: PATH without the entries equal to or under PREFIX. A
+# resumed or cleared session inherits the PATH an earlier run published, so its
+# bin and virtualenv entries are removed before this run publishes its own.
+strip_path() {
+    local entry out="" IFS=:
+    for entry in $1; do
+        case "$entry" in "$2"|"$2"/*) continue ;; esac
+        out="${out:+$out:}$entry"
+    done
+    printf '%s' "$out"
+}
+BASE_PATH="$(strip_path "$PATH" "$ROOT")"
 export PATH="$BIN:$BASE_PATH"
+# The manifest's env entries reach the session and every step this engine
+# runs, never this shell: a name such as VENV or WANT_PYTHON must not be able
+# to change what the engine itself does.
+STEP_ENV=()
 export DEBIAN_FRONTEND=noninteractive CI=1 npm_config_yes=true PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_NO_PROGRESS=1 PIP_PROGRESS_BAR=off \
     UV_CACHE_DIR="$CACHE_DIR/uv" PIP_CACHE_DIR="$CACHE_DIR/pip" npm_config_cache="$CACHE_DIR/npm" \
@@ -240,7 +255,9 @@ run() {
         return 124
     fi
     [ "$left" -lt "$STEP_TIMEOUT" ] || left="$STEP_TIMEOUT"
-    timeout "$left" "$@" >>"$LOG" 2>&1
+    # No step reads the manifest loops' input, and none keeps the lock: a
+    # background process a step leaves behind must not hold fd 9 after exit.
+    timeout "$left" env "${STEP_ENV[@]}" "$@" </dev/null >>"$LOG" 2>&1 9>&-
 }
 
 # mf KEY [SUBKEY]: print one manifest value per line (arrays expand; scalars
@@ -379,29 +396,48 @@ if [ -n "$venv_rel" ]; then
     fi
 fi
 export SESSION_BOOTSTRAP_ROOT="$ROOT" SESSION_BOOTSTRAP_BIN="$BIN" SESSION_BOOTSTRAP_VENV="$VENV"
+# An in-tree env_dir lies outside $ROOT, so strip its bin directory as well.
+BASE_PATH="$(strip_path "$BASE_PATH" "$VENV/bin")"
+export PATH="$BIN:$BASE_PATH"
 
 # ---------------------------------------------------------------- environment
 # Exported first so a cached run still re-publishes PATH into the new session.
-# The virtualenv joins PATH only while the manifest declares Python, so a venv
-# left behind by an earlier manifest cannot shadow the base interpreter.
-if [ "$WANT_PYTHON" = 1 ]; then
-    env_export PATH "$BIN:$VENV/bin:$BASE_PATH"
-    env_export VIRTUAL_ENV "$VENV"
-    env_export UV_PROJECT_ENVIRONMENT "$VENV"
-else
-    env_export PATH "$BIN:$BASE_PATH"
-    # A previous manifest may have declared Python: clear what it published and
-    # remove its out-of-tree environment, so nothing stale shadows the base
-    # interpreter in this or a later session.
+# The virtualenv is published only once it exists and runs (publish_python),
+# so neither the session nor this engine's own helpers ever run a broken or
+# half-built venv's python3, and a venv left behind by an earlier manifest
+# cannot shadow the base interpreter.
+env_export PATH "$BIN:$BASE_PATH"
+# unpublish_python: clear what an earlier session published for Python.
+unpublish_python() {
     if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
         printf 'unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT\n' >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
     fi
     unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT
+}
+# publish_python: put a working virtualenv on the session PATH, or clear it.
+publish_python() {
+    [ "$WANT_PYTHON" = 1 ] || return 0
+    if [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c '' >/dev/null 2>&1; then
+        env_export PATH "$BIN:$VENV/bin:$BASE_PATH"
+        env_export VIRTUAL_ENV "$VENV"
+        env_export UV_PROJECT_ENVIRONMENT "$VENV"
+    else
+        unpublish_python
+    fi
+}
+if [ "$WANT_PYTHON" != 1 ]; then
+    # A previous manifest may have declared Python: clear what it published and
+    # remove its out-of-tree environment.
+    unpublish_python
     [ -d "$ROOT/venv/$SLOT" ] && rm -rf "${ROOT:?}/venv/${SLOT:?}"
 fi
 while IFS= read -r name; do
     [ -n "$name" ] || continue
-    env_export "$name" "$(expand "$(mf env "$name")")"
+    value="$(expand "$(mf env "$name")")"
+    if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+        printf 'export %s=%q\n' "$name" "$value" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+    fi
+    STEP_ENV+=("$name=$value")
 done < <(python3 -c 'import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get("env",{})]' "$MANIFEST")
 # The session only sees PATH and the manifest's variables through
 # CLAUDE_ENV_FILE; an install it cannot publish is not ready.
@@ -501,8 +537,13 @@ if ! CURRENT_FINGERPRINT="$(fingerprint 2>>"$LOG")" || [ ${#CURRENT_FINGERPRINT}
 fi
 if [ "${#MISSING[@]}" -eq 0 ] && [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$CURRENT_FINGERPRINT" ] \
     && probe_apt && probe_python && probe_node && probe_binaries && probe_outputs; then
-    say "ready (cached) repo=$REPO python=$([ "$WANT_PYTHON" = 1 ] && "$VENV/bin/python" --version 2>&1 | cut -d' ' -f2 || echo none) log=$LOG"
-    exit 0
+    publish_python
+    if [ "$ENV_FILE_OK" = 1 ]; then
+        say "ready (cached) repo=$REPO python=$([ "$WANT_PYTHON" = 1 ] && "$VENV/bin/python" --version 2>&1 | cut -d' ' -f2 || echo none) log=$LOG"
+        exit 0
+    fi
+    say "FAILED could not write the session environment to CLAUDE_ENV_FILE=$CLAUDE_ENV_FILE"
+    MISSING+=("env-file")
 fi
 rm -f "$STATE"
 
@@ -560,20 +601,28 @@ if [ "$WANT_PYTHON" = 1 ]; then
         if [ "$(mf python system_site_packages)" = "true" ]; then
             venv_flags+=(--system-site-packages)
         fi
+        venv_rc=1
         if command -v uv >/dev/null 2>&1; then
             if [ -n "$interpreter" ]; then
-                run uv venv --seed "${venv_flags[@]}" --python "$interpreter" "$VENV"
+                run uv venv --seed "${venv_flags[@]}" --python "$interpreter" "$VENV" && venv_rc=0
             elif [ -n "$want_ver" ]; then
-                run uv venv --seed "${venv_flags[@]}" --python "$want_ver" "$VENV"
+                run uv venv --seed "${venv_flags[@]}" --python "$want_ver" "$VENV" && venv_rc=0
             else
-                run uv venv --seed "${venv_flags[@]}" "$VENV"
+                run uv venv --seed "${venv_flags[@]}" "$VENV" && venv_rc=0
             fi
+        elif [ -n "$interpreter" ] || [ -z "$want_ver" ]; then
+            run "${interpreter:-python3}" -m venv "${venv_flags[@]}" "$VENV" && venv_rc=0
         else
-            "${interpreter:-python3}" -m venv "${venv_flags[@]}" "$VENV" >>"$LOG" 2>&1
+            say "FAILED python $want_ver is not installed and uv is unavailable to provide it"
         fi
-        if [ ! -x "$VENV/bin/python" ]; then
+        # A creation step that failed part-way (a seed that never installed
+        # pip, say) can still leave bin/python behind: the exit status
+        # decides, and the partial environment this run created is removed so
+        # the next run rebuilds it rather than trusting it.
+        if [ "$venv_rc" -ne 0 ] || [ ! -x "$VENV/bin/python" ]; then
             say "FAILED python venv at $VENV (see $LOG)"
             MISSING+=("python-venv")
+            [ -f "$VENV/pyvenv.cfg" ] && rm -rf "${VENV:?}"
         fi
     fi
     if [ "$WANT_PYTHON" = 1 ] && [ -x "$VENV/bin/python" ]; then
@@ -672,13 +721,15 @@ while IFS= read -r spec; do
             say "FAILED sha256 mismatch for $name $version; refusing to install"
             MISSING+=("$name"); rm -rf "$tmp"; continue
         fi
+        # A failed extraction can leave a partial member behind, so the exit
+        # status decides, not the file's presence alone.
+        extracted=1
         case "$archive" in
-            zip) python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' "$tmp/download" "$member" "$tmp" >>"$LOG" 2>&1 ;;
-            tar.gz|tgz) tar -xzf "$tmp/download" -C "$tmp" "$member" >>"$LOG" 2>&1 ;;
-            none) mv "$tmp/download" "$tmp/$member" ;;
-            *) say "FAILED unknown archive type $archive for $name"; MISSING+=("$name"); rm -rf "$tmp"; continue ;;
+            zip) run python3 -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extract(sys.argv[2], sys.argv[3])' "$tmp/download" "$member" "$tmp" || extracted=0 ;;
+            tar.gz|tgz) run tar -xzf "$tmp/download" -C "$tmp" "$member" || extracted=0 ;;
+            none) mv "$tmp/download" "$tmp/$member" || extracted=0 ;;
         esac
-        if [ ! -f "$tmp/$member" ]; then
+        if [ "$extracted" = 0 ] || [ ! -f "$tmp/$member" ]; then
             say "FAILED extract $name ($archive member=$member)"
             MISSING+=("$name"); rm -rf "$tmp"; continue
         fi
@@ -751,6 +802,11 @@ done < <(mf post)
 if [ "${#MISSING[@]}" -eq 0 ] && ! probe_outputs; then
     say "FAILED a declared output is missing after provisioning: $(mf outputs | tr '\n' ' ')"
     MISSING+=("outputs")
+fi
+publish_python
+if [ "$ENV_FILE_OK" = 0 ] && [[ " ${MISSING[*]} " != *" env-file "* ]]; then
+    say "FAILED could not write the session environment to CLAUDE_ENV_FILE=$CLAUDE_ENV_FILE"
+    MISSING+=("env-file")
 fi
 if [ "${#MISSING[@]}" -eq 0 ] && [ -n "$CURRENT_FINGERPRINT" ]; then
     printf '%s\n' "$CURRENT_FINGERPRINT" >"$STATE"
