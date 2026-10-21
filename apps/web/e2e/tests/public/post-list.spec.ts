@@ -588,7 +588,7 @@ test.describe('Post List - Sort Order Verification', () => {
   test('New and Top request their sort and render the returned post order', async ({ page }) => {
     // Bootstrap the real portal on Trending. Only subsequent list RPCs are fixtures;
     // database chronology remains covered by the controlled PostgreSQL contract.
-    await page.goto('/')
+    await page.goto('/?sort=trending')
     await expectSettledPostList(page)
 
     const newer = {
@@ -778,7 +778,7 @@ test.describe('Post List - Search Accuracy', () => {
     }
   })
 
-  test('clearing search restores a larger result set', async ({ page }) => {
+  test('clearing search removes its filter without reducing results', async ({ page }) => {
     // Start with search active
     await page.goto('/?search=dark+mode')
     const postCards = await expectSettledPostList(page)
