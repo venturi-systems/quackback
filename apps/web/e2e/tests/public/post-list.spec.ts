@@ -800,7 +800,6 @@ test.describe('Post List - Search Accuracy', () => {
 
     await expect(page).toHaveURL(/search=/, { timeout: 5000 })
     await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(500)
 
     // Should show the specific "no match" message rather than just a blank list
     const noMatchMsg = page.getByText('No posts match your filters.')

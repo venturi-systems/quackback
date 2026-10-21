@@ -8,9 +8,8 @@ describe('settings.state column', () => {
     expect(column.getSQLType()).toBe('text')
     expect(column.notNull).toBe(true)
     expect(column.default).toBe('active')
-  })
 
-  it('restricts selected state values to the lifecycle union', () => {
+    // The database package typecheck also verifies the selected lifecycle union.
     expectTypeOf<(typeof settings.$inferSelect)['state']>().toEqualTypeOf<
       'active' | 'suspended' | 'deleting'
     >()
