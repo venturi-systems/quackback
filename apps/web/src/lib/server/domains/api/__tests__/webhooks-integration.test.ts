@@ -5,7 +5,7 @@
  * 1. Dev server running: `bun run dev`
  * 2. Valid API key in database
  *
- * Run with: API_KEY=qb_xxx bun run test apps/web/src/lib/api/__tests__/webhooks-integration.test.ts
+ * Run with: API_KEY=qb_xxx bun run test:api
  *
  * To skip these tests (CI without server): SKIP_INTEGRATION=true bun run test
  */
