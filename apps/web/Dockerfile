@@ -14,7 +14,7 @@
 
 # Base image with Bun. Pin the multi-architecture manifest so rebuilds use the
 # exact reviewed image rather than a mutable registry tag.
-FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS base
+FROM oven/bun:1.4.3@sha256:ec06c3b6cea04192ae6770c434f668ca41d343ad19fa6472216c7b48be39c598 AS base
 WORKDIR /app
 
 # ============================================================================
@@ -80,14 +80,14 @@ RUN bun build packages/db/src/migrate.ts \
 # ============================================================================
 # Production runner
 # ============================================================================
-FROM oven/bun:1.4.2-alpine@sha256:d888c0ae6c86d7866ff10c5aafdd9077b36aee6455b33dd270fb93c0dd5cef6f AS runner-base
+FROM oven/bun:1.4.3-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349437206c6b0b7422373 AS runner-base
 
 # Retain the reviewed, upstream-signed packages in the build context. Alpine's
 # release repositories replace old package revisions, so networked exact pins
 # cannot reproduce this layer once an index advances. See docker/openssl/README.md.
 # The read-only mount keeps the archives out of the runtime image layers.
 RUN --network=none --mount=type=bind,source=docker/openssl,target=/opt/openssl,readonly \
-    case "$(cat /etc/alpine-release)" in 3.22.*) ;; *) echo "Review retained OpenSSL packages for this Alpine release" >&2; exit 1 ;; esac && \
+    case "$(cat /etc/alpine-release)" in 3.24.*) ;; *) echo "Review retained OpenSSL packages for this Alpine release" >&2; exit 1 ;; esac && \
     for package in libcrypto3 libssl3 openssl; do \
       if apk info --installed "$package>3.5.9-r0" >/dev/null; then \
         echo "Advance retained OpenSSL packages before replacing newer $package" >&2; exit 1; \

@@ -1,6 +1,6 @@
 # Retained OpenSSL packages
 
-These are unmodified upstream Alpine v3.22 packages for OpenSSL 3.5.9-r0,
+These are unmodified upstream Alpine v3.24 packages for OpenSSL 3.5.9-r0,
 retained so the digest-pinned Bun runner builds after Alpine removes an older
 package revision from its index. All six packages are signed by Alpine and
 verified during installation using the selected base image's trusted keys.
@@ -16,15 +16,15 @@ the resulting image layers.
 
 ## Provenance and license
 
-Captured on 2026-10-01 from:
+Captured on 2026-10-21 from:
 
-- https://dl-cdn.alpinelinux.org/alpine/v3.22/main/x86_64/
-- https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/
+- https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/
+- https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/
 
 Each directory supplied `libcrypto3-3.5.9-r0.apk`, `libssl3-3.5.9-r0.apk` and
 `openssl-3.5.9-r0.apk`. Their package metadata identifies Alpine source commit
-`b6d0d5c5639c0034e9073c39e9ff139e28e71818`:
-https://gitlab.alpinelinux.org/alpine/aports/-/tree/b6d0d5c5639c0034e9073c39e9ff139e28e71818/main/openssl
+`29b9ec24b1b5b39aeef51fa2a044210e2ec5258e`:
+https://gitlab.alpinelinux.org/alpine/aports/-/tree/29b9ec24b1b5b39aeef51fa2a044210e2ec5258e/main/openssl
 
 OpenSSL is licensed under Apache-2.0. `LICENSE.txt` is the unmodified upstream
 license from https://github.com/openssl/openssl/blob/openssl-3.5.9/LICENSE.txt.
