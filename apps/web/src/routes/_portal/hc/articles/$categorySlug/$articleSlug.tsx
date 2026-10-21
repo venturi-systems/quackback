@@ -209,6 +209,7 @@ function ArticleDetailPage() {
                   )}
                   {article.updatedAt && (
                     <span className="text-sm text-muted-foreground">
+                      Last updated{' '}
                       <span className="font-semibold text-foreground">
                         {formatDistanceToNow(new Date(article.updatedAt), { addSuffix: true })}
                       </span>
