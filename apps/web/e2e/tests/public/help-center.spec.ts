@@ -3,7 +3,9 @@ import { setHelpCenterContent, setHelpCenterEnabled } from '../../utils/access-h
 import { isServerFnId, serverFnExport } from '../../utils/server-fn-id'
 
 // The flags are workspace-wide. One worker must own their enable/restore pair.
-test.describe.configure({ mode: 'serial' })
+// PROBE (reverted before review): default mode, so each converted test reports
+// on its own instead of the first failure skipping the rest of the file.
+test.describe.configure({ mode: 'default' })
 
 /**
  * Public Help Center E2E tests.
