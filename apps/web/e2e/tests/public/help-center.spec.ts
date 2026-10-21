@@ -1,5 +1,6 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Response } from '@playwright/test'
 import { setHelpCenterContent, setHelpCenterEnabled } from '../../utils/access-helpers'
+import { isServerFnId, serverFnExport } from '../../utils/server-fn-id'
 
 // The flags are workspace-wide. One worker must own their enable/restore pair.
 test.describe.configure({ mode: 'serial' })
@@ -10,15 +11,15 @@ test.describe.configure({ mode: 'serial' })
  * These tests cover the public-facing help center at /hc.
  * No authentication is required.
  *
- * The suite explicitly enables both help-center flags and the widget, whose
- * kb-search route the hero search calls, and restores all three after
- * execution. A disabled-feature 404 must never stand in for the help-center UI.
+ * The suite explicitly enables both help-center flags, keeps the widget
+ * disabled as db:seed leaves it, and restores all three after execution. A
+ * disabled-feature 404 must never stand in for the help-center UI, and the
+ * portal search must work without the widget (venturi-systems/feedback#472).
  * db:seed creates no help-center content, so the suite also creates its own
  * categories and articles (e2e/scripts/set-help-center-content.ts) and removes
- * them afterwards. Every page these tests open therefore exists, and no test
- * skips because content is missing. Some tests still check count() before an
- * assertion and pass when the element is absent; making those assertions
- * unconditional is follow-up work.
+ * them afterwards. Every page these tests open therefore exists, so every
+ * assertion below is unconditional: a test whose element is missing fails
+ * (venturi-systems/feedback#473).
  */
 
 test.beforeAll(() => {
@@ -44,19 +45,35 @@ async function expectLandingPage(page: Page) {
 }
 
 /**
- * Type `query` into the hero search, wait for the request it sends and require
- * a 200 answer. The hero search calls /api/widget/kb-search, and every widget
- * route answers 404 while the widget is disabled
- * (src/lib/server/widget/widget-enabled.ts). The suite enables the widget in
- * beforeAll, so a 404 here is a failure, not a reason to skip.
+ * Whether `response` answers the hero search's server function,
+ * searchPublicArticlesFn. isServerFnId accepts both the dev server's id and the
+ * compiled image's hashed id.
+ */
+function isHeroSearchResponse(response: Response): boolean {
+  const id = new URL(response.url()).pathname.split('/_serverFn/')[1]
+  return (
+    id !== undefined &&
+    isServerFnId(
+      id,
+      'src/lib/server/functions/help-center.ts',
+      serverFnExport('searchPublicArticlesFn')
+    )
+  )
+}
+
+/**
+ * Type `query` into the hero search, wait for the search it sends and require a
+ * 200 answer, then wait for the spinner to go: the component clears it in the
+ * same render that shows or hides the results, so a check after this helper
+ * reads the outcome of the search that ran.
  */
 async function searchHelpCenter(page: Page, query: string): Promise<void> {
-  const answered = page.waitForResponse((response) =>
-    response.url().includes('/api/widget/kb-search')
-  )
-  await page.getByPlaceholder('Search articles...').fill(query)
+  const answered = page.waitForResponse(isHeroSearchResponse)
+  const searchInput = page.getByPlaceholder('Search articles...')
+  await searchInput.fill(query)
   const response = await answered
-  expect(response.status(), `kb-search for "${query}"`).toBe(200)
+  expect(response.status(), `searchPublicArticlesFn for "${query}"`).toBe(200)
+  await expect(searchInput.locator('xpath=..').locator('.animate-spin')).toHaveCount(0)
 }
 
 test.describe('Public Help Center', () => {
@@ -267,11 +284,10 @@ test.describe('Public Help Center', () => {
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
 
-    // TOC renders "On this page" label only when headings are present
-    const tocLabel = page.getByText('On this page')
-    if ((await tocLabel.count()) > 0) {
-      await expect(tocLabel).toBeVisible()
-    }
+    // Every fixture article has h2 and h3 headings, so the ToC renders its
+    // "On this page" label. The ToC column is `xl:block`, which the
+    // chromium-public viewport (Desktop Chrome, 1280 px wide) meets.
+    await expect(page.getByText('On this page')).toBeVisible()
   })
 
   test('article page shows author and last-updated metadata when present', async ({ page }) => {
@@ -289,17 +305,13 @@ test.describe('Public Help Center', () => {
     await articleLinks.first().click()
     await page.waitForLoadState('networkidle')
 
-    // Author block shows "Written By <name>" when an author is set
-    const writtenBy = page.getByText(/Written By/i)
-    if ((await writtenBy.count()) > 0) {
-      await expect(writtenBy).toBeVisible()
-    }
+    // The fixture names the seeded demo user as every article's author
+    // (e2e/scripts/set-help-center-content.ts), so the page shows
+    // "Written By <name>".
+    await expect(page.getByText(/Written By/i)).toBeVisible()
 
-    // Last-updated shows "Last updated <relative time>"
-    const lastUpdated = page.getByText(/Last updated/i)
-    if ((await lastUpdated.count()) > 0) {
-      await expect(lastUpdated).toBeVisible()
-    }
+    // Every article has an updatedAt, shown as "Last updated <relative time>".
+    await expect(page.getByText(/Last updated/i)).toBeVisible()
   })
 
   // -------------------------------------------------------------------------
@@ -321,11 +333,10 @@ test.describe('Public Help Center', () => {
 
     // First breadcrumb item links back to /hc
     const helpCenterLink = breadcrumb.getByRole('link', { name: /Help Center/i })
-    if ((await helpCenterLink.count()) > 0) {
-      await helpCenterLink.click()
-      await page.waitForLoadState('networkidle')
-      await expect(page).toHaveURL(/\/hc\/?$/)
-    }
+    await expect(helpCenterLink).toBeVisible()
+    await helpCenterLink.click()
+    await page.waitForLoadState('networkidle')
+    await expect(page).toHaveURL(/\/hc\/?$/)
   })
 
   test('breadcrumb navigation works on article page', async ({ page }) => {
@@ -369,14 +380,13 @@ test.describe('Public Help Center', () => {
     await categoryCards.first().click()
     await page.waitForLoadState('networkidle')
 
-    // The left sidebar has an "All categories" back link (visible on xl viewports).
-    // The route component also renders it via Link to="/hc".
+    // The left sidebar has an "All categories" back link. Its column is
+    // `xl:block`, which the chromium-public viewport (1280 px wide) meets.
     const allCategoriesLink = page.getByRole('link', { name: /All categories/i })
-    if ((await allCategoriesLink.count()) > 0) {
-      await allCategoriesLink.first().click()
-      await page.waitForLoadState('networkidle')
-      await expect(page).toHaveURL(/\/hc\/?$/)
-    }
+    await expect(allCategoriesLink).toBeVisible()
+    await allCategoriesLink.click()
+    await page.waitForLoadState('networkidle')
+    await expect(page).toHaveURL(/\/hc\/?$/)
   })
 
   // -------------------------------------------------------------------------
@@ -409,6 +419,24 @@ test.describe('Public Help Center', () => {
       .locator('ul')
       .filter({ has: page.locator('button[type="button"]') })
     await expect(resultsDropdown.first()).toBeVisible()
+  })
+
+  test('hero search finds a fixture article while the widget is disabled', async ({ page }) => {
+    // db:seed leaves the widget disabled and beforeAll keeps it so, which this
+    // checks first: every widget route, its article search included, answers
+    // 404. The portal search must not depend on the widget
+    // (venturi-systems/feedback#472).
+    const widgetSearch = await page.request.get('/api/widget/kb-search?q=billing')
+    expect(widgetSearch.status(), 'the widget article search while the widget is off').toBe(404)
+
+    await expectLandingPage(page)
+    // A fixture article is titled "Update your billing details". The search is
+    // debounced and then answered by the server, so allow more than the
+    // default five seconds for the result to appear.
+    await page.getByPlaceholder('Search articles...').fill('billing')
+    await expect(page.getByRole('button', { name: /Update your billing details/ })).toBeVisible({
+      timeout: 15_000,
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -520,19 +548,16 @@ test.describe('Help Center - Search Accuracy', () => {
     const searchInput = page.getByPlaceholder('Search articles...')
     await expect(searchInput).toBeVisible()
 
-    // A nonsense string guaranteed not to match any article
-    await searchInput.fill('zzzznonexistentterm9999')
-    await page.waitForTimeout(700)
+    // A nonsense string guaranteed not to match any article. The helper waits
+    // for the search to answer and render, so the dropdown check below reads
+    // the result of a search that ran.
+    await searchHelpCenter(page, 'zzzznonexistentterm9999')
 
-    // The dropdown should NOT be visible (search sets showResults=false when empty)
+    // An empty result renders no dropdown (the component only renders it with results)
     const resultsDropdown = page.locator('ul').filter({
       has: page.locator('button[type="button"]'),
     })
-    // Either the dropdown is absent or hidden
-    const dropdownCount = await resultsDropdown.count()
-    if (dropdownCount > 0) {
-      await expect(resultsDropdown.first()).not.toBeVisible()
-    }
+    await expect(resultsDropdown).toHaveCount(0)
     // The search input itself should still be visible and hold the typed value
     await expect(searchInput).toHaveValue('zzzznonexistentterm9999')
   })
