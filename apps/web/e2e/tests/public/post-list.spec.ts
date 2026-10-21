@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test'
+import { generateId } from '@quackback/ids'
+import { isServerFnId, serverFnExport } from '../../utils/server-fn-id'
 import {
   openFilterCategory,
   selectFilterOption,
@@ -583,46 +585,115 @@ test.describe('Post List - Filter Result Verification', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Post List - Sort Order Verification', () => {
-  test('"New" sort: first post was created more recently than the second post', async ({
-    page,
-  }) => {
-    await page.goto('/?sort=new')
-    const postCards = page.locator('[data-post-id]')
-    await expect(postCards.first()).toBeVisible({ timeout: 15000 })
-    await page.waitForLoadState('networkidle')
+  test('New and Top request their sort and render the returned post order', async ({ page }) => {
+    // Bootstrap the real portal on Trending. Only subsequent list RPCs are fixtures;
+    // database chronology remains covered by the controlled PostgreSQL contract.
+    await page.goto('/')
+    await expectSettledPostList(page)
 
-    const count = await postCards.count()
-    test.skip(count < 2, 'Need at least 2 posts to verify sort order')
+    const newer = {
+      id: generateId('post'),
+      title: 'Client sort fixture: newer',
+      content: 'Newer post with fewer votes',
+      statusId: null,
+      voteCount: 1,
+      commentCount: 0,
+      authorName: null,
+      principalId: null,
+      createdAt: '2026-10-20T12:00:00.000Z',
+      tags: [],
+    }
+    const older = {
+      ...newer,
+      id: generateId('post'),
+      title: 'Client sort fixture: older',
+      content: 'Older post with more votes',
+      voteCount: 100,
+      createdAt: '2026-10-19T12:00:00.000Z',
+    }
+    const seen: string[] = []
+    const failures: string[] = []
+    const origin = new URL(page.url()).origin
 
-    // TimeAgo renders relative text, but the <a> element carries a data-post-id.
-    // The most robust DOM signal: the post links themselves include the post IDs.
-    // We verify ordering by checking that switching between "New" and "Top" produces
-    // different first-post IDs (proving the sort actually changes the list).
+    // The pinned client encodes simple object fields as Seroval key/value pairs.
+    // Reject an unknown envelope instead of guessing from the current page URL.
+    const field = (node: unknown, name: string): unknown => {
+      const props = (node as { p?: { k?: unknown[]; v?: unknown[] } } | null)?.p
+      if (!Array.isArray(props?.k) || !Array.isArray(props?.v)) {
+        throw new Error('Unexpected RPC object envelope for ' + name)
+      }
+      const index = props.k.indexOf(name)
+      if (index < 0 || index >= props.v.length) throw new Error('Missing RPC field: ' + name)
+      return props.v[index]
+    }
 
-    // Capture the first post ID under "new" sort
-    const firstPostIdNew = await postCards.first().getAttribute('data-post-id')
-    expect(firstPostIdNew).toBeTruthy()
+    await page.route('**/_serverFn/**', async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      const id = url.pathname.slice('/_serverFn/'.length)
+      if (
+        request.method() !== 'GET' ||
+        url.origin !== origin ||
+        !isServerFnId(
+          id,
+          'src/lib/server/functions/public-posts.ts',
+          serverFnExport('listPublicPostsFn')
+        )
+      ) {
+        await route.fallback()
+        return
+      }
+      try {
+        const payload = url.searchParams.get('payload')
+        if (!payload) throw new Error('Missing list RPC payload')
+        const envelope = JSON.parse(payload) as { t?: unknown }
+        const sort = field(field(envelope.t, 'data'), 'sort') as { t?: unknown; s?: unknown } | null
+        if (sort?.t !== 1 || (sort.s !== 'new' && sort.s !== 'top')) {
+          throw new Error('Unexpected list RPC sort')
+        }
+        seen.push(sort.s)
+        await route.fulfill({
+          contentType: 'application/json',
+          json: {
+            result: {
+              items: sort.s === 'new' ? [newer, older] : [older, newer],
+              total: 2,
+              hasMore: false,
+              nextCursor: null,
+            },
+            context: {},
+          },
+        })
+      } catch (error) {
+        failures.push(String(error))
+        await route.abort('failed')
+      }
+    })
 
-    // Switch to "top" sort
+    const newButton = page.getByRole('button', { name: /^New$/i })
+    await newButton.click()
+    await expect(page).toHaveURL(/sort=new/)
+    await expect(newButton).toHaveClass(/font-medium/)
+    await expect.poll(() => failures[0] ?? seen.includes('new')).toBe(true)
+    const newPosts = await expectSettledPostList(page)
+    await expect
+      .poll(() =>
+        newPosts.evaluateAll((posts) => posts.map((post) => post.getAttribute('data-post-id')))
+      )
+      .toEqual([newer.id, older.id])
+
     const topButton = page.getByRole('button', { name: /^Top$/i })
     await topButton.click()
-    await expect(page).toHaveURL(/sort=top/, { timeout: 5000 })
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(300)
-
-    const firstPostIdTop = await postCards.first().getAttribute('data-post-id')
-    expect(firstPostIdTop).toBeTruthy()
-
-    // Guard: if both sorts produce the same first post the seed data isn't
-    // diverse enough to differentiate them — skip rather than fail.
-    test.skip(
-      firstPostIdNew === firstPostIdTop,
-      'Sort may not differentiate with current data (same first post for new and top)'
-    )
-
-    // With 500 seed posts it is astronomically unlikely for new-sort and top-sort
-    // to have the same first post. Verify they differ, confirming sort works.
-    expect(firstPostIdNew).not.toBe(firstPostIdTop)
+    await expect(page).toHaveURL(/sort=top/)
+    await expect(topButton).toHaveClass(/font-medium/)
+    await expect.poll(() => failures[0] ?? seen.includes('top')).toBe(true)
+    const topPosts = await expectSettledPostList(page)
+    await expect
+      .poll(() =>
+        topPosts.evaluateAll((posts) => posts.map((post) => post.getAttribute('data-post-id')))
+      )
+      .toEqual([older.id, newer.id])
+    expect(failures).toEqual([])
   })
 
   test('"Top" sort: first post has vote count ≥ second post vote count', async ({ page }) => {
@@ -650,12 +721,10 @@ test.describe('Post List - Sort Order Verification', () => {
 
   test('"New" sort displays relative timestamps for the first two posts', async ({ page }) => {
     await page.goto('/?sort=new')
-    const postCards = page.locator('[data-post-id]')
-    await expect(postCards.first()).toBeVisible({ timeout: 15000 })
-    await page.waitForLoadState('networkidle')
+    const postCards = await expectSettledPostList(page)
 
     const count = await postCards.count()
-    test.skip(count < 2, 'Need at least 2 posts to verify sort order')
+    test.skip(count < 2, 'Need at least 2 posts to check both timestamps')
 
     // Relative timestamps are a rendering contract. Exact New-sort chronology
     // is covered by post.public-pagination-db.test.ts with controlled timestamps.
