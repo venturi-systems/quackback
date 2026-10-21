@@ -203,13 +203,11 @@ function ArticleDetailPage() {
                 <div className="flex flex-col gap-0.5">
                   {article.author && (
                     <span className="text-sm text-muted-foreground">
-                      Written By{' '}
                       <span className="font-semibold text-foreground">{article.author.name}</span>
                     </span>
                   )}
                   {article.updatedAt && (
                     <span className="text-sm text-muted-foreground">
-                      Last updated{' '}
                       <span className="font-semibold text-foreground">
                         {formatDistanceToNow(new Date(article.updatedAt), { addSuffix: true })}
                       </span>
