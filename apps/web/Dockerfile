@@ -87,7 +87,7 @@ FROM oven/bun:1.4.3-alpine@sha256:629e17411f1f129dbec3af78d5af9c9f2a937435c80349
 # cannot reproduce this layer once an index advances. See docker/openssl/README.md.
 # The read-only mount keeps the archives out of the runtime image layers.
 RUN --network=none --mount=type=bind,source=docker/openssl,target=/opt/openssl,readonly \
-    case "$(cat /etc/alpine-release)" in 3.22.*) ;; *) echo "Review retained OpenSSL packages for this Alpine release" >&2; exit 1 ;; esac && \
+    case "$(cat /etc/alpine-release)" in 3.24.*) ;; *) echo "Review retained OpenSSL packages for this Alpine release" >&2; exit 1 ;; esac && \
     for package in libcrypto3 libssl3 openssl; do \
       if apk info --installed "$package>3.5.9-r0" >/dev/null; then \
         echo "Advance retained OpenSSL packages before replacing newer $package" >&2; exit 1; \
