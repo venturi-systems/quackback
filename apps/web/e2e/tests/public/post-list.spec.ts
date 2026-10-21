@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test'
+import { generateId } from '@quackback/ids'
+import { isServerFnId, serverFnExport } from '../../utils/server-fn-id'
 import {
   openFilterCategory,
   selectFilterOption,
@@ -166,13 +168,6 @@ test.describe('Public Post List', () => {
     // Wait for page to be ready
     await page.waitForLoadState('networkidle')
 
-    // Skip if the features board has no posts in this environment
-    const postCards = page.locator('[data-post-id]')
-    test.skip(
-      (await postCards.count()) === 0,
-      'No posts found for features board in this environment'
-    )
-
     // Both filters should be active
     await expect(page).toHaveURL(/board=features/)
     await expect(page).toHaveURL(/sort=new/)
@@ -225,13 +220,6 @@ test.describe('Public Post List', () => {
 
     // Wait for page to be ready
     await page.waitForLoadState('networkidle')
-
-    // Skip if the features board has no posts in this environment
-    const postCards = page.locator('[data-post-id]')
-    test.skip(
-      (await postCards.count()) === 0,
-      'No posts found for features board in this environment'
-    )
 
     // URL should contain the board parameter
     await expect(page).toHaveURL(/[?&]board=features/)
@@ -597,63 +585,130 @@ test.describe('Post List - Filter Result Verification', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Post List - Sort Order Verification', () => {
-  test('"New" sort: first post was created more recently than the second post', async ({
-    page,
-  }) => {
-    await page.goto('/?sort=new')
-    const postCards = page.locator('[data-post-id]')
-    await expect(postCards.first()).toBeVisible({ timeout: 15000 })
-    await page.waitForLoadState('networkidle')
+  test('New and Top request their sort and render the returned post order', async ({ page }) => {
+    // Bootstrap the real portal on Trending. Only subsequent list RPCs are fixtures;
+    // database chronology remains covered by the controlled PostgreSQL contract.
+    await page.goto('/?sort=trending')
+    await expectSettledPostList(page)
 
-    const count = await postCards.count()
-    test.skip(count < 2, 'Need at least 2 posts to verify sort order')
+    const newer = {
+      id: generateId('post'),
+      title: 'Client sort fixture: newer',
+      content: 'Newer post with fewer votes',
+      statusId: null,
+      voteCount: 1,
+      commentCount: 0,
+      authorName: null,
+      principalId: null,
+      createdAt: '2026-10-20T12:00:00.000Z',
+      tags: [],
+    }
+    const older = {
+      ...newer,
+      id: generateId('post'),
+      title: 'Client sort fixture: older',
+      content: 'Older post with more votes',
+      voteCount: 100,
+      createdAt: '2026-10-19T12:00:00.000Z',
+    }
+    const seen: string[] = []
+    const failures: string[] = []
+    const origin = new URL(page.url()).origin
 
-    // TimeAgo renders relative text, but the <a> element carries a data-post-id.
-    // The most robust DOM signal: the post links themselves include the post IDs.
-    // We verify ordering by checking that switching between "New" and "Top" produces
-    // different first-post IDs (proving the sort actually changes the list).
+    // The pinned client encodes simple object fields as Seroval key/value pairs.
+    // Reject an unknown envelope instead of guessing from the current page URL.
+    const field = (node: unknown, name: string): unknown => {
+      const props = (node as { p?: { k?: unknown[]; v?: unknown[] } } | null)?.p
+      if (!Array.isArray(props?.k) || !Array.isArray(props?.v)) {
+        throw new Error('Unexpected RPC object envelope for ' + name)
+      }
+      const index = props.k.indexOf(name)
+      if (index < 0 || index >= props.v.length) throw new Error('Missing RPC field: ' + name)
+      return props.v[index]
+    }
 
-    // Capture the first post ID under "new" sort
-    const firstPostIdNew = await postCards.first().getAttribute('data-post-id')
-    expect(firstPostIdNew).toBeTruthy()
+    await page.route('**/_serverFn/**', async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      const id = url.pathname.slice('/_serverFn/'.length)
+      if (
+        request.method() !== 'GET' ||
+        url.origin !== origin ||
+        !isServerFnId(
+          id,
+          'src/lib/server/functions/public-posts.ts',
+          serverFnExport('listPublicPostsFn')
+        )
+      ) {
+        await route.fallback()
+        return
+      }
+      try {
+        const payload = url.searchParams.get('payload')
+        if (!payload) throw new Error('Missing list RPC payload')
+        const envelope = JSON.parse(payload) as { t?: unknown }
+        const sort = field(field(envelope.t, 'data'), 'sort') as { t?: unknown; s?: unknown } | null
+        if (sort?.t !== 1 || (sort.s !== 'new' && sort.s !== 'top')) {
+          throw new Error('Unexpected list RPC sort')
+        }
+        seen.push(sort.s)
+        await route.fulfill({
+          contentType: 'application/json',
+          json: {
+            result: {
+              items: sort.s === 'new' ? [newer, older] : [older, newer],
+              total: 2,
+              hasMore: false,
+              nextCursor: null,
+            },
+            context: {},
+          },
+        })
+      } catch (error) {
+        failures.push(String(error))
+        await route.abort('failed')
+      }
+    })
 
-    // Switch to "top" sort
+    const newButton = page.getByRole('button', { name: /^New$/i })
+    await newButton.click()
+    await expect(page).toHaveURL(/sort=new/)
+    await expect(newButton).toHaveClass(/font-medium/)
+    await expect.poll(() => failures[0] ?? seen.includes('new')).toBe(true)
+    const newPosts = await expectSettledPostList(page)
+    await expect
+      .poll(() =>
+        newPosts.evaluateAll((posts) => posts.map((post) => post.getAttribute('data-post-id')))
+      )
+      .toEqual([newer.id, older.id])
+
     const topButton = page.getByRole('button', { name: /^Top$/i })
     await topButton.click()
-    await expect(page).toHaveURL(/sort=top/, { timeout: 5000 })
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(300)
-
-    const firstPostIdTop = await postCards.first().getAttribute('data-post-id')
-    expect(firstPostIdTop).toBeTruthy()
-
-    // Guard: if both sorts produce the same first post the seed data isn't
-    // diverse enough to differentiate them — skip rather than fail.
-    test.skip(
-      firstPostIdNew === firstPostIdTop,
-      'Sort may not differentiate with current data (same first post for new and top)'
-    )
-
-    // With 500 seed posts it is astronomically unlikely for new-sort and top-sort
-    // to have the same first post. Verify they differ, confirming sort works.
-    expect(firstPostIdNew).not.toBe(firstPostIdTop)
+    await expect(page).toHaveURL(/sort=top/)
+    await expect(topButton).toHaveClass(/font-medium/)
+    await expect.poll(() => failures[0] ?? seen.includes('top')).toBe(true)
+    const topPosts = await expectSettledPostList(page)
+    await expect
+      .poll(() =>
+        topPosts.evaluateAll((posts) => posts.map((post) => post.getAttribute('data-post-id')))
+      )
+      .toEqual([older.id, newer.id])
+    expect(failures).toEqual([])
   })
 
   test('"Top" sort: first post has vote count ≥ second post vote count', async ({ page }) => {
     await page.goto('/?sort=top')
-    const postCards = page.locator('[data-post-id]')
-    await expect(postCards.first()).toBeVisible({ timeout: 15000 })
-    await page.waitForLoadState('networkidle')
+    const postCards = await expectSettledPostList(page)
 
     const count = await postCards.count()
     test.skip(count < 2, 'Need at least 2 posts to verify sort order')
 
     // Read vote counts from the DOM via data-testid="vote-count"
-    const voteCountSpans = page.locator('[data-post-id] [data-testid="vote-count"]')
+    const voteCountSpans = postCards.getByTestId('vote-count')
+    await expect(voteCountSpans.nth(0)).toHaveText(/^\d+$/)
+    await expect(voteCountSpans.nth(1)).toHaveText(/^\d+$/)
     const firstVoteText = await voteCountSpans.nth(0).textContent()
     const secondVoteText = await voteCountSpans.nth(1).textContent()
-
-    test.skip(!firstVoteText || !secondVoteText, 'Vote count elements not found')
 
     const firstVotes = parseInt(firstVoteText!.trim(), 10)
     const secondVotes = parseInt(secondVoteText!.trim(), 10)
@@ -664,42 +719,18 @@ test.describe('Post List - Sort Order Verification', () => {
     expect(firstVotes).toBeGreaterThanOrEqual(secondVotes)
   })
 
-  test('"New" sort places a recently-created post before an older one', async ({ page }) => {
+  test('"New" sort displays relative timestamps for the first two posts', async ({ page }) => {
     await page.goto('/?sort=new')
-    const postCards = page.locator('[data-post-id]')
-    await expect(postCards.first()).toBeVisible({ timeout: 15000 })
-    await page.waitForLoadState('networkidle')
+    const postCards = await expectSettledPostList(page)
 
     const count = await postCards.count()
-    test.skip(count < 2, 'Need at least 2 posts to verify sort order')
+    test.skip(count < 2, 'Need at least 2 posts to check both timestamps')
 
-    // TimeAgo component renders strings like "about 2 hours ago", "3 days ago".
-    // Capture the first two time-ago strings and verify the first is not older than the second.
-    // Strategy: "X minutes/hours ago" is newer than "X days/months ago".
-    // Note: .post-card is on the same element as [data-post-id], not a descendant.
+    // Relative timestamps are a rendering contract. Exact New-sort chronology
+    // is covered by post.public-pagination-db.test.ts with controlled timestamps.
     const timeAgoSpans = page.locator('[data-post-id] span.text-muted-foreground\\/70')
-    const firstTimeAgo = (await timeAgoSpans.nth(0).textContent())?.trim() ?? ''
-    const secondTimeAgo = (await timeAgoSpans.nth(1).textContent())?.trim() ?? ''
-
-    // Both should be non-empty relative time strings
-    expect(firstTimeAgo.length).toBeGreaterThan(0)
-    expect(secondTimeAgo.length).toBeGreaterThan(0)
-
-    // Simple ordering heuristic: if the first contains "minutes" or "hours" and
-    // the second contains "days" or "months", the first is definitely more recent.
-    // Otherwise we just verify the strings are present (sort is server-side and trusted).
-    const firstIsMinutesOrHours = /minutes|hours|seconds/.test(firstTimeAgo)
-    const secondIsDaysOrMore = /days|months|years/.test(secondTimeAgo)
-
-    if (firstIsMinutesOrHours && secondIsDaysOrMore) {
-      // First post is clearly more recent — verified
-      expect(firstIsMinutesOrHours).toBe(true)
-    } else {
-      // Both are in the same time-unit range; the list is still in new order per server.
-      // Just confirm that non-empty relative timestamps are shown on both cards.
-      expect(firstTimeAgo.length).toBeGreaterThan(0)
-      expect(secondTimeAgo.length).toBeGreaterThan(0)
-    }
+    await expect(timeAgoSpans.nth(0)).not.toBeEmpty()
+    await expect(timeAgoSpans.nth(1)).not.toBeEmpty()
   })
 })
 
@@ -729,21 +760,13 @@ test.describe('Post List - Search Accuracy', () => {
     await searchInput.press('Enter')
 
     await expect(page).toHaveURL(/search=dark\+mode|search=dark%20mode/, { timeout: 5000 })
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(300)
-
-    const filteredCount = await postCards.count()
-    const emptyState = page.getByText('No posts match your filters.')
-    const hasEmpty = (await emptyState.count()) > 0
-
-    test.skip(
-      filteredCount === 0 && !hasEmpty,
-      'Unexpected empty result without empty state message'
-    )
+    const settledPosts = await expectSettledPostList(page)
+    const filteredCount = await settledPosts.count()
+    const emptyState = page.getByText('No posts match your filters.', { exact: true })
 
     if (filteredCount > 0) {
       // Every visible post title should contain the search term (case-insensitive)
-      const titles = page.locator('[data-post-id] h3')
+      const titles = settledPosts.locator('h3')
       const titleCount = await titles.count()
       for (let i = 0; i < titleCount; i++) {
         const titleText = (await titles.nth(i).textContent()) ?? ''
@@ -751,16 +774,14 @@ test.describe('Post List - Search Accuracy', () => {
       }
     } else {
       // Empty state message is acceptable (no matching posts)
-      expect(hasEmpty).toBe(true)
+      await expect(emptyState).toBeVisible()
     }
   })
 
-  test('clearing search restores a larger result set', async ({ page }) => {
+  test('clearing search removes its filter without reducing results', async ({ page }) => {
     // Start with search active
     await page.goto('/?search=dark+mode')
-    const postCards = page.locator('[data-post-id]')
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(300)
+    const postCards = await expectSettledPostList(page)
     const searchCount = await postCards.count()
 
     // Open search popover and clear
@@ -772,10 +793,9 @@ test.describe('Post List - Search Accuracy', () => {
 
     // URL should no longer contain a search parameter
     await expect(page).not.toHaveURL(/[?&]search=/, { timeout: 5000 })
-    await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(300)
+    const restoredPosts = await expectSettledPostList(page)
 
-    const fullCount = await postCards.count()
+    const fullCount = await restoredPosts.count()
     // Full list should have at least as many posts as the search-filtered list
     expect(fullCount).toBeGreaterThanOrEqual(searchCount)
   })
@@ -800,7 +820,6 @@ test.describe('Post List - Search Accuracy', () => {
 
     await expect(page).toHaveURL(/search=/, { timeout: 5000 })
     await page.waitForLoadState('networkidle')
-    await page.waitForTimeout(500)
 
     // Should show the specific "no match" message rather than just a blank list
     const noMatchMsg = page.getByText('No posts match your filters.')
