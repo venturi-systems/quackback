@@ -133,22 +133,31 @@ strip_path() {
 }
 BASE_PATH="$(strip_path "$PATH" "$ROOT")"
 [ -n "$OLD_ROOT" ] && BASE_PATH="$(strip_path "$BASE_PATH" "$OLD_ROOT")"
+# venv_value_ours VALUE: VALUE is empty or names a virtualenv this engine
+# published: one under the root, one carrying its ownership marker, or the one
+# the state records it published, so a virtualenv the user activated
+# afterwards is never mistaken for it.
+venv_value_ours() {
+    [ -n "$1" ] || return 0
+    case "$1" in "$ROOT"/*) return 0 ;; esac
+    if [ -n "$OLD_ROOT" ]; then case "$1" in "$OLD_ROOT"/*) return 0 ;; esac; fi
+    [ -f "$1/$OWNER_MARK" ] && return 0
+    [ "$(cat "$ROOT/state/$SLOT.venv-path" 2>/dev/null)" = "$1" ]
+}
 # An in-tree virtualenv an earlier run published lies outside $ROOT, and the
-# manifest may since have moved env_dir; strip it by the VIRTUAL_ENV it set.
-# Only a virtualenv this engine published is stripped: one under the root, one
-# carrying its ownership marker, or any while the state records a Python
-# install. A virtualenv the user activated stays on PATH and in VIRTUAL_ENV.
+# manifest may since have moved env_dir; strip it by the VIRTUAL_ENV and
+# UV_PROJECT_ENVIRONMENT it set. Each variable is judged on its own value:
+# only a virtualenv this engine published is stripped, and one the user
+# activated stays on PATH and in its variable.
 INHERITED_VENV_OURS=0
-if [ -n "${VIRTUAL_ENV:-}" ]; then
-    case "$VIRTUAL_ENV" in "$ROOT"/*) INHERITED_VENV_OURS=1 ;; esac
-    [ -n "$OLD_ROOT" ] && case "$VIRTUAL_ENV" in "$OLD_ROOT"/*) INHERITED_VENV_OURS=1 ;; esac
-    [ -f "$VIRTUAL_ENV/.session-bootstrap-owned" ] && INHERITED_VENV_OURS=1
-    # The state records which virtualenv a run published, so one the user
-    # activated afterwards is never mistaken for it.
-    [ "$(cat "$ROOT/state/$SLOT.venv-path" 2>/dev/null)" = "$VIRTUAL_ENV" ] && INHERITED_VENV_OURS=1
-fi
+INHERITED_UV_OURS=0
+[ -n "${VIRTUAL_ENV:-}" ] && venv_value_ours "$VIRTUAL_ENV" && INHERITED_VENV_OURS=1
+[ -n "${UV_PROJECT_ENVIRONMENT:-}" ] && venv_value_ours "$UV_PROJECT_ENVIRONMENT" && INHERITED_UV_OURS=1
 if [ "$INHERITED_VENV_OURS" = 1 ]; then
     BASE_PATH="$(strip_path "$BASE_PATH" "$VIRTUAL_ENV/bin")"
+fi
+if [ "$INHERITED_UV_OURS" = 1 ]; then
+    BASE_PATH="$(strip_path "$BASE_PATH" "$UV_PROJECT_ENVIRONMENT/bin")"
 fi
 
 # The names an earlier run recorded under another root join this root's
@@ -175,22 +184,15 @@ fi
 # parses, still carries in a resumed or cleared session what the last valid
 # manifest published. Clear it: the PATH entries, the virtualenv variables
 # and every name the state recorded. Without state files only a VIRTUAL_ENV
-# under $ROOT is this engine's; any other belongs to the user and is left
-# alone. The recorded names stay behind as tombstones, so every other session
-# of the checkout that still carries them can clear them too. Returns 1 when
-# there was nothing to clear and 2 when CLAUDE_ENV_FILE could not be written.
-# venv_value_ours VALUE: VALUE is empty or names a virtualenv this engine
-# published, by the same tests that decide INHERITED_VENV_OURS.
-venv_value_ours() {
-    [ -n "$1" ] || return 0
-    case "$1" in "$ROOT"/*) return 0 ;; esac
-    if [ -n "$OLD_ROOT" ]; then case "$1" in "$OLD_ROOT"/*) return 0 ;; esac; fi
-    [ -f "$1/$OWNER_MARK" ] && return 0
-    [ "$(cat "$ROOT/state/$SLOT.venv-path" 2>/dev/null)" = "$1" ]
-}
+# or UV_PROJECT_ENVIRONMENT that venv_value_ours accepts is this engine's; any
+# other belongs to the user and is left alone. The recorded names stay behind
+# as tombstones, so every other session of the checkout that still carries
+# them can clear them too. Returns 1 when there was nothing to clear and 2
+# when CLAUDE_ENV_FILE could not be written.
 clear_published() {
     local published=0 name unsets=""
-    if [ -f "$ENV_NAMES" ] || [ -f "$STATE" ] || [ "$INHERITED_VENV_OURS" = 1 ]; then
+    if [ -f "$ENV_NAMES" ] || [ -f "$STATE" ] || [ "$INHERITED_VENV_OURS" = 1 ] \
+            || [ "$INHERITED_UV_OURS" = 1 ]; then
         published=1
     fi
     [ -n "${CLAUDE_ENV_FILE:-}" ] && [ "$published" = 1 ] || return 1
@@ -1063,8 +1065,18 @@ publish_python() {
 if [ "$WANT_PYTHON" != 1 ]; then
     # A previous manifest may have declared Python: clear what it published and
     # remove its out-of-tree environment. A virtualenv the user activated is
-    # not the engine's and stays published.
-    [ "$INHERITED_VENV_OURS" = 1 ] && unpublish_python
+    # not the engine's and stays published, so each variable is unset only
+    # when its own value is the engine's.
+    owned_unsets=""
+    [ "$INHERITED_VENV_OURS" = 1 ] && owned_unsets="VIRTUAL_ENV"
+    [ "$INHERITED_UV_OURS" = 1 ] && owned_unsets="${owned_unsets:+$owned_unsets }UV_PROJECT_ENVIRONMENT"
+    if [ -n "$owned_unsets" ]; then
+        if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+            printf 'unset %s\n' "$owned_unsets" >>"$CLAUDE_ENV_FILE" || ENV_FILE_OK=0
+        fi
+        # shellcheck disable=SC2086 # owned_unsets is a list of fixed names
+        unset $owned_unsets
+    fi
     [ -d "$ROOT/venv/$SLOT" ] && rm -rf "${ROOT:?}/venv/${SLOT:?}"
     rm -f "$PY_STATE"
 fi
