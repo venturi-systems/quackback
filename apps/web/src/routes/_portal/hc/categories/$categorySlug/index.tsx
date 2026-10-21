@@ -164,6 +164,7 @@ function CategoryIndexPage() {
                 className="mb-4 shrink-0 inline-flex w-full items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <ArrowLeftIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 break-words">All categories</span>
               </Link>
               <p className="mb-1.5 shrink-0 px-2 text-xs font-semibold uppercase tracking-widest text-muted-foreground/50">
                 Browse
@@ -231,7 +232,7 @@ function CategoryIndexPage() {
 
           {/* Main content */}
           <div className="min-w-0 max-w-2xl flex-1 py-10">
-            <HelpCenterBreadcrumbs items={breadcrumbs.map(({ label }) => ({ label }))} />
+            <HelpCenterBreadcrumbs items={breadcrumbs} />
 
             {/* Category header */}
             <div className="mt-6 mb-8">
