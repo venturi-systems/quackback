@@ -1,9 +1,10 @@
 /**
  * Enable the help-center fixture, then restore its exact prior settings.
  *
- * The widget is enabled as well. The help-center hero search calls
- * /api/widget/kb-search, every widget route answers 404 while the widget is off
- * (src/lib/server/widget/widget-enabled.ts), and db:seed leaves it off.
+ * The widget is held disabled, as db:seed leaves it. Every widget route answers
+ * 404 while the widget is off (src/lib/server/widget/widget-enabled.ts), and the
+ * portal's own search must work in that state (venturi-systems/feedback#472), so
+ * the suite runs it there whatever the workspace had configured before.
  */
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -76,7 +77,7 @@ function readSnapshot(): StoredSnapshot | null {
  * Add the widget column to a snapshot written before this script captured it.
  * That older script never changed widget_config, so the row still holds the
  * value it had before the fixture, and the snapshot records it before this
- * run enables the widget. The file is replaced by rename, so an interrupted
+ * run changes the widget. The file is replaced by rename, so an interrupted
  * write cannot destroy the original snapshot.
  */
 function upgradeLegacySnapshot(row: Snapshot) {
@@ -110,7 +111,7 @@ async function main() {
       }
       const flags = { ...JSON.parse(row.feature_flags ?? '{}'), helpCenter: true }
       const config = { ...JSON.parse(row.help_center_config ?? '{}'), enabled: true }
-      const widget = { ...JSON.parse(row.widget_config ?? '{}'), enabled: true }
+      const widget = { ...JSON.parse(row.widget_config ?? '{}'), enabled: false }
       await sql`
         UPDATE settings SET feature_flags = ${JSON.stringify(flags)},
           help_center_config = ${JSON.stringify(config)},
@@ -121,7 +122,7 @@ async function main() {
       if (snapshot === null) return
       if (snapshot.widget_config === undefined) {
         // No enable since the older script wrote this snapshot has changed
-        // widget_config: enable upgrades the snapshot before it enables the
+        // widget_config: enable upgrades the snapshot before it changes the
         // widget. Restore the two columns it holds and leave the widget as is.
         await sql`
           UPDATE settings SET feature_flags = ${snapshot.feature_flags},

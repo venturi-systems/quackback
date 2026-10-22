@@ -148,7 +148,9 @@ const original = {
   id: 'settings-owned',
   feature_flags: ' { "helpCenter": false, "kept": [1, "flag"] } ',
   help_center_config: '{"enabled":false,"title":"Acme help"}',
-  widget_config: '{"enabled":false,"identifyVerification":true}',
+  // A workspace with the widget switched on: the fixture must turn it off for
+  // the suite and give it back afterwards.
+  widget_config: '{"enabled":true,"identifyVerification":true}',
 }
 
 beforeEach(() => {
@@ -211,10 +213,14 @@ function expectOriginal() {
   expect(fixture.state.row).toEqual(original)
 }
 
+/**
+ * The help center is on and the widget is off, as db:seed leaves it: the portal
+ * search must not depend on the widget (venturi-systems/feedback#472).
+ */
 function expectEnabled() {
   expect(JSON.parse(fixture.state.row.feature_flags!).helpCenter).toBe(true)
   expect(JSON.parse(fixture.state.row.help_center_config!).enabled).toBe(true)
-  expect(JSON.parse(fixture.state.row.widget_config!).enabled).toBe(true)
+  expect(JSON.parse(fixture.state.row.widget_config!).enabled).toBe(false)
 }
 
 describe('help-center fixture restoration', () => {
@@ -275,7 +281,7 @@ describe('help-center snapshots written before widget_config was captured', () =
     legacyEnable(widgetConfig)
 
     expect(await run('enable')).toBe(0)
-    // Recorded through a temporary file before the widget is enabled.
+    // Recorded through a temporary file before the widget is changed.
     expect(fixture.state.calls).toEqual([
       'select',
       'snapshot-write',
