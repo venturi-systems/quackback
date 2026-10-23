@@ -64,10 +64,17 @@ vi.mock('@quackback/ids', async (importOriginal) => {
 })
 
 // Mock rate limiting to always allow
-vi.mock('@/lib/server/domains/api/rate-limit', () => ({
-  checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 100 })),
-  getClientIp: vi.fn(() => '127.0.0.1'),
-}))
+vi.mock('@/lib/server/domains/api/rate-limit', () => {
+  const checkRateLimit = vi.fn(async (_ip?: string) => ({ allowed: true, remaining: 100 }))
+  return {
+    checkRateLimit,
+    reserveAuthenticationAttempt: vi.fn(async (ip: string) => ({
+      ...(await checkRateLimit(ip)),
+      refund: vi.fn(),
+    })),
+    getClientIp: vi.fn(() => '127.0.0.1'),
+  }
+})
 
 // Mock settings service so getDeveloperConfig doesn't hit the real DB.
 // `getTenantSettings` is consumed lazily by the suspension guard (which the
