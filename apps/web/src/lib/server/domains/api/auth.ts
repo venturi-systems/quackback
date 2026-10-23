@@ -7,7 +7,7 @@
 
 import { verifyApiKey } from '@/lib/server/domains/api-keys/api-key.service'
 import type { ApiKey } from '@/lib/server/domains/api-keys'
-import { checkRateLimit, getClientIp } from './rate-limit'
+import { checkRateLimit, getClientIp, reserveAuthenticationAttempt } from './rate-limit'
 import { UnauthorizedError, ForbiddenError, RateLimitError } from '@/lib/shared/errors'
 import { db, principal, eq } from '@/lib/server/db'
 import type { PrincipalId } from '@quackback/ids'
@@ -17,6 +17,10 @@ import {
   hasApiKeyScope,
   type ApiKeyScope,
 } from '@/lib/shared/api-key-scopes'
+
+// Share module loading only; every request still revalidates the current key role.
+let authorityModule:
+  Promise<typeof import('@/lib/server/domains/api-keys/api-key-authority')> | undefined
 
 export type MemberRole = 'admin' | 'member' | 'user'
 
@@ -119,7 +123,8 @@ export async function requireApiKey(request: Request): Promise<ApiAuthContext | 
 
   // The key's stored role, capped by its creator's current role under the
   // team identity rule. A missing principal is the most restrictive role.
-  const { resolveApiKeyRole } = await import('@/lib/server/domains/api-keys/api-key-authority')
+  const { resolveApiKeyRole } = await (authorityModule ??=
+    import('@/lib/server/domains/api-keys/api-key-authority'))
   const role = await resolveApiKeyRole(apiKey, principalRecord?.role)
 
   return {
@@ -157,7 +162,7 @@ export async function withApiKeyAuth(
 ): Promise<ApiAuthContext> {
   const clientIp = getClientIp(request)
   const wantsImportMode = request.headers.get('x-import-mode') === 'true'
-  const rateLimit = await checkRateLimit(clientIp, wantsImportMode)
+  const rateLimit = await reserveAuthenticationAttempt(clientIp)
 
   if (!rateLimit.allowed) {
     throw new RateLimitError(rateLimit.retryAfter ?? 60)
@@ -189,6 +194,11 @@ export async function withApiKeyAuth(
   }
 
   if (wantsImportMode && isAdmin(auth.role)) {
+    const importLimit = await checkRateLimit(clientIp, true)
+    if (!importLimit.allowed) {
+      throw new RateLimitError(importLimit.retryAfter ?? 60)
+    }
+    rateLimit.refund()
     auth.importMode = true
   }
 

@@ -15,6 +15,8 @@ interface RateLimitEntry {
 }
 
 const rateLimitStore = new Map<string, RateLimitEntry>()
+let tierLimitsModule:
+  Promise<typeof import('@/lib/server/domains/settings/tier-limits.service')> | undefined
 
 // Configuration
 const WINDOW_MS = 60_000 // 1 minute
@@ -55,40 +57,74 @@ startCleanup()
  *
  * Self-hosters with no tier_limits row get null and fall back to MAX_REQUESTS.
  */
-export async function checkRateLimit(
-  ip: string,
-  importMode?: boolean
-): Promise<{
+interface RateLimitResult {
   allowed: boolean
   remaining: number
   retryAfter?: number
-}> {
+}
+
+interface RateLimitAttempt {
+  result: RateLimitResult
+  key: string
+  entry?: RateLimitEntry
+}
+
+async function consumeRateLimit(ip: string, importMode = false): Promise<RateLimitAttempt> {
   const now = Date.now()
-  const { getTierLimits } = await import('@/lib/server/domains/settings/tier-limits.service')
+  const { getTierLimits } = await (tierLimitsModule ??=
+    import('@/lib/server/domains/settings/tier-limits.service'))
   const limits = await getTierLimits()
   const baseLimit = limits.apiRequestsPerMinute ?? MAX_REQUESTS
   const maxRequests = importMode ? Math.max(baseLimit * 20, IMPORT_MIN) : baseLimit
-  const entry = rateLimitStore.get(ip)
+  // Only an authenticated administrator may select the import budget. Keep it
+  // separate so successful bulk imports do not exhaust normal authentication.
+  const key = `${importMode ? 'import' : 'normal'}:${ip}`
+  let entry = rateLimitStore.get(key)
 
-  // New IP or window expired - reset
   if (!entry || now - entry.windowStart > WINDOW_MS) {
-    // Cap store size to prevent memory exhaustion from spoofed IPs
     if (rateLimitStore.size >= MAX_STORE_SIZE && !entry) {
-      return { allowed: false, remaining: 0, retryAfter: 60 }
+      return { key, result: { allowed: false, remaining: 0, retryAfter: 60 } }
     }
-    rateLimitStore.set(ip, { count: 1, windowStart: now })
-    return { allowed: true, remaining: maxRequests - 1 }
+    entry = { count: 1, windowStart: now }
+    rateLimitStore.set(key, entry)
+    return { key, entry, result: { allowed: true, remaining: maxRequests - 1 } }
   }
 
-  // Within window - increment and check
-  entry.count++
-
-  if (entry.count > maxRequests) {
+  if (entry.count >= maxRequests) {
     const retryAfter = Math.ceil((entry.windowStart + WINDOW_MS - now) / 1000)
-    return { allowed: false, remaining: 0, retryAfter }
+    return { key, result: { allowed: false, remaining: 0, retryAfter } }
   }
+  entry.count++
+  return { key, entry, result: { allowed: true, remaining: maxRequests - entry.count } }
+}
 
-  return { allowed: true, remaining: maxRequests - entry.count }
+/** Charge the normal budget, or the import budget after administrator authorization. */
+export async function checkRateLimit(ip: string, importMode?: boolean): Promise<RateLimitResult> {
+  return (await consumeRateLimit(ip, importMode)).result
+}
+
+/**
+ * Reserve normal capacity before any credential lookup. Only a fully authorized
+ * admin import refunds it, after the separate import budget accepts the request.
+ * Invalid credentials, insufficient roles/scopes and rejected imports retain
+ * their charge. In-flight requests count until authorization completes.
+ */
+export async function reserveAuthenticationAttempt(
+  ip: string
+): Promise<RateLimitResult & { refund: () => void }> {
+  const attempt = await consumeRateLimit(ip)
+  let active = attempt.result.allowed
+  return {
+    ...attempt.result,
+    refund() {
+      if (!active) return
+      active = false
+      // A delayed completion must never refund a later window or a new entry.
+      if (attempt.entry && rateLimitStore.get(attempt.key) === attempt.entry) {
+        attempt.entry.count = Math.max(0, attempt.entry.count - 1)
+      }
+    },
+  }
 }
 
 /**
