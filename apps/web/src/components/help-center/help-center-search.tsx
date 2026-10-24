@@ -2,22 +2,21 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { searchPublicArticlesFn } from '@/lib/server/functions/help-center'
 import { contentPreview } from '@/lib/shared/utils/string'
 
 // ============================================================================
 // Types
 // ============================================================================
 
+/** The fields of a searchPublicArticlesFn row that the dropdown shows. */
 interface SearchResult {
   id: string
   slug: string
   title: string
   content: string
-  category: {
-    id: string
-    slug: string
-    name: string
-  }
+  categorySlug: string
+  categoryName: string
 }
 
 // ============================================================================
@@ -42,9 +41,12 @@ export function HelpCenterHeroSearch() {
 
     setIsSearching(true)
     try {
-      const res = await fetch(`/api/widget/kb-search?q=${encodeURIComponent(q)}&limit=8`)
-      const json = await res.json()
-      const articles: SearchResult[] = json.data?.articles ?? []
+      // The portal's own search: it applies the help-center read gate and does
+      // not depend on the embeddable widget, whose /api/widget/kb-search route
+      // answers 404 while the widget is disabled (venturi-systems/feedback#472).
+      const articles: SearchResult[] = await searchPublicArticlesFn({
+        data: { query: q.trim(), limit: 8 },
+      })
       setResults(articles)
       setShowResults(articles.length > 0)
     } catch {
@@ -92,7 +94,7 @@ export function HelpCenterHeroSearch() {
   const handleResultClick = (result: SearchResult) => {
     setShowResults(false)
     setQuery('')
-    window.location.href = `/hc/articles/${result.category.slug}/${result.slug}`
+    window.location.href = `/hc/articles/${result.categorySlug}/${result.slug}`
   }
 
   return (
@@ -125,7 +127,7 @@ export function HelpCenterHeroSearch() {
                   className="w-full text-left px-4 py-3 hover:bg-accent transition-colors"
                 >
                   <div className="text-sm font-medium text-foreground">{result.title}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{result.category.name}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{result.categoryName}</div>
                   {result.content && (
                     <div className="text-xs text-muted-foreground/70 mt-1 break-words">
                       {contentPreview(result.content, 150)}
