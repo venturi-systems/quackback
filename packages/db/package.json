@@ -34,9 +34,9 @@
   "devDependencies": {
     "@faker-js/faker": "^10.6.0",
     "@types/bcryptjs": "^3.0.0",
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "bcryptjs": "^3.0.3",
-    "dotenv": "^18.0.7",
+    "dotenv": "^18.0.8",
     "drizzle-kit": "^0.31.11"
   }
 }
