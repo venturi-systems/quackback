@@ -60,9 +60,13 @@ function getPostSortOrder(sort: SortOrder, cursorMode = false) {
     case 'trending':
       return [
         sql`(${posts.voteCount} / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - ${posts.createdAt})) / 86400)) DESC`,
+        desc(posts.id),
       ]
     default:
-      return [desc(posts.voteCount)]
+      // Ranked pages need a unique tie-breaker even while their leading score
+      // remains live. This stabilizes equal scores; it is not a snapshot of
+      // mutable vote counts or a replacement for ranked cursor pagination.
+      return [desc(posts.voteCount), desc(posts.id)]
   }
 }
 
@@ -216,6 +220,25 @@ function buildPostFilterConditions(params: PostListParams, actor: Actor) {
   return conditions
 }
 
+/** Hydrate only the selected ranked page. Keep one SQL snapshot and all current
+ * access/filter predicates; ordering remains live, not a rank snapshot.
+ * The inner LIMIT/OFFSET is a relational boundary, so correlated projection
+ * work runs for the page rows rather than every row discarded by OFFSET.
+ */
+function rankedPostWindow(params: PostListParams, actor: Actor) {
+  const { sort = 'top', page = 1, limit = 20 } = params
+  if (params.cursor !== undefined || sort === 'new' || page <= 1) return undefined
+  return db
+    .select({ id: posts.id })
+    .from(posts)
+    .innerJoin(boards, eq(posts.boardId, boards.id))
+    .where(and(...buildPostFilterConditions(params, actor)))
+    .orderBy(...getPostSortOrder(sort))
+    .limit(limit + 1)
+    .offset((page - 1) * limit)
+    .as('ranked_page')
+}
+
 export async function listPublicPostsWithVotesAndAvatars(
   params: PostListParams & { principalId?: PrincipalId; actor?: Actor }
 ): Promise<{ items: PostWithVotesAndAvatars[]; hasMore: boolean; nextCursor?: string | null }> {
@@ -225,6 +248,7 @@ export async function listPublicPostsWithVotesAndAvatars(
   const { cursorMode, condition } = publicPostPagination(params)
   if (condition) conditions.push(condition)
   const orderBy = getPostSortOrder(sort, cursorMode)
+  const rankedPage = rankedPostWindow(params, actor)
 
   // Only authenticated users can vote, so we only check principal_id
   // Anonymous users see vote counts but hasVoted is always false
@@ -237,7 +261,7 @@ export async function listPublicPostsWithVotesAndAvatars(
       )`.as('has_voted')
     : sql<boolean>`false`.as('has_voted')
 
-  const postsResult = await db
+  const postsQuery = db
     .select({
       id: posts.id,
       title: posts.title,
@@ -285,7 +309,9 @@ export async function listPublicPostsWithVotesAndAvatars(
     .where(and(...conditions))
     .orderBy(...orderBy)
     .limit(limit + 1)
-    .offset(cursorMode ? 0 : offset)
+    .offset(cursorMode || rankedPage ? 0 : offset)
+  if (rankedPage) postsQuery.$dynamic().innerJoin(rankedPage, eq(posts.id, rankedPage.id))
+  const postsResult = await postsQuery
 
   const hasMore = postsResult.length > limit
   const trimmedResults = hasMore ? postsResult.slice(0, limit) : postsResult
@@ -322,8 +348,9 @@ export async function listPublicPosts(
   const { cursorMode, condition } = publicPostPagination(params)
   if (condition) conditions.push(condition)
   const orderBy = getPostSortOrder(sort, cursorMode)
+  const rankedPage = rankedPostWindow(params, actor)
 
-  const postsResult = await db
+  const postsQuery = db
     .select({
       id: posts.id,
       title: posts.title,
@@ -361,7 +388,9 @@ export async function listPublicPosts(
     .where(and(...conditions))
     .orderBy(...orderBy)
     .limit(limit + 1)
-    .offset(cursorMode ? 0 : offset)
+    .offset(cursorMode || rankedPage ? 0 : offset)
+  if (rankedPage) postsQuery.$dynamic().innerJoin(rankedPage, eq(posts.id, rankedPage.id))
+  const postsResult = await postsQuery
 
   const hasMore = postsResult.length > limit
   const trimmedResults = hasMore ? postsResult.slice(0, limit) : postsResult

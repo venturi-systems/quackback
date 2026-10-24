@@ -141,3 +141,87 @@ describe.each([
     }
   })
 })
+
+describe.each([
+  ['plain', listPublicPosts],
+  ['with avatars', listPublicPostsWithVotesAndAvatars],
+] as const)('%s ranked pages on PostgreSQL', (_name, list) => {
+  it.each(['top', 'trending'] as const)(
+    'keeps %s membership, filters, ties, hasMore and page boundaries',
+    async (sort) => {
+      const schema = await import('@quackback/db/schema')
+      const database = drizzle(client, { schema })
+      const rollback = new Error('rollback ranked fixtures')
+      try {
+        await database.transaction(async (tx) => {
+          state.transaction = tx
+          try {
+            const boardId = generateId('board')
+            const authorId = generateId('principal')
+            const slug = 'ranked-' + boardId
+            const publicAccess = { ...DEFAULT_BOARD_ACCESS, view: 'anonymous' as const }
+            await tx.insert(boards).values({
+              id: boardId,
+              slug,
+              name: 'Ranked fixtures',
+              access: publicAccess,
+            })
+            await tx.insert(principal).values({
+              id: authorId,
+              type: 'service',
+              role: 'user',
+              createdAt: new Date(),
+            })
+            const visible = Array.from({ length: 31 }, (_, i) => ({
+              id: generateId('post'),
+              voteCount: 40 - Math.floor(i / 4),
+            })).sort(
+              (a, b) => b.voteCount - a.voteCount || toUuid(b.id).localeCompare(toUuid(a.id))
+            )
+            const insert = (id: (typeof visible)[number]['id'], voteCount: number, extra = {}) =>
+              tx.insert(posts).values({
+                id,
+                boardId,
+                principalId: authorId,
+                voteCount,
+                title: 'Ranked fixture',
+                content: 'Exact ranked content',
+                // Equal age makes top and trending tie semantics independently comparable.
+                createdAt: sql.raw("NOW() - INTERVAL '10 days'"),
+                ...extra,
+              })
+            for (const row of visible) await insert(row.id, row.voteCount)
+            await insert(generateId('post'), 999, { moderationState: 'pending' })
+            await insert(generateId('post'), 999, { deletedAt: new Date() })
+            await insert(generateId('post'), 999, { canonicalPostId: visible[0].id })
+            const params = { sort, boardSlug: slug, limit: 5, minVotes: 35 }
+            const eligible = visible.filter((row) => row.voteCount >= 35)
+            const seen = []
+            for (let page = 1; page <= 5; page++) {
+              const result = await list({ ...params, page })
+              const expected = eligible.slice((page - 1) * 5, page * 5)
+              expect(result.items.map(({ id }) => id)).toEqual(expected.map(({ id }) => id))
+              expect(result.items.every((row) => row.content === 'Exact ranked content')).toBe(true)
+              expect(result.hasMore).toBe(eligible.length > page * 5)
+              expect(result).not.toHaveProperty('nextCursor')
+              seen.push(...result.items.map(({ id }) => id))
+            }
+            expect(seen).toEqual(eligible.map(({ id }) => id))
+            expect(new Set(seen).size).toBe(seen.length)
+            // The page window must not evade the current access check.
+            await tx
+              .update(boards)
+              .set({ access: { ...publicAccess, view: 'team' } })
+              .where(eq(boards.id, boardId))
+            expect((await list({ ...params, page: 2 })).items).toEqual([])
+            throw rollback
+          } finally {
+            state.transaction = undefined
+          }
+        })
+      } catch (error) {
+        if (error !== rollback) throw error
+      }
+    }
+  )
+})
