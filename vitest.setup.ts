@@ -21,3 +21,14 @@ import { AsyncLocalStorage } from 'node:async_hooks'
     g[KEY] = als
   }
 }
+
+// happy-dom 21 rejects Animation.finished with AbortError when motion-dom 14.3
+// cancels an in-flight WAAPI animation during component unmount.
+if (typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function') {
+  const originalAnimate = Element.prototype.animate
+  Element.prototype.animate = function (...args) {
+    const animation = originalAnimate.apply(this, args)
+    animation?.finished?.catch?.(() => {})
+    return animation
+  }
+}
