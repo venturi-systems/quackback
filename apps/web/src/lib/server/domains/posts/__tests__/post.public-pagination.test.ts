@@ -20,13 +20,12 @@ vi.mock('@/lib/server/db', async () => {
         const from = selection.from.bind(selection)
         selection.from = ((...args: Parameters<typeof from>) => {
           const query = from(...args)
-          const offset = query.offset.bind(query)
-          // Compile the real Drizzle query at its execution boundary, then
-          // supply fixture rows without opening a database connection.
-          query.offset = ((value: number) => {
-            queries.push(offset(value).toSQL())
-            return rows()
-          }) as typeof query.offset
+          // Observe execution, not builder calls: ranked page selection is
+          // a non-executed subquery within the same SQL statement.
+          query.then = ((onFulfilled, onRejected) => {
+            queries.push(query.toSQL())
+            return Promise.resolve(rows()).then(onFulfilled, onRejected)
+          }) as typeof query.then
           return query
         }) as typeof selection.from
         return selection
@@ -127,10 +126,51 @@ describe.each([
       const result = await list({ sort, page: 3, limit: 20 })
       const { sql, params } = queries[0]
       expect(sql).toMatch(/ offset /)
-      expect(params.at(-1)).toBe(40)
+      if (sort === 'new') {
+        expect(params.at(-1)).toBe(40)
+      } else {
+        expect(params).toContain(40)
+        expect(sql).toContain('"ranked_page"')
+      }
       expect(sql).not.toContain('cursor_created_at')
       expect(result).not.toHaveProperty('nextCursor')
       if (sort === 'trending') expect(sql).toContain('NOW()')
+    }
+  )
+
+  it.each(['top', 'trending'] as const)(
+    'hydrates only the selected %s page in one query with stable ID ties',
+    async (sort) => {
+      await list({ sort, page: 8, limit: 20, boardSlug: 'ideas', minVotes: 4 })
+      expect(queries).toHaveLength(1)
+      const { sql, params } = queries[0]
+      const window = sql.match(/inner join \(select (.*?)\) "ranked_page" on/s)?.[1]
+      expect(window).toBeDefined()
+      expect(window).toMatch(/^"posts"\."id" from "posts"/)
+      expect(window).not.toMatch(/json_agg|avatar_key|display_name|has_voted|"content"/)
+      expect(window).toContain('"boards"."deleted_at" is null')
+      expect(window).toContain('"posts"."deleted_at" is null')
+      expect(window).toContain('"posts"."canonical_post_id" is null')
+      expect(window).toContain('"posts"."moderation_state"')
+      expect(window).toContain('"boards"."access"')
+      expect(window).toContain('"boards"."slug"')
+      expect(window).toContain('"posts"."vote_count" >=')
+      expect(window).toMatch(/"posts"\."id" desc limit \$\d+ offset \$\d+$/)
+      expect(sql).toMatch(/"ranked_page"\."id" where /)
+      expect(sql).toMatch(/"posts"\."id" desc limit \$\d+$/)
+      expect(sql.match(/ offset /g)).toHaveLength(1)
+      expect(params).toContain(140)
+      expect(params.at(-1)).toBe(21)
+    }
+  )
+
+  it.each(['top', 'trending'] as const)(
+    'keeps the first %s page direct while stabilizing equal scores',
+    async (sort) => {
+      await list({ sort, page: 1 })
+      const { sql } = queries[0]
+      expect(sql).not.toContain('"ranked_page"')
+      expect(sql).toMatch(/"posts"\."id" desc limit/)
     }
   )
 
