@@ -10,7 +10,7 @@
   "dependencies": {
     "dotenv": "^18.0.8",
     "papaparse": "^5.7.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/papaparse": "^5.3.15"
