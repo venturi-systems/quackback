@@ -224,7 +224,11 @@ async function unlinkLastGithub(who: Admin) {
   return handleUnlinkAccountGate(
     {
       path: '/unlink-account',
-      body: { providerId: 'github' },
+      body: {
+        accountId: (await db.query.account.findFirst({
+          where: eq(schema.account.userId, who.userId),
+        }))!.id,
+      },
       context: { sessionConfig: { freshAge: 0 } },
     },
     (async () => ({ user: { id: who.userId }, session: { createdAt: new Date() } })) as never

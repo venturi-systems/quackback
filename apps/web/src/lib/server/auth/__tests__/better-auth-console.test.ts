@@ -23,7 +23,6 @@ import { readFileSync } from 'node:fs'
 import { inspect } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { betterAuth } from 'better-auth'
-import { APIError } from 'better-auth/api'
 import { memoryAdapter } from 'better-auth/adapters/memory'
 import { DrizzleQueryError } from 'drizzle-orm'
 import { DATABASE_ERROR_LOG_MESSAGE, routeConsoleToLogger } from '@quackback/logger'
@@ -173,41 +172,6 @@ describe('an uncaught failed query in a Better Auth request (DEF-66, router onEr
 
     expect(response.status).toBe(400)
     expect(consoleText(spies)).toBe('')
-  })
-})
-
-describe('betterAuthApiErrorOptions', () => {
-  it('rethrows an error that is not an APIError, unchanged', () => {
-    const { onError } = betterAuthApiErrorOptions(capture().log)
-    const error = failedQuery()
-
-    expect(() => onError(error)).toThrow(error)
-  })
-
-  it("logs an internal-server-error APIError as Better Auth's default does", () => {
-    const sink = capture()
-    const { onError } = betterAuthApiErrorOptions(sink.log)
-
-    onError(new APIError('INTERNAL_SERVER_ERROR', { message: 'session store unavailable' }))
-    onError(new APIError('BAD_REQUEST', { message: 'Invalid email' }))
-
-    expect(sink.lines).toHaveLength(1)
-    expect(sink.parsed()[0]).toMatchObject({
-      level: 'error',
-      msg: 'INTERNAL_SERVER_ERROR',
-      err: { message: 'session store unavailable' },
-    })
-  })
-
-  it('logs an APIError that names a schema object by its message alone, as the default does', () => {
-    const sink = capture()
-    const { onError } = betterAuthApiErrorOptions(sink.log)
-
-    onError(new APIError('BAD_REQUEST', { message: 'relation "session" does not exist' }))
-
-    expect(sink.parsed()).toMatchObject([
-      { level: 'error', msg: 'relation "session" does not exist' },
-    ])
   })
 })
 

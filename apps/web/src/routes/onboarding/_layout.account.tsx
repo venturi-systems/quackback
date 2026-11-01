@@ -53,7 +53,7 @@ function AccountStep() {
   useEffect(() => {
     if (!ssoEnabled) return
     void authClient.signIn
-      .oauth2({ providerId: 'sso', callbackURL: '/' })
+      .social({ provider: 'sso', callbackURL: '/' })
       .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'))
   }, [ssoEnabled])
 
@@ -72,7 +72,7 @@ function AccountStep() {
             <Button
               onClick={() =>
                 void authClient.signIn
-                  .oauth2({ providerId: 'sso', callbackURL: '/' })
+                  .social({ provider: 'sso', callbackURL: '/' })
                   .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'))
               }
               className="mt-6 w-full h-11"

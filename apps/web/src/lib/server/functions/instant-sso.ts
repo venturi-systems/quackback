@@ -48,8 +48,8 @@ export const resolveInstantSsoRedirectFn = createServerFn({ method: 'GET' })
 
     const headers = getRequestHeaders()
     const safeCallback = isSafeCallbackUrl(data.callbackUrl) ? data.callbackUrl : '/'
-    const result = await auth.api.signInWithOAuth2({
-      body: { providerId, callbackURL: safeCallback, disableRedirect: true },
+    const result = await auth.api.signInSocial({
+      body: { provider: providerId, callbackURL: safeCallback, disableRedirect: true },
       headers,
     })
     return result?.url ? { url: result.url } : null

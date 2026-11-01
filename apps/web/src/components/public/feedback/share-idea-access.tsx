@@ -40,7 +40,7 @@ export function ShareIdeaSignIn() {
     // mounts at this anchor.
     window.history.replaceState(window.history.state, '', callbackUrl)
     if (soleOidcProviderId) {
-      void authClient.signIn.oauth2({ providerId: soleOidcProviderId, callbackURL: callbackUrl })
+      void authClient.signIn.social({ provider: soleOidcProviderId, callbackURL: callbackUrl })
       return
     }
     if (authPopover) {

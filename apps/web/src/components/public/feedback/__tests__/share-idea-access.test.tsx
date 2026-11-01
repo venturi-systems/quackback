@@ -16,7 +16,7 @@ vi.mock('@/components/auth/auth-popover-context', () => ({
   useAuthPopoverSafe: () => ({ openAuthPopover }),
 }))
 vi.mock('@/lib/client/auth-client', () => ({
-  authClient: { signIn: { oauth2: (...args: unknown[]) => oauth2(...args) } },
+  authClient: { signIn: { social: (...args: unknown[]) => oauth2(...args) } },
 }))
 // The composer itself is lazy and framer-motion based; these tests cover the
 // decision in front of it, so a marker stands in for the composer.
@@ -94,7 +94,7 @@ describe('FeedbackHeader share-an-idea surface (E-8)', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Sign in to share an idea' }))
     expect(oauth2).toHaveBeenCalledWith({
-      providerId: 'custom-oidc',
+      provider: 'custom-oidc',
       callbackURL: '/?board=ideas#feedback-composer',
     })
     expect(openAuthPopover).not.toHaveBeenCalled()

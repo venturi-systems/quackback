@@ -11,7 +11,7 @@
  */
 
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
-import { verifyAccessToken } from 'better-auth/oauth2'
+import { verifyBearerToken } from 'better-auth/oauth2'
 import { withApiKeyAuth } from '@/lib/server/domains/api/auth'
 import { DomainException, RateLimitError } from '@/lib/shared/errors'
 import { getDeveloperConfig } from '@/lib/server/domains/settings/settings.service'
@@ -64,7 +64,7 @@ async function resolveOAuthContext(token: string): Promise<McpAuthContext | null
   if (token.startsWith(API_KEY_PREFIX)) return null
 
   try {
-    const payload = await verifyAccessToken(token, {
+    const payload = await verifyBearerToken(token, {
       verifyOptions: {
         audience: `${config.baseUrl}/api/mcp`,
         issuer: `${config.baseUrl}/api/auth`,

@@ -2,6 +2,7 @@ import { betterAuth } from 'better-auth'
 import {
   ALLOW_UNAUTHENTICATED_CLIENT_REGISTRATION,
   OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES,
+  OAUTH_CLIENT_REGISTRATION_DEFAULT_APPLICATION_TYPE,
 } from './oauth-client-defaults'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import {
@@ -21,6 +22,7 @@ import { config } from '@/lib/server/config'
 import { logger } from '@/lib/server/logger'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import { linkingTrustedProviderIds } from './linking-trust'
+import { forwardLegacyOidcCallback } from './legacy-oidc-callback'
 import {
   answerAuthRequest,
   betterAuthApiErrorOptions,
@@ -90,6 +92,9 @@ async function createAuth() {
     principal: principalTable,
     invitation: invitationTable,
     jwks: jwksTable,
+    oauthResource: oauthResourceTable,
+    oauthClientResource: oauthClientResourceTable,
+    oauthClientAssertion: oauthClientAssertionTable,
     oauthClient: oauthClientTable,
     oauthAccessToken: oauthAccessTokenTable,
     oauthRefreshToken: oauthRefreshTokenTable,
@@ -117,21 +122,6 @@ async function createAuth() {
   // because GitHub has no such claim. See map-profile-claims.ts.
   const { mapProfileLocale, mapOidcProfileClaims } = await import('./map-profile-claims')
 
-  // login_hint pre-selects the typed email in the IdP picker. Read from
-  // the `additionalData.loginHint` body field that the team-login /
-  // portal-auth forms pass when initiating an OIDC sign-in. When absent
-  // (e.g. a direct hit on /sign-in/oauth2 with no email context) the hint
-  // is omitted and the IdP shows its default account list. Carried to
-  // every OIDC provider since any of them may be domain-routed.
-  const buildLoginHintParams = (ctx: {
-    body?: { additionalData?: { loginHint?: string } }
-  }): Record<string, string> => {
-    const hint = ctx.body?.additionalData?.loginHint
-    const params: Record<string, string> = {}
-    if (hint) params.login_hint = hint
-    return params
-  }
-
   // Build socialProviders config from DB-stored credentials
   const socialProviders: Record<string, Record<string, unknown>> = {}
   const genericOAuthConfigs: GenericOAuthConfig[] = []
@@ -155,7 +145,6 @@ async function createAuth() {
     creds: getIdentityProviderCredentials,
     tierAllowsOidc: tierLimits.features.customOidcProvider,
     mapProfileToUser: mapOidcProfileClaims,
-    buildLoginHintParams,
   })
   genericOAuthConfigs.push(...oidcConfigs)
 
@@ -252,6 +241,9 @@ async function createAuth() {
         invitation: invitationTable,
         // OAuth 2.1 Provider + JWT plugin tables
         jwks: jwksTable,
+        oauthResource: oauthResourceTable,
+        oauthClientResource: oauthClientResourceTable,
+        oauthClientAssertion: oauthClientAssertionTable,
         oauthClient: oauthClientTable,
         oauthAccessToken: oauthAccessTokenTable,
         oauthRefreshToken: oauthRefreshTokenTable,
@@ -440,6 +432,9 @@ async function createAuth() {
 
       // OAuth 2.1 Provider — turns Better Auth into an authorization server for MCP
       oauthProvider({
+        // Native rotation response replay replaces the pre-1.7 un-revoke hook.
+        // It binds reuse to the same scopes, resources and sender constraint.
+        refreshTokenReuseInterval: Math.max(0, config.oauthRefreshGraceSeconds),
         // Redirect unauthenticated OAuth users to portal login
         loginPage: '/auth/login',
 
@@ -476,7 +471,11 @@ async function createAuth() {
         clientRegistrationDefaultScopes: [...OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES],
 
         // MCP endpoint is a valid token audience
-        validAudiences: [`${baseURL}/api/mcp`],
+        resources: [`${baseURL}/api/mcp`],
+        enforcePerClientResources: true,
+        clientRegistrationDefaultResources: [`${baseURL}/api/mcp`],
+        clientRegistrationDefaultApplicationType:
+          OAUTH_CLIENT_REGISTRATION_DEFAULT_APPLICATION_TYPE,
 
         // Better Auth warns that /.well-known/oauth-authorization-server/api/auth
         // doesn't exist, but we intentionally serve metadata at the root well-known
@@ -688,7 +687,13 @@ export const auth = {
         log.debug({ method: request.method, path: url.pathname }, 'magic-link request')
       }
       const authInstance = await getAuth()
-      const response = await authInstance.handler(request)
+      const context = await authInstance.$context
+      const legacyIds = new Set(
+        context.socialProviders
+          .filter((provider) => provider.callbackPath === `/oauth2/callback/${provider.id}`)
+          .map((provider) => provider.id)
+      )
+      const response = await authInstance.handler(forwardLegacyOidcCallback(request, legacyIds))
       if (isMagicLink) {
         log.debug({ status: response.status }, 'magic-link response')
       }

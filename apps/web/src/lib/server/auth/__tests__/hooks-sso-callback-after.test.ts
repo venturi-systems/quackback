@@ -118,6 +118,24 @@ beforeEach(() => {
 })
 
 describe('handleSsoCallbackAfter — guards', () => {
+  it('processes the shared 1.7 callback only for a registered OIDC provider', async () => {
+    mockTxFindFirst.mockResolvedValue({ id: 'principal_existing_admin' })
+    await handleSsoCallbackAfter({
+      path: '/callback/:id',
+      params: { id: 'sso' },
+      context: { newSession: { user: { id: 'user_sso', email: 'alice@acme.com' } } },
+    })
+    expect(mockTransaction).toHaveBeenCalledOnce()
+    expect(mockTxUpdateSet).not.toHaveBeenCalledWith({ role: 'admin' })
+    vi.clearAllMocks()
+    await handleSsoCallbackAfter({
+      path: '/callback/:id',
+      params: { id: 'google' },
+      context: { newSession: { user: { id: 'user_google', email: 'alice@acme.com' } } },
+    })
+    expect(mockTransaction).not.toHaveBeenCalled()
+  })
+
   it('skips when path is not the OAuth callback', async () => {
     await handleSsoCallbackAfter(ctxFor({ path: '/sign-in/email', userId: 'user_1' }))
     expect(mockTransaction).not.toHaveBeenCalled()

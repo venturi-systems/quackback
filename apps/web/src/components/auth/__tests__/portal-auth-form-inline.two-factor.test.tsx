@@ -23,7 +23,7 @@ const mockSignInEmail = vi.fn()
 const mockSignOut = vi.fn()
 vi.mock('@/lib/client/auth-client', () => ({
   authClient: {
-    signIn: { email: mockSignInEmail, oauth2: vi.fn() },
+    signIn: { email: mockSignInEmail, social: vi.fn() },
     signOut: mockSignOut,
     signUp: { email: vi.fn() },
     requestPasswordReset: vi.fn(),

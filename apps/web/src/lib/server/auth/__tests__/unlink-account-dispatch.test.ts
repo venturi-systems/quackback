@@ -108,11 +108,14 @@ async function signedInWith(
   links: Array<{ providerId: string; accountId: string }>
 ): Promise<string> {
   const ctx = await auth.$context
-  const user = await ctx.internalAdapter.createUser({
-    name: 'Ada',
-    email: 'ada@acme.example',
-    emailVerified: true,
-  })
+  const user = await ctx.internalAdapter.createUser(
+    {
+      name: 'Ada',
+      email: 'ada@acme.example',
+      emailVerified: true,
+    },
+    { method: 'email-password' }
+  )
   for (const link of links) {
     await ctx.internalAdapter.createAccount({ userId: user.id, ...link })
   }
@@ -156,7 +159,9 @@ describe('a Google or GitHub unlink through Better Auth', () => {
     const auth = createTestAuth()
     const cookie = await signedInWith(auth, twoGithubLinks)
 
-    const res = await unlinkRequest(auth, cookie, { providerId: 'github' })
+    const res = await unlinkRequest(auth, cookie, {
+      accountId: String(hoisted.store.account[0].id),
+    })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ status: true })
@@ -172,7 +177,7 @@ describe('a Google or GitHub unlink through Better Auth', () => {
     const cookie = await signedInWith(auth, twoGithubLinks)
 
     const result = await auth.api.unlinkAccount({
-      body: { providerId: 'github' },
+      body: { accountId: String(hoisted.store.account[0].id) },
       headers: new Headers({ cookie }),
     })
 
@@ -182,17 +187,17 @@ describe('a Google or GitHub unlink through Better Auth', () => {
     expect(remaining('github')).toEqual(['gh_2'])
   })
 
-  it('treats an empty accountId as absent, as Better Auth does', async () => {
+  it('rejects a provider subject and an empty ID instead of selecting a link', async () => {
     const auth = createTestAuth()
     const cookie = await signedInWith(auth, twoGithubLinks)
-
-    const res = await unlinkRequest(auth, cookie, { providerId: 'github', accountId: '' })
-
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ status: true })
-    expect(hoisted.gateDeletes).toHaveLength(1)
+    for (const accountId of ['gh_1', '']) {
+      const res = await unlinkRequest(auth, cookie, { accountId })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toMatchObject({ code: 'ACCOUNT_NOT_FOUND' })
+    }
+    expect(hoisted.gateDeletes).toEqual([])
     expect(hoisted.betterAuthDeletes).toEqual([])
-    expect(remaining('github')).toEqual(['gh_2'])
+    expect(remaining('github')).toEqual(['gh_1', 'gh_2'])
   })
 
   it('returns the gate’s refusal and deletes nothing', async () => {
@@ -203,7 +208,9 @@ describe('a Google or GitHub unlink through Better Auth', () => {
       { providerId: 'credential', accountId: 'ada' },
     ])
 
-    const res = await unlinkRequest(auth, cookie, { providerId: 'github' })
+    const res = await unlinkRequest(auth, cookie, {
+      accountId: String(hoisted.store.account[0].id),
+    })
 
     expect(res.status).toBe(403)
     expect(await res.json()).toMatchObject({ code: 'last_admin_identity' })
@@ -216,7 +223,12 @@ describe('a Google or GitHub unlink through Better Auth', () => {
     const auth = createTestAuth()
     const cookie = await signedInWith(auth, twoGithubLinks)
 
-    const res = await unlinkRequest(auth, cookie, { providerId: 'github' }, 'https://evil.example')
+    const res = await unlinkRequest(
+      auth,
+      cookie,
+      { accountId: String(hoisted.store.account[0].id) },
+      'https://evil.example'
+    )
 
     expect(res.status).toBe(403)
     expect(hoisted.lockCount).toBe(0)
@@ -227,20 +239,22 @@ describe('a Google or GitHub unlink through Better Auth', () => {
 })
 
 describe('an unlink of any other provider', () => {
-  it('reaches Better Auth’s own handler, whose deletes this suite counts', async () => {
+  it('also deletes exactly the named local account under the lock', async () => {
     const auth = createTestAuth()
     const cookie = await signedInWith(auth, [
       { providerId: 'gitlab', accountId: 'gl_1' },
       { providerId: 'github', accountId: 'gh_1' },
     ])
 
-    const res = await unlinkRequest(auth, cookie, { providerId: 'gitlab' })
+    const res = await unlinkRequest(auth, cookie, {
+      accountId: String(hoisted.store.account[0].id),
+    })
 
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ status: true })
-    expect(hoisted.lockCount).toBe(0)
-    expect(hoisted.gateDeletes).toEqual([])
-    expect(hoisted.betterAuthDeletes).toHaveLength(1)
+    expect(hoisted.lockCount).toBe(1)
+    expect(hoisted.gateDeletes).toHaveLength(1)
+    expect(hoisted.betterAuthDeletes).toEqual([])
     expect(remaining('gitlab')).toEqual([])
     expect(remaining('github')).toEqual(['gh_1'])
   })

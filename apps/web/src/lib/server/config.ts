@@ -79,8 +79,8 @@ const configSchema = z.object({
 
   // Auth
   secretKey: z.string().min(32, 'SECRET_KEY must be at least 32 characters'),
-  // Rotation grace for OAuth refresh tokens (seconds). 0 disables healing
-  // and restores strict single-use rotation. See auth/refresh-grace.ts.
+  // Native OAuth refresh-response replay window (seconds). 0 restores
+  // strict single-use rotation; replay never un-revokes a token.
   oauthRefreshGraceSeconds: envInt.default(7 * 24 * 60 * 60),
 
   // Redis (BullMQ background jobs)

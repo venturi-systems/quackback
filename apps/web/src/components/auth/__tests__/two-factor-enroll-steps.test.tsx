@@ -48,16 +48,23 @@ const { TwoFactorEnrollSteps } = await import('../two-factor-enroll-steps')
 beforeEach(() => {
   vi.clearAllMocks()
   mockEnable.mockResolvedValue({
-    data: { totpURI: 'otpauth://x', backupCodes: ['aaaa-bbbb'] },
+    data: { method: 'totp', totpURI: 'otpauth://x', backupCodes: ['aaaa-bbbb'] },
     error: null,
   })
   mockVerifyTotp.mockResolvedValue({ error: null })
 })
 
 describe('TwoFactorEnrollSteps', () => {
+  it('fails closed if the server enables a different second-factor method', async () => {
+    mockEnable.mockResolvedValueOnce({ data: { method: 'otp' }, error: null })
+    render(<TwoFactorEnrollSteps password="pw" onComplete={() => {}} onCancel={() => {}} />)
+    expect(await screen.findByText('Could not start 2FA setup.')).toBeInTheDocument()
+    expect(screen.queryByAltText(/QR code/i)).not.toBeInTheDocument()
+  })
+
   it('enables on mount and renders the QR step', async () => {
     render(<TwoFactorEnrollSteps password="pw" onComplete={() => {}} onCancel={() => {}} />)
-    await waitFor(() => expect(mockEnable).toHaveBeenCalledWith({ password: 'pw' }))
+    await waitFor(() => expect(mockEnable).toHaveBeenCalledWith({ password: 'pw', method: 'totp' }))
     expect(await screen.findByAltText(/QR code/i)).toBeInTheDocument()
   })
 

@@ -26,7 +26,6 @@ import {
   type ProviderWithDomains,
 } from './provider-ids'
 import { AUTH_BLOCK_MESSAGES } from './redirect-errors'
-import { handleRefreshGraceHeal } from './refresh-grace'
 import { captureCountryFromHeaders } from './country-capture'
 import { getRequestHeaders } from '@tanstack/react-start/server'
 import { getClientIp } from '@/lib/server/domains/api/rate-limit'
@@ -434,12 +433,13 @@ const LAST_ADMIN_IDENTITY_MESSAGE =
  * leaving the delete to Better Auth after the lock was released let both
  * unlinks pass (DEF-62).
  *
- * So this hook performs every Google or GitHub unlink itself and returns
+ * Better Auth 1.7 names the local Account.id, so the hook resolves its
+ * provider under the same lock and performs every unlink itself. It returns
  * Better Auth's response body, which ends the request. It keeps the checks of
  * Better Auth's own /unlink-account endpoint, in its order and with its error
  * codes: a signed-in, fresh session, never the account's last linked account,
- * and the named account must exist. Any other provider, and a body Better
- * Auth's schema rejects, returns undefined and is left to Better Auth.
+ * and the named local account must exist. A body Better Auth's schema
+ * rejects is left to Better Auth.
  */
 export async function handleUnlinkAccountGate(
   ctx: {
@@ -453,16 +453,12 @@ export async function handleUnlinkAccountGate(
   resolveSession: SessionResolver = getSessionFromCtx as unknown as SessionResolver
 ): Promise<{ status: true } | undefined> {
   if (ctx.path !== '/unlink-account') return
-  const providerId = ctx.body?.providerId
-  if (providerId !== 'google' && providerId !== 'github') return
-  const requestedAccountId = ctx.body?.accountId
-  if (requestedAccountId !== undefined && typeof requestedAccountId !== 'string') return
-  // Better Auth tests `accountId` for truthiness, so an empty string names no
-  // account and the first link of the provider is unlinked. Match it.
-  const accountId = requestedAccountId || null
+  // 1.7 identifies links by the local Account.id, never the provider subject.
+  const accountId = ctx.body?.accountId
+  if (typeof accountId !== 'string') return
 
   // Better Auth's freshSessionMiddleware, which runs after this hook: no
-  // session is refused here, so no Google or GitHub unlink ever reaches Better
+  // session is refused here, so no unlink ever reaches Better
   // Auth's own delete, which runs outside the lock.
   const session = await resolveSession(ctx as never)
   const userId = session?.user?.id
@@ -505,11 +501,7 @@ export async function handleUnlinkAccountGate(
         message: "You can't unlink your last account",
       })
     }
-    const target = links.find((link) =>
-      accountId !== null
-        ? link.accountId === accountId && link.providerId === providerId
-        : link.providerId === providerId
-    )
+    const target = links.find((link) => link.id === accountId)
     if (!target) {
       throw new APIError('BAD_REQUEST', {
         code: 'ACCOUNT_NOT_FOUND',
@@ -524,7 +516,12 @@ export async function handleUnlinkAccountGate(
     const keepsTeamLink = links.some(
       (link) => link.id !== target.id && teamProviders.includes(link.providerId)
     )
-    if (principalRow?.role === 'admin' && principalRow.type === 'user' && !keepsTeamLink) {
+    if (
+      teamProviders.includes(target.providerId) &&
+      principalRow?.role === 'admin' &&
+      principalRow.type === 'user' &&
+      !keepsTeamLink
+    ) {
       const others = await countEligibleAdmins(tx, principalRow.id as PrincipalId)
       if (others < 1) {
         throw new APIError('FORBIDDEN', {
@@ -540,14 +537,13 @@ export async function handleUnlinkAccountGate(
 }
 
 export const hooksBefore = createAuthMiddleware(async (ctx) => {
-  // Disjoint path matchers: grace heal only touches /oauth2/token,
-  // sign-in pre-check only touches sign-in/OTP paths, the anonymous gate
+  // The provider owns refresh-token rotation/replay in 1.7. Disjoint app
+  // matchers: sign-in pre-check only touches sign-in/OTP paths, the anonymous gate
   // only /sign-in/anonymous, the registration gate only /oauth2/register and
   // the unlink gate only /unlink-account. Order is irrelevant.
-  await handleRefreshGraceHeal(ctx)
   await handleAnonymousSignInGate(ctx)
   await handleClientRegistrationGate(ctx)
-  // A Google or GitHub unlink is performed by the gate itself, under the
+  // Unlinking is performed by the gate itself, under the
   // team-role lock; its response body ends the request here.
   const unlinked = await handleUnlinkAccountGate(
     ctx as Parameters<typeof handleUnlinkAccountGate>[0]
@@ -603,8 +599,8 @@ export async function handleSsoCallbackAfter(
    *  Used to resolve the callback provider for the H8 promotion gate. */
   providers: readonly ProviderWithDomains[]
 ): Promise<void> {
-  if (ctx.path !== '/oauth2/callback/:providerId') return
-  const providerId = ctx.params?.providerId
+  if (ctx.path !== '/oauth2/callback/:providerId' && ctx.path !== '/callback/:id') return
+  const providerId = inferProvider(ctx)
   if (typeof providerId !== 'string' || !isRegisteredOidcProvider(providerId, registeredOidcIds))
     return
   const userId = ctx.context?.newSession?.user?.id
@@ -750,8 +746,8 @@ export async function handleAutoProvisionAfter(
   /** OIDC provider ids registered right now (from getRegisteredOidcProviderIds). */
   registeredOidcIds: Set<string>
 ): Promise<void> {
-  if (ctx.path !== '/oauth2/callback/:providerId') return
-  const providerId = ctx.params?.providerId
+  if (ctx.path !== '/oauth2/callback/:providerId' && ctx.path !== '/callback/:id') return
+  const providerId = inferProvider(ctx)
   if (typeof providerId !== 'string' || !isRegisteredOidcProvider(providerId, registeredOidcIds))
     return
 

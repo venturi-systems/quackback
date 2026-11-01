@@ -178,7 +178,7 @@ export function PortalHeader({
   // to the current page afterwards.
   const redirectToSoleProvider = () => {
     if (!soleOidcProviderId) return
-    void authClient.signIn.oauth2({ providerId: soleOidcProviderId, callbackURL: pathname })
+    void authClient.signIn.social({ provider: soleOidcProviderId, callbackURL: pathname })
   }
 
   const handleSignOut = async () => {

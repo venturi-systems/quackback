@@ -9,24 +9,17 @@ export type OAuthProviderEntry = {
 
 /**
  * Get the OAuth redirect URL for a provider.
- * Handles routing between signIn.oauth2 (generic) and signIn.social (built-in).
+ * Custom and built-in providers use the same Better Auth social endpoint.
  */
 export async function getOAuthRedirectUrl(
   provider: OAuthProviderEntry,
   callbackURL: string
 ): Promise<string | null> {
-  const result =
-    provider.type === 'generic-oauth'
-      ? await authClient.signIn.oauth2({
-          providerId: provider.id,
-          callbackURL,
-          disableRedirect: true,
-        })
-      : await authClient.signIn.social({
-          provider: provider.id,
-          callbackURL,
-          disableRedirect: true,
-        })
+  const result = await authClient.signIn.social({
+    provider: provider.id,
+    callbackURL,
+    disableRedirect: true,
+  })
   return result.data?.url ?? null
 }
 

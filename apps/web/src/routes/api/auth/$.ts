@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { SSO_OAUTH_CALLBACK_PREFIX } from '@/lib/shared/sso-test-keys'
-
 /**
  * Simple rate limiter for OAuth client registration.
  * Limits to 10 registrations per IP per hour to prevent spam/abuse.
@@ -82,7 +81,7 @@ export const Route = createFileRoute('/api/auth/$')({
 
         // Ensure `resource` is present in token exchange requests.
         // Without it, better-auth issues opaque tokens instead of JWTs,
-        // breaking `verifyAccessToken` in the MCP handler.
+        // breaking `verifyBearerToken` in the MCP handler.
         // Reading the body consumes the stream, so we always reconstruct
         // the request to avoid passing a consumed body to better-auth.
         if (url.pathname.endsWith('/oauth2/token')) {

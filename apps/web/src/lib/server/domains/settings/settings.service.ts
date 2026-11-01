@@ -90,7 +90,7 @@ async function getEmailDependentPassthroughKeys(): Promise<string[]> {
  * Public OIDC sign-in buttons for the portal, sourced from the
  * `identity_provider` table (NOT the static AUTH_PROVIDERS map). Each
  * button's `id` is the provider's `registrationId`, so a click drives
- * `signIn.oauth2({ providerId: registrationId })` → the matching
+ * `signIn.social({ provider: registrationId })` → the matching
  * `/oauth2/callback/<registrationId>`.
  *
  * A provider yields a button only when it is BOTH:

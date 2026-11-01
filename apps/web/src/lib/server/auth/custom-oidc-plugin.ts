@@ -11,12 +11,10 @@
  *    trigger it. There is no config hook, so the wrapper swaps the method for
  *    the pinned one. A provider without a pinned refresh has refresh refused.
  *
- * 2. Freshness. The plugin reads `authorizationUrl` / `tokenUrl` / `issuer`
- *    synchronously, and those getters only return a discovery document
- *    fetched within its TTL. A before-hook resolves the document through
- *    `safeFetch` on each route that reads them, so a sign-in never sees an
- *    expired document. When it cannot be resolved the getters stay
- *    undefined and the route fails closed.
+ * 2. Freshness. Better Auth 1.7 captures endpoint strings during init. The
+ *    wrapper replaces authorization URL construction with a pinned resolver,
+ *    and exposes the current pinned issuer to the shared callback. A
+ *    before-hook refuses unavailable endpoints before the route executes.
  *
  *    The callback routes need more than that. The plugin skips its RFC 9207
  *    `iss` check when the `issuer` getter reads undefined, and the pinned
@@ -30,8 +28,8 @@
  * Better-Auth would dispatch to for a configured custom-OIDC id is patched.
  */
 
-import { createAuthMiddleware } from 'better-auth/api'
-import type { OAuth2Tokens } from 'better-auth/oauth2'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { createAuthorizationURL, type OAuth2Tokens, type OAuthProvider } from 'better-auth/oauth2'
 import { logger } from '@/lib/server/logger'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import type { OidcEndpoints } from './custom-oidc-fetch'
@@ -82,11 +80,9 @@ function issParameter(query: unknown): unknown {
 /**
  * Resolve the endpoints of the custom-OIDC provider a route targets.
  *
- * On a sign-in route a failure is logged and swallowed: the route then reads
- * undefined endpoints and fails closed with the plugin's own configuration
- * error. On a callback route it returns the failure instead, and so does an
- * `iss` parameter that differs from the resolved issuer; the hook turns
- * either into the plugin's error redirect before any code is exchanged.
+ * Endpoint resolution failures refuse sign-in before URL construction. On
+ * callbacks they become an error redirect before any code is exchanged;
+ * an `iss` parameter that differs from the pinned issuer is also refused.
  */
 export async function resolveEndpointsForRoute(
   ctx: RouteContext,
@@ -101,7 +97,7 @@ export async function resolveEndpointsForRoute(
     endpoints = await pinned.resolveEndpoints()
   } catch (err) {
     log.warn({ err, providerId }, 'custom OIDC endpoints unavailable; sign-in fails closed')
-    return isCallback ? 'oauth_code_verification_failed' : undefined
+    return 'oauth_code_verification_failed'
   }
   if (!isCallback || !endpoints.issuer) return undefined
   const iss = issParameter(ctx.query)
@@ -137,6 +133,34 @@ export function pinProviderRefresh(
     const config = configsById.get(id)
     if (!config) continue
     provider.refreshAccessToken = config.pinned?.refreshAccessToken ?? refuseRefresh(id)
+    // Better Auth 1.7 captures endpoint strings during init. Resolve the
+    // pinned discovery source per authorization request instead, including
+    // after its TTL expires. No admin-provided URL reaches a global fetch.
+    const pinned = config.pinned
+    if (pinned) {
+      provider.createAuthorizationURL = async (
+        data: Parameters<OAuthProvider['createAuthorizationURL']>[0]
+      ) => {
+        const endpoints = await pinned.resolveEndpoints()
+        return createAuthorizationURL({
+          id,
+          options: { clientId: config.clientId, clientSecret: config.clientSecret },
+          authorizationEndpoint: endpoints.authorizationEndpoint,
+          state: data.state,
+          codeVerifier: config.pkce === false ? undefined : data.codeVerifier,
+          scopes: [...(data.scopes ?? []), ...(config.scopes ?? [])],
+          redirectURI: data.redirectURI,
+          prompt: config.prompt,
+          nonce: data.idTokenNonce,
+          additionalParams: data.additionalParams,
+          loginHint: data.loginHint,
+        })
+      }
+      Object.defineProperty(provider, 'issuer', { get: () => config.issuer })
+    }
+    // Existing IdP registrations and the admin Test sign-in use this URI.
+    // The catch-all forwards it internally to the shared 1.7 callback route.
+    provider.callbackPath = `/oauth2/callback/${id}`
     patched.add(id)
   }
 }
@@ -178,6 +202,12 @@ export function pinCustomOidcFetches<P extends { init?: unknown; hooks?: unknown
     handler: createAuthMiddleware(async (ctx) => {
       const failure = await resolveEndpointsForRoute(ctx, configsById)
       if (!failure) return
+      if (!ctx.path || !CALLBACK_ROUTES.has(ctx.path)) {
+        throw new APIError('BAD_REQUEST', {
+          code: 'INVALID_OAUTH_CONFIGURATION',
+          message: 'OIDC endpoints unavailable',
+        })
+      }
       // The same redirect the plugin's callback makes for these failures.
       const errorURL = ctx.context.options.onAPIError?.errorURL || `${ctx.context.baseURL}/error`
       const separator = errorURL.includes('?') ? '&' : '?'

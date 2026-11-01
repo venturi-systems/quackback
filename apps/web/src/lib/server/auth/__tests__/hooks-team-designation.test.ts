@@ -174,7 +174,13 @@ describe('handleTeamDesignationAfter', () => {
 describe('handleUnlinkAccountGate', () => {
   const unlink = (providerId: string, accountId?: string, freshAge?: number) => ({
     path: '/unlink-account',
-    body: { providerId, ...(accountId ? { accountId } : {}) },
+    body: {
+      accountId:
+        hoisted.accounts.find(
+          (a) =>
+            a.providerId === providerId && (accountId === undefined || a.accountId === accountId)
+        )?.id ?? `missing_${providerId}`,
+    },
     ...(freshAge === undefined ? {} : { context: { sessionConfig: { freshAge } } }),
   })
 
@@ -244,15 +250,13 @@ describe('handleUnlinkAccountGate', () => {
     expect(hoisted.deleted).toEqual(['account_gh'])
   })
 
-  it('leaves other providers to Better Auth', async () => {
-    await expect(
-      handleUnlinkAccountGate(unlink('credential'), signedIn.resolve as never)
-    ).resolves.toBeUndefined()
+  it('deletes a non-team link under the lock without affecting team identity', async () => {
+    hoisted.accounts.push({ id: 'account_sso', providerId: 'sso', accountId: 'sso_1' })
     await expect(
       handleUnlinkAccountGate(unlink('sso'), signedIn.resolve as never)
-    ).resolves.toBeUndefined()
-    expect(hoisted.lockCount).toBe(0)
-    expect(hoisted.deleted).toEqual([])
+    ).resolves.toEqual({ status: true })
+    expect(hoisted.countEligibleAdmins).not.toHaveBeenCalled()
+    expect(hoisted.deleted).toEqual(['account_sso'])
   })
 
   it('leaves a body Better Auth’s schema rejects to Better Auth', async () => {
@@ -303,19 +307,14 @@ describe('handleUnlinkAccountGate', () => {
     expect(hoisted.deleted).toEqual([])
   })
 
-  it('treats an empty accountId as absent, as Better Auth does', async () => {
-    hoisted.principal = { id: 'principal_x', role: 'member', type: 'user' }
-    hoisted.accounts = [
-      { id: 'account_gh1', providerId: 'github', accountId: 'gh_1' },
-      { id: 'account_gh2', providerId: 'github', accountId: 'gh_2' },
-    ]
+  it('rejects an empty local account ID without selecting the first provider link', async () => {
     await expect(
       handleUnlinkAccountGate(
-        { path: '/unlink-account', body: { providerId: 'github', accountId: '' } },
+        { path: '/unlink-account', body: { accountId: '' } },
         signedIn.resolve as never
       )
-    ).resolves.toEqual({ status: true })
-    expect(hoisted.deleted).toEqual(['account_gh1'])
+    ).rejects.toMatchObject({ body: expect.objectContaining({ code: 'ACCOUNT_NOT_FOUND' }) })
+    expect(hoisted.deleted).toEqual([])
   })
 
   it('answers ACCOUNT_NOT_FOUND for a link the account does not have', async () => {
