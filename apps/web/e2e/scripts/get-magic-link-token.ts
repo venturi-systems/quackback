@@ -26,17 +26,16 @@ if (!connectionString) {
 const sql = postgres(connectionString)
 
 async function getMagicLinkToken(): Promise<string> {
-  // Better-auth's magic-link plugin stores rows as
-  //   { identifier: <token>, value: '{"email":"...","attempt":0}' }
-  // The token is the row's `identifier`; `value` is a JSON blob carrying
-  // the recipient email + attempt counter. (The earlier schema put the
-  // email in `identifier`; that was replaced when the OTP+magic-link
-  // emails were unified.) We grep by the email embedded in the JSON.
+  // Better Auth 1.7 stores the raw URL token under a namespaced identifier.
+  // Require that namespace rather than selecting unrelated verification rows.
   const result = await sql`
     SELECT identifier, value, expires_at
     FROM verification
-    WHERE value::text ILIKE ${'%"email":"' + email + '"%'}
-      AND identifier NOT LIKE 'sign-in-otp-%'
+    WHERE identifier LIKE 'magic-link:%'
+      AND CASE WHEN pg_input_is_valid(value, 'jsonb')
+        THEN lower(value::jsonb->>'email') = lower(${email})
+          AND value::jsonb->>'type' = 'magic-link'
+        ELSE false END
       AND expires_at > NOW()
     ORDER BY created_at DESC
     LIMIT 1
@@ -46,7 +45,7 @@ async function getMagicLinkToken(): Promise<string> {
     throw new Error(`No live magic-link verification row found for email: ${email}`)
   }
 
-  return result[0].identifier as string
+  return (result[0].identifier as string).slice('magic-link:'.length)
 }
 
 try {

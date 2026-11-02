@@ -1,6 +1,6 @@
 # Better Auth 1.7 rollout
 
-This upgrade changes OAuth provider storage and request APIs. A lockfile-only
+This upgrade changes OAuth provider storage, magic-link records and request APIs. A lockfile-only
 deployment is unsafe. The application and `@better-auth/oauth-provider` must use
 the matching 1.7.15 family.
 
@@ -12,9 +12,14 @@ the matching 1.7.15 family.
 2. Quiesce the old application and OAuth client registration. Do not run old and
    new token issuers concurrently.
 3. Apply the journaled migrations through
-   `9005_venturi_oauth_provider_1_7`. This adds fields and tables, retains all
+   `9006_venturi_magic_link_1_7`. Migration 9005 adds fields and tables, retains all
    old identities and token revocations, and backfills only unambiguous legacy
    client metadata. It does not change account provider IDs or add an issuer.
+   Migration 9006 preserves unused, unexpired legacy magic links with the exact
+   former record shape, including seven-day invitations, without extending expiry.
+   It adds the provider namespace and record type. Namespace collisions stop the
+   migration for investigation; other verification records remain unchanged.
+   Previously attempted or ambiguous legacy links require normal reissuance.
 4. Inventory client metadata without reading client secrets or token values.
    Unknown application types, inconsistent public/authentication flags and
    missing required client secrets must be resolved from the original client
@@ -35,6 +40,8 @@ the matching 1.7.15 family.
    fail. A predecessor may replay its already issued response within grace;
    that must not mint tokens, extend expiry or restore a revoked successor.
    Confirm existing IdP callback URLs and linked account IDs are unchanged.
+   Verify a retained invitation and a new magic link each sign in the intended
+   recipient once. Cancelled links, replayed links and expired links must fail.
 
 For an operator SQL client, step five has this transaction shape (replace the
 example with the recorded prior audience, using the client's parameter binding):
@@ -63,7 +70,9 @@ seven-day healing window. During rollout a client may need a fresh authorization
 if its previous grant cannot be represented safely.
 
 The schema is additive, but token state written by the new provider is not a
-promise of reverse compatibility. Before a rollback, stop new issuance and
+promise of reverse compatibility. Namespaced magic-link records also require
+1.7 verification; do not drop the namespace or copy consumed links back into
+legacy storage. Before a rollback, stop new issuance and
 review the token families created or rotated under 1.7; do not run the old
 grace-heal hook over new rotation state. Keep the added columns and tables and
 use the normal incident recovery procedure. Do not restore a database snapshot

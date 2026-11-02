@@ -78,6 +78,11 @@ let _auth: AuthInstance | null = null
 // the current value (via the existing settings cache, no extra DB
 // round-trip). Mismatch → resetAuth(), other pods' writes propagate.
 let _authConfigVersion: number | null = null
+let _authGeneration = 0
+let _authInitialization: {
+  generation: number
+  promise: Promise<Awaited<ReturnType<typeof createAuth>>>
+} | null = null
 
 async function createAuth() {
   // Dynamic imports to prevent client bundling
@@ -634,23 +639,40 @@ async function createAuth() {
  * auth-instance-affecting write path.
  */
 export async function getAuth(): Promise<AuthInstance> {
-  // Skip the version check when no instance is cached yet — the build
-  // path below records the version after creation.
-  if (_auth && _authConfigVersion !== null) {
-    const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
-    const t = await getTenantSettings()
-    const current = t?.settings?.authConfigVersion
-    if (typeof current === 'number' && current !== _authConfigVersion) {
-      _auth = null
-      _authConfigVersion = null
+  for (;;) {
+    const cached = _auth
+    if (cached && _authConfigVersion !== null) {
+      const { getTenantSettings } = await import('@/lib/server/domains/settings/settings.service')
+      const t = await getTenantSettings()
+      // A concurrent reset or rebuild invalidates this version check.
+      if (_auth !== cached) continue
+      const current = t?.settings?.authConfigVersion
+      if (typeof current !== 'number' || current === _authConfigVersion) return cached
+      resetAuth()
+    }
+    // Async plugin initialization seeds persistent OAuth resources. All callers
+    // share it, and no caller receives an instance with an unfinished context.
+    const initialization = (_authInitialization ??= {
+      generation: _authGeneration,
+      promise: (async () => {
+        const built = await createAuth()
+        await built.instance.$context
+        return built
+      })(),
+    })
+    try {
+      const built = await initialization.promise
+      // A reset during initialization must not publish stale credentials.
+      // Finish the old initializer before starting its replacement so their
+      // persistent resource creation cannot race within this process.
+      if (initialization.generation !== _authGeneration) continue
+      _auth = built.instance
+      _authConfigVersion = built.authConfigVersion
+      return _auth
+    } finally {
+      if (_authInitialization === initialization) _authInitialization = null
     }
   }
-  if (!_auth) {
-    const built = await createAuth()
-    _auth = built.instance
-    _authConfigVersion = built.authConfigVersion
-  }
-  return _auth
 }
 
 /**
@@ -658,6 +680,7 @@ export async function getAuth(): Promise<AuthInstance> {
  * Call after changing auth provider credentials in the DB.
  */
 export function resetAuth(): void {
+  _authGeneration += 1
   _auth = null
   _authConfigVersion = null
 }

@@ -61,6 +61,10 @@ setup('authenticate as admin', async ({ page }) => {
     { maxRedirects: 5 }
   )
   expect(verifyResponse.ok()).toBeTruthy()
+  expect(
+    verifyResponse.url(),
+    'magic-link verification was redirected to an auth error'
+  ).not.toMatch(/[?&]error=/)
 
   // Step 4: Ensure test user has admin role (user now exists after verify)
   ensureTestUserHasRole(ADMIN_EMAIL, 'admin')

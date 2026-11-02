@@ -42,6 +42,7 @@ const FORK_AFTER_0125 = [
   '9003_venturi_legacy_api_key_bounds',
   '9004_venturi_feature_pipeline',
   '9005_venturi_oauth_provider_1_7',
+  '9006_venturi_magic_link_1_7',
 ]
 
 describe('two_factor lockout columns', () => {
@@ -132,6 +133,13 @@ describe('fork migration journal', () => {
           // each key it changes.
           expect(statement, e.tag).toMatch(/"legacy_bounded_at" IS NULL/)
           expect(statement, e.tag).toMatch(/"legacy_bounded_at" = now\(\)/)
+        } else if (
+          e.tag === '9006_venturi_magic_link_1_7' &&
+          statement.startsWith('DO $migration$')
+        ) {
+          // The integration test proves row preservation and replay safety.
+          expect(statement).toContain("identifier ~ '^[A-Za-z]{32}$'")
+          expect(statement).toContain("SET identifier = 'magic-link:' || legacy.identifier")
         } else if (
           e.tag === '9005_venturi_oauth_provider_1_7' &&
           /^UPDATE "oauth_client" SET /i.test(statement)

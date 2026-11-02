@@ -1,5 +1,5 @@
 import { generateRandomString } from 'better-auth/crypto'
-import { db, verification, eq, inArray } from '@/lib/server/db'
+import { db, verification, inArray } from '@/lib/server/db'
 import { getAuth } from './index'
 
 interface MintOptions {
@@ -55,8 +55,8 @@ export async function mintMagicLinkUrl(opts: MintOptions): Promise<{ url: string
   // is a plain object. `await` handles both.
   const ctx = await auth.$context
   await ctx.internalAdapter.createVerificationValue({
-    identifier: token,
-    value: JSON.stringify({ email: opts.email, attempt: 0 }),
+    identifier: `magic-link:${token}`,
+    value: JSON.stringify({ type: 'magic-link', email: opts.email }),
     expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
   })
 
@@ -66,9 +66,8 @@ export async function mintMagicLinkUrl(opts: MintOptions): Promise<{ url: string
     callbackPath: opts.callbackPath,
     errorCallbackPath: opts.errorCallbackPath,
   })
-  // `token` is the verification-row identifier. Callers that need to be able
-  // to invalidate the link later (invitations) persist it; sign-in callers
-  // ignore it.
+  // Keep the raw URL token for invitation cancellation. Better Auth stores
+  // the verification row under its namespaced identifier.
   return { url, token }
 }
 
@@ -80,9 +79,10 @@ export async function mintMagicLinkUrl(opts: MintOptions): Promise<{ url: string
  */
 export async function revokeMagicLinkToken(token: string | null | undefined): Promise<void> {
   if (!token) return
-  // `token` is the row's `identifier` — see `createVerificationValue` in
-  // mintMagicLinkUrl above, which stores the raw token as the identifier.
-  await db.delete(verification).where(eq(verification.identifier, token))
+  // Include pre-1.7 rows so cancellation also revokes outstanding older links.
+  await db
+    .delete(verification)
+    .where(inArray(verification.identifier, [`magic-link:${token}`, token]))
 }
 
 /**
@@ -92,5 +92,10 @@ export async function revokeMagicLinkToken(token: string | null | undefined): Pr
  */
 export async function revokeMagicLinkTokens(tokens: string[]): Promise<void> {
   if (tokens.length === 0) return
-  await db.delete(verification).where(inArray(verification.identifier, tokens))
+  await db.delete(verification).where(
+    inArray(
+      verification.identifier,
+      tokens.flatMap((token) => [`magic-link:${token}`, token])
+    )
+  )
 }

@@ -9,7 +9,7 @@ import * as databaseSchema from '@quackback/db/schema'
 import { getTableColumns, is } from 'drizzle-orm'
 import { PgTable } from 'drizzle-orm/pg-core'
 
-const state = vi.hoisted(() => ({ transaction: undefined as unknown }))
+const state = vi.hoisted(() => ({ transaction: undefined as unknown, providerLoads: 0 }))
 const databaseUrl = process.env.QUACKBACK_AUTH_TEST_DATABASE_URL
 const baseUrl = 'https://quackback-auth-startup.invalid'
 const rollback = new Error('ROLLBACK_AUTH_STARTUP_FIXTURE')
@@ -50,7 +50,10 @@ vi.mock('@/lib/server/domains/settings/settings.service', () => ({
   }),
 }))
 vi.mock('@/lib/server/domains/settings/identity-providers.service', () => ({
-  listIdentityProviders: async () => [],
+  listIdentityProviders: async () => {
+    state.providerLoads += 1
+    return []
+  },
   getIdentityProviderCredentials: async () => null,
 }))
 vi.mock('@/lib/server/domains/platform-credentials/platform-credential.service', () => ({
@@ -86,7 +89,12 @@ describe.skipIf(!databaseUrl)(
         fixture!.transaction(async (transaction) => {
           state.transaction = transaction
           resetAuth()
-          const auth = await getAuth()
+          // Parallel SSR and API requests must share one initialized provider.
+          // The provider seeds its configured resources during async init.
+          const instances = await Promise.all(Array.from({ length: 8 }, () => getAuth()))
+          const auth = instances[0]
+          expect(instances.every((instance) => instance === auth)).toBe(true)
+          expect(state.providerLoads).toBe(1)
           const context = await auth.$context
           const applicationSchema: Record<string, unknown> = await import('@/lib/server/db')
           for (const [model, schema] of Object.entries(context.tables)) {
@@ -137,6 +145,18 @@ describe.skipIf(!databaseUrl)(
             data: { expiresAt: new Date(Date.now() + 60_000) },
           })
           expect(assertion.id).toBeTruthy()
+
+          // A settings reset during a build discards the stale instance. Both
+          // callers receive the same replacement after that build settles.
+          resetAuth()
+          const staleBuild = getAuth()
+          resetAuth()
+          const replacementBuild = getAuth()
+          const [rebuilt, concurrent] = await Promise.all([staleBuild, replacementBuild])
+          expect(rebuilt).toBe(concurrent)
+          expect(rebuilt).not.toBe(auth)
+          expect(state.providerLoads).toBe(3)
+          expect(await getAuth()).toBe(rebuilt)
           throw rollback
         })
       ).rejects.toBe(rollback)
