@@ -38,7 +38,12 @@ const UPSTREAM_0126_WHEN = 1783728000000
 const FORK_BEFORE_0118 = ['9001_venturi_two_factor_lockout', '9002_venturi_hook_delivery_outcome']
 
 /** Fork migrations taken after upstream 0125. */
-const FORK_AFTER_0125 = ['9003_venturi_legacy_api_key_bounds', '9004_venturi_feature_pipeline']
+const FORK_AFTER_0125 = [
+  '9003_venturi_legacy_api_key_bounds',
+  '9004_venturi_feature_pipeline',
+  '9005_venturi_oauth_provider_1_7',
+  '9006_venturi_magic_link_1_7',
+]
 
 describe('two_factor lockout columns', () => {
   it('declares the Better Auth 1.6.30 lockout columns', () => {
@@ -128,6 +133,30 @@ describe('fork migration journal', () => {
           // each key it changes.
           expect(statement, e.tag).toMatch(/"legacy_bounded_at" IS NULL/)
           expect(statement, e.tag).toMatch(/"legacy_bounded_at" = now\(\)/)
+        } else if (
+          e.tag === '9006_venturi_magic_link_1_7' &&
+          statement.startsWith('DO $migration$')
+        ) {
+          // The integration test proves row preservation and replay safety.
+          expect(statement).toContain("identifier ~ '^[A-Za-z]{32}$'")
+          expect(statement).toContain("SET identifier = 'magic-link:' || legacy.identifier")
+        } else if (
+          e.tag === '9005_venturi_oauth_provider_1_7' &&
+          /^UPDATE "oauth_client" SET /i.test(statement)
+        ) {
+          // Proven legacy metadata only; explicit values are never overwritten.
+          if (statement.includes('SET "token_endpoint_auth_method"')) {
+            expect(statement).toContain(
+              'WHERE "token_endpoint_auth_method" IS NULL AND "public" = true;'
+            )
+          } else {
+            expect(statement).toContain('WHERE "application_type" IS NULL AND "type" IN')
+          }
+        } else if (
+          e.tag === '9005_venturi_oauth_provider_1_7' &&
+          /^(CREATE TABLE IF NOT EXISTS |CREATE (?:UNIQUE )?INDEX IF NOT EXISTS )/i.test(statement)
+        ) {
+          // Additive provider objects retain rows, constraints and indexes on re-run.
         } else if (
           e.tag === '9004_venturi_feature_pipeline' &&
           /^(CREATE TABLE IF NOT EXISTS |CREATE INDEX IF NOT EXISTS |CREATE OR REPLACE FUNCTION |DROP TRIGGER IF EXISTS )/i.test(

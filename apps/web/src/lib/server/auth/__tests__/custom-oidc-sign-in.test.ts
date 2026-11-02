@@ -24,6 +24,7 @@ import { checkUrlSafety, safeFetch, SsrfError } from '@/lib/server/content/ssrf-
 import { buildGenericOAuthConfigs } from '../build-oauth-configs'
 import { clearOidcDiscoveryCache, DISCOVERY_TTL_MS } from '../custom-oidc-fetch'
 import { pinCustomOidcFetches } from '../custom-oidc-plugin'
+import { forwardLegacyOidcCallback } from '../legacy-oidc-callback'
 import { pinSelfHostedGitlab } from '../self-hosted-gitlab'
 
 const safeFetchMock = vi.mocked(safeFetch)
@@ -111,19 +112,22 @@ type TestAuth = Awaited<ReturnType<typeof createTestAuth>>['auth']
 
 function signIn(auth: TestAuth): Promise<Response> {
   return auth.handler(
-    new Request(`${BASE_URL}/sign-in/oauth2`, {
+    new Request(`${BASE_URL}/sign-in/social`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: ORIGIN },
-      body: JSON.stringify({ providerId: 'sso', disableRedirect: true }),
+      body: JSON.stringify({ provider: 'sso', disableRedirect: true }),
     })
   )
 }
 
 function callback(auth: TestAuth, query: Record<string, string>, cookie?: string) {
   return auth.handler(
-    new Request(`${BASE_URL}/oauth2/callback/sso?${new URLSearchParams(query)}`, {
-      headers: cookie ? { cookie } : {},
-    })
+    forwardLegacyOidcCallback(
+      new Request(`${BASE_URL}/oauth2/callback/sso?${new URLSearchParams(query)}`, {
+        headers: cookie ? { cookie } : {},
+      }),
+      new Set(['sso'])
+    )
   )
 }
 
@@ -167,6 +171,8 @@ describe('custom OIDC sign-in through the Better-Auth handler', () => {
     const { url } = (await start.json()) as { url: string }
     const authorize = new URL(url)
     expect(`${authorize.origin}${authorize.pathname}`).toBe(DISCOVERY_DOC.authorization_endpoint)
+    expect(authorize.searchParams.get('redirect_uri')).toBe(`${BASE_URL}/oauth2/callback/sso`)
+    expect(authorize.searchParams.get('code_challenge_method')).toBe('S256')
     const state = authorize.searchParams.get('state')
     if (!state) throw new Error('authorization URL has no state')
 
@@ -185,6 +191,10 @@ describe('custom OIDC sign-in through the Better-Auth handler', () => {
       DISCOVERY_DOC.token_endpoint,
     ])
     expect(new URLSearchParams(safeFetchMock.mock.calls[1][1]?.body).get('code')).toBe('code-1')
+    expect(new URLSearchParams(safeFetchMock.mock.calls[1][1]?.body).get('redirect_uri')).toBe(
+      `${BASE_URL}/oauth2/callback/sso`
+    )
+    expect(db.account.map((a) => [a.providerId, a.accountId])).toEqual([['sso', 'user-1']])
     expect(db.user.map((u) => u.email)).toEqual(['ada@acme.example'])
     expect(fetchSpy).not.toHaveBeenCalled()
   })

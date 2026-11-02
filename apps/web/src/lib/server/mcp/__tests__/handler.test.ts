@@ -16,7 +16,7 @@ vi.mock('@/lib/server/domains/api-keys/api-key.service', () => ({
 }))
 
 vi.mock('better-auth/oauth2', () => ({
-  verifyAccessToken: vi.fn(),
+  verifyBearerToken: vi.fn(),
 }))
 
 const mockFindFirst = vi.fn()
@@ -423,8 +423,8 @@ function oauthRequest(body: unknown, token = 'oauth_test_token_abc123'): Request
 async function setupValidOAuth(overrides?: { role?: string; scopes?: string[]; type?: string }) {
   const role = overrides?.role ?? 'admin'
   const type = overrides?.type ?? 'user'
-  const { verifyAccessToken } = await import('better-auth/oauth2')
-  vi.mocked(verifyAccessToken).mockResolvedValue({
+  const { verifyBearerToken } = await import('better-auth/oauth2')
+  vi.mocked(verifyBearerToken).mockResolvedValue({
     sub: MOCK_USER_ID,
     principalId: MOCK_MEMBER_ID,
     role,
@@ -627,8 +627,8 @@ describe('MCP HTTP Handler', () => {
     )
 
     it('should return 401 for expired OAuth token', async () => {
-      const { verifyAccessToken } = await import('better-auth/oauth2')
-      vi.mocked(verifyAccessToken).mockRejectedValue(new Error('token expired'))
+      const { verifyBearerToken } = await import('better-auth/oauth2')
+      vi.mocked(verifyBearerToken).mockRejectedValue(new Error('token expired'))
 
       const { handleMcpRequest } = await import('../handler')
       const response = await handleMcpRequest(oauthRequest(jsonRpcRequest('initialize')))
@@ -637,8 +637,8 @@ describe('MCP HTTP Handler', () => {
     })
 
     it('should return 401 for invalid OAuth token', async () => {
-      const { verifyAccessToken } = await import('better-auth/oauth2')
-      vi.mocked(verifyAccessToken).mockRejectedValue(new Error('token invalid'))
+      const { verifyBearerToken } = await import('better-auth/oauth2')
+      vi.mocked(verifyBearerToken).mockRejectedValue(new Error('token invalid'))
 
       const { handleMcpRequest } = await import('../handler')
       const response = await handleMcpRequest(oauthRequest(jsonRpcRequest('initialize')))

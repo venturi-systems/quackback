@@ -64,7 +64,7 @@ vi.mock('@/lib/client/hooks/use-auth-broadcast', () => ({
 
 vi.mock('@/lib/client/auth-client', () => ({
   signOut: vi.fn(),
-  authClient: { signIn: { oauth2: mockOauth2 } },
+  authClient: { signIn: { social: mockOauth2 } },
 }))
 
 vi.mock('@/components/notifications', () => ({
@@ -146,7 +146,7 @@ describe('PortalHeader — single-IdP redirect', () => {
     mockResolveSole.mockReturnValue('oidc_entra')
     renderHeader({ userRole: null, isLoggedIn: false })
     fireEvent.click(screen.getByRole('button', { name: /log in/i }))
-    expect(mockOauth2).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'oidc_entra' }))
+    expect(mockOauth2).toHaveBeenCalledWith(expect.objectContaining({ provider: 'oidc_entra' }))
     expect(mockOpenAuthPopover).not.toHaveBeenCalled()
   })
 

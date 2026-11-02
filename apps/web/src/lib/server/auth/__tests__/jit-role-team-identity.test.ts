@@ -122,8 +122,8 @@ async function signIn(email: string, providerDomain: string) {
   ) => Promise<void>
   await handler(
     {
-      path: '/oauth2/callback/:providerId',
-      params: { providerId: 'corp-idp' },
+      path: '/callback/:id',
+      params: { id: 'corp-idp' },
       context: { newSession: { user: { id: 'user_abc', email } } },
     },
     [provider(providerDomain)],

@@ -57,7 +57,7 @@ export type AuditEventType =
   | 'two_factor.reset_by_admin'
   | 'two_factor.enabled'
   | 'two_factor.disabled'
-  // OAuth provider — see auth/refresh-grace.ts (temporary, better-auth#8512)
+  // Historical pre-1.7 OAuth grace-heal events remain readable.
   | 'oauth.refresh_token.grace_heal'
   // v1 access controls
   | 'board.access.changed'

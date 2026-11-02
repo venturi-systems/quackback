@@ -147,7 +147,7 @@ function OAuthButton({
  *    the form lives inside a dialog).
  *
  *  Stage 2: routed by `lookupAuthMethodsFn` —
- *    - `sso-redirect`     → `authClient.signIn.oauth2(...)` same-tab
+ *    - `sso-redirect`     → `authClient.signIn.social(...)` same-tab
  *      (the dialog is closing anyway since the page navigates).
  *    - `sso-default`      → "Workspace uses SSO" card + escape hatch.
  *    - `methods`          → password + magic-link form, email locked.
@@ -317,8 +317,9 @@ export function PortalAuthFormInline({
       if (result.kind === 'sso-redirect') {
         setView({ stage: 'sso-redirecting' })
         setLoadingAction('sso')
-        await authClient.signIn.oauth2({
-          providerId: result.providerId,
+        await authClient.signIn.social({
+          provider: result.providerId,
+          loginHint: trimmed,
           callbackURL: effectiveCallbackUrl,
         })
         return
@@ -901,8 +902,9 @@ export function PortalAuthFormInline({
             setLoadingAction('sso')
             try {
               setView({ stage: 'sso-redirecting' })
-              await authClient.signIn.oauth2({
-                providerId: view.providerId,
+              await authClient.signIn.social({
+                provider: view.providerId,
+                loginHint: email.trim(),
                 callbackURL: effectiveCallbackUrl,
               })
             } catch (err) {

@@ -16,10 +16,10 @@
  *
  * SSRF: the plugin is never given a `discoveryUrl`. It would fetch that URL,
  * and the token and userinfo endpoints the document names, with its own
- * unpinned client. Each config instead carries endpoint getters backed by a
- * discovery document fetched through `safeFetch`, plus pinned `getToken` /
- * `getUserInfo` hooks (see `custom-oidc-fetch.ts`). `custom-oidc-plugin.ts`
- * pins the refresh path, which has no config hook.
+ * unpinned client. Endpoint getters expose pinned discovery state, while
+ * `custom-oidc-plugin.ts` constructs authorization URLs from fresh endpoints.
+ * Pinned `getToken` / `getUserInfo` hooks and a refresh replacement keep every
+ * back-channel request in `safeFetch` (see `custom-oidc-fetch.ts`).
  *
  * Kept pure (no DB imports) so it can be unit-tested and so the auth builder
  * stays the only place that wires it to `listIdentityProviders` /
@@ -95,10 +95,6 @@ export interface GenericOAuthConfig {
     | 'select_account'
     | 'select_account consent'
     | 'login consent'
-  // Emit `login_hint` to pre-select the typed email in the IdP picker.
-  authorizationUrlParams?: (ctx: {
-    body?: { additionalData?: { loginHint?: string } }
-  }) => Record<string, string>
 }
 
 /**
@@ -120,13 +116,6 @@ export interface BuildGenericOAuthConfigsArgs {
   tierAllowsOidc: boolean
   /** Attached to every config so `user.locale` populates from sign-in. */
   mapProfileToUser?: (profile: unknown) => Record<string, unknown>
-  /**
-   * Builds the `login_hint` authorizationUrlParams. Carried to EVERY
-   * provider (any provider may be domain-routed), not just the legacy sso one.
-   */
-  buildLoginHintParams?: (ctx: {
-    body?: { additionalData?: { loginHint?: string } }
-  }) => Record<string, string>
 }
 
 /**
@@ -140,11 +129,10 @@ export async function buildGenericOAuthConfigs({
   creds,
   tierAllowsOidc,
   mapProfileToUser,
-  buildLoginHintParams,
 }: BuildGenericOAuthConfigsArgs): Promise<GenericOAuthConfig[]> {
   // Defense-in-depth: a workspace downgraded off the OIDC tier keeps its
   // provider rows in the DB. Skip registration so no login button renders
-  // and the /sign-in/oauth2 callback path 404s on those providerIds.
+  // and the /sign-in/social path 404s on those providerIds.
   if (!tierAllowsOidc) return []
 
   const configs: GenericOAuthConfig[] = []
@@ -170,8 +158,8 @@ export async function buildGenericOAuthConfigs({
       providerId: provider.registrationId,
       clientId,
       clientSecret: c.clientSecret,
-      // Getters, not values: the plugin reads these on every request, and the
-      // discovery document behind them expires (DISCOVERY_TTL_MS).
+      // The wrapper reads these pinned values per request. Upstream 1.7's
+      // captured init-time strings must not be used after discovery expires.
       get authorizationUrl() {
         return endpoints.peek()?.authorizationEndpoint
       },
@@ -204,7 +192,6 @@ export async function buildGenericOAuthConfigs({
       // users still link via accountLinking.trustedProviders.
       disableSignUp: provider.autoCreateUsers === false,
       ...(mapProfileToUser ? { mapProfileToUser } : {}),
-      ...(buildLoginHintParams ? { authorizationUrlParams: buildLoginHintParams } : {}),
     })
   }
 

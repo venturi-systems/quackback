@@ -127,8 +127,8 @@ const callHandlerWith = async (opts: CallOpts = {}) => {
   }
   await handler(
     {
-      path: opts.path ?? '/oauth2/callback/:providerId',
-      params: { providerId },
+      path: opts.path ?? '/callback/:id',
+      params: opts.path === '/oauth2/callback/:providerId' ? { providerId } : { id: providerId },
       context: {
         newSession: {
           user: { id: opts.userId ?? 'user_abc', email: opts.email ?? 'alice@acme.com' },

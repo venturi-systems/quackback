@@ -911,6 +911,20 @@
       "when": 1783641720000,
       "tag": "9004_venturi_feature_pipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1783641780000,
+      "tag": "9005_venturi_oauth_provider_1_7",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1783641840000,
+      "tag": "9006_venturi_magic_link_1_7",
+      "breakpoints": true
     }
   ]
 }

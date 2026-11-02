@@ -21,3 +21,8 @@ export const OAUTH_CLIENT_REGISTRATION_DEFAULT_SCOPES = [
   'read:feedback',
   'read:article',
 ] as const
+
+// MCP clients commonly omit application_type for exact loopback or private-use
+// redirects. Upstream infers native only for those cases, then validates all
+// redirects. An explicit client application_type remains authoritative.
+export const OAUTH_CLIENT_REGISTRATION_DEFAULT_APPLICATION_TYPE = 'infer' as const

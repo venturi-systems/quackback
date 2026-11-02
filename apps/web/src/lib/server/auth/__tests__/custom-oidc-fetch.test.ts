@@ -95,7 +95,7 @@ async function signInStack(providers: IdentityProvider[] = [provider()]) {
     tierAllowsOidc: true,
   })
   const plugin = pinCustomOidcFetches(genericOAuth({ config: configs }), configs)
-  const { context } = plugin.init({ socialProviders: [], baseURL: BASE_URL } as never)
+  const { context } = await plugin.init({ socialProviders: [], baseURL: BASE_URL } as never)
   const byId = new Map(configs.map((c) => [c.providerId, c]))
   const oauthProvider = (id: string) => {
     const found = context.socialProviders.find((p) => p.id === id)
@@ -139,6 +139,25 @@ afterAll(() => {
 })
 
 describe('custom OIDC runtime fetches', () => {
+  it('preserves the normalized legacy userinfo ID when raw id and sub differ', async () => {
+    safeFetchMock.mockResolvedValueOnce(json(DISCOVERY_DOC)).mockResolvedValueOnce(
+      json({
+        id: 'legacy-provider-id',
+        sub: 'different-oidc-sub',
+        email: 'ada@acme.example',
+        email_verified: true,
+      })
+    )
+    const { oauthProvider } = await signInStack()
+    const sso = oauthProvider('sso')
+    const tokens = { accessToken: 'access-1' }
+    const info = await sso.getUserInfo(tokens)
+    expect(info?.data).toMatchObject({ id: 'legacy-provider-id', sub: 'different-oidc-sub' })
+    expect(await sso.accountSubject({ profile: info!.data, tokens })).toBe('legacy-provider-id')
+    expect(info?.user).not.toHaveProperty('id')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it('never hands the plugin a discoveryUrl and does no network at build', async () => {
     const { configs } = await signInStack()
 
@@ -210,7 +229,8 @@ describe('custom OIDC runtime fetches', () => {
     expect(tokens.accessToken).toBe('access-1')
 
     expect(safeFetchMock.mock.calls[2][1]?.headers?.Authorization).toBe('Bearer access-1')
-    expect(info?.user).toMatchObject({ id: 'user-1', email: 'ada@acme.example' })
+    expect(info?.user).toMatchObject({ email: 'ada@acme.example' })
+    expect(await sso.accountSubject({ profile: info!.data, tokens })).toBe('user-1')
 
     const refreshBody = formBody(3)
     expect(refreshBody.get('grant_type')).toBe('refresh_token')
@@ -373,7 +393,8 @@ describe('custom OIDC runtime fetches', () => {
 
     expect(safeFetchMock).toHaveBeenCalledTimes(1)
     expect(safeFetchMock.mock.calls[0][0]).toBe('https://manual.example.com/token')
-    expect(info?.user).toMatchObject({ id: 'user-1', email: 'ada@acme.example' })
+    expect(info?.user).toMatchObject({ email: 'ada@acme.example' })
+    expect(info?.data).toMatchObject({ id: 'user-1' })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
@@ -386,7 +407,7 @@ describe('custom OIDC runtime fetches', () => {
       tokenUrl: 'https://idp.example.com/token',
     }
     const plugin = pinCustomOidcFetches(genericOAuth({ config: [bare] }), [bare])
-    const { context } = plugin.init({ socialProviders: [], baseURL: BASE_URL } as never)
+    const { context } = await plugin.init({ socialProviders: [], baseURL: BASE_URL } as never)
     const found = context.socialProviders.find((p) => p.id === 'bare')
     if (!found) throw new Error('provider not registered')
 
@@ -404,7 +425,7 @@ describe('custom OIDC runtime fetches', () => {
     })
     const plugin = pinCustomOidcFetches(genericOAuth({ config: configs }), configs)
 
-    const { context } = plugin.init({ socialProviders: [google], baseURL: BASE_URL } as never)
+    const { context } = await plugin.init({ socialProviders: [google], baseURL: BASE_URL } as never)
 
     expect(context.socialProviders.map((p) => p.id)).toEqual(['sso', 'google'])
     expect(google.refreshAccessToken).toBe(googleRefresh)
@@ -415,8 +436,8 @@ describe('custom OIDC runtime fetches', () => {
     const hooks = (
       plugin as unknown as { hooks?: { before?: Array<{ matcher: (c: object) => boolean }> } }
     ).hooks?.before
-    expect(hooks).toHaveLength(1)
-    const matches = (ctx: object) => hooks?.[0].matcher(ctx)
+    expect(hooks).toHaveLength(2)
+    const matches = (ctx: object) => hooks?.[1].matcher(ctx)
 
     expect(endpointReadingProviderId(SIGN_IN)).toBe('sso')
     expect(
@@ -453,11 +474,13 @@ describe('custom OIDC runtime fetches', () => {
     expect(safeFetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps sign-in routes on the plugin configuration error when resolution fails', async () => {
+  it('returns a failure so sign-in routes refuse before a second discovery attempt', async () => {
     safeFetchMock.mockRejectedValueOnce(new SsrfError('dns-error'))
     const { byId } = await signInStack()
 
-    await expect(resolveEndpointsForRoute(SIGN_IN, byId)).resolves.toBeUndefined()
+    await expect(resolveEndpointsForRoute(SIGN_IN, byId)).resolves.toBe(
+      'oauth_code_verification_failed'
+    )
   })
 
   it('checks the callback iss against the issuer the hook just resolved', async () => {
@@ -566,7 +589,8 @@ describe('custom OIDC runtime fetches', () => {
         sso.getUserInfo({ accessToken: 'access-1', idToken: 'not-a-jwt' })
       ).resolves.toBeNull()
       const accepted = await sso.getUserInfo(withIdToken({}))
-      expect(accepted?.user).toMatchObject({ id: 'user-1', email: 'ada@acme.example' })
+      expect(accepted?.user).toMatchObject({ email: 'ada@acme.example' })
+      expect(accepted?.data).toMatchObject({ id: 'user-1' })
       // Discovery only; no userinfo fetch for any of these.
       expect(safeFetchMock).toHaveBeenCalledTimes(1)
     })
@@ -705,7 +729,7 @@ describe('custom OIDC runtime fetches', () => {
         },
       ],
     })
-    const { context } = raw.init({ socialProviders: [], baseURL: BASE_URL } as never)
+    const { context } = await raw.init({ socialProviders: [], baseURL: BASE_URL } as never)
     const found = context.socialProviders.find((p) => p.id === 'raw')
     if (!found) throw new Error('provider not registered')
 

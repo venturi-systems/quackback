@@ -36,7 +36,7 @@ vi.mock('@/lib/server/functions/auth', () => ({
 
 vi.mock('@/lib/client/auth-client', () => ({
   authClient: {
-    signIn: { email: vi.fn(), emailOtp: vi.fn(), oauth2: vi.fn(), social: vi.fn() },
+    signIn: { email: vi.fn(), emailOtp: vi.fn(), social: vi.fn() },
     signUp: { email: vi.fn() },
     requestPasswordReset: vi.fn(),
   },

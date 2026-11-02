@@ -26,14 +26,13 @@ vi.mock('../index', async () => {
 
 const mockDeleteWhere = vi.fn().mockResolvedValue(undefined)
 const mockDbDelete = vi.fn(() => ({ where: mockDeleteWhere }))
-const mockEq = vi.fn((col: unknown, val: unknown) => ({ col, val }))
+const mockInArray = vi.fn((col: unknown, vals: unknown) => ({ op: 'inArray', col, vals }))
 const mockVerificationTable = { identifier: 'verification.identifier' }
 
 vi.mock('@/lib/server/db', () => ({
   db: { delete: mockDbDelete },
   verification: mockVerificationTable,
-  eq: mockEq,
-  inArray: vi.fn((col: unknown, vals: unknown) => ({ op: 'inArray', col, vals })),
+  inArray: mockInArray,
 }))
 
 const { mintMagicLinkUrl, revokeMagicLinkToken, revokeMagicLinkTokens } =
@@ -69,7 +68,7 @@ describe('mintMagicLinkUrl', () => {
     expect(typeof args.identifier).toBe('string')
     expect(args.identifier.length).toBeGreaterThan(16)
     const parsed = JSON.parse(args.value)
-    expect(parsed.email).toBe('a@b.com')
+    expect(parsed).toEqual({ type: 'magic-link', email: 'a@b.com' })
     expect(args.expiresAt).toBeInstanceOf(Date)
   })
 
@@ -95,19 +94,22 @@ describe('mintMagicLinkUrl', () => {
     })
     expect(url).toMatch(/^https:\/\/acme\.test\/verify-magic-link\?token=/)
     expect(url).toContain('callbackURL=')
-    // The returned token is the verification identifier and the one in the URL.
-    expect(token).toBe(mockCreateVerificationValue.mock.calls[0][0].identifier)
+    // The URL token stays raw; the provider namespaces its storage identifier.
+    expect(`magic-link:${token}`).toBe(mockCreateVerificationValue.mock.calls[0][0].identifier)
     expect(url).toContain(`token=${token}`)
   })
 })
 
 describe('revokeMagicLinkToken', () => {
-  it('deletes the verification row whose identifier is the token', async () => {
+  it('revokes both namespaced and outstanding legacy verification rows', async () => {
     await revokeMagicLinkToken('tok_abc')
 
     expect(mockDbDelete).toHaveBeenCalledTimes(1)
     expect(mockDbDelete).toHaveBeenCalledWith(mockVerificationTable)
-    expect(mockEq).toHaveBeenCalledWith(mockVerificationTable.identifier, 'tok_abc')
+    expect(mockInArray).toHaveBeenCalledWith(mockVerificationTable.identifier, [
+      'magic-link:tok_abc',
+      'tok_abc',
+    ])
     expect(mockDeleteWhere).toHaveBeenCalled()
   })
 
@@ -120,6 +122,12 @@ describe('revokeMagicLinkToken', () => {
 describe('revokeMagicLinkTokens', () => {
   it('deletes the verification rows for the whole set', async () => {
     await revokeMagicLinkTokens(['tok_a', 'tok_b'])
+    expect(mockInArray).toHaveBeenCalledWith(mockVerificationTable.identifier, [
+      'magic-link:tok_a',
+      'tok_a',
+      'magic-link:tok_b',
+      'tok_b',
+    ])
     expect(mockDbDelete).toHaveBeenCalledTimes(1)
     expect(mockDbDelete).toHaveBeenCalledWith(mockVerificationTable)
     expect(mockDeleteWhere).toHaveBeenCalled()
