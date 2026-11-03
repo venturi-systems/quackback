@@ -1,1 +1,0 @@
-ALTER TABLE "kb_articles" ALTER COLUMN "embedding" SET DATA TYPE vector(1536);

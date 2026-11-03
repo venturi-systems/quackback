@@ -1,1 +1,0 @@
-ALTER TABLE "feedback_themes" ADD COLUMN "merge_snapshot" jsonb;
