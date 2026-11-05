@@ -29,12 +29,12 @@
     ]
   },
   "overrides": {
-    "jose": "6.2.13",
+    "jose": "6.2.14",
     "@noble/ciphers": "2.0.0",
     "@codemirror/state": "6.6.0",
-    "@tiptap/core": "3.32.0",
-    "@tiptap/pm": "3.32.0",
-    "@tiptap/suggestion": "3.32.0",
+    "@tiptap/core": "3.32.2",
+    "@tiptap/pm": "3.32.2",
+    "@tiptap/suggestion": "3.32.2",
     "prosemirror-model": "1.25.11",
     "prosemirror-view": "1.42.3"
   },
