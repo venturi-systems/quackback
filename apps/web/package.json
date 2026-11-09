@@ -98,7 +98,7 @@
     "@tiptap/starter-kit": "^3.32.2",
     "@tiptap/suggestion": "^3.32.2",
     "bcryptjs": "^3.0.3",
-    "better-auth": "~1.7.15",
+    "better-auth": "~1.7.18",
     "bullmq": "^5.81.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
