@@ -29,14 +29,14 @@
     ]
   },
   "overrides": {
-    "jose": "6.2.14",
-    "@noble/ciphers": "2.0.0",
-    "@codemirror/state": "6.6.0",
-    "@tiptap/core": "3.32.2",
-    "@tiptap/pm": "3.32.2",
-    "@tiptap/suggestion": "3.32.2",
-    "prosemirror-model": "1.25.11",
-    "prosemirror-view": "1.42.3"
+    "jose": "6.2.15",
+    "@noble/ciphers": "2.2.0",
+    "@codemirror/state": "6.7.0",
+    "@tiptap/core": "3.33.0",
+    "@tiptap/pm": "3.33.0",
+    "@tiptap/suggestion": "3.33.0",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-view": "1.42.6"
   },
   "packageManager": "bun@1.4.2",
   "private": true,
