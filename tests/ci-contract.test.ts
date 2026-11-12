@@ -1005,3 +1005,30 @@ describe('QB-CI-007 database package type-level tests', () => {
     expect(existsSync(join(dbDir, 'src', '__tests__', 'types.test.ts'))).toBe(true)
   })
 })
+
+describe('QB-CI-008 widget package typecheck', () => {
+  // tsup builds packages/widget/src/browser-queue.ts as an IIFE with dts
+  // disabled, so esbuild strips its types without invoking tsc. Running the
+  // widget typecheck in static_analysis checks browser-queue.ts alongside the
+  // library entrypoints.
+  const ci = readFileSync(join(workflowDir, 'ci.yml'), 'utf8')
+  const widgetDir = join(process.cwd(), 'packages', 'widget')
+
+  it('runs the widget package typecheck in the static analysis lane', () => {
+    const staticAnalysis = ci.split('\n  static_analysis:\n')[1]?.split('\n  database_tests:\n')[0]
+    expect(staticAnalysis).toContain('run: bun run --filter @quackback/widget typecheck')
+  })
+
+  it('type-checks the widget source tree including browser-queue.ts', () => {
+    const pkg = JSON.parse(readFileSync(join(widgetDir, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>
+    }
+    expect(pkg.scripts?.typecheck).toBe('tsc --noEmit')
+
+    const tsconfig = JSON.parse(readFileSync(join(widgetDir, 'tsconfig.json'), 'utf8')) as {
+      include?: string[]
+    }
+    expect(tsconfig.include).toContain('src/**/*')
+    expect(existsSync(join(widgetDir, 'src', 'browser-queue.ts'))).toBe(true)
+  })
+})
