@@ -135,6 +135,12 @@ jobs:
       # includes src/**/*, which covers src/__tests__ and the seed scripts.
       - name: Typecheck the database package and its type-level tests
         run: bun run --filter @quackback/db typecheck
+      # tsup builds src/browser-queue.ts as an IIFE with dts disabled, so
+      # esbuild strips its types without invoking tsc. Run the package
+      # typecheck explicitly so every file under packages/widget/src is
+      # checked by tsc in static analysis.
+      - name: Typecheck the widget package
+        run: bun run --filter @quackback/widget typecheck
 
   database_tests:
     name: Database migrations and tests
