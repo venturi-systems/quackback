@@ -60,7 +60,9 @@ describe('PortalAccessGate — IntlProvider regression', () => {
 
     // Private-portal framing (surface switch) proves useIntl() resolved.
     expect(screen.getByText(/share feedback with acme corp/i)).toBeInTheDocument()
-    expect(screen.getByText(/sign in with an approved account/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/access is approved for individuals or organizations/i)
+    ).toBeInTheDocument()
     // The form is shown directly — no intermediate "Sign in / Register" button.
     expect(screen.getByTestId('auth-form-body')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /sign in \/ register/i })).not.toBeInTheDocument()
