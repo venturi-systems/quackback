@@ -132,7 +132,7 @@ describe('PortalAccessGate — feedback entry', () => {
   it('explains collaboration and approval without exposing help intended for admitted users', () => {
     render(<PortalAccessGate {...baseProps} visibility="private" />)
     expect(screen.getByTestId('portal-gate-access')).toHaveTextContent(
-      'Sign in with an approved account to share ideas and follow progress. Acme approves access for individuals or organizations.'
+      'Sign in to share ideas and follow progress. Access is approved for individuals or organizations.'
     )
     expect(
       screen.getByRole('heading', { level: 1, name: 'Share feedback with Acme' })
@@ -161,7 +161,7 @@ describe('PortalAccessGate — feedback entry', () => {
       }) => void
       act(() => onContextChange({ step, email: 'alex@acme.example' }))
       expect(container.querySelector('.portal-gate__intro')).toHaveTextContent(
-        'Sign in with an approved account'
+        'Access is approved for individuals or organizations.'
       )
       expect(container).not.toHaveTextContent('Who can do what')
     }

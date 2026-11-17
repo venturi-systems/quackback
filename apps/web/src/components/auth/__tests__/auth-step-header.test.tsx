@@ -47,8 +47,12 @@ describe('portal gate step copy', () => {
       })
 
       it(`${step} (${mode}) keeps the private copy for a private portal`, () => {
-        expect(gateDescription(step, mode, 'private')).toContain('Sign in with an approved account')
-        expect(gateDescription(step, mode)).toContain('Sign in with an approved account')
+        expect(gateDescription(step, mode, 'private')).toContain(
+          'Access is approved for individuals or organizations.'
+        )
+        expect(gateDescription(step, mode)).toContain(
+          'Access is approved for individuals or organizations.'
+        )
       })
     }
   }
