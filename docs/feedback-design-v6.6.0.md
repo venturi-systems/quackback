@@ -34,14 +34,24 @@ the design system's layout guidance allows; the page still starts at the top
 rather than centering vertically. By the owner's 2026-10-09 direction, the ready
 sign-in form has no help dropdown. Native recovery remains available when scripts
 cannot initialize the form; a recovery interaction begun before initialization
-keeps its focus until the visitor leaves it. The signed-in no-access page keeps the
+keeps its focus until the visitor leaves it. The private entry explains that
+approval can apply to an individual or an organization and provides a plain
+access-inquiry link to the public Contact page. This link does not grant access
+or change the enabled sign-in providers.
+
+Software notices use the same public frame and keyboard skip link. The page
+shows a short revision only when the build supplies a valid source commit; its
+source link retains the complete immutable revision. The source offer and
+license remain available without authentication.
+
+The signed-in no-access page keeps the
 reading-start layout. It says what the portal is, who can read it (from the portal's
 real posture), and who can do what: contributors read, post, vote and comment;
 team members also review posts, set status, move roadmap items, merge
 duplicates, publish the changelog, and create and rename boards;
 administrators also delete boards and change access, sign-in, portal settings
-and members. The `<h1>` still starts with "Sign in", and only the enabled
-providers are offered, so the infrastructure live check keeps its markers.
+and members. The `<h1>` identifies feedback collaboration, and only the enabled providers
+are offered.
 
 A missing page, a missing post and a post the viewer may not read all answer
 with the same 404 page, so a 404 never confirms that a post exists.

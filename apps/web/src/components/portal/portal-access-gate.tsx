@@ -238,6 +238,17 @@ function GateCard({
         ) : (
           <p className="portal-gate__lead">{header.description}</p>
         )}
+        {isBaseStep && visibility !== 'authenticated' && (
+          <a
+            className="inline-flex min-h-11 items-center underline underline-offset-4"
+            href="https://venturi.systems/contact/?intent=question"
+          >
+            <FormattedMessage
+              id="portal.gate.requestAccess"
+              defaultMessage="Request feedback access"
+            />
+          </a>
+        )}
       </div>
 
       <section className="portal-gate__signin" aria-label="Sign in">

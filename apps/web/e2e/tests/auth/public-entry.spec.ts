@@ -313,6 +313,10 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
       await expect(page.getByTestId('portal-gate-access')).toContainText(
         'Sign in with an approved account'
       )
+      await expect(page.getByRole('link', { name: 'Request feedback access' })).toHaveAttribute(
+        'href',
+        'https://venturi.systems/contact/?intent=question'
+      )
       await expect(page.getByRole('button', { name: /Google/i })).toBeEnabled()
       await expect(page.getByRole('button', { name: /GitHub/i })).toBeEnabled()
       await expect(page.getByLabel(/email/i)).toHaveCount(0)
