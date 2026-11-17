@@ -44,14 +44,14 @@ shows a short revision only when the build supplies a valid source commit; its
 source link retains the complete immutable revision. The source offer and
 license remain available without authentication.
 
-The signed-in no-access page keeps the
-reading-start layout. It says what the portal is, who can read it (from the portal's
-real posture), and who can do what: contributors read, post, vote and comment;
-team members also review posts, set status, move roadmap items, merge
-duplicates, publish the changelog, and create and rename boards;
-administrators also delete boards and change access, sign-in, portal settings
-and members. The `<h1>` identifies feedback collaboration, and only the enabled providers
-are offered.
+The signed-in no-access page keeps the reading-start layout. Its heading says
+“This account has no access”. It identifies the signed-in account when available,
+explains that the account is absent from the private portal's access list, and
+asks the visitor to contact the workspace team or sign out and use another account.
+The Sign out action remains available; this branch does not show role-help content.
+
+The unauthenticated entry heading identifies feedback collaboration and offers
+only the configured sign-in providers.
 
 A missing page, a missing post and a post the viewer may not read all answer
 with the same 404 page, so a 404 never confirms that a post exists.
