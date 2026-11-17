@@ -35,15 +35,23 @@ export async function captureFooterSpacing(
   })
   const viewport = page.viewportSize()
   try {
-    for (const [width, selector, text] of [
-      [320, '.venturi-footer__copyright', /^© \d{4} Venturi Systems, Inc\.$/],
-      [1024, '.venturi-footer__brand p', /^The system of record for AI\.$/],
+    for (const [width, selector, text, kind] of [
+      [320, '.venturi-footer__copyright', /^© \d{4} Venturi Systems, Inc\.$/, 'copyright'],
+      [1024, '.venturi-footer__brand p', /^The system of record for AI\.$/, 'brand'],
+      [1024, '.venturi-footer__copyright', /^© \d{4} Venturi Systems, Inc\.$/, 'copyright'],
     ] as const) {
       await page.setViewportSize({ width, height: 900 })
       await page.evaluate(async () => {
-        if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
         await document.fonts.ready
       })
+      // The feed already holds pagination while keyboard focus follows its
+      // sentinel. Exercise that supported footer state instead of blurring it
+      // and letting newly loaded cards push the footer away during capture.
+      const focusedAnchor = page
+        .locator(kind === 'copyright' ? '.venturi-footer__legal a' : '.venturi-footer__brand a')
+        .first()
+      await focusedAnchor.focus()
+      await expect(focusedAnchor).toBeFocused()
       const element = page.locator(selector)
       await expect(element).toHaveCount(1)
       await expect(element).toHaveText(text)
@@ -52,7 +60,16 @@ export async function captureFooterSpacing(
           const box = node.getBoundingClientRect(),
             style = getComputedStyle(node)
           const size = parseFloat(style.fontSize)
+          const active = document.activeElement
+          const focusedFooterAnchor =
+            active instanceof HTMLAnchorElement && node.closest('footer')?.contains(active)
+              ? {
+                  href: active.href,
+                  label: active.getAttribute('aria-label') || active.textContent?.trim(),
+                }
+              : null
           return {
+            focusedFooterAnchor,
             checkerText: node.textContent!.replace(/\s+/g, ' ').trim(),
             box: { x: box.x, y: box.y, width: box.width, height: box.height },
             pageBox: {
@@ -95,7 +112,7 @@ export async function captureFooterSpacing(
                 )
             )
             const before = await measure()
-            if (!before.fullyVisible) return false
+            if (!before.fullyVisible || !before.focusedFooterAnchor) return false
             const elementPngBase64 = (
               await element.screenshot({ animations: 'disabled' })
             ).toString('base64')
@@ -122,7 +139,7 @@ export async function captureFooterSpacing(
         ? `RESOLVED: ${resolution.resolution}`
         : 'REVIEW_REQUIRED: inspect this element and its footer context before recording a resolution.'
       fs.writeFileSync(
-        path.join(REVIEW_DIR, `${route.id}__${width}__footer__spacing.json`),
+        path.join(REVIEW_DIR, `${route.id}__${width}__footer-${kind}__spacing.json`),
         JSON.stringify(
           {
             schema: 'venturi.portal-spacing-review.v2',
@@ -154,6 +171,9 @@ export async function captureFooterSpacing(
     }
   } finally {
     await style.evaluate((element) => element.parentNode?.removeChild(element))
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    })
     if (viewport) await page.setViewportSize(viewport)
   }
 }
