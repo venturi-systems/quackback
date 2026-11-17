@@ -7,7 +7,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 // The footer mirrors the public website's contract (landing-page
 // src/content/site.ts legalLinks): the same five legal links, in the same
-// order, immediately after copyright, below Product / Trust / Connect.
+// order, immediately after copyright, below Product / Resources / Trust / Connect.
 describe('VenturiSiteFooter', () => {
   it('ends with the legal row in the public website order and labels', () => {
     render(<VenturiSiteFooter />)
@@ -30,7 +30,12 @@ describe('VenturiSiteFooter', () => {
       within(product)
         .getAllByRole('link')
         .map((link) => link.textContent?.replace(' ↗', '').trim())
-    ).toEqual(['Use Cases', 'How It Works', 'Platform', 'Documentation', 'Pricing', 'Login'])
+    ).toEqual(['Use Cases', 'How It Works', 'Platform'])
+    expect(
+      within(screen.getByRole('region', { name: 'Resources' }))
+        .getAllByRole('link')
+        .map((link) => link.textContent)
+    ).toEqual(['Pricing', 'Documentation', 'Login'])
     expect(screen.queryByRole('link', { name: 'Deployment' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Product demo/ })).not.toBeInTheDocument()
     for (const link of screen.getAllByRole('link')) {
@@ -47,16 +52,20 @@ describe('VenturiSiteFooter', () => {
       'https://venturi.systems/legal/'
     )
   })
-  it('offers the exact build source in Trust when the anonymous entry requests it', () => {
+  it('offers the exact build source as a utility without adding a fourth Trust link', () => {
     const commit = 'cef28adb3a25b25ef116534bb3673c68fcda7abd'
     vi.stubGlobal('__GIT_COMMIT__', commit)
     render(<VenturiSiteFooter showSourceCode />)
     const trust = screen.getByRole('region', { name: 'Trust' })
-    expect(within(trust).getByRole('link', { name: 'Source code' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Source code' })).toHaveAttribute(
       'href',
       `https://github.com/venturi-systems/quackback/tree/${commit}`
     )
+    expect(within(trust).queryByRole('link', { name: 'Source code' })).not.toBeInTheDocument()
+    expect(within(trust).getAllByRole('link')).toHaveLength(3)
     expect(within(trust).getByRole('link', { name: 'Software notices' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link')).toHaveLength(19)
+    expect(screen.getByText('The system of record for AI.')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Source code' })).toHaveLength(1)
   })
 

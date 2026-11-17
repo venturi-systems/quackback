@@ -27,6 +27,30 @@ AGPL-3.0 section 13 source link to the exact built commit. Identity lives in
 `lib/shared/venturi-identity.ts`, not in string comparisons on the workspace
 name.
 
+The November 13 owner direction in
+[Feedback #511](https://github.com/venturi-systems/feedback/issues/511)
+adopts the shared public footer and the exact brand line “The system of record
+for AI.” Both social image descriptions read “Venturi, the system of record for
+AI”. The four groups are Product, Resources, Trust and Connect, with at most
+three links per group. Software notices remain in Trust; the anonymous entry's
+versioned Source code link sits beside the copyright row. All nineteen entry
+footer links remain present. At phone widths each group has its heading above
+one row of links; at 640 pixels and above the groups form four columns. Legal
+links use one column below 768 pixels, a row below the copyright at tablet
+widths, and the copyright row from 1024 pixels. The brand stacks below 360
+pixels. Default text and groups remain unwrapped, with the existing 14-pixel
+navigation, 12-pixel legal text and 44-pixel targets.
+
+This later composition supersedes only the earlier requirement that the entire
+two-provider entry fit a 900-pixel-high phone. The sign-in form remains within
+the first viewport; the complete footer scrolls naturally and ends the page
+without an artificial empty tail. Desktop viewport-fit checks remain. Existing
+keyboard, contrast, source access, zoom, spacing and hydration checks remain;
+reader text enlargement may reflow labels instead of clipping or shrinking
+text. This is the same accessibility priority as the canonical shared footer.
+The source utility is the narrow Feedback-specific counterpart of the marketing
+footer's Back to top utility, preserving the AGPL source offer and shared layout.
+
 A portal that requires sign-in to read shows an open, unboxed sign-in page, not a
 card. By the owner's 2026-10-07 direction its short statement and social sign-in
 buttons share one centered column at every width, the short-statement variant

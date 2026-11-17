@@ -23,7 +23,7 @@ export function VenturiSiteFooter({ showSourceCode = false }: VenturiSiteFooterP
           <a href={VENTURI_SITE_URL} aria-label="Venturi home">
             <img src={VENTURI_LOCKUP_SRC} alt="" className="venturi-brand__lockup" />
           </a>
-          <p>The attribution layer for AI.</p>
+          <p>The system of record for AI.</p>
         </div>
         <nav className="venturi-footer__nav" aria-label="Footer">
           {VENTURI_FOOTER_GROUPS.map((group) => (
@@ -49,11 +49,6 @@ export function VenturiSiteFooter({ showSourceCode = false }: VenturiSiteFooterP
                     </a>
                   </li>
                 ))}
-                {showSourceCode && group.label === 'Trust' && (
-                  <li>
-                    <a href={sourceCodeUrl(commit)}>Source code</a>
-                  </li>
-                )}
               </ul>
             </section>
           ))}
@@ -71,6 +66,11 @@ export function VenturiSiteFooter({ showSourceCode = false }: VenturiSiteFooterP
               ))}
             </ul>
           </nav>
+          {showSourceCode && (
+            <a className="venturi-footer__source" href={sourceCodeUrl(commit)}>
+              Source code
+            </a>
+          )}
         </div>
       </div>
     </footer>

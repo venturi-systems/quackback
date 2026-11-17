@@ -186,15 +186,16 @@
   }
 }
 
-/* Public footer: compact Product, Trust and Connect groups followed by the
-   legal row, matching the public website while preserving 44px targets. */
+/* Feedback #511 adopts the November 13 shared public footer. Its four
+   groups keep every destination, with versioned AGPL source access in the
+   utility position beside copyright. Default-size text and groups do not
+   wrap; intrinsic flex sizing still accommodates enlarged text. */
 .venturi-footer {
   margin-top: auto;
   padding-block: 16px 12px;
   border-top: 1px solid var(--border);
   background: var(--background);
 }
-
 .venturi-footer__shell {
   display: grid;
   grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1.55fr);
@@ -205,11 +206,13 @@
   color: var(--ds-color-text-secondary);
   font-size: 14px;
   line-height: 1.5;
-  text-wrap: balance;
+  /* Default copy fits the canonical track; enlarged text can reflow. */
+  white-space: normal;
+  text-wrap: pretty;
 }
 .venturi-footer__nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px 24px;
 }
 .venturi-footer__nav h2 {
@@ -217,87 +220,108 @@
   color: var(--ds-color-text-secondary);
   font-size: 14px;
   font-weight: 400;
-  line-height: 1.4;
+  line-height: 1.5;
   text-align: start;
 }
 .venturi-footer__nav ul {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
 }
 .venturi-footer__nav li {
-  flex: 1 0 calc(50% - 16px);
-}
-.venturi-footer__nav a {
-  min-inline-size: 44px;
+  min-width: 0;
   max-width: 100%;
-  overflow-wrap: anywhere;
-  font-size: 14px;
-  line-height: 1.35;
 }
-
-.venturi-footer__related {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: var(--ds-primitive-dimension-space-24, 24px);
-}
-
 .venturi-footer a {
   display: inline-flex;
   align-items: center;
   min-height: var(--ds-component-touch-minimum);
   min-inline-size: var(--ds-component-touch-minimum);
+  max-width: 100%;
   color: var(--ds-color-text-strong);
   font-weight: var(--ds-primitive-font-weight-medium);
   text-decoration: none;
   transition: opacity 250ms ease;
 }
-
+.venturi-footer__nav a {
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: normal;
+}
 .venturi-footer a:hover {
   opacity: 0.8;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
-
-.venturi-footer__related a {
-  font-size: var(--ds-primitive-font-size-14);
-}
-
 .venturi-footer__legal-row {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-start;
-  column-gap: 16px;
-  padding-top: 8px;
+  justify-content: space-between;
+  gap: 0 16px;
   border-top: 1px solid var(--border);
   font-size: var(--ds-primitive-font-size-12);
   font-weight: var(--ds-primitive-font-weight-medium);
 }
-
+.venturi-footer__legal {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .venturi-footer__copyright {
   display: flex;
   align-items: center;
   min-height: 44px;
   margin: 0;
   color: var(--ds-color-text-legal);
+  line-height: 1.5;
 }
-
 .venturi-footer__legal ul {
   display: flex;
   flex-wrap: wrap;
-  column-gap: var(--ds-primitive-dimension-space-24, 24px);
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 16px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-
-.venturi-footer__legal a {
-  overflow-wrap: anywhere;
+.venturi-footer__legal a,
+.venturi-footer__source {
   color: var(--ds-color-text-primary);
   font-size: var(--ds-primitive-font-size-12);
+  line-height: 1.5;
+  overflow-wrap: normal;
+}
+@media (min-width: 1024px) {
+  @supports (grid-template-columns: subgrid) {
+    .venturi-footer__legal-row {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: auto;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0;
+    }
+    .venturi-footer__legal {
+      display: grid;
+      grid-column: span 6;
+      grid-template-columns: subgrid;
+      column-gap: normal;
+    }
+    .venturi-footer__legal ul {
+      display: grid;
+      grid-column: 1 / -1;
+      grid-template-columns: subgrid;
+      column-gap: normal;
+      row-gap: 0;
+    }
+  }
 }
 
 @media (max-width: 1023px) {
@@ -310,61 +334,71 @@
     align-items: center;
     gap: 0 16px;
   }
-}
-@media (min-width: 1024px) {
-  /* Keep the Product labels whole under accessibility text spacing while
-     preserving the compact four-column Product grid. */
-  .venturi-footer__nav {
-    grid-template-columns: minmax(0, max-content) repeat(2, minmax(min-content, 1fr));
-  }
-  .venturi-footer__nav section:first-child ul {
+  .venturi-footer__legal-row {
     display: grid;
-    grid-template-columns: repeat(4, auto);
-  }
-  .venturi-footer__nav section:first-child li {
-    min-width: 0;
-  }
-}
-@media (max-width: 1023px) {
-  .venturi-footer__nav {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-  .venturi-footer__nav section {
-    display: grid;
-    grid-template-columns: minmax(4rem, max-content) minmax(0, 1fr);
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
   }
-  .venturi-footer__nav h2 {
-    display: flex;
-    min-height: 44px;
+  .venturi-footer__legal {
+    grid-area: 1 / 1 / 2 / -1;
+  }
+  .venturi-footer__legal ul {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .venturi-footer__copyright {
+    padding-inline-end: 6.5em;
+  }
+  .venturi-footer__source {
+    grid-area: 1 / 2;
+    align-self: start;
+  }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  .venturi-footer__legal ul {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, auto));
     align-items: center;
   }
+  .venturi-footer__copyright {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 639px) {
+  .venturi-footer__nav {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 16px;
+  }
+  .venturi-footer__nav h2 {
+    /* Shared public heading accent: landing-page src/styles/global.css. */
+    color: #b4530a;
+  }
   .venturi-footer__nav ul {
-    display: flex;
+    flex-direction: row;
     flex-wrap: wrap;
-    gap: 0 12px;
-    margin: 0;
-  }
-  .venturi-footer__nav li {
-    flex: 0 0 auto;
-  }
-}
-@media (max-width: 560px) {
-  .venturi-footer__legal ul {
     column-gap: 16px;
+    margin-top: 0;
+  }
+  .venturi-footer__nav a {
+    white-space: nowrap;
+  }
+  /* Default copy fits one line. Reader text enlargement can use more room. */
+  .venturi-footer__brand p {
+    white-space: normal;
+    text-wrap: pretty;
   }
 }
-@media (max-width: 448px) {
-  /* Legal names keep their intrinsic width so the native font does not
-     strand the final word of a three-word title in a forced half-column. */
-  .venturi-footer__legal li:nth-child(n + 3) {
-    flex: 0 1 auto;
-    min-width: 0;
+@media (max-width: 359px) {
+  .venturi-footer__brand {
+    flex-direction: column;
+    align-items: flex-start;
   }
-  .venturi-footer__legal a {
-    max-width: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .venturi-footer a {
+    transition: none;
   }
 }
 
@@ -909,39 +943,6 @@
   }
   .portal-gate--entry .portal-gate__title {
     margin-block-end: 8px;
-  }
-  .portal-gate--entry .venturi-footer__brand {
-    display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
-    column-gap: 8px;
-  }
-  .portal-gate--entry .venturi-footer__nav section {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 8px;
-  }
-  .portal-gate--entry .venturi-footer__nav h2 {
-    flex: 0 0 56px;
-    min-height: 44px;
-  }
-  .portal-gate--entry .venturi-footer__nav ul {
-    display: contents;
-  }
-  .portal-gate--entry .venturi-footer__nav li {
-    flex: 0 0 auto;
-  }
-  .portal-gate--entry .venturi-footer__copyright {
-    flex-basis: 100%;
-    min-height: 0;
-    line-height: 1.5;
-  }
-}
-/* Keep Trust and Connect labels whole while containing each target in its group. */
-@media (min-width: 1024px) {
-  .venturi-footer__nav section:not(:first-child) li {
-    flex: 0 0 auto;
-    max-width: 100%;
-    min-width: 0;
   }
 }
 
