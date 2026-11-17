@@ -306,7 +306,7 @@
       grid-auto-columns: auto;
       justify-content: space-between;
       align-items: center;
-      gap: 0;
+      gap: 0 8px;
     }
     .venturi-footer__legal {
       display: grid;

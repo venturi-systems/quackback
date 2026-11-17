@@ -502,12 +502,24 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
                   }
                 }
               }
-              return { links, intersections, documentWidth: document.documentElement.scrollWidth }
+              const legal = Array.from(
+                document.querySelectorAll('.venturi-footer__legal a, .venturi-footer__source')
+              ).map((link) => link.getBoundingClientRect())
+              const legalGaps = legal.slice(1).map((box, index) => box.left - legal[index].right)
+              return {
+                links,
+                intersections,
+                legalGaps,
+                documentWidth: document.documentElement.scrollWidth,
+              }
             })
             footerGeometry.push({ width, stress, ...geometry })
             expect(geometry.documentWidth).toBeLessThanOrEqual(width)
             expect(geometry.links).toHaveLength(18)
             expect(geometry.intersections).toEqual([])
+            // A zero-width gap makes stressed labels touch without intersecting.
+            expect(geometry.legalGaps.length).toBeGreaterThan(0)
+            expect(Math.min(...geometry.legalGaps)).toBeGreaterThanOrEqual(7.9)
             for (const link of geometry.links) {
               expect(link.width, link.text ?? '').toBeGreaterThanOrEqual(44)
               expect(link.height, link.text ?? '').toBeGreaterThanOrEqual(44)
