@@ -97,6 +97,7 @@ describe('gateHead', () => {
 describe('socialCardMeta', () => {
   it('names the Venturi social card for this host as a large 1200 x 630 image', () => {
     expect(SOCIAL_CARD_URL).toBe('https://venturi.systems/og-image-feedback.png')
+    expect(SOCIAL_CARD_ALT).toBe('Venturi, the system of record for AI')
     expect(socialCardMeta()).toEqual([
       { property: 'og:image', content: SOCIAL_CARD_URL },
       { property: 'og:image:width', content: '1200' },

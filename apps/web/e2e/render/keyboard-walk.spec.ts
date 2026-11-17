@@ -51,6 +51,7 @@ import {
   type WalkContext,
 } from './plan'
 import { resolutionFor } from './review-resolutions'
+import { captureFooterSpacing } from './capture-footer-spacing'
 
 /** Tab presses per direction before the walk is declared endless. */
 const MAX_STOPS = 400
@@ -759,7 +760,8 @@ async function captureSpacingReview(page: Page, route: RouteSpec, ctx: WalkConte
         let checkerText = ''
         while (walker.nextNode()) {
           const parent = walker.currentNode.parentElement
-          if (!parent?.closest('.sr-only,.ds-sr-only')) checkerText += walker.currentNode.textContent
+          if (!parent?.closest('.sr-only,.ds-sr-only'))
+            checkerText += walker.currentNode.textContent
         }
         return {
           text: node.textContent,
@@ -924,6 +926,7 @@ for (const route of ROUTES) {
         findings.push(...stopFindings(forward, ctx))
         reverse = await walk(page, 'reverse', `${planned.id}__${ctx.id}`)
         findings.push(...stopFindings(reverse, ctx))
+        await captureFooterSpacing(page, planned, ctx)
         await captureSpacingReview(page, planned, ctx)
       } finally {
         for (const message of pageErrors) findings.push({ kind: 'page-error', detail: message })

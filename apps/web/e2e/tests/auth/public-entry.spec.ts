@@ -301,9 +301,10 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
         }
       )
     }
-    // REQ-FEEDBACK-AUTH-VIEWPORT: the normal two-provider entry fits in one
-    // viewport. Exercise the real fixture configuration rather than hiding
-    // controls; the earlier email and zoom coverage stays intact.
+    // Feedback #511 (November 13) supersedes the phone-height-only compact
+    // footer: four groups and single-column legal links may scroll naturally.
+    // Keep the form in the first viewport, desktop fit, every link and target,
+    // and the earlier email, keyboard, zoom and spacing coverage.
     const fittedViewports = []
     try {
       setPortalVisibility('private')
@@ -338,6 +339,33 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
             documentWidth: document.documentElement.scrollWidth,
             documentHeight: document.documentElement.scrollHeight,
             footerBottom: footer.getBoundingClientRect().bottom,
+            formBottom: document.querySelector('.portal-gate__signin')!.getBoundingClientRect()
+              .bottom,
+            footerGroups: Array.from(footer.querySelectorAll('.venturi-footer__nav section')).map(
+              (group) => ({
+                label: group.querySelector('h2')!.textContent,
+                heading: group.querySelector('h2')!.getBoundingClientRect().toJSON(),
+                links: Array.from(group.querySelectorAll('a')).map((link) =>
+                  link.getBoundingClientRect().toJSON()
+                ),
+              })
+            ),
+            legalRow: Array.from(
+              footer.querySelectorAll('.venturi-footer__legal li, .venturi-footer__source')
+            ).map((element) => element.getBoundingClientRect().toJSON()),
+            wrappedFooterText: Array.from(
+              footer.querySelectorAll('h2, p, a, .venturi-footer__copyright')
+            )
+              .filter((element) => {
+                if (!element.textContent?.trim()) return false
+                const range = document.createRange()
+                range.selectNodeContents(element)
+                return (
+                  new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top)))
+                    .size > 1
+                )
+              })
+              .map((element) => element.textContent),
             overflow: [
               document.documentElement,
               document.body,
@@ -353,15 +381,42 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
         })
         fittedViewports.push(fit)
         expect(fit.documentWidth).toBeLessThanOrEqual(width)
-        expect(fit.documentHeight).toBeLessThanOrEqual(height)
-        expect(fit.footerBottom).toBeLessThanOrEqual(height + 1)
+        expect(fit.formBottom).toBeLessThanOrEqual(height)
+        if (width >= 640) {
+          expect(fit.documentHeight).toBeLessThanOrEqual(height)
+          expect(fit.footerBottom).toBeLessThanOrEqual(height + 1)
+        }
+        if (width >= 1024) {
+          const gaps = fit.legalRow
+            .slice(1)
+            .map((box, index) => box.left - fit.legalRow[index].right)
+          expect(fit.legalRow).toHaveLength(7)
+          expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1)
+        }
+        expect(Math.abs(fit.footerBottom - fit.documentHeight)).toBeLessThanOrEqual(1)
+        expect(fit.wrappedFooterText).toEqual([])
+        expect(fit.footerGroups.map((group) => group.label)).toEqual([
+          'Product',
+          'Resources',
+          'Trust',
+          'Connect',
+        ])
+        for (const group of fit.footerGroups) {
+          expect(group.links).toHaveLength(3)
+          expect(group.links[0].top).toBeGreaterThanOrEqual(group.heading.bottom)
+          if (width < 640) {
+            expect(new Set(group.links.map((link) => Math.round(link.top))).size).toBe(1)
+          } else {
+            expect(new Set(group.links.map((link) => Math.round(link.left))).size).toBe(1)
+          }
+        }
         expect(fit.overflow.some((value) => /hidden|clip/.test(value))).toBe(false)
         expect(fit.targets).toHaveLength(19)
         for (const target of fit.targets) {
           expect(target.width, target.text ?? '').toBeGreaterThanOrEqual(44)
           expect(target.height, target.text ?? '').toBeGreaterThanOrEqual(44)
         }
-        for (const name of ['Product', 'Trust', 'Connect']) {
+        for (const name of ['Product', 'Resources', 'Trust', 'Connect']) {
           await expect(
             page.getByRole('region', { name, exact: true }).getByRole('list')
           ).toHaveCount(1)
@@ -382,7 +437,7 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
       } finally {
         setPortalAuthMethods('restore')
       }
-      await testInfo.attach('entry-normal-viewport-fit', {
+      await testInfo.attach('entry-shared-footer-viewport', {
         body: Buffer.from(JSON.stringify(fittedViewports)),
         contentType: 'application/json',
       })
@@ -447,12 +502,24 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
                   }
                 }
               }
-              return { links, intersections, documentWidth: document.documentElement.scrollWidth }
+              const legal = Array.from(
+                document.querySelectorAll('.venturi-footer__legal a, .venturi-footer__source')
+              ).map((link) => link.getBoundingClientRect())
+              const legalGaps = legal.slice(1).map((box, index) => box.left - legal[index].right)
+              return {
+                links,
+                intersections,
+                legalGaps,
+                documentWidth: document.documentElement.scrollWidth,
+              }
             })
             footerGeometry.push({ width, stress, ...geometry })
             expect(geometry.documentWidth).toBeLessThanOrEqual(width)
             expect(geometry.links).toHaveLength(18)
             expect(geometry.intersections).toEqual([])
+            // A zero-width gap makes stressed labels touch without intersecting.
+            expect(geometry.legalGaps.length).toBeGreaterThan(0)
+            expect(Math.min(...geometry.legalGaps)).toBeGreaterThanOrEqual(7.9)
             for (const link of geometry.links) {
               expect(link.width, link.text ?? '').toBeGreaterThanOrEqual(44)
               expect(link.height, link.text ?? '').toBeGreaterThanOrEqual(44)

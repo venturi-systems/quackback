@@ -44,6 +44,38 @@ const FEEDS = ['admin-feed', 'anonymous-feed'] as const
 const SIDEBAR_WIDTHS = ['1024s', '1440s', '1920s', '2560s'] as const
 
 export const REVIEW_RESOLUTIONS: readonly ReviewResolution[] = [
+  // PR 304 native run 44054101863: all seven routes were inspected separately,
+  // including each element crop and its stable, focused-footer viewport.
+  {
+    routes: [
+      'admin-feed',
+      'admin-roadmap',
+      'admin-changelog',
+      'admin-post',
+      'admin-notifications',
+      'anonymous-feed',
+      'anonymous-post',
+    ],
+    text: /^The system of record for AI\.$/,
+    widths: ['1024s'],
+    resolution:
+      'Accepted as text-spacing reflow after inspecting all seven route captures in PR 304 run 44054101863. In the 206.5625px brand column, the descriptor wraps to "The system of record" and "for AI.". Both complete lines remain readable, unobscured and clear of the focused logo and neighboring navigation. The exact descriptor is required by Feedback issue 511; shortening it would change the adopted identity. The ordinary footer remains on one line. Under accessibility spacing, retaining the full descriptor and canonical type size takes precedence over forcing one line.',
+  },
+  {
+    routes: [
+      'admin-feed',
+      'admin-roadmap',
+      'admin-changelog',
+      'admin-post',
+      'admin-notifications',
+      'anonymous-feed',
+      'anonymous-post',
+    ],
+    text: /^© 2026 Venturi Systems, Inc\.$/,
+    widths: ['320s', '1024s'],
+    resolution:
+      'Accepted as text-spacing reflow after inspecting all fourteen copyright captures in PR 304 run 44054101863. At 320px and 1024px with spacing stress, the complete copyright wraps before "Inc." inside its 44px-tall row. The year, company name and legal suffix remain legible and unobscured, with visible separation from the focused Sitemap link and the other legal links. The phone links stack naturally; the desktop links keep positive horizontal gutters. Retaining the legal company name and canonical 12px type is preferable to deleting the suffix, shrinking the text or suppressing accessible reflow.',
+  },
   {
     routes: [
       'admin-feed',

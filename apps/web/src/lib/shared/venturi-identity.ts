@@ -33,8 +33,13 @@ export const VENTURI_FOOTER_GROUPS = [
       { label: 'Use Cases', href: 'https://venturi.systems/use-cases/' },
       { label: 'How It Works', href: 'https://venturi.systems/how-it-works/' },
       { label: 'Platform', href: 'https://venturi.systems/platform/' },
-      { label: 'Documentation', href: VENTURI_DOCS_URL },
+    ],
+  },
+  {
+    label: 'Resources',
+    links: [
       { label: 'Pricing', href: 'https://venturi.systems/pricing/' },
+      { label: 'Documentation', href: VENTURI_DOCS_URL },
       { label: 'Login', href: 'https://app.venturi.systems/' },
     ],
   },

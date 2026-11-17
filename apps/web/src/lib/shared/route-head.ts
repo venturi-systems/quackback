@@ -54,7 +54,7 @@ export type SocialMeta = { property: string; content: string } | { name: string;
 export const SOCIAL_CARD_URL = 'https://venturi.systems/og-image-feedback.png'
 
 /** The alternative text every Venturi site gives its social card. */
-export const SOCIAL_CARD_ALT = 'Venturi, the attribution layer for AI'
+export const SOCIAL_CARD_ALT = 'Venturi, the system of record for AI'
 
 /** Open Graph and Twitter tags that show the social card as a large image. */
 export function socialCardMeta(): SocialMeta[] {
