@@ -47,34 +47,80 @@ export async function captureFooterSpacing(
       const element = page.locator(selector)
       await expect(element).toHaveCount(1)
       await expect(element).toHaveText(text)
-      await element.scrollIntoViewIfNeeded()
-      const measurement = await element.evaluate((node) => {
-        const box = node.getBoundingClientRect(),
-          style = getComputedStyle(node)
-        const size = parseFloat(style.fontSize)
-        return {
-          checkerText: node.textContent!.replace(/\s+/g, ' ').trim(),
-          box: { x: box.x, y: box.y, width: box.width, height: box.height },
-          pageBox: { x: box.x + scrollX, y: box.y + scrollY, width: box.width, height: box.height },
-          fontFamily: style.fontFamily,
-          fontSize: style.fontSize,
-          spacing: {
-            line: parseFloat(style.lineHeight) / size,
-            letter: parseFloat(style.letterSpacing) / size,
-            word: parseFloat(style.wordSpacing) / size,
+      const measure = () =>
+        element.evaluate((node) => {
+          const box = node.getBoundingClientRect(),
+            style = getComputedStyle(node)
+          const size = parseFloat(style.fontSize)
+          return {
+            checkerText: node.textContent!.replace(/\s+/g, ' ').trim(),
+            box: { x: box.x, y: box.y, width: box.width, height: box.height },
+            pageBox: {
+              x: box.x + scrollX,
+              y: box.y + scrollY,
+              width: box.width,
+              height: box.height,
+            },
+            fullyVisible:
+              box.width > 0 &&
+              box.height > 0 &&
+              box.left >= 0 &&
+              box.top >= 0 &&
+              box.right <= innerWidth &&
+              box.bottom <= innerHeight,
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+            spacing: {
+              line: parseFloat(style.lineHeight) / size,
+              letter: parseFloat(style.letterSpacing) / size,
+              word: parseFloat(style.wordSpacing) / size,
+            },
+          }
+        })
+      type Measurement = Awaited<ReturnType<typeof measure>>
+      let capture:
+        { measurement: Measurement; elementPngBase64: string; pngBase64: string } | undefined
+      // Feed pagination can move the footer after scrolling. Keep the real page
+      // running, and accept evidence only while the entire target remains stable
+      // inside the viewport throughout both captures. Full-page capture can
+      // trigger more feed loading and omit the footer from its initial extent.
+      await expect
+        .poll(
+          async () => {
+            await element.scrollIntoViewIfNeeded()
+            await page.evaluate(
+              () =>
+                new Promise<void>((resolve) =>
+                  requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+                )
+            )
+            const before = await measure()
+            if (!before.fullyVisible) return false
+            const elementPngBase64 = (
+              await element.screenshot({ animations: 'disabled' })
+            ).toString('base64')
+            const between = await measure()
+            if (JSON.stringify(before) !== JSON.stringify(between)) return false
+            const pngBase64 = (
+              await page.screenshot({ fullPage: false, animations: 'disabled' })
+            ).toString('base64')
+            const after = await measure()
+            if (JSON.stringify(before) !== JSON.stringify(after)) return false
+            capture = { measurement: after, elementPngBase64, pngBase64 }
+            return true
           },
-        }
-      })
+          {
+            timeout: 15_000,
+            message: `Stable visible footer evidence for ${route.id} at ${width}px`,
+          }
+        )
+        .toBe(true)
+      if (!capture) throw new Error('Footer evidence was not captured')
+      const { measurement, elementPngBase64, pngBase64 } = capture
       const resolution = resolutionFor(route.id, measurement.checkerText, `${width}s`)
       const disposition = resolution
         ? `RESOLVED: ${resolution.resolution}`
         : 'REVIEW_REQUIRED: inspect this element and its footer context before recording a resolution.'
-      const elementPngBase64 = (await element.screenshot({ animations: 'disabled' })).toString(
-        'base64'
-      )
-      const pngBase64 = (
-        await page.screenshot({ fullPage: true, animations: 'disabled' })
-      ).toString('base64')
       fs.writeFileSync(
         path.join(REVIEW_DIR, `${route.id}__${width}__footer__spacing.json`),
         JSON.stringify(
@@ -87,6 +133,7 @@ export async function captureFooterSpacing(
             viewport: page.viewportSize(),
             locale: 'en-US',
             textSpacingStress: true,
+            contextCapture: 'viewport',
             capturedAt: new Date().toISOString(),
             regions: [
               {
@@ -106,7 +153,7 @@ export async function captureFooterSpacing(
       )
     }
   } finally {
-    await style.evaluate((element) => element.remove())
+    await style.evaluate((element) => element.parentNode?.removeChild(element))
     if (viewport) await page.setViewportSize(viewport)
   }
 }

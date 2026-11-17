@@ -237,6 +237,8 @@ describe('published OAuth provider native rotation replay', () => {
   })
 
   it('cannot mint refresh authority after the successor is revoked through the real endpoint', async () => {
+    // Compare replay payloads at the same instant; expires_in counts down in real time.
+    vi.useFakeTimers({ toFake: ['Date'] })
     const { db, refresh, revoke } = stack()
     const first = await refresh()
     expect(first.status).toBe(200)
@@ -285,6 +287,8 @@ describe('published OAuth provider native rotation replay', () => {
   })
 
   it('replays the same response without un-revoking or rotating a second time', async () => {
+    // Compare replay payloads at the same instant; expires_in counts down in real time.
+    vi.useFakeTimers({ toFake: ['Date'] })
     const { db, refresh } = stack()
     const first = await refresh()
     expect(first.status, JSON.stringify(await first.clone().json())).toBe(200)
