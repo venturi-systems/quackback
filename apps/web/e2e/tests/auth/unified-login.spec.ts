@@ -199,7 +199,9 @@ test('(3) private portal gate: sign-in in the gate lands on /admin', async ({ pa
 
     // The gate renders the shared auth form inline (no modal). Its private-
     // portal copy + the email field prove the gate rendered the form directly.
-    await expect(page.getByText(/sign in with an approved account/i)).toBeVisible({
+    await expect(
+      page.getByText(/access is approved for individuals or organizations/i)
+    ).toBeVisible({
       timeout: 15000,
     })
     await expect(page.getByLabel(/email/i)).toBeVisible({ timeout: 15000 })

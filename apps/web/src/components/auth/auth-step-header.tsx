@@ -99,7 +99,7 @@ export function headerForStep(
         ) : (
           <FormattedMessage
             id="portal.auth.feedback.approvedDescription"
-            defaultMessage="Sign in with an approved account to share ideas, discuss improvements, and follow progress."
+            defaultMessage="Sign in to share ideas and follow progress. Access is approved for individuals or organizations."
           />
         ),
     }

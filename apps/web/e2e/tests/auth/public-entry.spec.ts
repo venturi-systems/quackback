@@ -311,7 +311,11 @@ test('(3a) public entry preserves readable type, provider controls and reflow', 
       setEntrySocialProviders('seed')
       await page.goto('/')
       await expect(page.getByTestId('portal-gate-access')).toContainText(
-        'Sign in with an approved account'
+        'Access is approved for individuals or organizations.'
+      )
+      await expect(page.getByRole('link', { name: 'Request feedback access' })).toHaveAttribute(
+        'href',
+        'https://venturi.systems/contact/?intent=question'
       )
       await expect(page.getByRole('button', { name: /Google/i })).toBeEnabled()
       await expect(page.getByRole('button', { name: /GitHub/i })).toBeEnabled()

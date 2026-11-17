@@ -145,10 +145,37 @@ test('software notices and exact-build source are available without sign-in', as
   await page.goto('/software-notices')
   await expect(page).toHaveURL(/\/software-notices$/)
   await expect(page.getByRole('heading', { name: 'Software notices' })).toBeVisible()
+  await page.keyboard.press('Tab')
+  const skipLink = page.getByRole('link', { name: 'Skip to content', exact: true })
+  await expect(skipLink).toBeFocused()
+  await expect(skipLink).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('main')).toBeFocused()
   await expect(
     page.getByRole('link', { name: 'View the source for this version' })
   ).toHaveAttribute(
     'href',
     /https:\/\/github\.com\/venturi-systems\/quackback(?:\/tree\/[0-9a-f]{7,40})?$/
   )
+  const source = await page
+    .getByRole('link', { name: 'View the source for this version' })
+    .getAttribute('href')
+  const revision = source?.match(/\/tree\/([0-9a-f]{7,40})$/)?.[1]
+  if (revision) {
+    await expect(page.getByTestId('software-version')).toHaveText(
+      `Running version ${revision.slice(0, 12)}`
+    )
+  } else {
+    await expect(page.getByTestId('software-version')).toHaveCount(0)
+  }
+  await expect(
+    page.getByRole('link', { name: 'Read the GNU Affero General Public License' })
+  ).toHaveAttribute('href', 'https://www.gnu.org/licenses/agpl-3.0.html')
+  for (const width of [320, 390, 768, 1024, 1440, 1920, 2560]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(page.getByRole('heading', { name: 'Software notices' })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      width
+    )
+  }
 })
