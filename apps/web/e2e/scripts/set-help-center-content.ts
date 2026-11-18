@@ -4,10 +4,8 @@
  *
  *   bun set-help-center-content.ts <create|remove>
  *
- * `db:seed` creates no help-center categories or articles, so without this
- * fixture every category, article, table-of-contents and feedback test in
- * e2e/tests/public/help-center.spec.ts skips: the landing page lists only
- * categories that hold a published article.
+ * The fixture gives the public help-center suite categories with known
+ * article counts, headings, and ordering independent of the demo seed.
  *
  * Every row carries the `e2e-hc-` slug prefix. `create` first deletes rows left
  * by an earlier attempt, so a retried beforeAll starts from the same state, and

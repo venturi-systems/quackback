@@ -30,6 +30,7 @@ import { boards, tags, roadmaps } from './schema/boards'
 import { posts, postTags, postRoadmaps, votes, comments } from './schema/posts'
 import { postStatuses, DEFAULT_STATUSES } from './schema/statuses'
 import { changelogEntries, changelogEntryPosts } from './schema/changelog'
+import { helpCenterArticles, helpCenterCategories } from './schema/kb'
 import { segments } from './schema/segments'
 import type { SegmentRules } from './schema/segments'
 import { feedbackSources, rawFeedbackItems, feedbackSignals } from './schema/feedback'
@@ -381,12 +382,55 @@ async function ensureDemoPrincipal(): Promise<{ id: PrincipalId; created: boolea
   return { id: demoPrincipalId, created: true }
 }
 
+async function seedDemoHelpCenter(principalId: PrincipalId) {
+  const sections = [
+    {
+      heading: 'Share an idea',
+      text: 'Open the feedback board to suggest an improvement or vote on an existing idea.',
+    },
+    {
+      heading: 'Follow progress',
+      text: 'Check the roadmap for planned work and the changelog for released updates.',
+    },
+  ]
+
+  await db.transaction(async (tx) => {
+    const [category] = await tx
+      .insert(helpCenterCategories)
+      .values({
+        slug: 'seed-hc-demo-workspace',
+        name: 'Explore the demo workspace',
+        description: 'Learn how the sample feedback portal works.',
+      })
+      .onConflictDoNothing({ target: helpCenterCategories.slug })
+      .returning({ id: helpCenterCategories.id })
+    if (!category) return
+
+    await tx.insert(helpCenterArticles).values({
+      categoryId: category.id,
+      slug: 'seed-hc-demo-workspace-guide',
+      title: 'Use the sample feedback portal',
+      description: 'Share feedback and follow changes in the demo workspace.',
+      content: sections.map(({ heading, text }) => `## ${heading}\n\n${text}`).join('\n\n'),
+      contentJson: {
+        type: 'doc',
+        content: sections.flatMap(({ heading, text }) => [
+          { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: heading }] },
+          { type: 'paragraph', content: [{ type: 'text', text }] },
+        ]),
+      },
+      principalId,
+      publishedAt: new Date(),
+    })
+  })
+}
+
 async function seed() {
   console.log('Seeding database...\n')
 
   // Create settings (the singleton settings record) - skip if exists
-  const existingSettings = await db.select().from(settings).limit(1)
-  if (existingSettings.length === 0) {
+  const [existingWorkspace] = await db.select().from(settings).limit(1)
+  if (!existingWorkspace) {
     const settingsId: WorkspaceId = generateId('workspace')
     // Mark onboarding as complete so dev environment skips the onboarding flow
     const setupState = {
@@ -405,6 +449,8 @@ async function seed() {
       createdAt: new Date(),
       setupState: JSON.stringify(setupState),
       portalConfig: JSON.stringify({ features: { allowAnonymous: true } }),
+      featureFlags: JSON.stringify({ helpCenter: true }),
+      helpCenterConfig: JSON.stringify({ enabled: true }),
     })
     console.log('Created settings: Acme Corp (onboarding complete)')
   } else {
@@ -429,7 +475,7 @@ async function seed() {
 
   // Get or create users and principals
   const existingPrincipals = await db
-    .select({ id: principal.id, name: user.name })
+    .select({ id: principal.id, name: user.name, email: user.email })
     .from(principal)
     .innerJoin(user, eq(principal.userId, user.id))
 
@@ -451,7 +497,7 @@ async function seed() {
   // already holds users and posts gains no account. The demo principal goes
   // first: changelog authors come from the first four principals, which a
   // fresh seed makes the admins.
-  let demoPrincipalId: PrincipalId | undefined
+  let demoPrincipalId = existingPrincipals.find(({ email }) => email === DEMO_USER.email)?.id
   if (createPosts || seedSampleUsers) {
     const demoPrincipal = await ensureDemoPrincipal()
     demoPrincipalId = demoPrincipal.id
@@ -500,6 +546,11 @@ async function seed() {
   } else {
     console.log(`Using ${existingPrincipals.length} existing users`)
   }
+
+  const isDemoWorkspace =
+    !existingWorkspace ||
+    (existingWorkspace.slug === DEMO_ORG.slug && existingWorkspace.name === DEMO_ORG.name)
+  if (isDemoWorkspace && demoPrincipalId) await seedDemoHelpCenter(demoPrincipalId)
 
   // Create or get tags
   const tagIds: TagId[] = []
