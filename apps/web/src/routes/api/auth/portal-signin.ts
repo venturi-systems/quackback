@@ -1,5 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { isAPIError } from 'better-auth/api'
 import { requestEmailSignin } from '@/lib/server/auth/email-signin'
+import { AUTH_BLOCK_MESSAGES } from '@/lib/server/auth/redirect-errors'
 import { logger } from '@/lib/server/logger'
 
 const log = logger.child({ component: 'portal-signin' })
@@ -35,6 +37,22 @@ export const Route = createFileRoute('/api/auth/portal-signin')({
           await requestEmailSignin({ email: body.email, callbackURL })
           return Response.json({ ok: true })
         } catch (err) {
+          // The Better Auth pre-check redirects browsers, but this form expects JSON.
+          if (isAPIError(err) && err.status === 'FOUND') {
+            const location = new Headers(err.headers).get('location')
+            const target = location ? URL.parse(location, request.url) : null
+            if (
+              target?.origin === new URL(request.url).origin &&
+              target.pathname === '/' &&
+              target.searchParams.get('auth') === 'signin' &&
+              target.searchParams.get('error') === 'magic_link_method_not_allowed'
+            ) {
+              return Response.json(
+                { error: AUTH_BLOCK_MESSAGES.magic_link_method_not_allowed },
+                { status: 403 }
+              )
+            }
+          }
           log.error({ err }, 'portal signin failed')
           return Response.json(
             { error: err instanceof Error ? err.message : 'Failed to send sign-in email' },
