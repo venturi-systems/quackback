@@ -35,6 +35,15 @@ export function writeBetterAuthLog(
   message: unknown,
   args: readonly unknown[]
 ): void {
+  // Better Auth 1.7.22 passes the join predicate as a plain object. Its
+  // bound values are private and do not go through the database error serializer.
+  if (
+    typeof message === 'string' &&
+    message.startsWith('Failed to query fallback join for model ')
+  ) {
+    appLog[methodFor(level)]('auth fallback join failed')
+    return
+  }
   // The first error is logged as `err` and the rest under `args`; the message
   // is always a string (see `writeLogCall` in @quackback/logger).
   writeLogCall(appLog, methodFor(level), message, args)
