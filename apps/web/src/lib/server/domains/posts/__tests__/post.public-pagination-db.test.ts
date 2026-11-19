@@ -150,7 +150,15 @@ describe.each([
     'keeps %s membership, filters, ties, hasMore and page boundaries',
     async (sort) => {
       const schema = await import('@quackback/db/schema')
-      const database = drizzle(client, { schema })
+      const queries: string[] = []
+      const database = drizzle(client, {
+        schema,
+        logger: {
+          logQuery(query) {
+            queries.push(query)
+          },
+        },
+      })
       const rollback = new Error('rollback ranked fixtures')
       try {
         await database.transaction(async (tx) => {
@@ -194,11 +202,24 @@ describe.each([
             await insert(generateId('post'), 999, { moderationState: 'pending' })
             await insert(generateId('post'), 999, { deletedAt: new Date() })
             await insert(generateId('post'), 999, { canonicalPostId: visible[0].id })
-            const params = { sort, boardSlug: slug, limit: 5, minVotes: 35 }
+            await insert(generateId('post'), 999, { title: 'Other', content: 'Unmatched' })
+            const params = {
+              sort,
+              boardSlug: slug,
+              limit: 5,
+              minVotes: 35,
+              search: 'ranked',
+              responded: 'unresponded' as const,
+            }
             const eligible = visible.filter((row) => row.voteCount >= 35)
             const seen = []
             for (let page = 1; page <= 5; page++) {
+              queries.length = 0
               const result = await list({ ...params, page })
+              const [query] = queries
+              expect(queries).toHaveLength(1)
+              expect(query.match(/websearch_to_tsquery/g)).toHaveLength(1)
+              expect(query.match(/comments\.is_team_member/g)).toHaveLength(1)
               const expected = eligible.slice((page - 1) * 5, page * 5)
               expect(result.items.map(({ id }) => id)).toEqual(expected.map(({ id }) => id))
               expect(result.items.every((row) => row.content === 'Exact ranked content')).toBe(true)

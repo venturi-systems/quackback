@@ -144,8 +144,7 @@ function nextPublicPostCursor(
   }
 }
 
-function buildPostFilterConditions(params: PostListParams, actor: Actor) {
-  const { boardSlug, statusIds, statusSlugs, tagIds, search } = params
+function postVisibilityConditions(actor: Actor) {
   // postViewFilter handles both the board-audience predicate and the
   // moderationState gate (e.g. hide 'pending' from non-authors). Compose
   // alongside the existing soft-delete + canonical-post filters — never
@@ -156,13 +155,17 @@ function buildPostFilterConditions(params: PostListParams, actor: Actor) {
   // boardViewFilter to grant admins visibility into team-only boards.
   // Soft-deleted boards must still be filtered for everyone — admins
   // never want stale tombstoned posts in the public portal feed.
-  const conditions = [
+  return [
     postViewFilter(actor),
     isNull(boards.deletedAt),
     isNull(posts.canonicalPostId),
     isNull(posts.deletedAt),
   ]
+}
 
+function buildPostFilterConditions(params: PostListParams, actor: Actor) {
+  const { boardSlug, statusIds, statusSlugs, tagIds, search } = params
+  const conditions = postVisibilityConditions(actor)
   if (boardSlug) {
     conditions.push(eq(boards.slug, boardSlug))
   }
@@ -221,7 +224,9 @@ function buildPostFilterConditions(params: PostListParams, actor: Actor) {
 }
 
 /** Hydrate only the selected ranked page. Keep one SQL snapshot and all current
- * access/filter predicates; ordering remains live, not a rank snapshot.
+ * access/filter predicates in the page window. Hydration rechecks visibility;
+ * search, tags, status, and response filters already selected these exact IDs.
+ * Ordering remains live, not a rank snapshot.
  * The inner LIMIT/OFFSET is a relational boundary, so correlated projection
  * work runs for the page rows rather than every row discarded by OFFSET.
  */
@@ -244,11 +249,13 @@ export async function listPublicPostsWithVotesAndAvatars(
 ): Promise<{ items: PostWithVotesAndAvatars[]; hasMore: boolean; nextCursor?: string | null }> {
   const { sort = 'top', page = 1, limit = 20, principalId, actor = ANONYMOUS_ACTOR } = params
   const offset = (page - 1) * limit
-  const conditions = buildPostFilterConditions(params, actor)
   const { cursorMode, condition } = publicPostPagination(params)
-  if (condition) conditions.push(condition)
   const orderBy = getPostSortOrder(sort, cursorMode)
   const rankedPage = rankedPostWindow(params, actor)
+  const conditions = rankedPage
+    ? postVisibilityConditions(actor)
+    : buildPostFilterConditions(params, actor)
+  if (condition) conditions.push(condition)
 
   // Only authenticated users can vote, so we only check principal_id
   // Anonymous users see vote counts but hasVoted is always false
@@ -344,11 +351,13 @@ export async function listPublicPosts(
 ): Promise<PublicPostListResult> {
   const { sort = 'top', page = 1, limit = 20, actor = ANONYMOUS_ACTOR } = params
   const offset = (page - 1) * limit
-  const conditions = buildPostFilterConditions(params, actor)
   const { cursorMode, condition } = publicPostPagination(params)
-  if (condition) conditions.push(condition)
   const orderBy = getPostSortOrder(sort, cursorMode)
   const rankedPage = rankedPostWindow(params, actor)
+  const conditions = rankedPage
+    ? postVisibilityConditions(actor)
+    : buildPostFilterConditions(params, actor)
+  if (condition) conditions.push(condition)
 
   const postsQuery = db
     .select({
