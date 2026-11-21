@@ -1078,6 +1078,16 @@ describe('QB-CI-009 code-quality gate', () => {
     }
   })
 
+  it('carries no condition that can switch the gate off', () => {
+    // The job condition is the only `if:` in the workflow. A different job
+    // condition, such as `if: false`, or a step-level `if:` on the snapshot,
+    // CodeQL or baseline step would stop the gate while every other assertion
+    // in this block still passed.
+    expect(workflow.match(/^[ \t]*if:.*$/gm)).toEqual([
+      "    if: github.repository == 'venturi-systems/quackback' && github.ref == 'refs/heads/main'",
+    ])
+  })
+
   it('never baselines a finding', () => {
     const baseline = JSON.parse(
       readFileSync(join(process.cwd(), 'config', 'code-quality-baseline.json'), 'utf8')

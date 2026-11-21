@@ -43,7 +43,9 @@
 # whose sha256 equals the CANONICAL_SHA256 entry in that revision's
 # verify_snapshots.py. The gate refuses to run on any other bytes. Never edit
 # the snapshot; to refresh it, copy the reviewed shared bytes and update the
-# digest below and in tests/ci-contract.test.ts in one change.
+# digest below and in tests/ci-contract.test.ts in one change. The snapshot's
+# docstring describes the fleet copy, which runs on the isolated ephemeral
+# pool; this job runs GitHub-hosted, as the runner exception on the job says.
 
 name: Code quality
 
