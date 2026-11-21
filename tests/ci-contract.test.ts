@@ -175,7 +175,13 @@ describe('QB-CI-004 Playwright failure evidence', () => {
     expect(upload).toContain('        if: ${{ !cancelled() }}\n')
     expect(upload).toContain(`uses: actions/upload-artifact@${sharedUploadArtifactPin()} `)
     expect(upload).toContain('          retention-days: 7\n')
-    for (const artifact of ['blob-report', 'test-results', 'e2e-results.json', 'e2e-plan.json']) {
+    for (const artifact of [
+      'blob-report',
+      'test-results',
+      'e2e-results.json',
+      'e2e-plan.json',
+      'e2e-groups.json',
+    ]) {
       expect(upload).toContain(`            apps/web/${artifact}\n`)
     }
   })
@@ -929,11 +935,31 @@ describe('QB-CI-002 e2e shard balance contract', () => {
   it('records that reweighting moves boundaries and cannot change what runs', () => {
     // The safety argument, kept next to the constant it justifies: weights
     // only move cut points, and filterForShard assigns every group to exactly
-    // one shard for any vector. Verified against Playwright 1.62.1 -- the
-    // union of all 8 shards is identical with and without these weights
-    // (803 distinct tests either way).
+    // one shard for any vector. Verified against Playwright 1.65.0 -- the
+    // union of all 8 shards is identical with the old weights, these weights
+    // and none, and equals the unsharded list of all 52 spec files
+    // (984 distinct tests either way).
     expect(ci).toContain('exactly one shard for ANY weight vector')
-    expect(ci).toContain('803 distinct tests either way')
+    expect(ci).toContain('984 distinct tests either way')
+  })
+
+  it('records the test groups the weight script needs, without changing the run', () => {
+    // compute-shard-weights.ts models Playwright's groups, which no JSON
+    // report shows. The CI reporter list writes them next to the results and
+    // the artifact upload keeps them; the reporter observes only.
+    const config = readFileSync(join(process.cwd(), 'apps', 'web', 'playwright.config.ts'), 'utf8')
+    expect(config).toContain(
+      "['./e2e/scripts/shard-groups-reporter.ts', { outputFile: 'e2e-groups.json' }]"
+    )
+    const reporter = readFileSync(
+      join(process.cwd(), 'apps', 'web', 'e2e', 'scripts', 'shard-groups-reporter.ts'),
+      'utf8'
+    )
+    expect(reporter).toContain('printsToStdio(): boolean {\n    return false')
+    // It never filters or reorders: no Reporter hook that could, and no
+    // throw out of onBegin (a changed internal shape becomes an `error`).
+    expect(reporter).not.toMatch(/\bonTestBegin\b|\bfilterTests|\.skip\(/)
+    expect(reporter).toContain('out.error = (error as Error).message')
   })
 })
 
