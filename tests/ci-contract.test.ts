@@ -1032,3 +1032,57 @@ describe('QB-CI-008 widget package typecheck', () => {
     expect(existsSync(join(widgetDir, 'src', 'browser-queue.ts'))).toBe(true)
   })
 })
+
+describe('QB-CI-009 code-quality gate', () => {
+  // REQ-12: CodeQL's JavaScript and TypeScript code-quality suite runs after
+  // every merge to main and holds its findings to an empty baseline. The
+  // workflow has no pull_request trigger (QB-CI-001 keeps every pull-request
+  // lane in ci.yml), so these assertions check the gate on every pull request.
+  const workflow = readFileSync(join(workflowDir, 'code-quality.yml'), 'utf8')
+  // sha256 of check_code_quality.py in venturi-systems/.github at
+  // 22c344e6bf61b7eb25b867be5e3669a4b5d0c8a4, the CANONICAL_SHA256 entry in
+  // that revision's ci-helper-paths/verify_snapshots.py.
+  const sharedHelperSha256 = 'aab620dfc9dcb34dede301c621c886316daf8ed2cb2ce892f6bd3b0fdd0a87a3'
+
+  it('runs only an unmodified snapshot of the shared helper', () => {
+    const helper = readFileSync(join(process.cwd(), 'scripts', 'check_code_quality.py'))
+    expect(createHash('sha256').update(helper).digest('hex')).toBe(sharedHelperSha256)
+    expect(workflow).toContain(
+      `echo '${sharedHelperSha256}  scripts/check_code_quality.py' | sha256sum --check --strict -`
+    )
+    expect(workflow.indexOf('name: Verify the shared helper snapshot')).toBeLessThan(
+      workflow.indexOf('name: Hold findings to the baseline')
+    )
+    // A public repository cannot use an action that lives in a private one.
+    expect(workflow).not.toMatch(/uses:\s*venturi-systems\//)
+  })
+
+  it('analyzes the complete tree with the code-quality suite and uploads nothing', () => {
+    expect(workflow).toMatch(/^on:\n {2}push:\n {4}branches: \[main\]\n {2}workflow_dispatch:\n/m)
+    expect(workflow).toContain('runs-on: ubuntu-24.04\n')
+    expect(workflow).toMatch(/\n {4}timeout-minutes: \d+\n/)
+    expect(workflow).toContain('languages: javascript-typescript')
+    expect(workflow).toContain('build-mode: none')
+    expect(workflow).toContain('disable-default-queries: true')
+    expect(workflow).toContain(
+      'codeql/javascript-queries:codeql-suites/javascript-code-quality.qls'
+    )
+    expect(workflow).toContain("CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'")
+    expect(workflow).toContain('upload: never')
+    expect(workflow).toContain('upload-database: false')
+    expect(workflow).toContain(
+      'python3 scripts/check_code_quality.py --baseline "$GITHUB_WORKSPACE/config/code-quality-baseline.json"'
+    )
+    for (const forbidden of ['--prune', '--write-baseline', 'paths-ignore', 'continue-on-error']) {
+      expect(workflow, forbidden).not.toContain(forbidden)
+    }
+  })
+
+  it('never baselines a finding', () => {
+    const baseline = JSON.parse(
+      readFileSync(join(process.cwd(), 'config', 'code-quality-baseline.json'), 'utf8')
+    ) as { schema_version: number; findings: unknown[] }
+    expect(baseline.schema_version).toBe(1)
+    expect(baseline.findings).toEqual([])
+  })
+})
