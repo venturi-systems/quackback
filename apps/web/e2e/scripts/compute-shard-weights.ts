@@ -29,8 +29,8 @@
  *
  * The previous version of this script modelled none of that. It keyed tests
  * by source location, so a loop declaring several tests at one line counted
- * as one; it sorted files by name, which puts the `trace`-scoped design
- * files at the front of chromium-public while Playwright runs them last;
+ * as one; it sorted files by path, which puts the `trace`-scoped design
+ * files ahead of most of chromium-public while Playwright runs them last;
  * and it drew cuts inside serial groups that Playwright cannot split. Its
  * last vector summed to 808 against 984 shardable tests.
  *
