@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "policy": "Exact language, rule, path and CodeQL fingerprint (line hash and start column) matches only. A finding outside this list fails CI; an entry that no longer reproduces fails as stale until --prune removes it. The list only shrinks.",
+  "findings": []
+}
