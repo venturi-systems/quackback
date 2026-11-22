@@ -46,10 +46,14 @@ export default defineConfig({
   // (e2e/scripts/check-known-failures.ts). It is the gate, not Playwright's
   // exit code -- a failure already on e2e/known-failures.json must not redden
   // the shard, and anything else must.
+  // The shard-groups reporter only observes: it writes this shard's
+  // Playwright test groups to e2e-groups.json, which
+  // e2e/scripts/compute-shard-weights.ts needs to rebalance the shards.
   reporter: process.env.CI
     ? [
         ['blob', { outputDir: 'blob-report' }],
         ['json', { outputFile: 'e2e-results.json' }],
+        ['./e2e/scripts/shard-groups-reporter.ts', { outputFile: 'e2e-groups.json' }],
         ['list'],
       ]
     : [['html', { outputFolder: 'playwright-report' }], ['list']],

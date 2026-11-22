@@ -50,6 +50,7 @@ test-results/
 blob-report/
 e2e-results.json
 e2e-plan.json
+e2e-groups.json
 apps/web/e2e/.auth/
 
 # Turbo

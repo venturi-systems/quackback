@@ -594,34 +594,48 @@ jobs:
       # Duration-balanced shard boundaries.
       #
       # `--shard=i/8` splits by test COUNT, not duration: filterForShard sums
-      # group.tests.length and cuts at equal counts. Test durations here span
-      # three orders of magnitude, so equal counts produce very unequal work.
+      # each group's tests that are not skipped and cuts at equal counts.
+      # Test durations here span three orders of magnitude, so equal counts
+      # produce very unequal work.
       # Measured on run 35289540093, the eight shards ran 6.5, 6.5, 8.0, 9.2,
       # 10.2, 10.5, 10.5 and 12.8 minutes. The slowest sets the critical path
       # and the fastest finishes five minutes early holding an idle runner.
       #
       # PWTEST_SHARD_WEIGHTS moves the cut points. Each weight is that shard's
-      # share of the total test count, so a shard full of slow tests is given
-      # fewer of them. The numbers below were derived from the measured
-      # per-test durations of run 37833749533 (#245, 2026-10-08): walk the
-      # tests in Playwright's own order and take the eight contiguous ranges
-      # whose slowest is shortest, which on that run is 3.4 minutes against a
-      # 3.3 minute mean. The previous vector came from run 37513233008 two
-      # days earlier, when the suite measured 67.6 minutes of tests; it
-      # measures 26.6 now, with a different shape, so on this run that vector
-      # ran 4.9, 2.7, 4.9, 5.1, 1.3, 1.0, 2.0 and 4.7 minutes. They sum to
-      # 808, the current test count, which makes the split exact rather than
-      # rounded -- but nothing depends on that, because Playwright uses the
-      # weights proportionally.
+      # share of the shardable test count, so a shard full of slow tests is
+      # given fewer of them. Playwright cuts whole test GROUPS, not tests: a
+      # serial or default-mode file is one indivisible group (help-center 40
+      # tests, post-submission 36, comments 35), and files that set the
+      # worker-scoped `trace` option sort to the end of their project.
+      #
+      # The previous vector came from a model that counted one test per
+      # source location (a loop of tests at one line counted once), sorted
+      # files by name and cut inside serial groups. It summed to 808 against
+      # 984 shardable tests. On runs 44897288384, 44870496672 and 44680485745
+      # (main, 2026-11-20 and 21) its eight shards measured 233, 186, 228,
+      # 234, 128, 35, 161 and 265 s of tests on the first. The three runs'
+      # long poles were 265, 276 and 277 s against a 175 s mean, and shard 6
+      # finished its tests after 35 s.
+      #
+      # The vector below comes from e2e/scripts/compute-shard-weights.ts,
+      # which takes Playwright's own groups (shard-groups-reporter.ts), costs
+      # each test at the median of those three runs, proves it reproduces the
+      # runs' actual shards under the old vector, and picks the contiguous
+      # split of groups whose slowest shard is shortest. Replayed through
+      # Playwright 1.65.0's own --list --shard, each shard holds exactly the
+      # counts below, and the three runs' measured costs give long poles of
+      # 219, 192 and 210 s. The weights are the exact shard sizes, so they
+      # sum to the shardable count; Playwright applies them proportionally.
       #
       # Regenerate after a significant change in the suite's shape:
-      #   bun apps/web/e2e/scripts/compute-shard-weights.ts <results...>
+      #   bun apps/web/e2e/scripts/compute-shard-weights.ts <artifact dirs...>
       #
       # Why this does not change coverage: filterForShard assigns every group
       # to exactly one shard for ANY weight vector -- it only moves the
       # boundaries between them. Verified rather than assumed: the union of
-      # all eight shards is byte-identical with and without these weights
-      # (803 distinct tests either way). See tests/ci-contract.test.ts.
+      # all eight shards is identical with the old weights, the new weights
+      # and no weights, and equals the unsharded --list of all 52 spec files
+      # (984 distinct tests either way). See tests/ci-contract.test.ts.
       #
       # This is set at JOB level on purpose. The plan step and the run step
       # must see the same value; if only one did, the shard's results would
@@ -632,7 +646,7 @@ jobs:
       # One that rejects it fails loudly in CI. Weights that drift as tests
       # are added degrade toward that same equal-count baseline; they cannot
       # drop a test.
-      PWTEST_SHARD_WEIGHTS: '114:84:144:133:109:23:85:116'
+      PWTEST_SHARD_WEIGHTS: '120:94:142:121:115:156:144:92'
     steps:
       - name: Checkout tested source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -861,6 +875,7 @@ jobs:
             apps/web/test-results
             apps/web/e2e-results.json
             apps/web/e2e-plan.json
+            apps/web/e2e-groups.json
           retention-days: 7
           if-no-files-found: ignore
 
