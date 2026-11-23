@@ -1,4 +1,4 @@
-FROM postgres:18
+FROM postgres:19
 
 # Install pg_cron and pgvector extensions
 RUN apt-get update \
