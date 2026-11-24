@@ -15,11 +15,9 @@ test.describe.configure({ mode: 'serial' })
  * disabled as db:seed leaves it, and restores all three after execution. A
  * disabled-feature 404 must never stand in for the help-center UI, and the
  * portal search must work without the widget (venturi-systems/feedback#472).
- * db:seed creates no help-center content, so the suite also creates its own
- * categories and articles (e2e/scripts/set-help-center-content.ts) and removes
- * them afterwards. Every page these tests open therefore exists, so every
- * assertion below is unconditional: a test whose element is missing fails
- * (venturi-systems/feedback#473).
+ * The suite creates dedicated categories and articles
+ * (e2e/scripts/set-help-center-content.ts) and removes them afterwards. The
+ * separate demo seed check covers the content local workspaces start with.
  */
 
 test.beforeAll(() => {
@@ -99,14 +97,21 @@ test.describe('Public Help Center', () => {
     await expect(searchInput).toBeVisible()
   })
 
-  test('shows categories list when categories exist in seed data', async ({ page }) => {
+  test('lists the published demo seed category and article', async ({ page }) => {
     await expectLandingPage(page)
 
-    // Category cards link to /hc/categories/<slug>. The fixture always creates
-    // categories, so the "No categories yet" empty state is asserted by
-    // src/components/help-center/__tests__/help-center-category-grid.test.tsx.
-    const categoryCards = page.locator('a[href*="/hc/categories/"]')
-    await expect(categoryCards.first()).toBeVisible()
+    const category = page.locator('a[href="/hc/categories/seed-hc-demo-workspace"]')
+    await expect(category).toContainText('Explore the demo workspace')
+    await category.click()
+    const article = page.getByRole('link', { name: /Use the sample feedback portal/ })
+    await expect(article).toHaveAttribute(
+      'href',
+      '/hc/articles/seed-hc-demo-workspace/seed-hc-demo-workspace-guide'
+    )
+    await article.click()
+    await expect(
+      page.getByRole('heading', { name: 'Use the sample feedback portal' })
+    ).toBeVisible()
   })
 
   test('each category card shows name and article count', async ({ page }) => {
@@ -718,7 +723,7 @@ test.describe('Help Center - Article Content Verification', () => {
     }
   })
 
-  test('clicking a ToC link scrolls its heading into view', async ({ page }) => {
+  test('clicking a ToC link scrolls to its heading and updates the URL', async ({ page }) => {
     await navigateToFirstArticle(page)
 
     // The TOC renders on xl viewports only. A short viewport keeps the last
@@ -738,9 +743,9 @@ test.describe('Help Center - Article Content Verification', () => {
     const target = page.locator(`[id="${targetHash.slice(1)}"]`)
     await expect(target).not.toBeInViewport()
 
-    // help-center-toc.tsx prevents the default jump and calls scrollIntoView, so
-    // the URL keeps no hash; the click has to bring the heading into view.
+    const expectedUrl = new URL(targetHash, page.url()).href
     await lastLink.click()
+    await expect(page).toHaveURL(expectedUrl)
     await expect(target).toBeInViewport()
   })
 })

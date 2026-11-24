@@ -23,10 +23,10 @@ test.describe('Admin Experimental Settings', () => {
   })
 
   test('shows Help Center feature flag card', async ({ page }) => {
-    // Exact: the Support section's own description ("...a self-serve help
-    // center.") and the flag description both contain the words, so the
-    // substring form resolved to three elements. The flag's <label> is the card.
-    await expect(page.getByText('Help Center', { exact: true })).toBeVisible({ timeout: 10000 })
+    // The enabled help center also appears in navigation.
+    const flagLabel = page.locator('label[for="flag-helpCenter"]')
+    await expect(flagLabel).toHaveText('Help Center', { timeout: 10000 })
+    await expect(flagLabel).toBeVisible()
     await expect(
       page.getByText('Publish a searchable help center so customers can find answers on their own.')
     ).toBeVisible()

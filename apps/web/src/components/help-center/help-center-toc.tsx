@@ -46,8 +46,14 @@ export function HelpCenterToc({ headings }: HelpCenterTocProps) {
               <a
                 href={`#${heading.id}`}
                 onClick={(e) => {
+                  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+
+                  const target = document.getElementById(heading.id)
+                  if (!target) return
+
                   e.preventDefault()
-                  document.getElementById(heading.id)?.scrollIntoView({ behavior: 'smooth' })
+                  window.history.replaceState(window.history.state, '', e.currentTarget.hash)
+                  target.scrollIntoView({ behavior: 'smooth' })
                   setActiveId(heading.id)
                 }}
                 className={cn(
