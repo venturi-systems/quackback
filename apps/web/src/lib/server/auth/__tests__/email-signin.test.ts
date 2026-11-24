@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { APIError } from 'better-auth/api'
+import { AUTH_BLOCK_MESSAGES } from '../redirect-errors'
 
 const hoisted = vi.hoisted(() => ({
   mockMintMagicLinkUrl: vi.fn(async () => ({
@@ -32,6 +34,11 @@ vi.mock('@/lib/server/storage/s3', () => ({ getEmailSafeUrl: () => null }))
 
 vi.mock('@/lib/server/config', () => ({ config: { baseUrl: 'https://acme.quackback.io' } }))
 
+vi.mock('@tanstack/react-router', () => ({
+  createFileRoute: () => (options: unknown) => ({ options }),
+}))
+
+import { Route } from '@/routes/api/auth/portal-signin'
 import { requestEmailSignin } from '../email-signin'
 
 describe('requestEmailSignin — failed-verify redirect', () => {
@@ -69,5 +76,57 @@ describe('requestEmailSignin — refused send', () => {
 
     expect(hoisted.mockMintMagicLinkUrl).not.toHaveBeenCalled()
     expect(hoisted.mockSendMagicLinkEmail).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/auth/portal-signin', () => {
+  type Handler = (context: { request: Request }) => Promise<Response>
+  const post = (Route as unknown as { options: { server: { handlers: { POST: Handler } } } })
+    .options.server.handlers.POST
+  const request = () =>
+    post({
+      request: new Request('https://acme.quackback.io/api/auth/portal-signin', {
+        method: 'POST',
+        body: JSON.stringify({ email: 'visitor@example.com', callbackURL: '/' }),
+      }),
+    })
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it.each([
+    '/?auth=signin&error=magic_link_method_not_allowed',
+    '/?auth=signin&callbackUrl=/admin&error=magic_link_method_not_allowed',
+  ])('reports the disabled method without issuing a sign-in link for %s', async (location) => {
+    hoisted.mockSendVerificationOTP.mockRejectedValueOnce(
+      new APIError('FOUND', undefined, { location })
+    )
+    const res = await request()
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: AUTH_BLOCK_MESSAGES.magic_link_method_not_allowed })
+    expect(res.headers.has('set-cookie')).toBe(false)
+    expect(hoisted.mockMintMagicLinkUrl).not.toHaveBeenCalled()
+    expect(hoisted.mockSendMagicLinkEmail).not.toHaveBeenCalled()
+  })
+
+  it('sends the sign-in email when the method is allowed', async () => {
+    const res = await request()
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(hoisted.mockMintMagicLinkUrl).toHaveBeenCalledOnce()
+    expect(hoisted.mockSendMagicLinkEmail).toHaveBeenCalledOnce()
+  })
+
+  it('does not report an unrelated redirect as the workspace policy', async () => {
+    hoisted.mockSendVerificationOTP.mockRejectedValueOnce(
+      new APIError('FOUND', undefined, {
+        location: 'https://elsewhere.example/?auth=signin&error=magic_link_method_not_allowed',
+      })
+    )
+    expect((await request()).status).toBe(500)
+  })
+
+  it('keeps unexpected delivery failures distinct from policy denials', async () => {
+    hoisted.mockSendMagicLinkEmail.mockRejectedValueOnce(new Error('delivery unavailable'))
+    expect((await request()).status).toBe(500)
   })
 })

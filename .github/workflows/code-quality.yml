@@ -1,0 +1,141 @@
+# Code quality: CodeQL's code-quality suite for JavaScript and TypeScript, held
+# to a baseline that only shrinks. The baseline starts empty and stays empty:
+# a finding is fixed, never baselined.
+#
+# WHY. GitHub Code Quality is a repository setting
+# (dynamic/github-code-quality) that runs these same suites on GitHub-hosted
+# runners, and no file in this repository can route, scope or throttle it.
+# Owner decision 2026-09-29: resolve every finding it reports, then disable it
+# organization-wide, and run its checks as a gate with a fixed cost. Fleet
+# repositories such as codex and fleet-dotfiles run this check through the
+# ci-helper-paths action in venturi-systems/.github. This workflow gives
+# quackback the same check, so a green run on main is the evidence of zero
+# findings that the switch-off needs.
+#
+# WHERE. GitHub-hosted, see the runner exception on the job. Hosted minutes
+# cost nothing for a public repository, so the cost stays fixed at zero. The
+# job holds a read-only token, no secret and no environment, and uploads
+# nothing: code scanning upload would need security-events: write, so results
+# go to the job log, the step summary and line annotations instead.
+#
+# WHEN. After every merge to main, and on manual dispatch. No pull_request
+# trigger: QB-CI-001 in tests/ci-contract.test.ts holds every pull-request lane
+# to ci.yml behind the one required portability-gate context. A finding that
+# lands fails the run on main with an annotation on its line, and the fix is the
+# next pull request. The same contract file checks this workflow, the helper's
+# digest and the empty baseline on every pull request (QB-CI-009).
+#
+# WHAT. CodeQL builds a database without compiling (build-mode none) and runs
+# javascript-code-quality.qls, the suite Code Quality runs.
+# scripts/check_code_quality.py then compares the SARIF with
+# config/code-quality-baseline.json: a finding outside the baseline fails and is
+# annotated on its line, and an entry that no longer reproduces fails as stale.
+# That comparison needs the whole result set, so the action's diff-informed
+# analysis is off (see env below). The CodeQL bundle is pinned (tools:) so a
+# CodeQL release cannot change the findings between two runs; a bump is its own
+# reviewed change.
+#
+# THE HELPER. A public repository cannot use an action that lives in a private
+# repository (see cache-eviction.yml), so the organization's ci-helper-paths
+# action is out of reach here. scripts/check_code_quality.py is a byte-for-byte
+# snapshot of check_code_quality.py from venturi-systems/.github at
+# 22c344e6bf61b7eb25b867be5e3669a4b5d0c8a4 (.github/actions/ci-helper-paths),
+# whose sha256 equals the CANONICAL_SHA256 entry in that revision's
+# verify_snapshots.py. The gate refuses to run on any other bytes. Never edit
+# the snapshot; to refresh it, copy the reviewed shared bytes and update the
+# digest below and in tests/ci-contract.test.ts in one change. The snapshot's
+# docstring describes the fleet copy, which runs on the isolated ephemeral
+# pool; this job runs GitHub-hosted, as the runner exception on the job says.
+
+name: Code quality
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: code-quality-${{ github.run_id }}-${{ github.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: code quality (javascript-typescript)
+    if: github.repository == 'venturi-systems/quackback' && github.ref == 'refs/heads/main'
+    # Runner exception (C): GitHub-hosted on purpose. This repository is public,
+    # and both organization self-hosted groups refuse public repositories:
+    # venturi-ci-ephemeral and venturi-ci-trusted pin allows_public_repositories
+    # to false (infra ci-runners/pool/pool.json, ci-runners/trusted/layout.json).
+    # A self-hosted label here would queue and never start. Hosted minutes are
+    # free for a public repository, so this job adds no per-minute cost.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # codeql-action reads the workflow run for telemetry; without it the step
+      # fails after a successful scan.
+      actions: read
+    env:
+      # A filtered SARIF would make the gate report every untouched baseline
+      # entry as stale, so the analysis is always complete. The action filters
+      # only pull_request runs, which this workflow does not have; the flag
+      # keeps that true if a pull_request trigger is ever added. Both init and
+      # analyze read it.
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify the shared helper snapshot
+        run: |
+          set -euo pipefail
+          echo 'aab620dfc9dcb34dede301c621c886316daf8ed2cb2ce892f6bd3b0fdd0a87a3  scripts/check_code_quality.py' | sha256sum --check --strict -
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          tools: https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.1/codeql-bundle-linux64.tar.gz
+          # Only the code-quality suite runs. `queries:` would read a
+          # `codeql/<x>-queries:<path>` specifier as an external GitHub
+          # repository and fail init, so the suite is selected as a pack, and
+          # the default code-scanning queries are switched off. The pack ships
+          # in the pinned bundle, so nothing is fetched from a registry.
+          config: |
+            disable-default-queries: true
+            packs:
+              javascript:
+                - codeql/javascript-queries:codeql-suites/javascript-code-quality.qls
+          # No TRAP or dependency cache is restored or saved.
+          trap-caching: 'false'
+          dependency-caching: 'false'
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: '/code-quality/language:javascript-typescript'
+          upload: never
+          # upload: never stops only the SARIF upload. Without this the action
+          # also tries to upload the CodeQL database on main. The read-only
+          # token refuses all four attempts (one try and three retries), which
+          # leaves a failure annotation on a green run (platform #5910).
+          upload-database: false
+          output: ${{ runner.temp }}/code-quality-sarif
+
+      - name: Hold findings to the baseline
+        env:
+          SARIF_DIR: ${{ runner.temp }}/code-quality-sarif
+        run: |
+          set -euo pipefail
+          sarif="$(find "${SARIF_DIR}" -name '*.sarif' -print -quit)"
+          if [ -z "${sarif}" ]; then
+            echo "::error::CodeQL wrote no SARIF for javascript-typescript under ${SARIF_DIR}"
+            exit 2
+          fi
+          python3 scripts/check_code_quality.py --baseline "$GITHUB_WORKSPACE/config/code-quality-baseline.json" --sarif "javascript-typescript=${sarif}"

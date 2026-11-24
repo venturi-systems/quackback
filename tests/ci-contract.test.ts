@@ -175,7 +175,13 @@ describe('QB-CI-004 Playwright failure evidence', () => {
     expect(upload).toContain('        if: ${{ !cancelled() }}\n')
     expect(upload).toContain(`uses: actions/upload-artifact@${sharedUploadArtifactPin()} `)
     expect(upload).toContain('          retention-days: 7\n')
-    for (const artifact of ['blob-report', 'test-results', 'e2e-results.json', 'e2e-plan.json']) {
+    for (const artifact of [
+      'blob-report',
+      'test-results',
+      'e2e-results.json',
+      'e2e-plan.json',
+      'e2e-groups.json',
+    ]) {
       expect(upload).toContain(`            apps/web/${artifact}\n`)
     }
   })
@@ -929,11 +935,31 @@ describe('QB-CI-002 e2e shard balance contract', () => {
   it('records that reweighting moves boundaries and cannot change what runs', () => {
     // The safety argument, kept next to the constant it justifies: weights
     // only move cut points, and filterForShard assigns every group to exactly
-    // one shard for any vector. Verified against Playwright 1.62.1 -- the
-    // union of all 8 shards is identical with and without these weights
-    // (803 distinct tests either way).
+    // one shard for any vector. Verified against Playwright 1.65.0 -- the
+    // union of all 8 shards is identical with the old weights, these weights
+    // and none, and equals the unsharded list of all 52 spec files
+    // (984 distinct tests either way).
     expect(ci).toContain('exactly one shard for ANY weight vector')
-    expect(ci).toContain('803 distinct tests either way')
+    expect(ci).toContain('984 distinct tests either way')
+  })
+
+  it('records the test groups the weight script needs, without changing the run', () => {
+    // compute-shard-weights.ts models Playwright's groups, which no JSON
+    // report shows. The CI reporter list writes them next to the results and
+    // the artifact upload keeps them; the reporter observes only.
+    const config = readFileSync(join(process.cwd(), 'apps', 'web', 'playwright.config.ts'), 'utf8')
+    expect(config).toContain(
+      "['./e2e/scripts/shard-groups-reporter.ts', { outputFile: 'e2e-groups.json' }]"
+    )
+    const reporter = readFileSync(
+      join(process.cwd(), 'apps', 'web', 'e2e', 'scripts', 'shard-groups-reporter.ts'),
+      'utf8'
+    )
+    expect(reporter).toContain('printsToStdio(): boolean {\n    return false')
+    // It never filters or reorders: no Reporter hook that could, and no
+    // throw out of onBegin (a changed internal shape becomes an `error`).
+    expect(reporter).not.toMatch(/\bonTestBegin\b|\bfilterTests|\.skip\(/)
+    expect(reporter).toContain('out.error = (error as Error).message')
   })
 })
 
@@ -1030,5 +1056,69 @@ describe('QB-CI-008 widget package typecheck', () => {
     }
     expect(tsconfig.include).toContain('src/**/*')
     expect(existsSync(join(widgetDir, 'src', 'browser-queue.ts'))).toBe(true)
+  })
+})
+
+describe('QB-CI-009 code-quality gate', () => {
+  // REQ-12: CodeQL's JavaScript and TypeScript code-quality suite runs after
+  // every merge to main and holds its findings to an empty baseline. The
+  // workflow has no pull_request trigger (QB-CI-001 keeps every pull-request
+  // lane in ci.yml), so these assertions check the gate on every pull request.
+  const workflow = readFileSync(join(workflowDir, 'code-quality.yml'), 'utf8')
+  // sha256 of check_code_quality.py in venturi-systems/.github at
+  // 22c344e6bf61b7eb25b867be5e3669a4b5d0c8a4, the CANONICAL_SHA256 entry in
+  // that revision's ci-helper-paths/verify_snapshots.py.
+  const sharedHelperSha256 = 'aab620dfc9dcb34dede301c621c886316daf8ed2cb2ce892f6bd3b0fdd0a87a3'
+
+  it('runs only an unmodified snapshot of the shared helper', () => {
+    const helper = readFileSync(join(process.cwd(), 'scripts', 'check_code_quality.py'))
+    expect(createHash('sha256').update(helper).digest('hex')).toBe(sharedHelperSha256)
+    expect(workflow).toContain(
+      `echo '${sharedHelperSha256}  scripts/check_code_quality.py' | sha256sum --check --strict -`
+    )
+    expect(workflow.indexOf('name: Verify the shared helper snapshot')).toBeLessThan(
+      workflow.indexOf('name: Hold findings to the baseline')
+    )
+    // A public repository cannot use an action that lives in a private one.
+    expect(workflow).not.toMatch(/uses:\s*venturi-systems\//)
+  })
+
+  it('analyzes the complete tree with the code-quality suite and uploads nothing', () => {
+    expect(workflow).toMatch(/^on:\n {2}push:\n {4}branches: \[main\]\n {2}workflow_dispatch:\n/m)
+    expect(workflow).toContain('runs-on: ubuntu-24.04\n')
+    expect(workflow).toMatch(/\n {4}timeout-minutes: \d+\n/)
+    expect(workflow).toContain('languages: javascript-typescript')
+    expect(workflow).toContain('build-mode: none')
+    expect(workflow).toContain('disable-default-queries: true')
+    expect(workflow).toContain(
+      'codeql/javascript-queries:codeql-suites/javascript-code-quality.qls'
+    )
+    expect(workflow).toContain("CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'")
+    expect(workflow).toContain('upload: never')
+    expect(workflow).toContain('upload-database: false')
+    expect(workflow).toContain(
+      'python3 scripts/check_code_quality.py --baseline "$GITHUB_WORKSPACE/config/code-quality-baseline.json"'
+    )
+    for (const forbidden of ['--prune', '--write-baseline', 'paths-ignore', 'continue-on-error']) {
+      expect(workflow, forbidden).not.toContain(forbidden)
+    }
+  })
+
+  it('carries no condition that can switch the gate off', () => {
+    // The job condition is the only `if:` in the workflow. A different job
+    // condition, such as `if: false`, or a step-level `if:` on the snapshot,
+    // CodeQL or baseline step would stop the gate while every other assertion
+    // in this block still passed.
+    expect(workflow.match(/^[ \t]*if:.*$/gm)).toEqual([
+      "    if: github.repository == 'venturi-systems/quackback' && github.ref == 'refs/heads/main'",
+    ])
+  })
+
+  it('never baselines a finding', () => {
+    const baseline = JSON.parse(
+      readFileSync(join(process.cwd(), 'config', 'code-quality-baseline.json'), 'utf8')
+    ) as { schema_version: number; findings: unknown[] }
+    expect(baseline.schema_version).toBe(1)
+    expect(baseline.findings).toEqual([])
   })
 })

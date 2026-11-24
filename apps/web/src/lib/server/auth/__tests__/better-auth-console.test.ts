@@ -9,15 +9,12 @@
  *   that is not an `APIError`: `console.error('# SERVER_ERROR: ', error)`.
  *   The app's `onAPIError` option rethrows such an error and
  *   `answerAuthRequest` logs it through the app logger instead.
- * - @better-auth/core 1.6.33 `dist/db/adapter/factory.mjs:385` prints the
- *   failed query when a fallback join fails: `console.error(error)`. The
- *   server routes the console through the app logger (`routeConsoleToLogger`).
+ * - @better-auth/core 1.7.22 sends failed fallback join filters to its configured
+ *   logger. Filter values can identify users. The app drops those arguments.
+ *   Older adapters that write a query error directly to the console are
+ *   covered separately by the production console router.
  *
- * Each test drives a real Better Auth instance over the memory adapter, whose
- * `user` table throws drizzle-orm's `DrizzleQueryError` (`Failed query: <sql>
- * \nparams: <values>`) with an email and a session token bound, and checks
- * both the console and the app logger's capture stream. The control cases,
- * without the app's options, show the console path each fix closes.
+ * Each case drives a real adapter or error route and checks both output channels.
  */
 import { readFileSync } from 'node:fs'
 import { inspect } from 'node:util'
@@ -31,15 +28,17 @@ import {
   answerAuthRequest,
   betterAuthApiErrorOptions,
   betterAuthLoggerOptions,
+  type BetterAuthLoggerOptions,
 } from '../better-auth-logger'
 
 const ORIGIN = 'http://localhost:3000'
 const SESSION_TOKEN = 'sess_tok_SECRET_7c2a'
 const EMAIL = 'ann@acme.example'
+const JOIN_USER_ID = 'user_fixture_private_join_42'
 const STATEMENT = 'select "id", "email" from "user" where "user"."email" = $1'
 
 /** Texts that must never appear in any emitted line or console call. */
-const SECRETS = [SESSION_TOKEN, EMAIL, 'Failed query', 'params:']
+const SECRETS = [SESSION_TOKEN, EMAIL, JOIN_USER_ID, 'Failed query', 'params:']
 
 function failedQuery(): DrizzleQueryError {
   return new DrizzleQueryError(
@@ -89,7 +88,11 @@ function storeWithFailingUserTable(): Record<string, unknown[]> {
  * `appOptions` is false, the app's `onAPIError` option. Lines Better Auth
  * logs while it starts are dropped, and the console spies go in afterwards.
  */
-async function createTestAuth(sink: ReturnType<typeof capture>, appOptions = true) {
+async function createTestAuth(
+  sink: ReturnType<typeof capture>,
+  appOptions = true,
+  logger: BetterAuthLoggerOptions = betterAuthLoggerOptions(sink.log)
+) {
   const auth = betterAuth({
     baseURL: ORIGIN,
     secret: 'better-auth-console-test-secret-0123456789abcdef',
@@ -98,7 +101,7 @@ async function createTestAuth(sink: ReturnType<typeof capture>, appOptions = tru
     // Better Auth skips its origin check under a test runner; keep it on, as in production.
     advanced: { disableOriginCheck: false },
     emailAndPassword: { enabled: true },
-    logger: betterAuthLoggerOptions(sink.log),
+    logger,
     ...(appOptions ? { onAPIError: betterAuthApiErrorOptions(sink.log) } : {}),
   })
   const context = await auth.$context
@@ -175,39 +178,58 @@ describe('an uncaught failed query in a Better Auth request (DEF-66, router onEr
   })
 })
 
-describe('a failed fallback join (DEF-66, @better-auth/core factory.mjs:385)', () => {
+describe('a failed fallback join (DEF-66)', () => {
   /** A session whose user lookup, the fallback join, fails. */
   async function findSessionWithFailingJoin(
     context: Awaited<ReturnType<typeof createTestAuth>>['context']
   ) {
-    const session = await context.internalAdapter.createSession('user_1')
+    const session = await context.internalAdapter.createSession(JOIN_USER_ID)
     return context.internalAdapter.findSession(session.token)
   }
 
-  it('control: without the console routed, the failed query is printed raw', async () => {
-    const sink = capture()
-    const { context, spies } = await createTestAuth(sink)
-
+  it('confirms the upstream logger receives the bound fallback join value', async () => {
+    const calls: unknown[][] = []
+    const { context, spies } = await createTestAuth(capture(), true, {
+      disableColors: true,
+      log: (...args) => {
+        calls.push(args)
+      },
+    })
     await expect(findSessionWithFailingJoin(context)).rejects.toBeInstanceOf(DrizzleQueryError)
-
-    expect(consoleText(spies)).toContain(EMAIL)
+    expect(calls).toContainEqual([
+      'error',
+      'Failed to query fallback join for model user:',
+      expect.objectContaining({ where: [expect.objectContaining({ value: JOIN_USER_ID })] }),
+    ])
+    expect(consoleText(spies)).toBe('')
   })
 
-  it('is written through the app logger when the console is routed', async () => {
+  it('records the fallback join failure without logging its bound values', async () => {
     const sink = capture()
     const { context, spies } = await createTestAuth(sink)
-    const restore = routeConsoleToLogger(sink.log)
-    try {
-      await expect(findSessionWithFailingJoin(context)).rejects.toBeInstanceOf(DrizzleQueryError)
-    } finally {
-      restore()
-    }
-
+    await expect(findSessionWithFailingJoin(context)).rejects.toBeInstanceOf(DrizzleQueryError)
     expect(consoleText(spies)).toBe('')
-    expect(sink.lines.length).toBeGreaterThan(0)
+    expect(sink.parsed()).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        msg: 'auth fallback join failed',
+      })
+    )
     for (const line of sink.lines) {
       for (const secret of SECRETS) expect(line).not.toContain(secret)
     }
+  })
+
+  it('still sanitizes a query error written directly to the production console', () => {
+    const sink = capture()
+    const spies = consoleSpies()
+    const restore = routeConsoleToLogger(sink.log)
+    try {
+      console.error(failedQuery())
+    } finally {
+      restore()
+    }
+    expect(consoleText(spies)).toBe('')
     expect(sink.parsed()).toContainEqual(
       expect.objectContaining({
         level: 'error',
@@ -215,6 +237,9 @@ describe('a failed fallback join (DEF-66, @better-auth/core factory.mjs:385)', (
         err: expect.objectContaining({ type: 'DrizzleQueryError', statement: STATEMENT }),
       })
     )
+    for (const line of sink.lines) {
+      for (const secret of SECRETS) expect(line).not.toContain(secret)
+    }
   })
 })
 
