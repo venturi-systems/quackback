@@ -146,7 +146,7 @@ describe.each([
       const { sql, params } = queries[0]
       const window = sql.match(/inner join \(select (.*?)\) "ranked_page" on/s)?.[1]
       expect(window).toBeDefined()
-      expect(window).toMatch(/^"posts"\."id" from "posts"/)
+      expect(window).toMatch(/^"posts"\."id", .* as "rank_score" from "posts"/)
       expect(window).not.toMatch(/json_agg|avatar_key|display_name|has_voted|"content"/)
       expect(window).toContain('"boards"."deleted_at" is null')
       expect(window).toContain('"posts"."deleted_at" is null')
@@ -157,7 +157,10 @@ describe.each([
       expect(window).toContain('"posts"."vote_count" >=')
       expect(window).toMatch(/"posts"\."id" desc limit \$\d+ offset \$\d+$/)
       expect(sql).toMatch(/"ranked_page"\."id" where /)
-      expect(sql).toMatch(/"posts"\."id" desc limit \$\d+$/)
+      expect(sql).toMatch(
+        /order by (?:"ranked_page"\.)?"rank_score" desc, "ranked_page"\."id" desc limit \$\d+$/
+      )
+      if (sort === 'trending') expect(sql.match(/NOW\(\)/g)).toHaveLength(1)
       expect(sql.match(/ offset /g)).toHaveLength(1)
       expect(params).toContain(140)
       expect(params.at(-1)).toBe(21)

@@ -53,21 +53,18 @@ export function parseAvatarData(json: string | null): string | null {
 
 type SortOrder = 'top' | 'new' | 'trending'
 
+function postRank(sort: 'top' | 'trending') {
+  return sort === 'trending'
+    ? sql`(${posts.voteCount} / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - ${posts.createdAt})) / 86400))`
+    : sql`${posts.voteCount}`
+}
+
 function getPostSortOrder(sort: SortOrder, cursorMode = false) {
-  switch (sort) {
-    case 'new':
-      return cursorMode ? [desc(posts.createdAt), desc(posts.id)] : [desc(posts.createdAt)]
-    case 'trending':
-      return [
-        sql`(${posts.voteCount} / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - ${posts.createdAt})) / 86400)) DESC`,
-        desc(posts.id),
-      ]
-    default:
-      // Ranked pages need a unique tie-breaker even while their leading score
-      // remains live. This stabilizes equal scores; it is not a snapshot of
-      // mutable vote counts or a replacement for ranked cursor pagination.
-      return [desc(posts.voteCount), desc(posts.id)]
+  if (sort === 'new') {
+    return cursorMode ? [desc(posts.createdAt), desc(posts.id)] : [desc(posts.createdAt)]
   }
+  // The ID breaks equal-score ties; vote counts and trending scores remain live.
+  return [desc(postRank(sort)), desc(posts.id)]
 }
 
 export interface PostWithVotesAndAvatars {
@@ -226,7 +223,8 @@ function buildPostFilterConditions(params: PostListParams, actor: Actor) {
 /** Hydrate only the selected ranked page. Keep one SQL snapshot and all current
  * access/filter predicates in the page window. Hydration rechecks visibility;
  * search, tags, status, and response filters already selected these exact IDs.
- * Ordering remains live, not a rank snapshot.
+ * Hydrate in the window's existing score/ID order, so PostgreSQL can use it
+ * without sorting the hydrated rows again. Ordering remains live.
  * The inner LIMIT/OFFSET is a relational boundary, so correlated projection
  * work runs for the page rows rather than every row discarded by OFFSET.
  */
@@ -234,11 +232,11 @@ function rankedPostWindow(params: PostListParams, actor: Actor) {
   const { sort = 'top', page = 1, limit = 20 } = params
   if (params.cursor !== undefined || sort === 'new' || page <= 1) return undefined
   return db
-    .select({ id: posts.id })
+    .select({ id: posts.id, rank: postRank(sort).as('rank_score') })
     .from(posts)
     .innerJoin(boards, eq(posts.boardId, boards.id))
     .where(and(...buildPostFilterConditions(params, actor)))
-    .orderBy(...getPostSortOrder(sort))
+    .orderBy(({ rank, id }) => [desc(rank), desc(id)])
     .limit(limit + 1)
     .offset((page - 1) * limit)
     .as('ranked_page')
@@ -250,8 +248,10 @@ export async function listPublicPostsWithVotesAndAvatars(
   const { sort = 'top', page = 1, limit = 20, principalId, actor = ANONYMOUS_ACTOR } = params
   const offset = (page - 1) * limit
   const { cursorMode, condition } = publicPostPagination(params)
-  const orderBy = getPostSortOrder(sort, cursorMode)
   const rankedPage = rankedPostWindow(params, actor)
+  const orderBy = rankedPage
+    ? [desc(rankedPage.rank), desc(rankedPage.id)]
+    : getPostSortOrder(sort, cursorMode)
   const conditions = rankedPage
     ? postVisibilityConditions(actor)
     : buildPostFilterConditions(params, actor)
@@ -352,8 +352,10 @@ export async function listPublicPosts(
   const { sort = 'top', page = 1, limit = 20, actor = ANONYMOUS_ACTOR } = params
   const offset = (page - 1) * limit
   const { cursorMode, condition } = publicPostPagination(params)
-  const orderBy = getPostSortOrder(sort, cursorMode)
   const rankedPage = rankedPostWindow(params, actor)
+  const orderBy = rankedPage
+    ? [desc(rankedPage.rank), desc(rankedPage.id)]
+    : getPostSortOrder(sort, cursorMode)
   const conditions = rankedPage
     ? postVisibilityConditions(actor)
     : buildPostFilterConditions(params, actor)
