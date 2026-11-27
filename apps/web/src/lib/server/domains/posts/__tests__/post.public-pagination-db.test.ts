@@ -183,9 +183,8 @@ describe.each([
             const visible = Array.from({ length: 31 }, (_, i) => ({
               id: generateId('post'),
               voteCount: 40 - Math.floor(i / 4),
-            })).sort(
-              (a, b) => b.voteCount - a.voteCount || toUuid(b.id).localeCompare(toUuid(a.id))
-            )
+              ageHours: [12, 48, 240][i % 3],
+            }))
             const insert = (id: (typeof visible)[number]['id'], voteCount: number, extra = {}) =>
               tx.insert(posts).values({
                 id,
@@ -194,11 +193,14 @@ describe.each([
                 voteCount,
                 title: 'Ranked fixture',
                 content: 'Exact ranked content',
-                // Equal age makes top and trending tie semantics independently comparable.
                 createdAt: sql.raw("NOW() - INTERVAL '10 days'"),
                 ...extra,
               })
-            for (const row of visible) await insert(row.id, row.voteCount)
+            for (const row of visible) {
+              await insert(row.id, row.voteCount, {
+                createdAt: sql`NOW() - ${row.ageHours}::int * INTERVAL '1 hour'`,
+              })
+            }
             await insert(generateId('post'), 999, { moderationState: 'pending' })
             await insert(generateId('post'), 999, { deletedAt: new Date() })
             await insert(generateId('post'), 999, { canonicalPostId: visible[0].id })
@@ -211,7 +213,18 @@ describe.each([
               search: 'ranked',
               responded: 'unresponded' as const,
             }
-            const eligible = visible.filter((row) => row.voteCount >= 35)
+            // Among 35–40 votes the three trending score bands cannot overlap:
+            // 12-hour posts score 35–40, two-day posts 17.5–20, ten-day posts 3.5–4.
+            // The second page crosses two bands; counting only votes in either
+            // selection or hydration changes its IDs or their order.
+            const eligible = visible
+              .filter((row) => row.voteCount >= 35)
+              .sort(
+                (a, b) =>
+                  (sort === 'trending' ? a.ageHours - b.ageHours : 0) ||
+                  b.voteCount - a.voteCount ||
+                  toUuid(b.id).localeCompare(toUuid(a.id))
+              )
             const seen = []
             for (let page = 1; page <= 5; page++) {
               queries.length = 0
